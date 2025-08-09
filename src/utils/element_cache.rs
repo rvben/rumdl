@@ -528,12 +528,11 @@ pub fn get_element_cache(content: &str) -> ElementCache {
         let cache_guard = ELEMENT_CACHE.lock().unwrap();
 
         // If cache exists and content matches, return it
-        if let Some(existing_cache) = &*cache_guard {
-            if let Some(cached_content) = &existing_cache.content {
-                if cached_content == content {
-                    return existing_cache.clone(); // Keep existing cache
-                }
-            }
+        if let Some(existing_cache) = &*cache_guard
+            && let Some(cached_content) = &existing_cache.content
+            && cached_content == content
+        {
+            return existing_cache.clone(); // Keep existing cache
         }
     }
 

@@ -89,10 +89,10 @@ impl MD041FirstLineHeading {
 
     /// Check if a line is an HTML heading
     fn is_html_heading(line: &str, level: usize) -> bool {
-        if let Ok(Some(captures)) = HTML_HEADING_PATTERN.captures(line.trim()) {
-            if let Some(h_level) = captures.get(1) {
-                return h_level.as_str().parse::<usize>().unwrap_or(0) == level;
-            }
+        if let Ok(Some(captures)) = HTML_HEADING_PATTERN.captures(line.trim())
+            && let Some(h_level) = captures.get(1)
+        {
+            return h_level.as_str().parse::<usize>().unwrap_or(0) == level;
         }
         false
     }

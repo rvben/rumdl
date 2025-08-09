@@ -185,11 +185,11 @@ impl Rule for MD050StrongStyle {
 
         for (line_num, line) in content.lines().enumerate() {
             // Skip if this line is in front matter
-            if let Some(line_info) = ctx.line_info(line_num + 1) {
-                if line_info.in_front_matter {
-                    byte_pos += line.len() + 1; // +1 for newline
-                    continue;
-                }
+            if let Some(line_info) = ctx.line_info(line_num + 1)
+                && line_info.in_front_matter
+            {
+                byte_pos += line.len() + 1; // +1 for newline
+                continue;
             }
 
             for m in strong_regex.find_iter(line) {
@@ -276,10 +276,10 @@ impl Rule for MD050StrongStyle {
             .filter(|m| {
                 // Skip matches in front matter
                 let (line_num, _) = ctx.offset_to_line_col(m.start());
-                if let Some(line_info) = ctx.line_info(line_num) {
-                    if line_info.in_front_matter {
-                        return false;
-                    }
+                if let Some(line_info) = ctx.line_info(line_num)
+                    && line_info.in_front_matter
+                {
+                    return false;
                 }
                 !ctx.is_in_code_block_or_span(m.start())
                     && !self.is_in_link(ctx, m.start())

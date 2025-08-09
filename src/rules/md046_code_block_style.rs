@@ -253,10 +253,11 @@ impl MD046CodeBlockStyle {
                                     let identifier = after_fence.trim();
 
                                     // Must start with letter or # (for C#, F#)
-                                    if let Some(first) = identifier.chars().next() {
-                                        if !first.is_alphabetic() && first != '#' {
-                                            continue;
-                                        }
+                                    if let Some(first) = identifier.chars().next()
+                                        && !first.is_alphabetic()
+                                        && first != '#'
+                                    {
+                                        continue;
                                     }
 
                                     // Reasonable length for a language identifier
@@ -286,10 +287,11 @@ impl MD046CodeBlockStyle {
                                 }
 
                                 // Skip if doesn't start with letter or #
-                                if let Some(first) = identifier.chars().next() {
-                                    if !first.is_alphabetic() && first != '#' {
-                                        continue;
-                                    }
+                                if let Some(first) = identifier.chars().next()
+                                    && !first.is_alphabetic()
+                                    && first != '#'
+                                {
+                                    continue;
                                 }
                             }
                         }
@@ -309,10 +311,10 @@ impl MD046CodeBlockStyle {
                             let _popped = fence_stack.pop();
 
                             // Check if we're exiting a markdown documentation block
-                            if let Some((_, _, _, _, is_md)) = _popped {
-                                if is_md {
-                                    inside_markdown_documentation_block = false;
-                                }
+                            if let Some((_, _, _, _, is_md)) = _popped
+                                && is_md
+                            {
+                                inside_markdown_documentation_block = false;
                             }
                             continue;
                         }
@@ -437,16 +439,16 @@ impl MD046CodeBlockStyle {
             None
         } else if fenced_found && !indented_found {
             // Only fenced blocks found
-            return Some(CodeBlockStyle::Fenced);
+            Some(CodeBlockStyle::Fenced)
         } else if !fenced_found && indented_found {
             // Only indented blocks found
-            return Some(CodeBlockStyle::Indented);
+            Some(CodeBlockStyle::Indented)
         } else {
             // Both types found - use the first one encountered
             if indented_line < fenced_line {
-                return Some(CodeBlockStyle::Indented);
+                Some(CodeBlockStyle::Indented)
             } else {
-                return Some(CodeBlockStyle::Fenced);
+                Some(CodeBlockStyle::Fenced)
             }
         }
     }
@@ -625,11 +627,11 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // Close any unclosed fenced blocks
-        if let Some(fence_type) = fenced_fence_type {
-            if in_fenced_block {
-                result.push_str(fence_type);
-                result.push('\n');
-            }
+        if let Some(fence_type) = fenced_fence_type
+            && in_fenced_block
+        {
+            result.push_str(fence_type);
+            result.push('\n');
         }
 
         // Remove trailing newline if original didn't have one

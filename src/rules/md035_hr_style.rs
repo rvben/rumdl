@@ -65,10 +65,10 @@ impl MD035HRStyle {
         let mut order: Vec<&str> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
             // Skip if this line is in a code block
-            if let Some(line_info) = ctx.line_info(i + 1) {
-                if line_info.in_code_block {
-                    continue;
-                }
+            if let Some(line_info) = ctx.line_info(i + 1)
+                && line_info.in_code_block
+            {
+                continue;
             }
 
             if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(lines, i) {
@@ -118,10 +118,10 @@ impl Rule for MD035HRStyle {
 
         for (i, line) in lines.iter().enumerate() {
             // Skip if this line is in a code block or code span
-            if let Some(line_info) = ctx.line_info(i + 1) {
-                if line_info.in_code_block {
-                    continue;
-                }
+            if let Some(line_info) = ctx.line_info(i + 1)
+                && line_info.in_code_block
+            {
+                continue;
             }
 
             // Skip if this is a potential Setext heading underline
@@ -178,11 +178,11 @@ impl Rule for MD035HRStyle {
 
         for (i, line) in lines.iter().enumerate() {
             // Skip if this line is in a code block or code span
-            if let Some(line_info) = ctx.line_info(i + 1) {
-                if line_info.in_code_block {
-                    result.push(line.to_string());
-                    continue;
-                }
+            if let Some(line_info) = ctx.line_info(i + 1)
+                && line_info.in_code_block
+            {
+                result.push(line.to_string());
+                continue;
             }
 
             // Skip if this is a potential Setext heading underline

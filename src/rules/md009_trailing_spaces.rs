@@ -111,10 +111,10 @@ impl Rule for MD009TrailingSpaces {
             // Handle code blocks if not in strict mode
             if !self.config.strict {
                 // Use pre-computed line info
-                if let Some(line_info) = ctx.line_info(line_num + 1) {
-                    if line_info.in_code_block {
-                        continue;
-                    }
+                if let Some(line_info) = ctx.line_info(line_num + 1)
+                    && line_info.in_code_block
+                {
+                    continue;
                 }
             }
 
@@ -229,12 +229,12 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Handle code blocks if not in strict mode
-            if let Some(line_info) = ctx.line_info(i + 1) {
-                if line_info.in_code_block {
-                    result.push_str(line);
-                    result.push('\n');
-                    continue;
-                }
+            if let Some(line_info) = ctx.line_info(i + 1)
+                && line_info.in_code_block
+            {
+                result.push_str(line);
+                result.push('\n');
+                continue;
             }
 
             // Special handling for empty blockquote lines

@@ -621,17 +621,16 @@ fn find_markdown_files(
                 return Err(format!("File not found: {path_str}").into());
             }
             // If it's a file, check if it's a markdown file and add it directly
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "md" || ext == "markdown" {
-                        let cleaned_path = if let Some(stripped) = path_str.strip_prefix("./") {
-                            stripped.to_string()
-                        } else {
-                            path_str.clone()
-                        };
-                        file_paths.push(cleaned_path);
-                    }
-                }
+            if path.is_file()
+                && let Some(ext) = path.extension()
+                && (ext == "md" || ext == "markdown")
+            {
+                let cleaned_path = if let Some(stripped) = path_str.strip_prefix("./") {
+                    stripped.to_string()
+                } else {
+                    path_str.clone()
+                };
+                file_paths.push(cleaned_path);
             }
         }
 
@@ -1037,19 +1036,20 @@ fn offer_vscode_extension_install() {
                             }
                         }
                     }
-                } else if let Ok(num) = answer.parse::<usize>() {
-                    if num > 0 && num <= available_editors.len() {
-                        let (cmd, editor_name) = available_editors[num - 1];
-                        println!("\nInstalling for {editor_name}...");
-                        match VsCodeExtension::with_command(cmd) {
-                            Ok(vscode) => {
-                                if let Err(e) = vscode.install(false) {
-                                    eprintln!("{}: {}", "Error".red().bold(), e);
-                                }
-                            }
-                            Err(e) => {
+                } else if let Ok(num) = answer.parse::<usize>()
+                    && num > 0
+                    && num <= available_editors.len()
+                {
+                    let (cmd, editor_name) = available_editors[num - 1];
+                    println!("\nInstalling for {editor_name}...");
+                    match VsCodeExtension::with_command(cmd) {
+                        Ok(vscode) => {
+                            if let Err(e) = vscode.install(false) {
                                 eprintln!("{}: {}", "Error".red().bold(), e);
                             }
+                        }
+                        Err(e) => {
+                            eprintln!("{}: {}", "Error".red().bold(), e);
                         }
                     }
                 }
@@ -1387,17 +1387,14 @@ build-backend = \"setuptools.build_meta\"
                                 // Successfully handled 'get', exit the command processing
                             } else {
                                 let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
-                                if let Some(rule) = all_rules.iter().find(|r| r.name() == section_part) {
-                                    if let Some((_, toml::Value::Table(table))) = rule.default_config_section() {
-                                        if let Some(v) = table.get(&normalized_field) {
-                                            let value_str = format_toml_value(v);
-                                            println!(
-                                                "{normalized_rule_name}.{normalized_field} = {value_str} [from default]"
-                                            );
-                                            // Successfully handled 'get', exit the command processing
-                                            return;
-                                        }
-                                    }
+                                if let Some(rule) = all_rules.iter().find(|r| r.name() == section_part)
+                                    && let Some((_, toml::Value::Table(table))) = rule.default_config_section()
+                                    && let Some(v) = table.get(&normalized_field)
+                                {
+                                    let value_str = format_toml_value(v);
+                                    println!("{normalized_rule_name}.{normalized_field} = {value_str} [from default]");
+                                    // Successfully handled 'get', exit the command processing
+                                    return;
                                 }
                                 eprintln!("Unknown config key: {normalized_rule_name}.{normalized_field}");
                                 exit::tool_error();
@@ -2659,17 +2656,16 @@ fn apply_fixes(
     }
 
     // Write fixed content back to file
-    if warnings_fixed > 0 {
-        if let Err(err) = std::fs::write(file_path, content) {
-            if !quiet {
-                eprintln!(
-                    "{} Failed to write fixed content to file {}: {}",
-                    "Error:".red().bold(),
-                    file_path,
-                    err
-                );
-            }
-        }
+    if warnings_fixed > 0
+        && let Err(err) = std::fs::write(file_path, content)
+        && !quiet
+    {
+        eprintln!(
+            "{} Failed to write fixed content to file {}: {}",
+            "Error:".red().bold(),
+            file_path,
+            err
+        );
     }
 
     warnings_fixed

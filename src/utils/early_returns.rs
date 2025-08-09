@@ -119,10 +119,11 @@ pub fn has_lists(content: &str) -> bool {
 pub fn has_ordered_lists(content: &str) -> bool {
     for line in content.lines() {
         let trimmed = line.trim_start();
-        if let Some(first_char) = trimmed.chars().next() {
-            if first_char.is_ascii_digit() && trimmed.contains(". ") {
-                return true;
-            }
+        if let Some(first_char) = trimmed.chars().next()
+            && first_char.is_ascii_digit()
+            && trimmed.contains(". ")
+        {
+            return true;
         }
     }
     false
@@ -241,10 +242,11 @@ impl ContentAnalysis {
             if !analysis.has_lists {
                 if line.contains("* ") || line.contains("- ") || line.contains("+ ") {
                     analysis.has_lists = true;
-                } else if let Some(first_char) = trimmed_start.chars().next() {
-                    if first_char.is_ascii_digit() && line.contains(". ") {
-                        analysis.has_lists = true;
-                    }
+                } else if let Some(first_char) = trimmed_start.chars().next()
+                    && first_char.is_ascii_digit()
+                    && line.contains(". ")
+                {
+                    analysis.has_lists = true;
                 }
             }
 

@@ -198,19 +198,19 @@ pub fn is_rule_disabled_at_line(content: &str, rule_name: &str, line_num: usize)
         let line = line.trim();
 
         // Check for disable comments (both global and rule-specific)
-        if let Some(rules) = parse_disable_comment(line) {
-            if rules.is_empty() || rules.contains(&rule_name) {
-                is_disabled = true;
-                continue;
-            }
+        if let Some(rules) = parse_disable_comment(line)
+            && (rules.is_empty() || rules.contains(&rule_name))
+        {
+            is_disabled = true;
+            continue;
         }
 
         // Check for enable comments (both global and rule-specific)
-        if let Some(rules) = parse_enable_comment(line) {
-            if rules.is_empty() || rules.contains(&rule_name) {
-                is_disabled = false;
-                continue;
-            }
+        if let Some(rules) = parse_enable_comment(line)
+            && (rules.is_empty() || rules.contains(&rule_name))
+        {
+            is_disabled = false;
+            continue;
         }
     }
 
@@ -628,7 +628,7 @@ MD001 should still be enabled here"#;
 
     <!-- rumdl-disable MD001 -->
     This is in an indented code block
-    
+
 MD001 should still be enabled here"#;
 
         assert!(!is_rule_disabled_at_line(indented_content, "MD001", 5));

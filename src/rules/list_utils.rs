@@ -75,11 +75,12 @@ impl ListUtils {
             '0'..='9' => {
                 // Check for ordered list pattern using a literal search first
                 let dot_pos = trimmed.find('.');
-                if let Some(pos) = dot_pos {
-                    if pos > 0 && pos < trimmed.len() - 1 {
-                        let after_dot = &trimmed[pos + 1..];
-                        return after_dot.starts_with(' ');
-                    }
+                if let Some(pos) = dot_pos
+                    && pos > 0
+                    && pos < trimmed.len() - 1
+                {
+                    let after_dot = &trimmed[pos + 1..];
+                    return after_dot.starts_with(' ');
                 }
                 false
             }
@@ -123,11 +124,12 @@ impl ListUtils {
 
         // Check for ordered list pattern using a literal search
         let dot_pos = trimmed.find('.');
-        if let Some(pos) = dot_pos {
-            if pos > 0 && pos < trimmed.len() - 1 {
-                let after_dot = &trimmed[pos + 1..];
-                return after_dot.starts_with(' ');
-            }
+        if let Some(pos) = dot_pos
+            && pos > 0
+            && pos < trimmed.len() - 1
+        {
+            let after_dot = &trimmed[pos + 1..];
+            return after_dot.starts_with(' ');
         }
 
         false

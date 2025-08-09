@@ -273,10 +273,10 @@ fn test_list_with_content() {
             if current_block_start_debug.is_none() {
                 current_block_start_debug = Some(current_line_idx_1_debug);
             }
-            if i_debug == num_lines_vec - 1 {
-                if let Some(start) = current_block_start_debug {
-                    calculated_blocks.push((start, current_line_idx_1_debug));
-                }
+            if i_debug == num_lines_vec - 1
+                && let Some(start) = current_block_start_debug
+            {
+                calculated_blocks.push((start, current_line_idx_1_debug));
             }
         } else if let Some(start) = current_block_start_debug {
             calculated_blocks.push((start, i_debug));

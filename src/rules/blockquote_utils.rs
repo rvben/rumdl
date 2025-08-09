@@ -105,10 +105,10 @@ impl BlockquoteUtils {
 
     /// Extract the content of a blockquote line
     pub fn extract_content(line: &str) -> String {
-        if let Some(captures) = BLOCKQUOTE_LINE.captures(line) {
-            if let Some(content) = captures.get(2) {
-                return content.as_str().to_string();
-            }
+        if let Some(captures) = BLOCKQUOTE_LINE.captures(line)
+            && let Some(content) = captures.get(2)
+        {
+            return content.as_str().to_string();
         }
 
         String::new()
@@ -116,10 +116,10 @@ impl BlockquoteUtils {
 
     /// Extract the indentation of a blockquote line
     pub fn extract_indentation(line: &str) -> String {
-        if let Some(captures) = BLOCKQUOTE_LINE.captures(line) {
-            if let Some(indent) = captures.get(1) {
-                return indent.as_str().to_string();
-            }
+        if let Some(captures) = BLOCKQUOTE_LINE.captures(line)
+            && let Some(indent) = captures.get(1)
+        {
+            return indent.as_str().to_string();
         }
 
         String::new()
@@ -137,12 +137,12 @@ impl BlockquoteUtils {
                 let content = captures.get(2).map_or("", |m| m.as_str());
                 return format!("{indent}> {content}");
             }
-        } else if Self::has_multiple_spaces_after_marker(line) {
-            if let Some(captures) = BLOCKQUOTE_MULTIPLE_SPACES.captures(line) {
-                let indent = captures.get(1).map_or("", |m| m.as_str());
-                let content = captures.get(3).map_or("", |m| m.as_str());
-                return format!("{indent}> {content}");
-            }
+        } else if Self::has_multiple_spaces_after_marker(line)
+            && let Some(captures) = BLOCKQUOTE_MULTIPLE_SPACES.captures(line)
+        {
+            let indent = captures.get(1).map_or("", |m| m.as_str());
+            let content = captures.get(3).map_or("", |m| m.as_str());
+            return format!("{indent}> {content}");
         }
 
         line.to_string()

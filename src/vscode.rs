@@ -30,10 +30,10 @@ impl VsCodeExtension {
     fn command_exists(cmd: &str) -> bool {
         // First, try to run the command directly with --version
         // This is more reliable than using which/where
-        if let Ok(output) = Command::new(cmd).arg("--version").output() {
-            if output.status.success() {
-                return true;
-            }
+        if let Ok(output) = Command::new(cmd).arg("--version").output()
+            && output.status.success()
+        {
+            return true;
         }
 
         // Fallback: use platform-appropriate command lookup

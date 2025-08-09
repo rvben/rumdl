@@ -88,29 +88,30 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
         let mut special_type = "";
 
         // Find earliest special marker
-        if let Some(pos) = remaining.find('`') {
-            if pos < next_special {
-                next_special = pos;
-                special_type = "code";
-            }
+        if let Some(pos) = remaining.find('`')
+            && pos < next_special
+        {
+            next_special = pos;
+            special_type = "code";
         }
-        if let Some(pos) = remaining.find("**") {
-            if pos < next_special {
-                next_special = pos;
-                special_type = "bold";
-            }
+        if let Some(pos) = remaining.find("**")
+            && pos < next_special
+        {
+            next_special = pos;
+            special_type = "bold";
         }
-        if let Some(pos) = remaining.find('*') {
-            if pos < next_special && !remaining[pos..].starts_with("**") {
-                next_special = pos;
-                special_type = "italic";
-            }
+        if let Some(pos) = remaining.find('*')
+            && pos < next_special
+            && !remaining[pos..].starts_with("**")
+        {
+            next_special = pos;
+            special_type = "italic";
         }
-        if let Some(pos) = remaining.find('[') {
-            if pos < next_special {
-                next_special = pos;
-                special_type = "link";
-            }
+        if let Some(pos) = remaining.find('[')
+            && pos < next_special
+        {
+            next_special = pos;
+            special_type = "link";
         }
 
         // Add any text before the special character

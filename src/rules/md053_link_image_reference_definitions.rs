@@ -187,12 +187,11 @@ impl MD053LinkImageReferenceDefinitions {
                     let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
 
                     // Update the end line for this definition
-                    if let Some(ranges) = definitions.get_mut(&normalized_id) {
-                        if let Some(last_range) = ranges.last_mut() {
-                            if last_range.0 == def_start {
-                                last_range.1 = i;
-                            }
-                        }
+                    if let Some(ranges) = definitions.get_mut(&normalized_id)
+                        && let Some(last_range) = ranges.last_mut()
+                        && last_range.0 == def_start
+                    {
+                        last_range.1 = i;
                     }
                 }
             }
@@ -214,24 +213,24 @@ impl MD053LinkImageReferenceDefinitions {
 
         // 1. Add usages from cached reference links in LintContext
         for link in &ctx.links {
-            if link.is_reference {
-                if let Some(ref_id) = &link.reference_id {
-                    // Ensure the link itself is not inside a code block line
-                    if !doc_structure.is_in_code_block(link.line) {
-                        usages.insert(Self::unescape_reference(ref_id).to_lowercase());
-                    }
+            if link.is_reference
+                && let Some(ref_id) = &link.reference_id
+            {
+                // Ensure the link itself is not inside a code block line
+                if !doc_structure.is_in_code_block(link.line) {
+                    usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                 }
             }
         }
 
         // 2. Add usages from cached reference images in LintContext
         for image in &ctx.images {
-            if image.is_reference {
-                if let Some(ref_id) = &image.reference_id {
-                    // Ensure the image itself is not inside a code block line
-                    if !doc_structure.is_in_code_block(image.line) {
-                        usages.insert(Self::unescape_reference(ref_id).to_lowercase());
-                    }
+            if image.is_reference
+                && let Some(ref_id) = &image.reference_id
+            {
+                // Ensure the image itself is not inside a code block line
+                if !doc_structure.is_in_code_block(image.line) {
+                    usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                 }
             }
         }
@@ -251,19 +250,19 @@ impl MD053LinkImageReferenceDefinitions {
 
             // Find potential shortcut references
             for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(&line_info.content).flatten() {
-                if let Some(full_match) = caps.get(0) {
-                    if let Some(ref_id_match) = caps.get(1) {
-                        // Check if the match is within a code span
-                        let match_byte_offset = line_info.byte_offset + full_match.start();
-                        let in_code_span = code_spans
-                            .iter()
-                            .any(|span| match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end);
+                if let Some(full_match) = caps.get(0)
+                    && let Some(ref_id_match) = caps.get(1)
+                {
+                    // Check if the match is within a code span
+                    let match_byte_offset = line_info.byte_offset + full_match.start();
+                    let in_code_span = code_spans
+                        .iter()
+                        .any(|span| match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end);
 
-                        if !in_code_span {
-                            let ref_id = ref_id_match.as_str().trim();
-                            let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
-                            usages.insert(normalized_id);
-                        }
+                    if !in_code_span {
+                        let ref_id = ref_id_match.as_str().trim();
+                        let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
+                        usages.insert(normalized_id);
                     }
                 }
             }

@@ -62,25 +62,25 @@ impl Rule for MD028NoBlanksBlockquote {
             }
 
             // Check if this is a blockquote that needs MD028 fix
-            if let Some(blockquote) = &line_info.blockquote {
-                if blockquote.needs_md028_fix {
-                    // Calculate precise character range for the entire empty blockquote line
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, &line_info.content);
+            if let Some(blockquote) = &line_info.blockquote
+                && blockquote.needs_md028_fix
+            {
+                // Calculate precise character range for the entire empty blockquote line
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, &line_info.content);
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: "Empty blockquote line should contain '>' marker".to_string(),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range_with_length(line_num, 1, line_info.content.len()),
-                            replacement: Self::get_replacement(&blockquote.indent, blockquote.nesting_level),
-                        }),
-                    });
-                }
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message: "Empty blockquote line should contain '>' marker".to_string(),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range_with_length(line_num, 1, line_info.content.len()),
+                        replacement: Self::get_replacement(&blockquote.indent, blockquote.nesting_level),
+                    }),
+                });
             }
         }
 

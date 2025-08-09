@@ -79,10 +79,10 @@ mod comprehensive_windows_tests {
     /// Simulate our new command_exists logic without importing the actual function
     fn simulate_new_command_exists(cmd: &str) -> bool {
         // Primary approach: try direct execution
-        if let Ok(output) = Command::new(cmd).arg("--version").output() {
-            if output.status.success() {
-                return true;
-            }
+        if let Ok(output) = Command::new(cmd).arg("--version").output()
+            && output.status.success()
+        {
+            return true;
         }
 
         // Fallback: platform-appropriate lookup

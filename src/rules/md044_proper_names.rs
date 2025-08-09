@@ -604,7 +604,7 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
 
-    fn create_context(content: &str) -> LintContext {
+    fn create_context(content: &str) -> LintContext<'_> {
         LintContext::new(content)
     }
 

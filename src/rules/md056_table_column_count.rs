@@ -160,11 +160,11 @@ impl Rule for MD056TableColumnCount {
         for (i, line) in lines.iter().enumerate() {
             let warning_idx = warnings.iter().position(|w| w.line == i + 1);
 
-            if let Some(idx) = warning_idx {
-                if let Some(fix) = &warnings[idx].fix {
-                    result.push(fix.replacement.clone());
-                    continue;
-                }
+            if let Some(idx) = warning_idx
+                && let Some(fix) = &warnings[idx].fix
+            {
+                result.push(fix.replacement.clone());
+                continue;
             }
             result.push(line.to_string());
         }
@@ -298,7 +298,7 @@ Cell 4   | Cell 5   | Cell 6   |";
         let rule = MD056TableColumnCount;
         let content = "| Header 1 | Header 2 | Header 3
 |----------|----------|----------
-| Cell 1   | Cell 2   
+| Cell 1   | Cell 2
 | Cell 4   | Cell 5   | Cell 6";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();

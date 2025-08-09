@@ -169,29 +169,27 @@ impl Rule for MD010NoHardTabs {
             // Skip if in code block and code_blocks is false
             if !self.config.code_blocks {
                 // Use pre-computed line info
-                if let Some(line_info) = ctx.line_info(line_num + 1) {
-                    if line_info.in_code_block {
-                        continue;
-                    }
+                if let Some(line_info) = ctx.line_info(line_num + 1)
+                    && line_info.in_code_block
+                {
+                    continue;
                 }
             }
 
             // Skip if in a code block with an ignored language
-            if !self.config.ignore_code_languages.is_empty() {
-                if let Some(line_info) = ctx.line_info(line_num + 1) {
-                    if line_info.in_code_block {
-                        // Check if this code block has an ignored language
-                        if let Some(lang) = self.get_code_block_language(ctx, line_num + 1) {
-                            if self
-                                .config
-                                .ignore_code_languages
-                                .iter()
-                                .any(|ignored| ignored.eq_ignore_ascii_case(&lang))
-                            {
-                                continue;
-                            }
-                        }
-                    }
+            if !self.config.ignore_code_languages.is_empty()
+                && let Some(line_info) = ctx.line_info(line_num + 1)
+                && line_info.in_code_block
+            {
+                // Check if this code block has an ignored language
+                if let Some(lang) = self.get_code_block_language(ctx, line_num + 1)
+                    && self
+                        .config
+                        .ignore_code_languages
+                        .iter()
+                        .any(|ignored| ignored.eq_ignore_ascii_case(&lang))
+                {
+                    continue;
                 }
             }
 
@@ -280,24 +278,21 @@ impl Rule for MD010NoHardTabs {
                 result.push_str(line);
             } else if !self.config.ignore_code_languages.is_empty() {
                 // Check if we should ignore this code block based on language
-                if let Some(line_info) = ctx.line_info(i + 1) {
-                    if line_info.in_code_block {
-                        if let Some(lang) = self.get_code_block_language(ctx, i + 1) {
-                            if self
-                                .config
-                                .ignore_code_languages
-                                .iter()
-                                .any(|ignored| ignored.eq_ignore_ascii_case(&lang))
-                            {
-                                // Preserve tabs in ignored language code blocks
-                                result.push_str(line);
-                                if i < lines.len() - 1 || content.ends_with('\n') {
-                                    result.push('\n');
-                                }
-                                continue;
-                            }
-                        }
+                if let Some(line_info) = ctx.line_info(i + 1)
+                    && line_info.in_code_block
+                    && let Some(lang) = self.get_code_block_language(ctx, i + 1)
+                    && self
+                        .config
+                        .ignore_code_languages
+                        .iter()
+                        .any(|ignored| ignored.eq_ignore_ascii_case(&lang))
+                {
+                    // Preserve tabs in ignored language code blocks
+                    result.push_str(line);
+                    if i < lines.len() - 1 || content.ends_with('\n') {
+                        result.push('\n');
                     }
+                    continue;
                 }
                 // Not an ignored code block, replace tabs
                 result.push_str(&line.replace('\t', &" ".repeat(self.config.spaces_per_tab)));

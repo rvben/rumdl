@@ -334,16 +334,16 @@ impl Rule for MD057ExistingRelativeLinks {
                     }
 
                     // Find the URL part after the link text
-                    if let Some(caps) = URL_EXTRACT_REGEX.captures_at(line, end_pos - 1) {
-                        if let Some(url_group) = caps.get(1) {
-                            let url = url_group.as_str().trim();
+                    if let Some(caps) = URL_EXTRACT_REGEX.captures_at(line, end_pos - 1)
+                        && let Some(url_group) = caps.get(1)
+                    {
+                        let url = url_group.as_str().trim();
 
-                            // Calculate column position
-                            let column = start_pos + 1;
+                        // Calculate column position
+                        let column = start_pos + 1;
 
-                            // Process and validate the link
-                            self.process_link(url, link.line, column, &mut warnings);
-                        }
+                        // Process and validate the link
+                        self.process_link(url, link.line, column, &mut warnings);
                     }
                 }
             }

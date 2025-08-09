@@ -114,19 +114,19 @@ impl MD005ListIndent {
 
         for list_block in group {
             for &item_line in &list_block.item_lines {
-                if let Some(line_info) = ctx.line_info(item_line) {
-                    if let Some(list_item) = &line_info.list_item {
-                        // Calculate the effective indentation (considering blockquotes)
-                        let effective_indent = if let Some(blockquote) = &line_info.blockquote {
-                            // For blockquoted lists, use relative indentation within the blockquote
-                            list_item.marker_column.saturating_sub(blockquote.nesting_level * 2)
-                        } else {
-                            // For normal lists, use the marker column directly
-                            list_item.marker_column
-                        };
+                if let Some(line_info) = ctx.line_info(item_line)
+                    && let Some(list_item) = &line_info.list_item
+                {
+                    // Calculate the effective indentation (considering blockquotes)
+                    let effective_indent = if let Some(blockquote) = &line_info.blockquote {
+                        // For blockquoted lists, use relative indentation within the blockquote
+                        list_item.marker_column.saturating_sub(blockquote.nesting_level * 2)
+                    } else {
+                        // For normal lists, use the marker column directly
+                        list_item.marker_column
+                    };
 
-                        all_list_items.push((item_line, effective_indent, line_info, list_item));
-                    }
+                    all_list_items.push((item_line, effective_indent, line_info, list_item));
                 }
             }
         }

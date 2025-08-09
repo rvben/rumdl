@@ -134,10 +134,11 @@ impl RumdlLanguageServer {
                 for warning in warnings {
                     // Check if warning is within the requested range
                     let warning_line = (warning.line.saturating_sub(1)) as u32;
-                    if warning_line >= range.start.line && warning_line <= range.end.line {
-                        if let Some(action) = warning_to_code_action(&warning, uri, text) {
-                            actions.push(action);
-                        }
+                    if warning_line >= range.start.line
+                        && warning_line <= range.end.line
+                        && let Some(action) = warning_to_code_action(&warning, uri, text)
+                    {
+                        actions.push(action);
                     }
                 }
 
@@ -204,10 +205,10 @@ impl LanguageServer for RumdlLanguageServer {
         log::info!("Initializing rumdl Language Server");
 
         // Parse client capabilities and configuration
-        if let Some(options) = params.initialization_options {
-            if let Ok(config) = serde_json::from_value::<RumdlLspConfig>(options) {
-                *self.config.write().await = config;
-            }
+        if let Some(options) = params.initialization_options
+            && let Ok(config) = serde_json::from_value::<RumdlLspConfig>(options)
+        {
+            *self.config.write().await = config;
         }
 
         // Load rumdl configuration with auto-discovery
@@ -289,53 +290,51 @@ impl LanguageServer for RumdlLanguageServer {
         drop(config_guard);
 
         // Auto-fix on save if enabled
-        if enable_auto_fix {
-            if let Some(text) = self.documents.read().await.get(&params.text_document.uri) {
-                match self.apply_all_fixes(&params.text_document.uri, text).await {
-                    Ok(Some(fixed_text)) => {
-                        // Create a workspace edit to apply the fixes
-                        let edit = TextEdit {
-                            range: Range {
-                                start: Position { line: 0, character: 0 },
-                                end: self.get_end_position(text),
-                            },
-                            new_text: fixed_text.clone(),
-                        };
+        if enable_auto_fix && let Some(text) = self.documents.read().await.get(&params.text_document.uri) {
+            match self.apply_all_fixes(&params.text_document.uri, text).await {
+                Ok(Some(fixed_text)) => {
+                    // Create a workspace edit to apply the fixes
+                    let edit = TextEdit {
+                        range: Range {
+                            start: Position { line: 0, character: 0 },
+                            end: self.get_end_position(text),
+                        },
+                        new_text: fixed_text.clone(),
+                    };
 
-                        let mut changes = std::collections::HashMap::new();
-                        changes.insert(params.text_document.uri.clone(), vec![edit]);
+                    let mut changes = std::collections::HashMap::new();
+                    changes.insert(params.text_document.uri.clone(), vec![edit]);
 
-                        let workspace_edit = WorkspaceEdit {
-                            changes: Some(changes),
-                            document_changes: None,
-                            change_annotations: None,
-                        };
+                    let workspace_edit = WorkspaceEdit {
+                        changes: Some(changes),
+                        document_changes: None,
+                        change_annotations: None,
+                    };
 
-                        // Apply the edit
-                        match self.client.apply_edit(workspace_edit).await {
-                            Ok(response) => {
-                                if response.applied {
-                                    log::info!("Auto-fix applied successfully");
-                                    // Update our stored version
-                                    self.documents
-                                        .write()
-                                        .await
-                                        .insert(params.text_document.uri.clone(), fixed_text);
-                                } else {
-                                    log::warn!("Auto-fix was not applied: {:?}", response.failure_reason);
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("Failed to apply auto-fix: {e}");
+                    // Apply the edit
+                    match self.client.apply_edit(workspace_edit).await {
+                        Ok(response) => {
+                            if response.applied {
+                                log::info!("Auto-fix applied successfully");
+                                // Update our stored version
+                                self.documents
+                                    .write()
+                                    .await
+                                    .insert(params.text_document.uri.clone(), fixed_text);
+                            } else {
+                                log::warn!("Auto-fix was not applied: {:?}", response.failure_reason);
                             }
                         }
+                        Err(e) => {
+                            log::error!("Failed to apply auto-fix: {e}");
+                        }
                     }
-                    Ok(None) => {
-                        log::debug!("No fixes to apply");
-                    }
-                    Err(e) => {
-                        log::error!("Failed to generate fixes: {e}");
-                    }
+                }
+                Ok(None) => {
+                    log::debug!("No fixes to apply");
+                }
+                Err(e) => {
+                    log::error!("Failed to generate fixes: {e}");
                 }
             }
         }

@@ -122,54 +122,53 @@ impl Rule for MD002FirstHeadingH1 {
             .enumerate()
             .find_map(|(line_num, line_info)| line_info.heading.as_ref().map(|h| (line_num, line_info, h)));
 
-        if let Some((line_num, line_info, heading)) = first_heading {
-            if heading.level != self.config.level as u8 {
-                let message = format!(
-                    "First heading should be level {}, found level {}",
-                    self.config.level, heading.level
+        if let Some((line_num, line_info, heading)) = first_heading
+            && heading.level != self.config.level as u8
+        {
+            let message = format!(
+                "First heading should be level {}, found level {}",
+                self.config.level, heading.level
+            );
+
+            // Calculate the fix
+            let fix = {
+                let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(
+                    &heading.text,
+                    self.config.level,
+                    match heading.style {
+                        crate::lint_context::HeadingStyle::ATX => {
+                            if heading.has_closing_sequence {
+                                HeadingStyle::AtxClosed
+                            } else {
+                                HeadingStyle::Atx
+                            }
+                        }
+                        crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
+                        crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
+                    },
                 );
 
-                // Calculate the fix
-                let fix = {
-                    let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(
-                        &heading.text,
-                        self.config.level,
-                        match heading.style {
-                            crate::lint_context::HeadingStyle::ATX => {
-                                if heading.has_closing_sequence {
-                                    HeadingStyle::AtxClosed
-                                } else {
-                                    HeadingStyle::Atx
-                                }
-                            }
-                            crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
-                            crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
-                        },
-                    );
+                // Use line content range to replace the entire heading line
+                let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
+                Some(Fix {
+                    range: line_index.line_content_range(line_num + 1), // Convert to 1-indexed
+                    replacement,
+                })
+            };
 
-                    // Use line content range to replace the entire heading line
-                    let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
-                    Some(Fix {
-                        range: line_index.line_content_range(line_num + 1), // Convert to 1-indexed
-                        replacement,
-                    })
-                };
+            // Calculate precise range: highlight the entire first heading
+            let (start_line, start_col, end_line, end_col) = calculate_heading_range(line_num + 1, &line_info.content);
 
-                // Calculate precise range: highlight the entire first heading
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_heading_range(line_num + 1, &line_info.content);
-
-                return Ok(vec![LintWarning {
-                    message,
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix,
-                    rule_name: Some(self.name()),
-                }]);
-            }
+            return Ok(vec![LintWarning {
+                message,
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                severity: Severity::Warning,
+                fix,
+                rule_name: Some(self.name()),
+            }]);
         }
 
         Ok(vec![])

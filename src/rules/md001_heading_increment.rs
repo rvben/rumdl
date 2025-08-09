@@ -79,41 +79,41 @@ impl Rule for MD001HeadingIncrement {
                 let level = heading.level as usize;
 
                 // Check if this heading level is more than one level deeper than the previous
-                if let Some(prev) = prev_level {
-                    if level > prev + 1 {
-                        let indentation = line_info.indent;
-                        let heading_text = &heading.text;
+                if let Some(prev) = prev_level
+                    && level > prev + 1
+                {
+                    let indentation = line_info.indent;
+                    let heading_text = &heading.text;
 
-                        // Map heading style
-                        let style = match heading.style {
-                            crate::lint_context::HeadingStyle::ATX => HeadingStyle::Atx,
-                            crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
-                            crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
-                        };
+                    // Map heading style
+                    let style = match heading.style {
+                        crate::lint_context::HeadingStyle::ATX => HeadingStyle::Atx,
+                        crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
+                        crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
+                    };
 
-                        // Create a fix with the correct heading level
-                        let fixed_level = prev + 1;
-                        let replacement = HeadingUtils::convert_heading_style(heading_text, fixed_level as u32, style);
+                    // Create a fix with the correct heading level
+                    let fixed_level = prev + 1;
+                    let replacement = HeadingUtils::convert_heading_style(heading_text, fixed_level as u32, style);
 
-                        // Calculate precise range: highlight the entire heading
-                        let line_content = &line_info.content;
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_heading_range(line_num + 1, line_content);
+                    // Calculate precise range: highlight the entire heading
+                    let line_content = &line_info.content;
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_heading_range(line_num + 1, line_content);
 
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: format!("Expected heading level {}, but found heading level {}", prev + 1, level),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_content_range(line_num + 1),
-                                replacement: format!("{}{}", " ".repeat(indentation), replacement),
-                            }),
-                        });
-                    }
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!("Expected heading level {}, but found heading level {}", prev + 1, level),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_content_range(line_num + 1),
+                            replacement: format!("{}{}", " ".repeat(indentation), replacement),
+                        }),
+                    });
                 }
 
                 prev_level = Some(level);
@@ -133,10 +133,10 @@ impl Rule for MD001HeadingIncrement {
                 let mut fixed_level = level;
 
                 // Check if this heading needs fixing
-                if let Some(prev) = prev_level {
-                    if level > prev + 1 {
-                        fixed_level = prev + 1;
-                    }
+                if let Some(prev) = prev_level
+                    && level > prev + 1
+                {
+                    fixed_level = prev + 1;
                 }
 
                 // Map heading style - when fixing, we may need to change Setext style based on level

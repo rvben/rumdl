@@ -176,7 +176,6 @@ impl MD051LinkFragments {
         }
     }
 
-
     /// Detect if a path represents a cross-file link
     fn is_cross_file_link(path: &str) -> bool {
         // Empty path means internal fragment
@@ -216,11 +215,20 @@ impl MD051LinkFragments {
         // Common file extensions that indicate cross-file references
         let file_extensions = [
             // Markdown and documentation formats
-            ".md", ".markdown", ".mdown", ".mkdn", ".mdx",
+            ".md",
+            ".markdown",
+            ".mdown",
+            ".mkdn",
+            ".mdx",
             // Web formats
-            ".html", ".htm", ".xhtml",
+            ".html",
+            ".htm",
+            ".xhtml",
             // Other common documentation formats
-            ".rst", ".txt", ".adoc", ".org",
+            ".rst",
+            ".txt",
+            ".adoc",
+            ".org",
         ];
 
         // Case-insensitive extension matching
@@ -238,7 +246,7 @@ impl MD051LinkFragments {
             if last_dot == 0 && !path_lower[1..].contains('.') {
                 return false;
             }
-            
+
             let potential_ext = &path_lower[last_dot + 1..];
             if potential_ext.len() >= 2
                 && potential_ext.len() <= 6
@@ -602,7 +610,6 @@ mod tests {
                 .contains("Link anchor '#missing-section' does not exist")
         );
     }
-
 
     #[test]
     fn test_strip_markdown_formatting() {

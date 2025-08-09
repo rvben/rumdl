@@ -456,10 +456,7 @@ fn test_md051_fragment_generation_regression() {
         ("Test [Brackets]", "test-brackets"),
         // Complex cases
         ("1. Heading with Numbers & Symbols!", "1-heading-with-numbers-symbols"),
-        (
-            "Multiple!!! Exclamations & Symbols???",
-            "multiple-exclamations-symbols",
-        ),
+        ("Multiple!!! Exclamations & Symbols???", "multiple-exclamations-symbols"),
         (
             "Heading with (Parentheses) & [Brackets]",
             "heading-with-parentheses-brackets",

@@ -250,22 +250,22 @@ impl MD037NoSpaceInEmphasis {
         if (line.starts_with(' ') || line.starts_with('*') || line.starts_with('+') || line.starts_with('-'))
             && UNORDERED_LIST_MARKER_REGEX.is_match(line)
         {
-            if let Some(caps) = UNORDERED_LIST_MARKER_REGEX.captures(line) {
-                if let Some(full_match) = caps.get(0) {
-                    let list_marker_end = full_match.end();
-                    if list_marker_end < line.len() {
-                        let remaining_content = &line[list_marker_end..];
+            if let Some(caps) = UNORDERED_LIST_MARKER_REGEX.captures(line)
+                && let Some(full_match) = caps.get(0)
+            {
+                let list_marker_end = full_match.end();
+                if list_marker_end < line.len() {
+                    let remaining_content = &line[list_marker_end..];
 
-                        if self.is_likely_list_item_fast(remaining_content) {
-                            self.check_line_content_for_emphasis_fast(
-                                remaining_content,
-                                line_num,
-                                list_marker_end,
-                                warnings,
-                            );
-                        } else {
-                            self.check_line_content_for_emphasis_fast(line, line_num, 0, warnings);
-                        }
+                    if self.is_likely_list_item_fast(remaining_content) {
+                        self.check_line_content_for_emphasis_fast(
+                            remaining_content,
+                            line_num,
+                            list_marker_end,
+                            warnings,
+                        );
+                    } else {
+                        self.check_line_content_for_emphasis_fast(line, line_num, 0, warnings);
                     }
                 }
             }

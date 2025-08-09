@@ -69,10 +69,11 @@ impl MD031BlanksAroundFences {
             // Check for ordered list (number followed by . or ))
             if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                 let mut chars = trimmed.chars().skip_while(|c| c.is_ascii_digit());
-                if let Some(next) = chars.next() {
-                    if (next == '.' || next == ')') && chars.next() == Some(' ') {
-                        return true;
-                    }
+                if let Some(next) = chars.next()
+                    && (next == '.' || next == ')')
+                    && chars.next() == Some(' ')
+                {
+                    return true;
                 }
             }
 

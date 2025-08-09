@@ -674,8 +674,8 @@ line-length:
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         // Note: This might fail if our JSON parser doesn't support comments
         // If it fails, that's actually expected behavior - JSONC requires special handling
-        if result.is_err() {
-            let error_msg = result.unwrap_err().to_string();
+        if let Err(error) = result {
+            let error_msg = error.to_string();
             assert!(
                 error_msg.contains("Failed to parse JSON"),
                 "JSONC parsing should attempt JSON first"

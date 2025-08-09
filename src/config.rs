@@ -235,10 +235,10 @@ pub fn get_rule_config_value<T: serde::de::DeserializeOwned>(config: &Config, ru
 
     // Try each variant until we find a match
     for variant in &key_variants {
-        if let Some(value) = rule_config.values.get(variant) {
-            if let Ok(result) = T::deserialize(value.clone()) {
-                return Some(result);
-            }
+        if let Some(value) = rule_config.values.get(variant)
+            && let Ok(result) = T::deserialize(value.clone())
+        {
+            return Some(result);
         }
     }
 
@@ -1483,149 +1483,147 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
     let file = Some(path.to_string());
 
     // 1. Handle [tool.rumdl] as before
-    if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl")) {
-        if let Some(rumdl_table) = rumdl_config.as_table() {
-            // --- Extract global options ---
-            if let Some(enable) = rumdl_table.get("enable") {
-                if let Ok(values) = Vec::<String>::deserialize(enable.clone()) {
-                    // Normalize rule names in the list
-                    let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
-                    fragment
-                        .global
-                        .enable
-                        .push_override(normalized_values, source, file.clone(), None);
-                }
+    if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl"))
+        && let Some(rumdl_table) = rumdl_config.as_table()
+    {
+        // --- Extract global options ---
+        if let Some(enable) = rumdl_table.get("enable")
+            && let Ok(values) = Vec::<String>::deserialize(enable.clone())
+        {
+            // Normalize rule names in the list
+            let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+            fragment
+                .global
+                .enable
+                .push_override(normalized_values, source, file.clone(), None);
+        }
+        if let Some(disable) = rumdl_table.get("disable")
+            && let Ok(values) = Vec::<String>::deserialize(disable.clone())
+        {
+            // Re-enable normalization
+            let normalized_values: Vec<String> = values.into_iter().map(|s| normalize_key(&s)).collect();
+            fragment
+                .global
+                .disable
+                .push_override(normalized_values, source, file.clone(), None);
+        }
+        if let Some(include) = rumdl_table.get("include")
+            && let Ok(values) = Vec::<String>::deserialize(include.clone())
+        {
+            fragment
+                .global
+                .include
+                .push_override(values, source, file.clone(), None);
+        }
+        if let Some(exclude) = rumdl_table.get("exclude")
+            && let Ok(values) = Vec::<String>::deserialize(exclude.clone())
+        {
+            fragment
+                .global
+                .exclude
+                .push_override(values, source, file.clone(), None);
+        }
+        if let Some(respect_gitignore) = rumdl_table
+            .get("respect-gitignore")
+            .or_else(|| rumdl_table.get("respect_gitignore"))
+            && let Ok(value) = bool::deserialize(respect_gitignore.clone())
+        {
+            fragment
+                .global
+                .respect_gitignore
+                .push_override(value, source, file.clone(), None);
+        }
+        if let Some(output_format) = rumdl_table
+            .get("output-format")
+            .or_else(|| rumdl_table.get("output_format"))
+            && let Ok(value) = String::deserialize(output_format.clone())
+        {
+            if fragment.global.output_format.is_none() {
+                fragment.global.output_format = Some(SourcedValue::new(value.clone(), source));
+            } else {
+                fragment
+                    .global
+                    .output_format
+                    .as_mut()
+                    .unwrap()
+                    .push_override(value, source, file.clone(), None);
             }
-            if let Some(disable) = rumdl_table.get("disable") {
-                if let Ok(values) = Vec::<String>::deserialize(disable.clone()) {
-                    // Re-enable normalization
-                    let normalized_values: Vec<String> = values.into_iter().map(|s| normalize_key(&s)).collect();
-                    fragment
-                        .global
-                        .disable
-                        .push_override(normalized_values, source, file.clone(), None);
-                }
-            }
-            if let Some(include) = rumdl_table.get("include") {
-                if let Ok(values) = Vec::<String>::deserialize(include.clone()) {
-                    fragment
-                        .global
-                        .include
-                        .push_override(values, source, file.clone(), None);
-                }
-            }
-            if let Some(exclude) = rumdl_table.get("exclude") {
-                if let Ok(values) = Vec::<String>::deserialize(exclude.clone()) {
-                    fragment
-                        .global
-                        .exclude
-                        .push_override(values, source, file.clone(), None);
-                }
-            }
-            if let Some(respect_gitignore) = rumdl_table
-                .get("respect-gitignore")
-                .or_else(|| rumdl_table.get("respect_gitignore"))
-            {
-                if let Ok(value) = bool::deserialize(respect_gitignore.clone()) {
-                    fragment
-                        .global
-                        .respect_gitignore
-                        .push_override(value, source, file.clone(), None);
-                }
-            }
-            if let Some(output_format) = rumdl_table
-                .get("output-format")
-                .or_else(|| rumdl_table.get("output_format"))
-            {
-                if let Ok(value) = String::deserialize(output_format.clone()) {
-                    if fragment.global.output_format.is_none() {
-                        fragment.global.output_format = Some(SourcedValue::new(value.clone(), source));
-                    } else {
-                        fragment.global.output_format.as_mut().unwrap().push_override(
-                            value,
-                            source,
-                            file.clone(),
-                            None,
-                        );
-                    }
-                }
-            }
+        }
 
-            // --- Re-introduce special line-length handling ---
-            let mut found_line_length_val: Option<toml::Value> = None;
-            for key in ["line-length", "line_length"].iter() {
-                if let Some(val) = rumdl_table.get(*key) {
-                    // Ensure the value is actually an integer before cloning
-                    if val.is_integer() {
-                        found_line_length_val = Some(val.clone());
-                        break;
-                    } else {
-                        // Optional: Warn about wrong type for line-length?
-                    }
-                }
-            }
-            if let Some(line_length_val) = found_line_length_val {
-                let norm_md013_key = normalize_key("MD013"); // Normalize to "md013"
-                let rule_entry = fragment.rules.entry(norm_md013_key).or_default();
-                let norm_line_length_key = normalize_key("line-length"); // Ensure "line-length"
-                let sv = rule_entry
-                    .values
-                    .entry(norm_line_length_key)
-                    .or_insert_with(|| SourcedValue::new(line_length_val.clone(), ConfigSource::Default));
-                sv.push_override(line_length_val, source, file.clone(), None);
-            }
-
-            // --- Extract rule-specific configurations ---
-            for (key, value) in rumdl_table {
-                let norm_rule_key = normalize_key(key);
-
-                // Skip keys already handled as global or special cases
-                if [
-                    "enable",
-                    "disable",
-                    "include",
-                    "exclude",
-                    "respect_gitignore",
-                    "respect-gitignore", // Added kebab-case here too
-                    "line_length",
-                    "line-length",
-                    "output_format",
-                    "output-format",
-                ]
-                .contains(&norm_rule_key.as_str())
-                {
-                    continue;
-                }
-
-                // Explicitly check if the key looks like a rule name (e.g., starts with 'md')
-                // AND if the value is actually a TOML table before processing as rule config.
-                // This prevents misinterpreting other top-level keys under [tool.rumdl]
-                let norm_rule_key_upper = norm_rule_key.to_ascii_uppercase();
-                if norm_rule_key_upper.len() == 5
-                    && norm_rule_key_upper.starts_with("MD")
-                    && norm_rule_key_upper[2..].chars().all(|c| c.is_ascii_digit())
-                    && value.is_table()
-                {
-                    if let Some(rule_config_table) = value.as_table() {
-                        // Get the entry for this rule (e.g., "md013")
-                        let rule_entry = fragment.rules.entry(norm_rule_key_upper).or_default();
-                        for (rk, rv) in rule_config_table {
-                            let norm_rk = normalize_key(rk); // Normalize the config key itself
-
-                            let toml_val = rv.clone();
-
-                            let sv = rule_entry
-                                .values
-                                .entry(norm_rk.clone())
-                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
-                            sv.push_override(toml_val, source, file.clone(), None);
-                        }
-                    }
+        // --- Re-introduce special line-length handling ---
+        let mut found_line_length_val: Option<toml::Value> = None;
+        for key in ["line-length", "line_length"].iter() {
+            if let Some(val) = rumdl_table.get(*key) {
+                // Ensure the value is actually an integer before cloning
+                if val.is_integer() {
+                    found_line_length_val = Some(val.clone());
+                    break;
                 } else {
-                    // Key is not a global/special key, doesn't start with 'md', or isn't a table.
-                    // TODO: Track unknown keys/sections if necessary for validation later.
-                    // eprintln!("[DEBUG parse_pyproject] Skipping key '{}' as it's not a recognized rule table.", key);
+                    // Optional: Warn about wrong type for line-length?
                 }
+            }
+        }
+        if let Some(line_length_val) = found_line_length_val {
+            let norm_md013_key = normalize_key("MD013"); // Normalize to "md013"
+            let rule_entry = fragment.rules.entry(norm_md013_key).or_default();
+            let norm_line_length_key = normalize_key("line-length"); // Ensure "line-length"
+            let sv = rule_entry
+                .values
+                .entry(norm_line_length_key)
+                .or_insert_with(|| SourcedValue::new(line_length_val.clone(), ConfigSource::Default));
+            sv.push_override(line_length_val, source, file.clone(), None);
+        }
+
+        // --- Extract rule-specific configurations ---
+        for (key, value) in rumdl_table {
+            let norm_rule_key = normalize_key(key);
+
+            // Skip keys already handled as global or special cases
+            if [
+                "enable",
+                "disable",
+                "include",
+                "exclude",
+                "respect_gitignore",
+                "respect-gitignore", // Added kebab-case here too
+                "line_length",
+                "line-length",
+                "output_format",
+                "output-format",
+            ]
+            .contains(&norm_rule_key.as_str())
+            {
+                continue;
+            }
+
+            // Explicitly check if the key looks like a rule name (e.g., starts with 'md')
+            // AND if the value is actually a TOML table before processing as rule config.
+            // This prevents misinterpreting other top-level keys under [tool.rumdl]
+            let norm_rule_key_upper = norm_rule_key.to_ascii_uppercase();
+            if norm_rule_key_upper.len() == 5
+                && norm_rule_key_upper.starts_with("MD")
+                && norm_rule_key_upper[2..].chars().all(|c| c.is_ascii_digit())
+                && value.is_table()
+            {
+                if let Some(rule_config_table) = value.as_table() {
+                    // Get the entry for this rule (e.g., "md013")
+                    let rule_entry = fragment.rules.entry(norm_rule_key_upper).or_default();
+                    for (rk, rv) in rule_config_table {
+                        let norm_rk = normalize_key(rk); // Normalize the config key itself
+
+                        let toml_val = rv.clone();
+
+                        let sv = rule_entry
+                            .values
+                            .entry(norm_rk.clone())
+                            .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
+                        sv.push_override(toml_val, source, file.clone(), None);
+                    }
+                }
+            } else {
+                // Key is not a global/special key, doesn't start with 'md', or isn't a table.
+                // TODO: Track unknown keys/sections if necessary for validation later.
+                // eprintln!("[DEBUG parse_pyproject] Skipping key '{}' as it's not a recognized rule table.", key);
             }
         }
     }
@@ -1638,18 +1636,17 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 if norm_rule_name.len() == 5
                     && norm_rule_name.to_ascii_uppercase().starts_with("MD")
                     && norm_rule_name[2..].chars().all(|c| c.is_ascii_digit())
+                    && let Some(rule_table) = value.as_table()
                 {
-                    if let Some(rule_table) = value.as_table() {
-                        let rule_entry = fragment.rules.entry(norm_rule_name.to_ascii_uppercase()).or_default();
-                        for (rk, rv) in rule_table {
-                            let norm_rk = normalize_key(rk);
-                            let toml_val = rv.clone();
-                            let sv = rule_entry
-                                .values
-                                .entry(norm_rk.clone())
-                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
-                            sv.push_override(toml_val, source, file.clone(), None);
-                        }
+                    let rule_entry = fragment.rules.entry(norm_rule_name.to_ascii_uppercase()).or_default();
+                    for (rk, rv) in rule_table {
+                        let norm_rk = normalize_key(rk);
+                        let toml_val = rv.clone();
+                        let sv = rule_entry
+                            .values
+                            .entry(norm_rk.clone())
+                            .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
+                        sv.push_override(toml_val, source, file.clone(), None);
                     }
                 }
             }
@@ -1664,18 +1661,17 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 if norm_rule_name.len() == 5
                     && norm_rule_name.to_ascii_uppercase().starts_with("MD")
                     && norm_rule_name[2..].chars().all(|c| c.is_ascii_digit())
+                    && let Some(rule_table) = value.as_table()
                 {
-                    if let Some(rule_table) = value.as_table() {
-                        let rule_entry = fragment.rules.entry(norm_rule_name.to_ascii_uppercase()).or_default();
-                        for (rk, rv) in rule_table {
-                            let norm_rk = normalize_key(rk);
-                            let toml_val = rv.clone();
-                            let sv = rule_entry
-                                .values
-                                .entry(norm_rk.clone())
-                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
-                            sv.push_override(toml_val, source, file.clone(), None);
-                        }
+                    let rule_entry = fragment.rules.entry(norm_rule_name.to_ascii_uppercase()).or_default();
+                    for (rk, rv) in rule_table {
+                        let norm_rk = normalize_key(rk);
+                        let toml_val = rv.clone();
+                        let sv = rule_entry
+                            .values
+                            .entry(norm_rk.clone())
+                            .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
+                        sv.push_override(toml_val, source, file.clone(), None);
                     }
                 }
             }
@@ -1710,126 +1706,124 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
         .collect();
 
     // Handle [global] section
-    if let Some(global_item) = doc.get("global") {
-        if let Some(global_table) = global_item.as_table() {
-            for (key, value_item) in global_table.iter() {
-                let norm_key = normalize_key(key);
-                match norm_key.as_str() {
-                    "enable" | "disable" | "include" | "exclude" => {
-                        if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
-                            // Corrected: Iterate directly over the Formatted<Array>
-                            let values: Vec<String> = formatted_array
+    if let Some(global_item) = doc.get("global")
+        && let Some(global_table) = global_item.as_table()
+    {
+        for (key, value_item) in global_table.iter() {
+            let norm_key = normalize_key(key);
+            match norm_key.as_str() {
+                "enable" | "disable" | "include" | "exclude" => {
+                    if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
+                        // Corrected: Iterate directly over the Formatted<Array>
+                        let values: Vec<String> = formatted_array
                                 .iter()
                                 .filter_map(|item| item.as_str()) // Extract strings
                                 .map(|s| s.to_string())
                                 .collect();
 
-                            // Normalize rule names for enable/disable
-                            let final_values = if norm_key == "enable" || norm_key == "disable" {
-                                // Corrected: Pass &str to normalize_key
-                                values.into_iter().map(|s| normalize_key(&s)).collect()
-                            } else {
-                                values
-                            };
+                        // Normalize rule names for enable/disable
+                        let final_values = if norm_key == "enable" || norm_key == "disable" {
+                            // Corrected: Pass &str to normalize_key
+                            values.into_iter().map(|s| normalize_key(&s)).collect()
+                        } else {
+                            values
+                        };
 
-                            match norm_key.as_str() {
-                                "enable" => {
-                                    fragment
-                                        .global
-                                        .enable
-                                        .push_override(final_values, source, file.clone(), None)
-                                }
-                                "disable" => {
-                                    fragment
-                                        .global
-                                        .disable
-                                        .push_override(final_values, source, file.clone(), None)
-                                }
-                                "include" => {
-                                    fragment
-                                        .global
-                                        .include
-                                        .push_override(final_values, source, file.clone(), None)
-                                }
-                                "exclude" => {
-                                    fragment
-                                        .global
-                                        .exclude
-                                        .push_override(final_values, source, file.clone(), None)
-                                }
-                                _ => unreachable!(), // Should not happen due to outer match
-                            }
-                        } else {
-                            log::warn!(
-                                "[WARN] Expected array for global key '{}' in {}, found {}",
-                                key,
-                                path,
-                                value_item.type_name()
-                            );
-                        }
-                    }
-                    "respect_gitignore" | "respect-gitignore" => {
-                        // Handle both cases
-                        if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
-                            let val = *formatted_bool.value();
-                            fragment
+                        match norm_key.as_str() {
+                            "enable" => fragment
                                 .global
-                                .respect_gitignore
-                                .push_override(val, source, file.clone(), None);
-                        } else {
-                            log::warn!(
-                                "[WARN] Expected boolean for global key '{}' in {}, found {}",
-                                key,
-                                path,
-                                value_item.type_name()
-                            );
-                        }
-                    }
-                    "line_length" | "line-length" => {
-                        // Handle both cases
-                        if let Some(toml_edit::Value::Integer(formatted_int)) = value_item.as_value() {
-                            let val = *formatted_int.value() as u64;
-                            fragment
-                                .global
-                                .line_length
-                                .push_override(val, source, file.clone(), None);
-                        } else {
-                            log::warn!(
-                                "[WARN] Expected integer for global key '{}' in {}, found {}",
-                                key,
-                                path,
-                                value_item.type_name()
-                            );
-                        }
-                    }
-                    "output_format" | "output-format" => {
-                        // Handle both cases
-                        if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
-                            let val = formatted_string.value().clone();
-                            if fragment.global.output_format.is_none() {
-                                fragment.global.output_format = Some(SourcedValue::new(val.clone(), source));
-                            } else {
-                                fragment.global.output_format.as_mut().unwrap().push_override(
-                                    val,
-                                    source,
-                                    file.clone(),
-                                    None,
-                                );
+                                .enable
+                                .push_override(final_values, source, file.clone(), None),
+                            "disable" => {
+                                fragment
+                                    .global
+                                    .disable
+                                    .push_override(final_values, source, file.clone(), None)
                             }
+                            "include" => {
+                                fragment
+                                    .global
+                                    .include
+                                    .push_override(final_values, source, file.clone(), None)
+                            }
+                            "exclude" => {
+                                fragment
+                                    .global
+                                    .exclude
+                                    .push_override(final_values, source, file.clone(), None)
+                            }
+                            _ => unreachable!(), // Should not happen due to outer match
+                        }
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected array for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "respect_gitignore" | "respect-gitignore" => {
+                    // Handle both cases
+                    if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
+                        let val = *formatted_bool.value();
+                        fragment
+                            .global
+                            .respect_gitignore
+                            .push_override(val, source, file.clone(), None);
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected boolean for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "line_length" | "line-length" => {
+                    // Handle both cases
+                    if let Some(toml_edit::Value::Integer(formatted_int)) = value_item.as_value() {
+                        let val = *formatted_int.value() as u64;
+                        fragment
+                            .global
+                            .line_length
+                            .push_override(val, source, file.clone(), None);
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected integer for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "output_format" | "output-format" => {
+                    // Handle both cases
+                    if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
+                        let val = formatted_string.value().clone();
+                        if fragment.global.output_format.is_none() {
+                            fragment.global.output_format = Some(SourcedValue::new(val.clone(), source));
                         } else {
-                            log::warn!(
-                                "[WARN] Expected string for global key '{}' in {}, found {}",
-                                key,
-                                path,
-                                value_item.type_name()
+                            fragment.global.output_format.as_mut().unwrap().push_override(
+                                val,
+                                source,
+                                file.clone(),
+                                None,
                             );
                         }
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected string for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
                     }
-                    _ => {
-                        // Add to unknown_keys for potential validation later
-                        // fragment.unknown_keys.push(("[global]".to_string(), key.to_string()));
-                        log::warn!("[WARN] Unknown key in [global] section of {path}: {key}");
-                    }
+                }
+                _ => {
+                    // Add to unknown_keys for potential validation later
+                    // fragment.unknown_keys.push(("[global]".to_string(), key.to_string()));
+                    log::warn!("[WARN] Unknown key in [global] section of {path}: {key}");
                 }
             }
         }

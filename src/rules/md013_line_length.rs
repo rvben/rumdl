@@ -529,11 +529,11 @@ impl MD013LineLength {
         // Pattern: [text](very-long-url) -> [text](url)
         if line.contains('[') && line.contains("](") {
             for cap in MARKDOWN_LINK_PATTERN.captures_iter(&effective_line.clone()) {
-                if let (Some(full_match), Some(text), Some(url)) = (cap.get(0), cap.get(1), cap.get(2)) {
-                    if url.as_str().len() > 15 {
-                        let replacement = format!("[{}](url)", text.as_str());
-                        effective_line = effective_line.replacen(full_match.as_str(), &replacement, 1);
-                    }
+                if let (Some(full_match), Some(text), Some(url)) = (cap.get(0), cap.get(1), cap.get(2))
+                    && url.as_str().len() > 15
+                {
+                    let replacement = format!("[{}](url)", text.as_str());
+                    effective_line = effective_line.replacen(full_match.as_str(), &replacement, 1);
                 }
             }
         }

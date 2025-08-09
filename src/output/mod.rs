@@ -417,7 +417,7 @@ mod tests {
 
         for format in &formats {
             let formatter = format.create_formatter();
-            let output = formatter.format_warnings(&[warning.clone()], "test.md");
+            let output = formatter.format_warnings(std::slice::from_ref(&warning), "test.md");
             assert!(
                 !output.is_empty(),
                 "Format {format:?} should handle warnings without rule names"

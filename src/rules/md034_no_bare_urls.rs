@@ -153,11 +153,11 @@ impl MD034NoBareUrls {
         excluded_ranges.sort_by_key(|r| r.0);
         let mut merged: Vec<(usize, usize)> = Vec::new();
         for (start, end) in excluded_ranges {
-            if let Some((_, last_end)) = merged.last_mut() {
-                if *last_end >= start {
-                    *last_end = (*last_end).max(end);
-                    continue;
-                }
+            if let Some((_, last_end)) = merged.last_mut()
+                && *last_end >= start
+            {
+                *last_end = (*last_end).max(end);
+                continue;
             }
             merged.push((start, end));
         }
@@ -276,12 +276,11 @@ impl MD034NoBareUrls {
             let (line_num, col_num) = ctx.offset_to_line_col(match_start);
 
             // Skip reference definitions for URLs
-            if !is_email {
-                if let Some(line_info) = ctx.line_info(line_num) {
-                    if REFERENCE_DEF_RE.is_match(&line_info.content) {
-                        continue;
-                    }
-                }
+            if !is_email
+                && let Some(line_info) = ctx.line_info(line_num)
+                && REFERENCE_DEF_RE.is_match(&line_info.content)
+            {
+                continue;
             }
 
             let matched_text = &content[match_start..match_end];

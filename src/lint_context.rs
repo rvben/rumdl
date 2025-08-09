@@ -1493,42 +1493,43 @@ impl<'a> LintContext<'a> {
                             found_continuation = true;
                         }
                         // Check if followed by another list item at the same level
-                        else if !next_line.in_code_block && next_line.list_item.is_some() {
-                            if let Some(item) = &next_line.list_item {
-                                let next_blockquote_prefix = BLOCKQUOTE_PREFIX_REGEX
-                                    .find(&next_line.content)
-                                    .map_or(String::new(), |m| m.as_str().to_string());
-                                if item.marker_column == current_indent_level
-                                    && item.is_ordered == block.is_ordered
-                                    && block.blockquote_prefix.trim() == next_blockquote_prefix.trim()
-                                {
-                                    // Check if there was meaningful content between the list items
-                                    let has_meaningful_content = (line_idx + 1..check_idx).any(|idx| {
-                                        if let Some(between_line) = lines.get(idx) {
-                                            let trimmed = between_line.content.trim();
-                                            // Skip empty lines
-                                            if trimmed.is_empty() {
-                                                return false;
-                                            }
-                                            // Check for meaningful content
-                                            let line_indent =
-                                                between_line.content.len() - between_line.content.trim_start().len();
-                                            // Code fences or properly indented content
-                                            trimmed.starts_with("```")
-                                                || trimmed.starts_with("~~~")
-                                                || line_indent >= min_continuation_indent
-                                        } else {
-                                            false
+                        else if !next_line.in_code_block
+                            && next_line.list_item.is_some()
+                            && let Some(item) = &next_line.list_item
+                        {
+                            let next_blockquote_prefix = BLOCKQUOTE_PREFIX_REGEX
+                                .find(&next_line.content)
+                                .map_or(String::new(), |m| m.as_str().to_string());
+                            if item.marker_column == current_indent_level
+                                && item.is_ordered == block.is_ordered
+                                && block.blockquote_prefix.trim() == next_blockquote_prefix.trim()
+                            {
+                                // Check if there was meaningful content between the list items
+                                let has_meaningful_content = (line_idx + 1..check_idx).any(|idx| {
+                                    if let Some(between_line) = lines.get(idx) {
+                                        let trimmed = between_line.content.trim();
+                                        // Skip empty lines
+                                        if trimmed.is_empty() {
+                                            return false;
                                         }
-                                    });
-
-                                    if block.is_ordered {
-                                        // For ordered lists: only continue if there's meaningful content
-                                        found_continuation = has_meaningful_content;
+                                        // Check for meaningful content
+                                        let line_indent =
+                                            between_line.content.len() - between_line.content.trim_start().len();
+                                        // Code fences or properly indented content
+                                        trimmed.starts_with("```")
+                                            || trimmed.starts_with("~~~")
+                                            || line_indent >= min_continuation_indent
                                     } else {
-                                        // For unordered lists: continue regardless
-                                        found_continuation = true;
+                                        false
                                     }
+                                });
+
+                                if block.is_ordered {
+                                    // For ordered lists: only continue if there's meaningful content
+                                    found_continuation = has_meaningful_content;
+                                } else {
+                                    // For unordered lists: continue regardless
+                                    found_continuation = true;
                                 }
                             }
                         }
@@ -2017,10 +2018,10 @@ impl<'a> ListBlockMerger<'a> {
     /// Check if there are only blank lines between blocks
     fn has_only_blank_lines_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
         for line_num in (current.end_line + 1)..next.start_line {
-            if let Some(line_info) = self.lines.get(line_num - 1) {
-                if !line_info.content.trim().is_empty() {
-                    return false;
-                }
+            if let Some(line_info) = self.lines.get(line_num - 1)
+                && !line_info.content.trim().is_empty()
+            {
+                return false;
             }
         }
         true

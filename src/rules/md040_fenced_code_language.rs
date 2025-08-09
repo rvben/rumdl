@@ -35,15 +35,15 @@ impl Rule for MD040FencedCodeLanguage {
             let trimmed = line.trim();
 
             // Update disabled state incrementally
-            if let Some(rules) = crate::rule::parse_disable_comment(trimmed) {
-                if rules.is_empty() || rules.contains(&self.name()) {
-                    is_disabled = true;
-                }
+            if let Some(rules) = crate::rule::parse_disable_comment(trimmed)
+                && (rules.is_empty() || rules.contains(&self.name()))
+            {
+                is_disabled = true;
             }
-            if let Some(rules) = crate::rule::parse_enable_comment(trimmed) {
-                if rules.is_empty() || rules.contains(&self.name()) {
-                    is_disabled = false;
-                }
+            if let Some(rules) = crate::rule::parse_enable_comment(trimmed)
+                && (rules.is_empty() || rules.contains(&self.name()))
+            {
+                is_disabled = false;
             }
 
             // Skip processing if rule is disabled
@@ -201,15 +201,15 @@ impl Rule for MD040FencedCodeLanguage {
             let trimmed = line.trim();
 
             // Update disabled state incrementally
-            if let Some(rules) = crate::rule::parse_disable_comment(trimmed) {
-                if rules.is_empty() || rules.contains(&self.name()) {
-                    is_disabled = true;
-                }
+            if let Some(rules) = crate::rule::parse_disable_comment(trimmed)
+                && (rules.is_empty() || rules.contains(&self.name()))
+            {
+                is_disabled = true;
             }
-            if let Some(rules) = crate::rule::parse_enable_comment(trimmed) {
-                if rules.is_empty() || rules.contains(&self.name()) {
-                    is_disabled = false;
-                }
+            if let Some(rules) = crate::rule::parse_enable_comment(trimmed)
+                && (rules.is_empty() || rules.contains(&self.name()))
+            {
+                is_disabled = false;
             }
 
             // Skip processing if rule is disabled, preserve the line as-is
@@ -410,7 +410,7 @@ print("Hello, world!")
         // Test with spaces after the fence
         let content = r#"# Test
 
-```   
+```
 print("Hello, world!")
 ```
 "#;
@@ -564,7 +564,7 @@ console.log("test");
     ```javascript
     console.log("deeply nested");
     ```
-  
+
   - Another nested
     ```
     no language

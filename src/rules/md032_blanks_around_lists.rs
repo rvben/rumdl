@@ -565,10 +565,10 @@ impl MD032BlanksAroundLists {
         let mut result_lines: Vec<String> = Vec::with_capacity(num_lines + insertions.len());
         for (i, line) in lines.iter().enumerate() {
             let current_line_num = i + 1;
-            if let Some(prefix_to_insert) = insertions.get(&current_line_num) {
-                if result_lines.is_empty() || result_lines.last().unwrap() != prefix_to_insert {
-                    result_lines.push(prefix_to_insert.clone());
-                }
+            if let Some(prefix_to_insert) = insertions.get(&current_line_num)
+                && (result_lines.is_empty() || result_lines.last().unwrap() != prefix_to_insert)
+            {
+                result_lines.push(prefix_to_insert.clone());
             }
             result_lines.push(line.to_string());
         }

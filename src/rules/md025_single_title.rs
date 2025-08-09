@@ -211,14 +211,14 @@ impl Rule for MD025SingleTitle {
         // Find all headings at the target level using cached information
         let mut target_level_headings = Vec::new();
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading {
-                if heading.level as usize == self.config.level {
-                    // Ignore if indented 4+ spaces (code block)
-                    if line_info.indent >= 4 {
-                        continue;
-                    }
-                    target_level_headings.push(line_num);
+            if let Some(heading) = &line_info.heading
+                && heading.level as usize == self.config.level
+            {
+                // Ignore if indented 4+ spaces (code block)
+                if line_info.indent >= 4 {
+                    continue;
                 }
+                target_level_headings.push(line_num);
             }
         }
 
@@ -455,19 +455,19 @@ impl Rule for MD025SingleTitle {
         // Fast path: count target level headings efficiently
         let mut target_level_count = 0;
         for line_info in &ctx.lines {
-            if let Some(heading) = &line_info.heading {
-                if heading.level as usize == self.config.level {
-                    // Ignore if indented 4+ spaces (code block)
-                    if line_info.indent >= 4 {
-                        continue;
-                    }
-                    target_level_count += 1;
+            if let Some(heading) = &line_info.heading
+                && heading.level as usize == self.config.level
+            {
+                // Ignore if indented 4+ spaces (code block)
+                if line_info.indent >= 4 {
+                    continue;
+                }
+                target_level_count += 1;
 
-                    // If we find more than 1, we need to run the full check
-                    // to determine if they're legitimate document sections
-                    if target_level_count > 1 {
-                        return false;
-                    }
+                // If we find more than 1, we need to run the full check
+                // to determine if they're legitimate document sections
+                if target_level_count > 1 {
+                    return false;
                 }
             }
         }
@@ -609,18 +609,18 @@ mod tests {
         let result = rule.check(&ctx);
         assert!(result.is_ok());
 
-        if let Ok(warnings) = result {
-            if !warnings.is_empty() {
-                // Check that the fix doesn't cause a panic
-                let fix_result = rule.fix(&ctx);
-                assert!(fix_result.is_ok());
+        if let Ok(warnings) = result
+            && !warnings.is_empty()
+        {
+            // Check that the fix doesn't cause a panic
+            let fix_result = rule.fix(&ctx);
+            assert!(fix_result.is_ok());
 
-                // The fix should produce valid content
-                if let Ok(fixed_content) = fix_result {
-                    assert!(!fixed_content.is_empty());
-                    // Should convert the second "#" to "##" (or "## " if there's content)
-                    assert!(fixed_content.contains("##"));
-                }
+            // The fix should produce valid content
+            if let Ok(fixed_content) = fix_result {
+                assert!(!fixed_content.is_empty());
+                // Should convert the second "#" to "##" (or "## " if there's content)
+                assert!(fixed_content.contains("##"));
             }
         }
     }

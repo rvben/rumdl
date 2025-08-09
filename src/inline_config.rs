@@ -190,19 +190,17 @@ impl InlineConfig {
             // Find all comments on this line and process them in order
             let mut comment_positions = Vec::new();
 
-            if let Some(pos) = line.find("<!-- markdownlint-disable") {
-                if !line[pos..].contains("<!-- markdownlint-disable-line")
-                    && !line[pos..].contains("<!-- markdownlint-disable-next-line")
-                {
-                    comment_positions.push((pos, "disable"));
-                }
+            if let Some(pos) = line.find("<!-- markdownlint-disable")
+                && !line[pos..].contains("<!-- markdownlint-disable-line")
+                && !line[pos..].contains("<!-- markdownlint-disable-next-line")
+            {
+                comment_positions.push((pos, "disable"));
             }
-            if let Some(pos) = line.find("<!-- rumdl-disable") {
-                if !line[pos..].contains("<!-- rumdl-disable-line")
-                    && !line[pos..].contains("<!-- rumdl-disable-next-line")
-                {
-                    comment_positions.push((pos, "disable"));
-                }
+            if let Some(pos) = line.find("<!-- rumdl-disable")
+                && !line[pos..].contains("<!-- rumdl-disable-line")
+                && !line[pos..].contains("<!-- rumdl-disable-next-line")
+            {
+                comment_positions.push((pos, "disable"));
             }
 
             if let Some(pos) = line.find("<!-- markdownlint-enable") {
@@ -311,10 +309,10 @@ impl InlineConfig {
         }
 
         // Check line-specific disables (disable-line, disable-next-line)
-        if let Some(line_rules) = self.line_disabled_rules.get(&line_number) {
-            if line_rules.contains("*") || line_rules.contains(rule_name) {
-                return true;
-            }
+        if let Some(line_rules) = self.line_disabled_rules.get(&line_number)
+            && (line_rules.contains("*") || line_rules.contains(rule_name))
+        {
+            return true;
         }
 
         // Check persistent disables at this line

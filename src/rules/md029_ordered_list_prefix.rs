@@ -188,15 +188,15 @@ impl Rule for MD029OrderedListPrefix {
                     }
                 }
                 // If indent matches stack top, increment index
-                if let Some(&mut (top_indent, ref mut idx)) = indent_stack.last_mut() {
-                    if indent == top_indent {
-                        let expected_num = self.get_expected_number(*idx);
-                        let fixed_line = self.fix_line(line, expected_num);
-                        result.push_str(&fixed_line);
-                        result.push('\n');
-                        *idx += 1;
-                        continue;
-                    }
+                if let Some(&mut (top_indent, ref mut idx)) = indent_stack.last_mut()
+                    && indent == top_indent
+                {
+                    let expected_num = self.get_expected_number(*idx);
+                    let fixed_line = self.fix_line(line, expected_num);
+                    result.push_str(&fixed_line);
+                    result.push('\n');
+                    *idx += 1;
+                    continue;
                 }
                 // New deeper indent or first item
                 indent_stack.push((indent, 0));
@@ -493,10 +493,10 @@ impl MD029OrderedListPrefix {
         }
 
         for line_num in (end_line + 1)..start_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                if line_info.heading.is_some() {
-                    return true;
-                }
+            if let Some(line_info) = ctx.line_info(line_num)
+                && line_info.heading.is_some()
+            {
+                return true;
             }
         }
 
@@ -545,14 +545,14 @@ impl MD029OrderedListPrefix {
             self.check_for_lazy_continuation(ctx, list_block, warnings);
 
             for &item_line in &list_block.item_lines {
-                if let Some(line_info) = ctx.line_info(item_line) {
-                    if let Some(list_item) = &line_info.list_item {
-                        // Skip unordered lists (safety check)
-                        if !list_item.is_ordered {
-                            continue;
-                        }
-                        all_items.push((item_line, line_info, list_item));
+                if let Some(line_info) = ctx.line_info(item_line)
+                    && let Some(list_item) = &line_info.list_item
+                {
+                    // Skip unordered lists (safety check)
+                    if !list_item.is_ordered {
+                        continue;
                     }
+                    all_items.push((item_line, line_info, list_item));
                 }
             }
         }
