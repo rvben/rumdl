@@ -233,6 +233,11 @@ version-push:
 	@git push origin $(LATEST_TAG)
 	@echo "Release workflow triggered for $(LATEST_TAG)"
 
+# Pre-release validation
+pre-release:
+	@echo "Running pre-release validation..."
+	@./scripts/pre-release.sh
+
 # Combined targets for one-step release
 release-major: version-major version-push
 release-minor: version-minor version-push
