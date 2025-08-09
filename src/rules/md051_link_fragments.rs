@@ -74,7 +74,7 @@ impl MD051LinkFragments {
                     let final_fragment = if let Some(count) = fragment_counts.get_mut(&base_fragment) {
                         let suffix = *count;
                         *count += 1;
-                        format!("{}-{}", base_fragment, suffix)
+                        format!("{base_fragment}-{suffix}")
                     } else {
                         fragment_counts.insert(base_fragment.clone(), 1);
                         base_fragment
