@@ -3,7 +3,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD045Config {
-    #[serde(default = "default_placeholder_text")]
+    #[serde(
+        default = "default_placeholder_text",
+        rename = "placeholder-text",
+        alias = "placeholder_text"
+    )]
     pub placeholder_text: String,
 }
 

@@ -2,7 +2,6 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct MD054Config {
     #[serde(default = "default_true")]
     pub autolink: bool,
@@ -14,7 +13,7 @@ pub struct MD054Config {
     pub inline: bool,
     #[serde(default = "default_true")]
     pub shortcut: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", rename = "url-inline", alias = "url_inline")]
     pub url_inline: bool,
 }
 

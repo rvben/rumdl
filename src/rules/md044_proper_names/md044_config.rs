@@ -6,10 +6,10 @@ pub struct MD044Config {
     #[serde(default)]
     pub names: Vec<String>,
 
-    #[serde(default = "default_code_blocks")]
+    #[serde(default = "default_code_blocks", rename = "code-blocks", alias = "code_blocks")]
     pub code_blocks: bool,
 
-    #[serde(default = "default_html_comments")]
+    #[serde(default = "default_html_comments", rename = "html-comments", alias = "html_comments")]
     pub html_comments: bool,
 }
 

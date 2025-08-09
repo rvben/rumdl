@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 pub enum ListStyle {
     One, // Use '1.' for all items
-    #[serde(rename = "one_one")]
+    #[serde(rename = "one-one", alias = "one_one")]
     OneOne, // All ones (1. 1. 1.)
     #[default]
     Ordered, // Sequential (1. 2. 3.)

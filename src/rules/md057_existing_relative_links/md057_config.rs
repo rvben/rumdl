@@ -2,9 +2,12 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct MD057Config {
-    #[serde(default = "default_skip_media_files")]
+    #[serde(
+        default = "default_skip_media_files",
+        rename = "skip-media-files",
+        alias = "skip_media_files"
+    )]
     pub skip_media_files: bool,
 }
 
