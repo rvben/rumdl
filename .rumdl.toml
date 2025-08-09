@@ -32,6 +32,9 @@ style = "asterisk"
 # Strong emphasis style (** or __)
 style = "asterisk"
 
+[MD051]
+anchor-style = "github"
+
 [MD055]
 # Table pipe style (leading_and_trailing or no_leading_or_trailing)
 style = "leading_and_trailing"

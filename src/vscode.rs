@@ -543,10 +543,16 @@ mod tests {
     fn test_current_editor_from_env() {
         // Save current TERM_PROGRAM if it exists
         let original_term = std::env::var("TERM_PROGRAM").ok();
+        let original_editor = std::env::var("EDITOR").ok();
+        let original_visual = std::env::var("VISUAL").ok();
 
         unsafe {
-            // Test with no TERM_PROGRAM set
+            // Clear all environment variables that could affect the test
             std::env::remove_var("TERM_PROGRAM");
+            std::env::remove_var("EDITOR");
+            std::env::remove_var("VISUAL");
+
+            // Test with no TERM_PROGRAM set
             assert!(VsCodeExtension::current_editor_from_env().is_none());
 
             // Test with VS Code TERM_PROGRAM (but command might not exist)
@@ -573,11 +579,17 @@ mod tests {
             let _mixed_case_result = VsCodeExtension::current_editor_from_env();
             // Result should be same as lowercase version
 
-            // Restore original TERM_PROGRAM
+            // Restore original environment variables
             if let Some(term) = original_term {
                 std::env::set_var("TERM_PROGRAM", term);
             } else {
                 std::env::remove_var("TERM_PROGRAM");
+            }
+            if let Some(editor) = original_editor {
+                std::env::set_var("EDITOR", editor);
+            }
+            if let Some(visual) = original_visual {
+                std::env::set_var("VISUAL", visual);
             }
         }
     }

@@ -186,7 +186,7 @@ impl MD051LinkFragments {
                 ' ' => result.push('-'), // Step 3: spaces to hyphens
                 '-' => result.push('-'),
                 '_' => {} // kramdown REMOVES underscores (key difference!)
-                _ => {} // Remove everything else including non-ASCII
+                _ => {}   // Remove everything else including non-ASCII
             }
         }
 
@@ -327,9 +327,11 @@ impl Rule for MD051LinkFragments {
     where
         Self: Sized,
     {
-        // Look for anchor_style configuration
+        // Config keys are normalized to kebab-case by the config system
         let anchor_style = if let Some(rule_config) = config.rules.get("MD051") {
-            if let Some(style_str) = rule_config.values.get("anchor_style").and_then(|v| v.as_str()) {
+            if let Some(style_str) = rule_config.values.get("anchor-style")
+                .and_then(|v| v.as_str()) 
+            {
                 match style_str.to_lowercase().as_str() {
                     "kramdown" | "jekyll" => AnchorStyle::Kramdown,
                     _ => AnchorStyle::GitHub,
@@ -345,14 +347,8 @@ impl Rule for MD051LinkFragments {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let config_str = r#"# Anchor generation style
-# Options: "github" (default) or "kramdown"
-# - github: preserves underscores, removes punctuation
-# - kramdown: removes both underscores and punctuation
-anchor_style = "github""#;
-
-        let value: toml::Value = toml::from_str(r#"anchor_style = "github""#).ok()?;
-        Some((config_str.to_string(), value))
+        let value: toml::Value = toml::from_str(r#"anchor-style = "github""#).ok()?;
+        Some(("MD051".to_string(), value))
     }
 }
 
