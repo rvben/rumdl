@@ -19,7 +19,7 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: make lint-fast
+        entry: make lint
         language: system
         types: [rust]
         pass_filenames: false
