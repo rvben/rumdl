@@ -109,7 +109,7 @@ impl MD051LinkFragments {
     }
 
     /// Fragment generation following GitHub's official algorithm
-    /// GitHub preserves underscores and consecutive hyphens
+    /// GitHub preserves most Unicode characters, underscores, and consecutive hyphens
     #[inline]
     fn heading_to_fragment_github(&self, heading: &str) -> String {
         if heading.is_empty() {
@@ -126,30 +126,55 @@ impl MD051LinkFragments {
         // Trim whitespace first
         let text = text.trim();
 
-        // Follow GitHub's algorithm
+        // Follow GitHub's actual algorithm (verified with github-slugger)
+        // GitHub PRESERVES most Unicode characters including:
+        // - Accented Latin (café, résumé, über)
+        // - Chinese, Japanese, Korean
+        // - Arabic, Hebrew
+        // - Greek, Cyrillic
+        // - Hindi and other scripts
+        // It only removes emoji and certain punctuation
         let mut fragment = String::with_capacity(text.len());
 
         for c in text.to_lowercase().chars() {
-            match c {
-                // Keep ASCII letters and numbers only (GitHub removes non-ASCII)
-                c if c.is_ascii_alphabetic() || c.is_ascii_digit() => fragment.push(c),
-                // Keep underscores (GitHub preserves these)
-                '_' => fragment.push('_'),
-                // Keep hyphens
-                '-' => fragment.push('-'),
-                // Convert spaces to hyphens
-                ' ' => fragment.push('-'),
-                // Remove all other punctuation and non-ASCII
-                _ => {}
+            // Check if character should be kept
+            if Self::is_valid_github_char(c) {
+                fragment.push(c);
+            } else if c.is_whitespace() || c == '-' {
+                // Convert whitespace to hyphens
+                fragment.push('-');
             }
+            // Skip emoji, certain punctuation, etc.
         }
 
-        // Remove leading and trailing hyphens
+        // GitHub does NOT collapse consecutive hyphens - verified with github-slugger
+        // Remove leading and trailing hyphens only
         fragment.trim_matches('-').to_string()
     }
 
+    /// Check if a character should be preserved in GitHub-style anchors
+    #[inline]
+    fn is_valid_github_char(c: char) -> bool {
+        // Keep alphanumeric (including non-ASCII letters)
+        c.is_alphanumeric() ||
+        // Keep underscores
+        c == '_' ||
+        // Keep most Unicode letters but exclude:
+        // - Emoji ranges (U+1F300 to U+1F9FF)
+        // - Certain symbols and punctuation
+        (c as u32 > 0x7F && !matches!(c,
+            '\u{2000}'..='\u{206F}' |  // General punctuation
+            '\u{2E00}'..='\u{2E7F}' |  // Supplemental punctuation
+            '\u{3000}'..='\u{303F}' |  // CJK symbols and punctuation (but keep CJK letters)
+            '\u{FE00}'..='\u{FE0F}' |  // Variation selectors
+            '\u{1F300}'..='\u{1F9FF}' | // Emoji & Symbols
+            '\u{2600}'..='\u{26FF}' |   // Miscellaneous Symbols
+            '\u{2700}'..='\u{27BF}'     // Dingbats
+        ))
+    }
+
     /// Fragment generation following kramdown's algorithm
-    /// kramdown removes underscores but preserves consecutive hyphens
+    /// kramdown strips diacritics but keeps base letters, removes underscores
     #[inline]
     fn heading_to_fragment_kramdown(&self, heading: &str) -> String {
         if heading.is_empty() {
@@ -166,32 +191,72 @@ impl MD051LinkFragments {
         // Trim whitespace first
         let text = text.trim();
 
+        // Check if this would result in empty/non-Latin content
+        let has_latin = text
+            .chars()
+            .any(|c| c.is_ascii_alphabetic() || (c as u32 >= 0x00C0 && c as u32 <= 0x024F)); // Latin extended
+
+        if !has_latin {
+            // kramdown generates generic "section" for non-Latin scripts
+            return "section".to_string();
+        }
+
         // Follow kramdown's algorithm
         let mut result = String::with_capacity(text.len());
         let mut found_letter = false;
 
         for c in text.chars() {
-            // Step 1: Skip leading non-letters (kramdown removes leading numbers)
-            if !found_letter && !c.is_ascii_alphabetic() {
+            // Skip leading non-letters
+            if !found_letter && !Self::is_kramdown_letter(c) {
                 continue;
             }
-            if c.is_ascii_alphabetic() {
+            if Self::is_kramdown_letter(c) {
                 found_letter = true;
             }
 
-            // Step 2: Keep only ASCII letters, numbers, spaces, and hyphens
-            match c {
-                c if c.is_ascii_alphabetic() => result.push(c.to_ascii_lowercase()),
-                c if c.is_ascii_digit() => result.push(c),
-                ' ' => result.push('-'), // Step 3: spaces to hyphens
-                '-' => result.push('-'),
-                '_' => {} // kramdown REMOVES underscores (key difference!)
-                _ => {}   // Remove everything else including non-ASCII
+            // Process character
+            if c.is_ascii_alphabetic() {
+                result.push(c.to_ascii_lowercase());
+            } else if c.is_ascii_digit() && found_letter {
+                result.push(c);
+            } else if c == ' ' || c == '-' {
+                result.push('-');
+            } else if let Some(replacement) = Self::kramdown_normalize_char(c) {
+                // kramdown normalizes accented characters
+                result.push_str(replacement);
             }
+            // Skip underscores and other characters
         }
 
         // Remove leading and trailing hyphens
         result.trim_matches('-').to_string()
+    }
+
+    /// Check if character is considered a letter by kramdown
+    #[inline]
+    fn is_kramdown_letter(c: char) -> bool {
+        c.is_ascii_alphabetic() ||
+        // Latin-1 Supplement and Extended Latin
+        (c as u32 >= 0x00C0 && c as u32 <= 0x024F)
+    }
+
+    /// Normalize accented characters for kramdown (simplified)
+    #[inline]
+    fn kramdown_normalize_char(c: char) -> Option<&'static str> {
+        match c {
+            'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => Some("a"),
+            'È' | 'É' | 'Ê' | 'Ë' | 'è' | 'é' | 'ê' | 'ë' => Some("e"),
+            'Ì' | 'Í' | 'Î' | 'Ï' | 'ì' | 'í' | 'î' | 'ï' => Some("i"),
+            'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => Some("o"),
+            'Ù' | 'Ú' | 'Û' | 'Ü' | 'ù' | 'ú' | 'û' | 'ü' => Some("u"),
+            'Ý' | 'ý' | 'ÿ' => Some("y"),
+            'Ñ' | 'ñ' => Some("n"),
+            'Ç' | 'ç' => Some("c"),
+            'ß' => Some("ss"),
+            'Æ' | 'æ' => Some("ae"),
+            'Œ' | 'œ' => Some("oe"),
+            _ => None,
+        }
     }
 
     /// Strip markdown formatting from heading text (optimized for common patterns)
@@ -286,8 +351,10 @@ impl Rule for MD051LinkFragments {
                             continue;
                         }
 
-                        // Check if fragment exists in document
-                        if !valid_headings.contains(fragment) {
+                        // Check if fragment exists in document (case-insensitive)
+                        let fragment_lower = fragment.to_lowercase();
+                        let found = valid_headings.iter().any(|h| h.to_lowercase() == fragment_lower);
+                        if !found {
                             let column = url_match.start() + 1;
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name()),
@@ -374,13 +441,13 @@ mod tests {
         // With code
         assert_eq!(rule.heading_to_fragment_github("Using `code` here"), "using-code-here");
 
-        // With ampersand (punctuation removed, spaces preserved as hyphens)
+        // With ampersand (punctuation removed, creates double hyphen)
         assert_eq!(rule.heading_to_fragment_github("This & That"), "this--that");
 
         // Leading/trailing spaces and hyphens
         assert_eq!(rule.heading_to_fragment_github("  Spaces  "), "spaces");
 
-        // Multiple spaces (GitHub does NOT collapse consecutive hyphens)
+        // Multiple spaces (each space becomes a hyphen)
         assert_eq!(
             rule.heading_to_fragment_github("Multiple   Spaces"),
             "multiple---spaces"
@@ -398,6 +465,17 @@ mod tests {
 
         // Test slash conversion (punctuation removed)
         assert_eq!(rule.heading_to_fragment_github("CI/CD Migration"), "cicd-migration");
+
+        // Unicode preservation (GitHub keeps these!)
+        assert_eq!(rule.heading_to_fragment_github("Café au Lait"), "café-au-lait");
+        assert_eq!(rule.heading_to_fragment_github("Résumé"), "résumé");
+        assert_eq!(rule.heading_to_fragment_github("Über uns"), "über-uns");
+        assert_eq!(rule.heading_to_fragment_github("你好世界"), "你好世界");
+        assert_eq!(rule.heading_to_fragment_github("こんにちは"), "こんにちは");
+
+        // Emoji removal
+        assert_eq!(rule.heading_to_fragment_github("🎉 Party Time"), "party-time");
+        assert_eq!(rule.heading_to_fragment_github("Code 💻 Review"), "code--review");
     }
 
     #[test]
@@ -422,13 +500,13 @@ mod tests {
             "using-code-here"
         );
 
-        // With ampersand (punctuation removed, spaces preserved as hyphens)
+        // With ampersand (punctuation removed, creates double hyphen)
         assert_eq!(rule.heading_to_fragment_kramdown("This & That"), "this--that");
 
         // Leading/trailing spaces and hyphens
         assert_eq!(rule.heading_to_fragment_kramdown("  Spaces  "), "spaces");
 
-        // Multiple spaces (kramdown does NOT collapse consecutive hyphens)
+        // Multiple spaces (each space becomes a hyphen)
         assert_eq!(
             rule.heading_to_fragment_kramdown("Multiple   Spaces"),
             "multiple---spaces"
@@ -450,6 +528,17 @@ mod tests {
 
         // Test slash conversion (punctuation removed)
         assert_eq!(rule.heading_to_fragment_kramdown("CI/CD Migration"), "cicd-migration");
+
+        // Test accented character normalization (kramdown strips diacritics)
+        assert_eq!(rule.heading_to_fragment_kramdown("Café au Lait"), "cafe-au-lait");
+        assert_eq!(rule.heading_to_fragment_kramdown("Résumé"), "resume");
+        assert_eq!(rule.heading_to_fragment_kramdown("Über uns"), "uber-uns");
+
+        // Non-Latin scripts become "section"
+        assert_eq!(rule.heading_to_fragment_kramdown("你好世界"), "section");
+        assert_eq!(rule.heading_to_fragment_kramdown("こんにちは"), "section");
+        assert_eq!(rule.heading_to_fragment_kramdown("مرحبا"), "section");
+        assert_eq!(rule.heading_to_fragment_kramdown("שלום"), "section");
     }
 
     #[test]
@@ -458,7 +547,7 @@ mod tests {
         let kramdown_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
 
         // Test the specific case from issue 39
-        // Both GitHub and kramdown preserve consecutive hyphens
+        // Both GitHub and kramdown PRESERVE consecutive hyphens (verified with official tools)
         assert_eq!(github_rule.heading_to_fragment_github("The End - yay"), "the-end---yay");
         assert_eq!(
             kramdown_rule.heading_to_fragment_kramdown("The End - yay"),
@@ -527,7 +616,7 @@ mod tests {
     #[test]
     fn test_complex_heading_with_special_chars() {
         let rule = MD051LinkFragments::new();
-        // Per GitHub spec: punctuation removed, spaces become hyphens (preserving consecutive)
+        // Per GitHub spec: punctuation removed, & creates double hyphen
         let content = "# FAQ: What's New & Improved?\n\n[faq](#faq-whats-new--improved)";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
