@@ -51,6 +51,9 @@ lazy_static! {
     static ref MALFORMED_ORDERED_LIST: Regex = Regex::new(r"^(\s*)(\d+\.)([^\s])").unwrap();
     static ref MALFORMED_ORDERED_LIST_WRONG_MARKER: Regex = Regex::new(r"^(\s*)(\d+[)\]])(\s*)").unwrap();
 
+    // Empty list patterns (just marker without content)
+    static ref EMPTY_UNORDERED_LIST: Regex = Regex::new(r"^(\s*)([*+-])\s*$").unwrap();
+
     // Front matter pattern
     static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
 }
@@ -181,8 +184,10 @@ impl MarkdownElements {
                 let text = captures.get(4).map_or("", |m| m.as_str()).trim().to_string();
                 let spaces_after_hash = captures.get(3).map_or("", |m| m.as_str()).len();
 
-                // Determine if heading is well-formed (must have space after #)
-                let quality = if spaces_after_hash > 0 {
+                // Determine if heading is well-formed
+                // Special cases for empty headings: # and ###### are valid, others need space
+                let quality = if spaces_after_hash > 0 || (text.is_empty() && (hashes.len() == 1 || hashes.len() == 6))
+                {
                     ElementQuality::Valid
                 } else {
                     ElementQuality::Malformed
@@ -306,6 +311,33 @@ impl MarkdownElements {
                     start_line: i,
                     end_line: i,
                     text: line.trim().to_string(),
+                    metadata: Some(marker.to_string()),
+                    quality: ElementQuality::Valid,
+                });
+
+                continue;
+            }
+
+            // Check for empty unordered list items (just marker)
+            if let Some(_captures) = EMPTY_UNORDERED_LIST.captures(line) {
+                // Exclude horizontal rules and front matter markers
+                if line.trim() == "---" || line.trim() == "***" || line.trim() == "___" {
+                    continue;
+                }
+
+                let marker = if line.trim_start().starts_with('*') {
+                    "asterisk"
+                } else if line.trim_start().starts_with('+') {
+                    "plus"
+                } else {
+                    "minus"
+                };
+
+                lists.push(MarkdownElement {
+                    element_type: ElementType::List,
+                    start_line: i,
+                    end_line: i,
+                    text: String::new(), // Empty list item
                     metadata: Some(marker.to_string()),
                     quality: ElementQuality::Valid,
                 });

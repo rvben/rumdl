@@ -1,4 +1,4 @@
 include python/rumdl/*.py
 include python/rumdl/py.typed
 global-exclude *.pyc
-global-exclude __pycache__/ 
+global-exclude __pycache__/

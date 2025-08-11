@@ -6,7 +6,7 @@ use rumdl::utils::fix_utils::apply_warning_fixes;
 #[test]
 fn test_unicode_cli_lsp_consistency() {
     // Unicode content similar to our test file but smaller for focused testing
-    let unicode_content = r#"# 🚀 This is a header with emoji 
+    let unicode_content = r#"# 🚀 This is a header with emoji
 مرحبا بكم في هذا النص العربي
 (https://例え.テスト)[Japanese domain link]
 Here is some `中文代码` in inline code

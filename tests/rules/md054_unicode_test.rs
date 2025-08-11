@@ -21,9 +21,9 @@ fn test_unicode_edge_cases() {
 
     // Test with very long Unicode strings that might cause overflow
     let content_long = r#"
-[This is a very long link text with a mix of Latin and Unicode characters: 
-café, ñáéíóú, こんにちは, привет, 汉字, مرحبا, שלום, 
-and many many more characters to ensure we have a lengthy text that 
+[This is a very long link text with a mix of Latin and Unicode characters:
+café, ñáéíóú, こんにちは, привет, 汉字, مرحبا, שלום,
+and many many more characters to ensure we have a lengthy text that
 could potentially cause issues with byte indexing if not handled properly.
 This text is intentionally very long to test edge cases with string length handling.
 ](https://example.com/long-unicode)

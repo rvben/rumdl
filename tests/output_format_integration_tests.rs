@@ -8,10 +8,13 @@ fn test_grouped_output_format() {
     let temp_dir = tempdir().unwrap();
     let test_file = temp_dir.path().join("test.md");
 
-    let content = r#"# Heading
-Content with trailing space 
+    let content = format!(
+        r#"# Heading
+Content with trailing space{}
 *Emphasis without space*
-"#;
+"#,
+        "   "
+    ); // Add trailing spaces programmatically
 
     fs::write(&test_file, content).unwrap();
 
@@ -33,9 +36,12 @@ fn test_pylint_output_format() {
     let temp_dir = tempdir().unwrap();
     let test_file = temp_dir.path().join("test.md");
 
-    let content = r#"# Heading
-Content with trailing space 
-"#;
+    let content = format!(
+        r#"# Heading
+Content with trailing space{}
+"#,
+        "   "
+    ); // Add trailing spaces programmatically
 
     fs::write(&test_file, content).unwrap();
 
@@ -56,9 +62,12 @@ fn test_azure_output_format() {
     let temp_dir = tempdir().unwrap();
     let test_file = temp_dir.path().join("test.md");
 
-    let content = r#"# Heading
-Content with trailing space 
-"#;
+    let content = format!(
+        r#"# Heading
+Content with trailing space{}
+"#,
+        "   "
+    ); // Add trailing spaces programmatically
 
     fs::write(&test_file, content).unwrap();
 

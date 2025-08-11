@@ -20,27 +20,27 @@ EOF
 generate_row() {
     local target="$1"
     local platform="$2"
-    
+
     # Determine file extension based on platform
     if [[ "$target" == *"windows"* ]]; then
         ext="zip"
     else
         ext="tar.gz"
     fi
-    
+
     filename="rumdl-${VERSION}-${target}.${ext}"
     checksum_file="${filename}.sha256"
-    
+
     # Generate download URLs
     download_url="https://github.com/rvben/rumdl/releases/download/${VERSION}/${filename}"
     checksum_url="https://github.com/rvben/rumdl/releases/download/${VERSION}/${checksum_file}"
-    
+
     # Output table row
     echo "| [${filename}](${download_url}) | ${platform} | [checksum](${checksum_url}) |"
 }
 
 # Generate rows for each platform
-generate_row "x86_64-unknown-linux-gnu" "Linux x86_64" 
+generate_row "x86_64-unknown-linux-gnu" "Linux x86_64"
 generate_row "x86_64-unknown-linux-musl" "Linux x86_64 (musl)"
 generate_row "aarch64-unknown-linux-gnu" "Linux ARM64"
 generate_row "aarch64-unknown-linux-musl" "Linux ARM64 (musl)"

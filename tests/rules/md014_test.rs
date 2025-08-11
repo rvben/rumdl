@@ -295,7 +295,7 @@ has output
 
 Some text
 
-```bash  
+```bash
 $ echo "no output"
 ```
 

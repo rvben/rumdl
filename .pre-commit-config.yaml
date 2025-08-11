@@ -37,7 +37,7 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
-        exclude: \.md$|tests/inline_config_test\.rs$
+        exclude: \.md$|tests/inline_config_test\.rs$|tests/output_format_integration_tests\.rs$|tests/lsp_editor_integration_tests\.rs$|tests/utils_markdown_edge_cases\.rs$
       - id: end-of-file-fixer
         exclude: \.md$
       - id: check-yaml

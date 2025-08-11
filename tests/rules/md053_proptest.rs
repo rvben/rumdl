@@ -26,7 +26,7 @@ proptest! {
 
         let rule = MD053LinkImageReferenceDefinitions::default();
         let result = rule.check(&content);
-        
+
         prop_assert_eq!(
             result.unused_refs.iter().map(|(r,_,_)| r).collect::<Vec<_>>(),
             expected_unused

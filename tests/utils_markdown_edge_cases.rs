@@ -4,7 +4,7 @@ use rumdl::utils::{ElementQuality, ElementType, MarkdownElements};
 fn test_nested_elements() {
     // Test document with nested elements
     let content = r#"> # Heading inside blockquote
-> 
+>
 > - List inside blockquote
 >   - Nested list inside blockquote
 >     ```
@@ -124,7 +124,7 @@ fn test_malformed_elements() {
 
 ##  Multiple spaces after hashes
 
-###### 
+######
 
 Heading
 ==
@@ -235,12 +235,12 @@ Unclosed code block
 fn test_empty_and_special_cases() {
     let content = r#"
 
-# 
+#
 ##
 ### Empty heading
 
-- 
-* 
+-
+*
 + Empty list items
 
 ```

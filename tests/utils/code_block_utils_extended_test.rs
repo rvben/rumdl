@@ -296,7 +296,7 @@ More text with ``nested ` backtick`` syntax.
 
     Indented code block
     Still indented
-    
+
 ~~~
 Another code block style
 ~~~

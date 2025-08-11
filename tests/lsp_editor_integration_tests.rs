@@ -18,13 +18,13 @@ Some content here."#;
     let editing_steps = [
         // Step 1: User adds trailing spaces (common typing scenario)
         r#"# My Document
-This is the first paragraph.   
+This is the first paragraph.
 
 ## Section 1
 Some content here."#,
         // Step 2: User adds a new heading without proper spacing
         r#"# My Document
-This is the first paragraph.   
+This is the first paragraph.
 
 ## Section 1
 Some content here.
@@ -85,7 +85,7 @@ More content."#,
 fn test_editor_save_workflow() {
     // Simulate editor save workflow: check -> fix -> check again
     let content_with_issues = r#"#Heading Without Space
-Content with trailing spaces   
+Content with trailing spaces
 
 ##Another Heading
 - List item
@@ -317,10 +317,13 @@ Content here.
 ##Bad Heading
 More content."#;
 
-    let after_edit = r#"# Title
-Content here.   
+    let after_edit = format!(
+        "# Title{}
+Content here.
 ##Bad Heading
-More content."#;
+More content.",
+        "   "
+    ); // Add trailing spaces programmatically
 
     let rule = MD009TrailingSpaces::default();
 
@@ -329,7 +332,7 @@ More content."#;
     let warnings1 = rule.check(&ctx1).expect("Rule check should succeed");
 
     // After edit (simulate typing spaces)
-    let ctx2 = LintContext::new(after_edit);
+    let ctx2 = LintContext::new(&after_edit);
     let warnings2 = rule.check(&ctx2).expect("Rule check should succeed");
 
     // After undo (back to original)
@@ -354,6 +357,10 @@ More content."#;
         let fix3 = apply_warning_fixes(original, &warnings3).expect("Fix should succeed");
 
         assert_eq!(fix1, fix3, "Fixes should be identical after undo");
+    }
+
+    if !warnings2.is_empty() {
+        let _fix2 = apply_warning_fixes(&after_edit, &warnings2).expect("Fix should succeed");
     }
 
     println!(

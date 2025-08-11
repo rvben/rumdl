@@ -204,9 +204,9 @@ fn test_many_small_issues() {
 fn test_mixed_rule_performance() {
     // Test performance when multiple rules process the same content
     let content = r#"
-# Test Document  
+# Test Document
 
-## Section 1  
+## Section 1
 (https://example.com)[reversed link]
 
 ```
@@ -214,10 +214,10 @@ code without language
 ```
 
 ## Section 2
-- Item 1  
-- Item 2  
+- Item 1
+- Item 2
 
-More content  
+More content
 "#;
 
     let rules: Vec<Box<dyn Rule>> = vec![

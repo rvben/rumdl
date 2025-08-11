@@ -196,7 +196,7 @@ fn test_md010_mixed_indentation_in_code() {
 fn test_interaction_list_code_tabs() {
     // Test tabs in list items and code blocks
     let content = r#"1. List	with	tab
-   
+
    ```
    	Code with tab
    ```
@@ -210,7 +210,7 @@ fn test_interaction_list_code_tabs() {
 
     // Expected: tabs in list items are replaced with spaces, tabs in code blocks preserved
     let expected = r#"1. List    with    tab
-   
+
    ```
    	Code with tab
    ```

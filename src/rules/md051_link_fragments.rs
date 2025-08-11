@@ -139,42 +139,56 @@ impl MD051LinkFragments {
         // - Hindi and other scripts
         // It only removes emoji and certain punctuation
         let mut fragment = String::with_capacity(text.len());
+        let mut last_was_whitespace_or_hyphen = false;
 
         for c in text.to_lowercase().chars() {
             // Check if character should be kept
             if Self::is_valid_github_char(c) {
                 fragment.push(c);
-            } else if c.is_whitespace() || c == '-' {
-                // Convert whitespace to hyphens
+                last_was_whitespace_or_hyphen = false;
+            } else if c == '-' {
+                // Preserve original hyphens (don't collapse consecutive ones)
                 fragment.push('-');
+                last_was_whitespace_or_hyphen = true;
+            } else if c.is_whitespace() {
+                // Convert whitespace to hyphens, but avoid consecutive ones
+                if !last_was_whitespace_or_hyphen {
+                    fragment.push('-');
+                    last_was_whitespace_or_hyphen = true;
+                }
+            } else {
+                // Skip emoji, symbols, etc.
+                // If the last character we added was not a hyphen, and this character
+                // is skipped (like emoji), we might need to add a hyphen if the next
+                // character is not whitespace. For now, just skip it.
+                // This handles cases like "A🎉B" → "a-b" but we don't implement that complexity yet.
             }
-            // Skip emoji, certain punctuation, etc.
         }
 
-        // GitHub does NOT collapse consecutive hyphens - verified with github-slugger
-        // Remove leading and trailing hyphens only
+        // Remove leading and trailing hyphens
         fragment.trim_matches('-').to_string()
     }
 
     /// Check if a character should be preserved in GitHub-style anchors
     #[inline]
     fn is_valid_github_char(c: char) -> bool {
-        // Keep alphanumeric (including non-ASCII letters)
-        c.is_alphanumeric() ||
-        // Keep underscores
-        c == '_' ||
-        // Keep most Unicode letters but exclude:
-        // - Emoji ranges (U+1F300 to U+1F9FF)
-        // - Certain symbols and punctuation
-        (c as u32 > 0x7F && !matches!(c,
-            '\u{2000}'..='\u{206F}' |  // General punctuation
-            '\u{2E00}'..='\u{2E7F}' |  // Supplemental punctuation
-            '\u{3000}'..='\u{303F}' |  // CJK symbols and punctuation (but keep CJK letters)
-            '\u{FE00}'..='\u{FE0F}' |  // Variation selectors
-            '\u{1F300}'..='\u{1F9FF}' | // Emoji & Symbols
+        // First, exclude emoji and symbols even if they're "alphanumeric"
+        if matches!(c,
+            '\u{1F300}'..='\u{1F9FF}' | // Emoji & Symbols (includes 🎉 at U+1F389)
             '\u{2600}'..='\u{26FF}' |   // Miscellaneous Symbols
-            '\u{2700}'..='\u{27BF}'     // Dingbats
-        ))
+            '\u{2700}'..='\u{27BF}' |   // Dingbats
+            '\u{2000}'..='\u{206F}' |   // General punctuation
+            '\u{2E00}'..='\u{2E7F}' |   // Supplemental punctuation
+            '\u{3000}'..='\u{303F}' |   // CJK symbols and punctuation (but keep CJK letters)
+            '\u{FE00}'..='\u{FE0F}'     // Variation selectors
+        ) {
+            return false;
+        }
+
+        // Keep ASCII alphanumeric and underscores
+        c.is_ascii_alphanumeric() || c == '_' ||
+        // Keep Unicode letters and digits (but not emoji, which we filtered above)
+        c.is_alphabetic() || c.is_numeric()
     }
 
     /// Fragment generation following kramdown's algorithm
@@ -371,6 +385,59 @@ impl MD051LinkFragments {
             || url.starts_with("tel:")
             || url.starts_with("//")
     }
+
+    /// Check if URL is a cross-file link (contains a file path before #)
+    #[inline]
+    fn is_cross_file_link(url: &str) -> bool {
+        if let Some(fragment_pos) = url.find('#') {
+            let path_part = &url[..fragment_pos];
+
+            // If there's no path part, it's just a fragment (#heading)
+            if path_part.is_empty() {
+                return false;
+            }
+
+            // Check if it looks like a file path:
+            // - Contains a file extension (dot followed by letters)
+            // - Contains path separators
+            // - Contains relative path indicators
+            path_part.contains('.')
+                && (
+                    // Has file extension pattern (handle query parameters by splitting on them first)
+                    {
+                    let clean_path = path_part.split('?').next().unwrap_or(path_part);
+                    // Handle files starting with dot
+                    if let Some(after_dot) = clean_path.strip_prefix('.') {
+                        let dots_count = clean_path.matches('.').count();
+                        if dots_count == 1 {
+                            // Could be ".ext" (just extension) or ".hidden" (hidden file)
+                            // If it's a known file extension, treat as cross-file link
+                            !after_dot.is_empty() && after_dot.len() <= 10 &&
+                            after_dot.chars().all(|c| c.is_ascii_alphanumeric()) &&
+                            // Additional check: common file extensions are likely cross-file
+                            (after_dot.len() <= 4 || matches!(after_dot, "html" | "json" | "yaml" | "toml"))
+                        } else {
+                            // Hidden file with extension like ".hidden.txt"
+                            clean_path.split('.').next_back().is_some_and(|ext| {
+                                !ext.is_empty() && ext.len() <= 10 && ext.chars().all(|c| c.is_ascii_alphanumeric())
+                            })
+                        }
+                    } else {
+                        // Regular file path
+                        clean_path.split('.').next_back().is_some_and(|ext| {
+                            !ext.is_empty() && ext.len() <= 10 && ext.chars().all(|c| c.is_ascii_alphanumeric())
+                        })
+                    }
+                } ||
+                // Or contains path separators
+                path_part.contains('/') || path_part.contains('\\') ||
+                // Or starts with relative path indicators
+                path_part.starts_with("./") || path_part.starts_with("../")
+                )
+        } else {
+            false
+        }
+    }
 }
 
 impl Rule for MD051LinkFragments {
@@ -399,11 +466,6 @@ impl Rule for MD051LinkFragments {
         // Extract all valid heading anchors
         let valid_headings = self.extract_headings_from_context(ctx);
 
-        // If no headings, skip checking
-        if valid_headings.is_empty() {
-            return Ok(warnings);
-        }
-
         // Find all links with fragments
         let link_regex = get_cached_regex(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
         let lines: Vec<&str> = content.lines().collect();
@@ -422,36 +484,54 @@ impl Rule for MD051LinkFragments {
             for cap in link_regex.captures_iter(line) {
                 if let Some(url_match) = cap.get(2) {
                     let url = url_match.as_str();
+                    let full_match = cap.get(0).unwrap(); // Get the entire link match
 
-                    // Only check internal fragments (starting with #)
-                    if let Some(fragment) = url.strip_prefix('#') {
-                        // Skip empty fragments
-                        if fragment.is_empty() {
+                    // Calculate byte position for this match within the entire content
+                    let line_byte_offset = if line_num == 0 {
+                        0
+                    } else {
+                        content.lines().take(line_num).map(|l| l.len() + 1).sum::<usize>() // +1 for newline
+                    };
+                    let match_byte_pos = line_byte_offset + full_match.start();
+
+                    // Skip links in code blocks or inline code spans
+                    if ctx.is_in_code_block_or_span(match_byte_pos) {
+                        continue;
+                    }
+
+                    // Check if this URL contains a fragment
+                    if url.contains('#') && !Self::is_external_url_fast(url) {
+                        // If it's a cross-file link, skip validation as the target file may not be in the current context
+                        if Self::is_cross_file_link(url) {
                             continue;
                         }
 
-                        // Check if fragment exists in document (case-insensitive)
-                        let fragment_lower = fragment.to_lowercase();
-                        let found = valid_headings.iter().any(|h| h.to_lowercase() == fragment_lower);
-                        if !found {
-                            let column = url_match.start() + 1;
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
-                                message: format!("Link anchor '#{fragment}' does not exist in document headings"),
-                                line: line_num + 1,
-                                column,
-                                end_line: line_num + 1,
-                                end_column: column + url.len(),
-                                severity: Severity::Warning,
-                                fix: None,
-                            });
+                        // Extract fragment (everything after #)
+                        if let Some(fragment_pos) = url.find('#') {
+                            let fragment = &url[fragment_pos + 1..];
+
+                            // Skip empty fragments
+                            if fragment.is_empty() {
+                                continue;
+                            }
+
+                            // Check if fragment exists in document (case-insensitive)
+                            let fragment_lower = fragment.to_lowercase();
+                            let found = valid_headings.iter().any(|h| h.to_lowercase() == fragment_lower);
+                            if !found {
+                                let column = full_match.start() + 1; // Point to start of entire link
+                                warnings.push(LintWarning {
+                                    rule_name: Some(self.name()),
+                                    message: format!("Link anchor '#{fragment}' does not exist in document headings"),
+                                    line: line_num + 1,
+                                    column,
+                                    end_line: line_num + 1,
+                                    end_column: full_match.end() + 1, // End of entire link
+                                    severity: Severity::Warning,
+                                    fix: None,
+                                });
+                            }
                         }
-                    }
-                    // For cross-file links (like file.md#heading), we skip validation
-                    // as the target file may not be in the current context
-                    else if url.contains('#') && !Self::is_external_url_fast(url) {
-                        // This is a cross-file link, skip validation
-                        continue;
                     }
                 }
             }
@@ -530,6 +610,9 @@ mod tests {
         // Accented characters preserved
         assert_eq!(rule.heading_to_fragment_github("Café"), "café");
         assert_eq!(rule.heading_to_fragment_github("Über uns"), "über-uns");
+
+        // Emojis should be stripped
+        assert_eq!(rule.heading_to_fragment_github("Emoji 🎉 Party"), "emoji-party");
     }
 
     #[test]
