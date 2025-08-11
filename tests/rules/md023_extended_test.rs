@@ -203,9 +203,9 @@ fn test_empty_indented_headings() {
     // Test case with empty indented headings
     let content = r#"# Valid heading
 
-  ## 
+  ##
 
-   ### 
+   ###
 "#;
 
     let ctx = LintContext::new(content);
@@ -265,4 +265,36 @@ fn test_multiple_indentation_levels() {
     assert!(!fixed.contains(" ## Heading with 1"));
     assert!(!fixed.contains("  ## Heading with 2"));
     assert!(!fixed.contains("   ## Heading with 3"));
+}
+
+#[test]
+fn test_md023_heading_after_list() {
+    // Test content with heading after list
+    let content = r#"# Configuration Precedence
+
+Settings are applied in the following order (later sources override earlier ones):
+
+1. **Built-in defaults**
+2. **Configuration file** (`.rumdl.toml` or `pyproject.toml`)
+3. **Command-line arguments**
+
+   ### Example: Precedence in Action
+
+Given this configuration file:"#;
+
+    let rule = MD023HeadingStartLeft;
+    let ctx = LintContext::new(content);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "Should detect one indented heading");
+    assert_eq!(warnings[0].line, 9);
+    assert!(warnings[0].message.contains("should not be indented"));
+
+    // Verify the fix works
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_ne!(fixed, content, "MD023 should fix indented heading after list");
+
+    // Verify the indented heading was fixed
+    assert!(fixed.contains("### Example: Precedence in Action"));
+    assert!(!fixed.contains("   ### Example: Precedence in Action"));
 }

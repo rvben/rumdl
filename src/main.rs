@@ -2496,13 +2496,7 @@ fn process_file_with_formatter(
                     });
 
                 let rule_name = warning.rule_name.unwrap_or("unknown");
-                let fix_indicator = if was_fixed {
-                    " [fixed]"
-                } else if warning.fix.is_some() {
-                    " [*]"
-                } else {
-                    ""
-                };
+                let fix_indicator = if was_fixed { " [fixed]" } else { "" };
 
                 // Format: file:line:column: [rule] message [fixed/*/]
                 let line = format!(

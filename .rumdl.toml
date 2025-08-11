@@ -16,6 +16,9 @@ code_blocks = true
 tables = false
 headings = true
 
+[MD029]
+style = "ordered"
+
 [MD046]
 # Code block style
 style = "fenced"

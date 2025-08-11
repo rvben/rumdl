@@ -199,7 +199,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD006" => Some(Box::new(MD006StartBullets)),
         "MD007" => Some(Box::new(MD007ULIndent::new(2))),
         "MD009" => Some(Box::new(MD009TrailingSpaces::new(2, false))),
-        "MD010" => Some(Box::new(MD010NoHardTabs::new(4, false))),
+        "MD010" => Some(Box::new(MD010NoHardTabs::new(4))),
         "MD011" => Some(Box::new(MD011NoReversedLinks)),
         "MD012" => Some(Box::new(MD012NoMultipleBlanks::new(1))),
         "MD013" => Some(Box::new(MD013LineLength::new(80, true, true, true, false))),

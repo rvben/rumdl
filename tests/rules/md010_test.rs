@@ -52,14 +52,15 @@ fn test_empty_line_tabs() {
     let content = "Normal line\n\t\t\n\tMore text";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // One warning per line (grouped consecutive tabs)
+    // Line 3 starts with tab after blank line, so it's an indented code block and is skipped
+    assert_eq!(result.len(), 1); // Only the empty line with tabs
     assert_eq!(result[0].line, 2);
     assert_eq!(result[0].message, "Empty line contains 2 tabs");
 }
 
 #[test]
 fn test_code_blocks_allowed() {
-    let rule = MD010NoHardTabs::new(4, false);
+    let rule = MD010NoHardTabs::new(4);
     let content = "Normal line\n```\n\tCode with tab\n\tMore code\n```\nNormal\tline";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
@@ -69,16 +70,17 @@ fn test_code_blocks_allowed() {
 
 #[test]
 fn test_code_blocks_not_allowed() {
-    let rule = MD010NoHardTabs::default(); // code_blocks = true
+    let rule = MD010NoHardTabs::default(); // code blocks are always skipped now
     let content = "Normal line\n```\n\tCode with tab\n\tMore code\n```\nNormal\tline";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3); // All tabs are flagged
+    assert_eq!(result.len(), 1); // Only tab outside code block is flagged
+    assert_eq!(result[0].line, 6);
 }
 
 #[test]
 fn test_fix_with_code_blocks() {
-    let rule = MD010NoHardTabs::new(2, false); // 2 spaces per tab, preserve code blocks
+    let rule = MD010NoHardTabs::new(2); // 2 spaces per tab, preserve code blocks
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
@@ -87,11 +89,11 @@ fn test_fix_with_code_blocks() {
 
 #[test]
 fn test_fix_without_code_blocks() {
-    let rule = MD010NoHardTabs::new(2, true); // 2 spaces per tab, fix code blocks
+    let rule = MD010NoHardTabs::new(2); // 2 spaces per tab, code blocks always preserved
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "  Indented line\n```\n  Code\n```\n    Double indented");
+    assert_eq!(fixed, "  Indented line\n```\n\tCode\n```\n    Double indented");
 }
 
 #[test]
@@ -137,7 +139,7 @@ fn test_html_comments_with_tabs() {
 #[test]
 fn test_md010_tabs_in_nested_code_blocks() {
     // Test tabs in various code block contexts
-    let rule = MD010NoHardTabs::new(4, false); // Don't check code blocks
+    let rule = MD010NoHardTabs::new(4); // Don't check code blocks
 
     // Note: The last line has a blank line before it and starts with tab, so it's an indented code block
     let content = "No\ttabs\there\n\n```\n\tTabs\tin\tcode\n```\n\nRegular\ttext\twith\ttabs";
@@ -160,7 +162,7 @@ fn test_md010_tabs_in_nested_code_blocks() {
 
 #[test]
 fn test_md010_tabs_in_indented_code() {
-    let rule = MD010NoHardTabs::new(4, false);
+    let rule = MD010NoHardTabs::new(4);
 
     let content = "Text\n\n\t\tCode with tabs\n\t\tMore code\n\nText\twith\ttab";
     let ctx = LintContext::new(content);
@@ -178,7 +180,7 @@ fn test_md010_tabs_in_indented_code() {
 
 #[test]
 fn test_md010_mixed_indentation_in_code() {
-    let rule = MD010NoHardTabs::new(2, false);
+    let rule = MD010NoHardTabs::new(2);
 
     let content = "```python\n  spaces\n\ttab\n  \tmixed\n```\n\nOutside\ttab";
     let ctx = LintContext::new(content);
@@ -204,7 +206,7 @@ fn test_interaction_list_code_tabs() {
 2. Wrong	number	here"#;
 
     // Test MD010 - tabs in list items are replaced, tabs in code blocks are preserved
-    let rule_tabs = MD010NoHardTabs::new(4, false);
+    let rule_tabs = MD010NoHardTabs::new(4);
     let ctx = LintContext::new(content);
     let fixed_tabs = rule_tabs.fix(&ctx).unwrap();
 
@@ -305,13 +307,13 @@ fn test_configuration_spaces_per_tab() {
     let content = "\tOne tab\n\t\tTwo tabs\n\t\t\tThree tabs";
 
     // Test with 2 spaces per tab
-    let rule2 = MD010NoHardTabs::new(2, true);
+    let rule2 = MD010NoHardTabs::new(2);
     let ctx = LintContext::new(content);
     let fixed2 = rule2.fix(&ctx).unwrap();
     assert_eq!(fixed2, "  One tab\n    Two tabs\n      Three tabs");
 
     // Test with 8 spaces per tab
-    let rule8 = MD010NoHardTabs::new(8, true);
+    let rule8 = MD010NoHardTabs::new(8);
     let fixed8 = rule8.fix(&ctx).unwrap();
     assert_eq!(
         fixed8,
@@ -323,35 +325,18 @@ fn test_configuration_spaces_per_tab() {
 fn test_configuration_code_blocks_parameter() {
     let content = "Normal\ttab\n\n```javascript\nfunction\tfoo() {\n\treturn\ttrue;\n}\n```\n\nAnother\ttab";
 
-    // Test with code_blocks = true (default)
-    let rule_check_code = MD010NoHardTabs::new(4, true);
+    // Code blocks are always skipped now
+    let rule = MD010NoHardTabs::new(4);
     let ctx = LintContext::new(content);
-    let result_check = rule_check_code.check(&ctx).unwrap();
-    assert_eq!(
-        result_check.len(),
-        5,
-        "Should check tabs in code blocks when code_blocks=true"
-    );
-
-    // Test with code_blocks = false
-    let rule_skip_code = MD010NoHardTabs::new(4, false);
-    let result_skip = rule_skip_code.check(&ctx).unwrap();
-    assert_eq!(
-        result_skip.len(),
-        2,
-        "Should skip tabs in code blocks when code_blocks=false"
-    );
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 2, "Should always skip tabs in code blocks");
+    assert_eq!(result[0].line, 1);
+    assert_eq!(result[1].line, 9);
 
     // Verify fix behavior
-    let fixed_skip = rule_skip_code.fix(&ctx).unwrap();
-    assert!(
-        fixed_skip.contains("function\tfoo()"),
-        "Should preserve tabs in code blocks"
-    );
-    assert!(
-        fixed_skip.contains("Normal    tab"),
-        "Should fix tabs outside code blocks"
-    );
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(fixed.contains("function\tfoo()"), "Should preserve tabs in code blocks");
+    assert!(fixed.contains("Normal    tab"), "Should fix tabs outside code blocks");
 }
 
 #[test]
@@ -382,12 +367,15 @@ fn test_fix_preserves_content_structure() {
 
     // Verify structure is preserved
     assert!(fixed.contains("# Header"), "Headers preserved");
-    assert!(fixed.contains("    Indented paragraph"), "Indentation converted");
+    // After blank line, tab-indented line is treated as indented code block and preserved
+    assert!(fixed.contains("\tIndented paragraph"), "Indented code block preserved");
     assert!(fixed.contains("    - Nested"), "List indentation converted");
     assert!(
         fixed.contains("        - Double nested"),
         "Double indentation converted"
     );
+    // Code blocks are always preserved now
+    assert!(fixed.contains("\tCode block"), "Code block tabs preserved");
     assert!(fixed.contains(">     With tab"), "Quote tab converted");
     assert!(fixed.contains("| Col1    | Col2    |"), "Table tabs converted");
 }
@@ -417,7 +405,7 @@ fn test_edge_cases() {
 
 #[test]
 fn test_inline_code_spans() {
-    let rule = MD010NoHardTabs::new(4, false);
+    let rule = MD010NoHardTabs::new(4);
 
     // Test tabs in inline code spans
     let content = "Text with `inline\tcode` and\ttab outside";

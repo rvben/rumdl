@@ -214,8 +214,8 @@ impl Rule for MD025SingleTitle {
             if let Some(heading) = &line_info.heading
                 && heading.level as usize == self.config.level
             {
-                // Ignore if indented 4+ spaces (code block)
-                if line_info.indent >= 4 {
+                // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
+                if line_info.indent >= 4 || line_info.in_code_block {
                     continue;
                 }
                 target_level_headings.push(line_num);
@@ -305,7 +305,7 @@ impl Rule for MD025SingleTitle {
             }
 
             if let Some(heading) = &line_info.heading {
-                if heading.level as usize == self.config.level {
+                if heading.level as usize == self.config.level && !line_info.in_code_block {
                     if !found_first {
                         found_first = true;
                         // Keep the first heading as-is
@@ -458,8 +458,8 @@ impl Rule for MD025SingleTitle {
             if let Some(heading) = &line_info.heading
                 && heading.level as usize == self.config.level
             {
-                // Ignore if indented 4+ spaces (code block)
-                if line_info.indent >= 4 {
+                // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
+                if line_info.indent >= 4 || line_info.in_code_block {
                     continue;
                 }
                 target_level_count += 1;
@@ -654,6 +654,33 @@ mod tests {
             result.len(),
             1,
             "Strict mode should flag all multiple H1s regardless of separators"
+        );
+    }
+
+    #[test]
+    fn test_python_comments_in_code_blocks() {
+        let rule = MD025SingleTitle::default();
+
+        // Test that Python comments in code blocks are not treated as headers
+        let content = "# Main Title\n\n```python\n# This is a Python comment, not a heading\nprint('Hello')\n```\n\n## Section\n\nMore content.";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag Python comments in code blocks as headings"
+        );
+
+        // Test the fix method doesn't modify Python comments
+        let content = "# Main Title\n\n```python\n# Python comment\nprint('test')\n```\n\n# Second Title";
+        let ctx = crate::lint_context::LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("# Python comment"),
+            "Fix should preserve Python comments in code blocks"
+        );
+        assert!(
+            fixed.contains("## Second Title"),
+            "Fix should demote the actual second heading"
         );
     }
 }

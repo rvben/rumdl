@@ -290,24 +290,24 @@ rumdl processes files using the following logic:
 
 1. **Start with candidate files**:
 
-- If paths are provided via CLI: use those files/directories
-- Otherwise: recursively scan current directory for `.md` and `.markdown` files
+   - If paths are provided via CLI: use those files/directories
+   - Otherwise: recursively scan current directory for `.md` and `.markdown` files
 
 2. **Apply .gitignore filtering** (if `respect_gitignore = true`):
 
-- Skip files/directories listed in `.gitignore` files
+   - Skip files/directories listed in `.gitignore` files
 
 3. **Apply include patterns** (if specified):
 
-- Keep only files matching at least one include pattern
+   - Keep only files matching at least one include pattern
 
 4. **Apply exclude patterns**:
 
-- Remove files matching any exclude pattern
+   - Remove files matching any exclude pattern
 
 5. **Apply rule filtering**:
 
-- Process remaining files with enabled rules only
+   - Process remaining files with enabled rules only
 
 ### Example: File Selection
 

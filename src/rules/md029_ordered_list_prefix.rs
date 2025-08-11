@@ -122,12 +122,19 @@ impl Rule for MD029OrderedListPrefix {
             let between_content_is_code_only =
                 self.is_only_code_between_blocks(ctx, prev_block.end_line, current_block.start_line);
 
+            // This catches the pattern: 1. item / - sub / 1. item (should be 2.)
+            let has_only_unindented_lists =
+                self.has_only_unindented_lists_between(ctx, prev_block.end_line, current_block.start_line);
+
             // Be more conservative: only group if there are no structural separators
             // Check specifically for headings between the blocks
             let has_heading_between =
                 self.has_heading_between_blocks(ctx, prev_block.end_line, current_block.start_line);
 
-            let should_group = between_content_is_code_only
+            // Group blocks if:
+            // 1. They have only code between them, OR
+            // 2. They have only unindented list items between them (the new case!)
+            let should_group = (between_content_is_code_only || has_only_unindented_lists)
                 && self.blocks_are_logically_continuous(ctx, prev_block.end_line, current_block.start_line)
                 && !has_heading_between;
 
@@ -155,7 +162,6 @@ impl Rule for MD029OrderedListPrefix {
         let mut result = String::new();
         let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
         let lines: Vec<&str> = content.lines().collect();
-        let mut byte_pos = 0;
         let mut in_code_fence = false;
 
         for line in lines.iter() {
@@ -166,18 +172,16 @@ impl Rule for MD029OrderedListPrefix {
                 in_code_fence = !in_code_fence;
                 result.push_str(line);
                 result.push('\n');
-                byte_pos += line.len() + 1;
                 continue;
             }
 
-            // Skip if in code block or fence
-            if in_code_fence || ctx.is_in_code_block_or_span(byte_pos) {
+            // Skip if in code fence
+            if in_code_fence {
                 result.push_str(line);
                 result.push('\n');
-                byte_pos += line.len() + 1;
                 continue;
             }
-            if Self::get_list_number(line).is_some() {
+            if let Some(_current_num) = Self::get_list_number(line) {
                 let indent = line.chars().take_while(|c| c.is_whitespace()).count();
                 // Pop stack if current indent is less than stack top
                 while let Some(&(top_indent, _)) = indent_stack.last() {
@@ -221,7 +225,7 @@ impl Rule for MD029OrderedListPrefix {
 
                 if is_continuation {
                     if line_indent <= 2 && !indent_stack.is_empty() {
-                        // Check if this line is itself a list item
+                        // Check if this line is itself a list item or heading
                         let trimmed = line.trim();
                         let is_list_item = trimmed.starts_with("* ")
                             || trimmed.starts_with("- ")
@@ -230,7 +234,12 @@ impl Rule for MD029OrderedListPrefix {
                                 && trimmed.chars().next().unwrap().is_ascii_digit()
                                 && trimmed.contains(". "));
 
-                        if !is_list_item {
+                        // Check if this is a heading (ATX style)
+                        let is_heading = trimmed.starts_with('#')
+                            && trimmed.len() > 1
+                            && (trimmed.chars().nth(1) == Some(' ') || trimmed.chars().nth(1) == Some('#'));
+
+                        if !is_list_item && !is_heading {
                             // This is a lazy continuation - fix it by adding proper indentation
                             let (list_indent, _) = indent_stack.last().unwrap();
                             let proper_indent = " ".repeat(list_indent + 3);
@@ -238,7 +247,7 @@ impl Rule for MD029OrderedListPrefix {
                             result.push_str(line.trim_start());
                             result.push('\n');
                         } else {
-                            // This is a list item, not a continuation - it breaks the list
+                            // This is a list item or heading, not a continuation - it breaks the list
                             indent_stack.clear();
                             result.push_str(line);
                             result.push('\n');
@@ -259,8 +268,6 @@ impl Rule for MD029OrderedListPrefix {
                 result.push_str(line);
                 result.push('\n');
             }
-
-            byte_pos += line.len() + 1;
         }
         // Remove trailing newline if the original content didn't have one
         if !content.ends_with('\n') && result.ends_with('\n') {
@@ -435,6 +442,40 @@ impl MD029OrderedListPrefix {
                 }
 
                 // Any other non-empty content means lists are truly separated
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if blocks are separated only by unindented list items
+    /// This helps detect the pattern: 1. item / - sub / 1. item (should be 2.)
+    fn has_only_unindented_lists_between(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        end_line: usize,
+        start_line: usize,
+    ) -> bool {
+        if end_line >= start_line {
+            return false;
+        }
+
+        for line_num in (end_line + 1)..start_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                let trimmed = line_info.content.trim();
+
+                // Skip empty lines
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                // If it's an unindented list item (column 0), that's what we're looking for
+                if line_info.list_item.is_some() && line_info.indent == 0 {
+                    continue;
+                }
+
+                // Any other non-empty content means it's not just unindented lists
                 return false;
             }
         }

@@ -11,7 +11,7 @@ use rumdl::utils::fix_utils::{apply_warning_fixes, validate_fix_range};
 fn test_no_empty_fix_ranges() {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::new(2, false)),
-        Box::new(MD010NoHardTabs::new(4, true)),
+        Box::new(MD010NoHardTabs::new(4)),
         Box::new(MD011NoReversedLinks),
         Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD019NoMultipleSpaceAtx::new()),
@@ -65,10 +65,7 @@ fn test_cli_lsp_consistency() {
             "Text with trailing spaces    ",
             Box::new(MD009TrailingSpaces::new(2, false)) as Box<dyn Rule>,
         ),
-        (
-            "Text\twith\ttabs",
-            Box::new(MD010NoHardTabs::new(4, true)) as Box<dyn Rule>,
-        ),
+        ("Text\twith\ttabs", Box::new(MD010NoHardTabs::new(4)) as Box<dyn Rule>),
         (
             "(https://example.com)[Click here]",
             Box::new(MD011NoReversedLinks) as Box<dyn Rule>,
@@ -115,7 +112,7 @@ fn test_cli_lsp_consistency() {
 fn test_fix_ranges_within_bounds() {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::new(2, false)),
-        Box::new(MD010NoHardTabs::new(4, true)),
+        Box::new(MD010NoHardTabs::new(4)),
         Box::new(MD011NoReversedLinks),
         Box::new(MD038NoSpaceInCode::new()),
         Box::new(MD039NoSpaceInLinks::new()),
@@ -175,7 +172,7 @@ fn test_fix_ranges_within_bounds() {
 fn test_fixes_improve_content() {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::new(2, false)),
-        Box::new(MD010NoHardTabs::new(4, true)),
+        Box::new(MD010NoHardTabs::new(4)),
         Box::new(MD011NoReversedLinks),
         Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD019NoMultipleSpaceAtx::new()),
