@@ -466,7 +466,7 @@ fn test_md051_fragment_generation_regression() {
         ("Only!!! Symbols!!!", "only-symbols"),
         ("   Spaces   ", "spaces"), // Leading/trailing spaces
         ("Already-hyphenated", "already-hyphenated"),
-        ("Multiple---hyphens", "multiple-hyphens"),
+        ("Multiple---hyphens", "multiple---hyphens"), // GitHub preserves consecutive hyphens
     ];
 
     for (heading, expected_fragment) in test_cases {

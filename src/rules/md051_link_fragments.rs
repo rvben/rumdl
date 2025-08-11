@@ -71,19 +71,16 @@ impl MD051LinkFragments {
             if let Some(heading) = &line_info.heading {
                 let line = &line_info.content;
 
-                // Check for TOC section
-                if TOC_SECTION_START.is_match(line) {
-                    in_toc = true;
-                    continue;
-                }
+                // Check if we're entering a TOC section
+                let is_toc_heading = TOC_SECTION_START.is_match(line);
 
                 // If we were in TOC and hit another heading, we're out of TOC
-                if in_toc {
+                if in_toc && !is_toc_heading {
                     in_toc = false;
                 }
 
-                // Skip if in TOC
-                if in_toc {
+                // Skip if we're inside a TOC section (but not the TOC heading itself)
+                if in_toc && !is_toc_heading {
                     continue;
                 }
 
@@ -105,6 +102,11 @@ impl MD051LinkFragments {
                         fragment
                     };
                     headings.insert(final_fragment);
+                }
+
+                // After processing the TOC heading, mark that we're in a TOC section
+                if is_toc_heading {
+                    in_toc = true;
                 }
             }
         }
@@ -139,22 +141,22 @@ impl MD051LinkFragments {
         // - Hindi and other scripts
         // It only removes emoji and certain punctuation
         let mut fragment = String::with_capacity(text.len());
-        let mut last_was_whitespace_or_hyphen = false;
+        let mut last_was_space = false;
 
         for c in text.to_lowercase().chars() {
             // Check if character should be kept
             if Self::is_valid_github_char(c) {
                 fragment.push(c);
-                last_was_whitespace_or_hyphen = false;
+                last_was_space = false;
             } else if c == '-' {
-                // Preserve original hyphens (don't collapse consecutive ones)
+                // Always preserve hyphens
                 fragment.push('-');
-                last_was_whitespace_or_hyphen = true;
+                last_was_space = false;
             } else if c.is_whitespace() {
-                // Convert whitespace to hyphens, but avoid consecutive ones
-                if !last_was_whitespace_or_hyphen {
+                // Convert whitespace to hyphens, but avoid consecutive spaces becoming multiple hyphens
+                if !last_was_space {
                     fragment.push('-');
-                    last_was_whitespace_or_hyphen = true;
+                    last_was_space = true;
                 }
             } else {
                 // Skip emoji, symbols, etc.
@@ -520,6 +522,7 @@ impl Rule for MD051LinkFragments {
                             let found = valid_headings.iter().any(|h| h.to_lowercase() == fragment_lower);
                             if !found {
                                 let column = full_match.start() + 1; // Point to start of entire link
+
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name()),
                                     message: format!("Link anchor '#{fragment}' does not exist in document headings"),
@@ -528,7 +531,7 @@ impl Rule for MD051LinkFragments {
                                     end_line: line_num + 1,
                                     end_column: full_match.end() + 1, // End of entire link
                                     severity: Severity::Warning,
-                                    fix: None,
+                                    fix: None, // No auto-fix per industry standard
                                 });
                             }
                         }
@@ -541,7 +544,8 @@ impl Rule for MD051LinkFragments {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // MD051 cannot automatically fix invalid link fragments
+        // MD051 does not provide auto-fix
+        // Link fragment corrections require human judgment to avoid incorrect fixes
         Ok(ctx.content.to_string())
     }
 
