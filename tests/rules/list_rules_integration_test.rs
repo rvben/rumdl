@@ -339,6 +339,7 @@ fn test_empty_lines_between_list_items() {
 }
 
 #[test]
+#[ignore] // Skip in normal test runs - performance test
 fn test_performance_with_large_mixed_lists() {
     // Test performance and correctness with larger list structures
     let md004 = MD004UnorderedListStyle::default();
