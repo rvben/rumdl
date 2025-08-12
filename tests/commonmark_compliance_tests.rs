@@ -41,8 +41,9 @@ fn validate_commonmark_compliance(content: &str, filename: &str, dir_path: &std:
     // Run rumdl with --fix to apply all rules
     let output = Command::cargo_bin("rumdl")
         .unwrap()
-        .arg("--fix")
+        .arg("check")
         .arg(file_path.to_str().unwrap())
+        .arg("--fix")
         .output()
         .unwrap();
 
@@ -199,8 +200,9 @@ Final paragraph with a footnote[^1] and a horizontal rule:
     // Run rumdl with --fix to apply all rules
     let output = Command::cargo_bin("rumdl")
         .unwrap()
-        .arg("--fix")
+        .arg("check")
         .arg(complex_markdown_path.to_str().unwrap())
+        .arg("--fix")
         .output()
         .unwrap();
 

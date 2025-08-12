@@ -39,7 +39,7 @@ fn test_cli_include_exclude() {
 
     // Test include via CLI - should only process docs/doc1.md
     println!("--- Running CLI Include Test ---");
-    let (success_incl, stdout_incl, _) = run_cmd(&[".", "--include", "docs/doc1.md", "--verbose"]);
+    let (success_incl, stdout_incl, _) = run_cmd(&["check", ".", "--include", "docs/doc1.md", "--verbose"]);
     assert!(success_incl, "CLI Include Test failed");
     let norm_stdout_incl = normalize(&stdout_incl);
     assert!(
@@ -57,7 +57,7 @@ fn test_cli_include_exclude() {
 
     // Test exclude via CLI - exclude the temp directory
     println!("--- Running CLI Exclude Test ---");
-    let (success_excl, stdout_excl, _) = run_cmd(&[".", "--exclude", "docs/temp", "--verbose"]);
+    let (success_excl, stdout_excl, _) = run_cmd(&["check", ".", "--exclude", "docs/temp", "--verbose"]);
     assert!(success_excl, "CLI Exclude Test failed");
     let norm_stdout_excl = normalize(&stdout_excl);
     assert!(
@@ -79,8 +79,15 @@ fn test_cli_include_exclude() {
 
     // Test combined include and exclude via CLI - include *.md in docs, exclude temp
     println!("--- Running CLI Include/Exclude Test ---");
-    let (success_comb, stdout_comb, _) =
-        run_cmd(&[".", "--include", "docs/*.md", "--exclude", "docs/temp", "--verbose"]);
+    let (success_comb, stdout_comb, _) = run_cmd(&[
+        "check",
+        ".",
+        "--include",
+        "docs/*.md",
+        "--exclude",
+        "docs/temp",
+        "--verbose",
+    ]);
     assert!(success_comb, "CLI Include/Exclude Test failed");
     let norm_stdout_comb = normalize(&stdout_comb);
     assert!(
@@ -124,7 +131,7 @@ include = ["docs/doc1.md"]
 "#;
     create_config(base_path, config_incl);
 
-    let (success_incl, stdout_incl, _) = run_cmd(&[".", "--verbose"]);
+    let (success_incl, stdout_incl, _) = run_cmd(&["check", ".", "--verbose"]);
     assert!(success_incl, "Config Include Test failed");
     let norm_stdout_incl = normalize(&stdout_incl);
     assert!(
@@ -149,7 +156,7 @@ exclude = ["docs/temp"]
 "#;
     create_config(base_path, config_comb);
 
-    let (success_comb, stdout_comb, _) = run_cmd(&[".", "--verbose"]);
+    let (success_comb, stdout_comb, _) = run_cmd(&["check", ".", "--verbose"]);
     assert!(success_comb, "Config Include/Exclude Test failed");
     let norm_stdout_comb = normalize(&stdout_comb);
     assert!(
@@ -194,7 +201,7 @@ include = ["src/**/*.md"] # Config includes only src/test.md
 
     // Override with CLI pattern - should only process docs/doc1.md
     println!("--- Running CLI Override Config Test ---");
-    let (success, stdout, _) = run_cmd(&[".", "--include", "docs/doc1.md", "--verbose"]);
+    let (success, stdout, _) = run_cmd(&["check", ".", "--include", "docs/doc1.md", "--verbose"]);
     assert!(success, "CLI Override Config Test failed");
     let norm_stdout = normalize(&stdout);
 
@@ -239,7 +246,7 @@ include = ["README.md"] # Reverted pattern
 "#;
     create_config(base_path, config);
 
-    let (success, stdout, _) = run_cmd(&[".", "--verbose"]);
+    let (success, stdout, _) = run_cmd(&["check", ".", "--verbose"]);
     assert!(success, "README Pattern Scope Test failed");
     let norm_stdout = normalize(&stdout);
 
@@ -282,7 +289,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Test Case 1: Exclude directory ---
     println!("--- Running Test Case 1: Exclude directory ---");
-    let (success1, stdout1, stderr1) = run_cmd(&[".", "--exclude", "docs/temp", "--verbose"]);
+    let (success1, stdout1, stderr1) = run_cmd(&["check", ".", "--exclude", "docs/temp", "--verbose"]);
     println!("Test Case 1 Stdout:\\n{stdout1}");
     println!("Test Case 1 Stderr:\\n{stderr1}");
     assert!(success1, "Test Case 1 failed");
@@ -306,7 +313,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Test Case 2: Include specific file ---
     println!("--- Running Test Case 2: Include specific file ---");
-    let (success2, stdout2, stderr2) = run_cmd(&[".", "--include", "docs/doc1.md", "--verbose"]);
+    let (success2, stdout2, stderr2) = run_cmd(&["check", ".", "--include", "docs/doc1.md", "--verbose"]);
     println!("Test Case 2 Stdout:\\n{stdout2}");
     println!("Test Case 2 Stderr:\\n{stderr2}");
     assert!(success2, "Test Case 2 failed");
@@ -335,7 +342,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // --- Test Case 3: Exclude glob pattern (original failing case) ---
     // This should exclude README.md in root AND subfolder/README.md
     println!("--- Running Test Case 3: Exclude glob pattern ---");
-    let (success3, stdout3, stderr3) = run_cmd(&[".", "--exclude", "**/README.md", "--verbose"]);
+    let (success3, stdout3, stderr3) = run_cmd(&["check", ".", "--exclude", "**/README.md", "--verbose"]);
     println!("Test Case 3 Stdout:\\n{stdout3}");
     println!("Test Case 3 Stderr:\\n{stderr3}");
     assert!(success3, "Test Case 3 failed");
@@ -364,7 +371,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // --- Test Case 4: Include glob pattern ---
     // Should only include docs/doc1.md (not docs/temp/temp.md)
     println!("--- Running Test Case 4: Include glob pattern ---");
-    let (success4, stdout4, stderr4) = run_cmd(&[".", "--include", "docs/*.md", "--verbose"]);
+    let (success4, stdout4, stderr4) = run_cmd(&["check", ".", "--include", "docs/*.md", "--verbose"]);
     println!("Test Case 4 Stdout:\\n{stdout4}");
     println!("Test Case 4 Stderr:\\n{stderr4}");
     assert!(success4, "Test Case 4 failed");
@@ -394,6 +401,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // Should include docs/doc1.md but exclude docs/temp/temp.md
     println!("--- Running Test Case 5: Glob Include + Specific Exclude ---");
     let (success5, stdout5, stderr5) = run_cmd(&[
+        "check",
         ".",
         "--include",
         "docs/**/*.md",
@@ -428,8 +436,14 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Test Case 6: Specific Exclude Overrides Broader Include ---
     println!("--- Running Test Case 6: Specific Exclude Overrides Broader Include ---");
-    let (success6, stdout6, stderr6) =
-        run_cmd(&[".", "--include", "subfolder/*.md", "--exclude", "subfolder/README.md"]); // Pass only the args slice
+    let (success6, stdout6, stderr6) = run_cmd(&[
+        "check",
+        ".",
+        "--include",
+        "subfolder/*.md",
+        "--exclude",
+        "subfolder/README.md",
+    ]); // Pass only the args slice
     println!("Test Case 6 Stdout:\n{stdout6}");
     println!("Test Case 6 Stderr:{stderr6}");
     assert!(success6, "Case 6: Command failed"); // Use success6
@@ -444,7 +458,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Test Case 7: Root Exclude ---
     println!("--- Running Test Case 7: Root Exclude ---");
-    let (success7, stdout7, stderr7) = run_cmd(&[".", "--exclude", "README.md", "--verbose"]); // No globstar
+    let (success7, stdout7, stderr7) = run_cmd(&["check", ".", "--exclude", "README.md", "--verbose"]); // No globstar
     println!("Test Case 7 Stdout:\\n{stdout7}");
     println!("Test Case 7 Stderr:{stderr7}");
     assert!(success7, "Test Case 7 failed");
@@ -465,7 +479,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     // --- Test Case 8: Deep Glob Exclude ---
     // Should exclude everything
     println!("--- Running Test Case 8: Deep Glob Exclude ---");
-    let (success8, stdout8, stderr8) = run_cmd(&[".", "--exclude", "**/*", "--verbose"]);
+    let (success8, stdout8, stderr8) = run_cmd(&["check", ".", "--exclude", "**/*", "--verbose"]);
     println!("Test Case 8 Stdout:\\n{stdout8}");
     println!("Test Case 8 Stderr:\\n{stderr8}");
     assert!(success8, "Test Case 8 failed");
@@ -478,7 +492,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Test Case 9: Exclude multiple patterns ---
     println!("--- Running Test Case 9: Exclude multiple patterns ---");
-    let (success9, stdout9, stderr9) = run_cmd(&[".", "--exclude", "README.md,src/*", "--verbose"]);
+    let (success9, stdout9, stderr9) = run_cmd(&["check", ".", "--exclude", "README.md,src/*", "--verbose"]);
     println!("Test Case 9 Stdout:\n{stdout9}");
     println!("Test Case 9 Stderr:{stderr9}\n");
     assert!(success9, "Test Case 9 failed");
@@ -502,7 +516,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Test Case 10: Include multiple patterns ---
     println!("--- Running Test Case 10: Include multiple patterns ---");
-    let (success10, stdout10, stderr10) = run_cmd(&[".", "--include", "README.md,src/*", "--verbose"]);
+    let (success10, stdout10, stderr10) = run_cmd(&["check", ".", "--include", "README.md,src/*", "--verbose"]);
     println!("Test Case 10 Stdout:\n{stdout10}");
     println!("Test Case 10 Stderr:{stderr10}\n");
     assert!(success10, "Test Case 10 failed");
@@ -530,7 +544,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
 include=["src/*.md"]
 "#;
     create_config(temp_dir.path(), config11);
-    let (success11, stdout11, _) = run_cmd(&["docs/doc1.md", "--verbose"]);
+    let (success11, stdout11, _) = run_cmd(&["check", "docs/doc1.md", "--verbose"]);
     assert!(success11, "Test Case 11 failed");
     let norm_stdout11 = normalize(&stdout11);
     assert!(
@@ -549,7 +563,7 @@ include=["src/*.md"]
 include=["src/*.md"]
 "#;
     create_config(temp_dir.path(), config12);
-    let (success12, stdout12, _) = run_cmd(&["docs", "--verbose"]); // Process everything in docs/
+    let (success12, stdout12, _) = run_cmd(&["check", "docs", "--verbose"]); // Process everything in docs/
     assert!(success12, "Test Case 12 failed");
     let norm_stdout12 = normalize(&stdout12);
     assert!(
@@ -572,7 +586,7 @@ include=["src/*.md"]
 exclude=["docs/temp"]
 "#;
     create_config(temp_dir.path(), config13);
-    let (success13, stdout13, _) = run_cmd(&["docs", "--verbose"]); // Process docs/, exclude temp via config
+    let (success13, stdout13, _) = run_cmd(&["check", "docs", "--verbose"]); // Process docs/, exclude temp via config
     assert!(success13, "Test Case 13 failed");
     let norm_stdout13 = normalize(&stdout13);
     assert!(
@@ -587,7 +601,7 @@ exclude=["docs/temp"]
 
     // --- Test Case 14: Explicit Path (Dir) Respects CLI Exclude ---
     println!("--- Running Test Case 14: Explicit Path (Dir) Respects CLI Exclude ---");
-    let (success14, stdout14, _) = run_cmd(&["docs", "--exclude", "docs/temp", "--verbose"]); // Process docs/, exclude temp via CLI
+    let (success14, stdout14, _) = run_cmd(&["check", "docs", "--exclude", "docs/temp", "--verbose"]); // Process docs/, exclude temp via CLI
     assert!(success14, "Test Case 14 failed");
     let norm_stdout14 = normalize(&stdout14);
     assert!(
@@ -601,7 +615,7 @@ exclude=["docs/temp"]
 
     // --- Test Case 15: Multiple Explicit Paths ---
     println!("--- Running Test Case 15: Multiple Explicit Paths ---");
-    let (success15, stdout15, _) = run_cmd(&["docs/doc1.md", "src/test.md", "--verbose"]); // Process specific files
+    let (success15, stdout15, _) = run_cmd(&["check", "docs/doc1.md", "src/test.md", "--verbose"]); // Process specific files
     assert!(success15, "Test Case 15 failed");
     let norm_stdout15 = normalize(&stdout15);
     assert!(
@@ -627,7 +641,7 @@ exclude=["docs/temp"]
 include=["docs/**/*.md"]
 "#;
     create_config(temp_dir.path(), config16);
-    let (success16, stdout16, _) = run_cmd(&[".", "--exclude", "docs/temp/temp.md", "--verbose"]); // Discover ., exclude specific file via CLI
+    let (success16, stdout16, _) = run_cmd(&["check", ".", "--exclude", "docs/temp/temp.md", "--verbose"]); // Discover ., exclude specific file via CLI
     assert!(success16, "Test Case 16 failed");
     let norm_stdout16 = normalize(&stdout16);
     assert!(
@@ -653,7 +667,7 @@ exclude = ["docs/*"] # Exclude all docs via config
 "#,
     )?;
     let (success17, stdout17, stderr17) = run_cmd(
-        &[".", "--include", "docs/doc1.md", "--verbose"], // ADDED "." path for discovery mode
+        &["check", ".", "--include", "docs/doc1.md", "--verbose"], // ADDED "." path for discovery mode
     );
     println!("Test Case 17 Stdout:\n{stdout17}");
     println!("Test Case 17 Stderr:{stderr17}\n");
@@ -696,7 +710,8 @@ fn test_default_discovery_includes_only_markdown() -> Result<(), Box<dyn std::er
     fs::write(dir_path.join("test.txt"), "This is a text file.")?;
 
     let mut cmd = Command::cargo_bin("rumdl")?;
-    cmd.arg(".")
+    cmd.arg("check")
+        .arg(".")
         .arg("--verbose") // Need verbose to see "Processing file:" messages
         .current_dir(dir_path);
 
@@ -720,7 +735,7 @@ fn test_markdown_extension_handling() -> Result<(), Box<dyn std::error::Error>> 
 
     // Test 1: Default discovery should find both .md and .markdown
     let mut cmd1 = Command::cargo_bin("rumdl")?;
-    cmd1.arg(".").arg("--verbose").current_dir(dir_path);
+    cmd1.arg("check").arg(".").arg("--verbose").current_dir(dir_path);
     cmd1.assert()
         .success()
         .stdout(predicates::str::contains("Processing file: test.md"))
@@ -729,7 +744,8 @@ fn test_markdown_extension_handling() -> Result<(), Box<dyn std::error::Error>> 
 
     // Test 2: Explicit include for .markdown should only find that file
     let mut cmd2 = Command::cargo_bin("rumdl")?;
-    cmd2.arg(".")
+    cmd2.arg("check")
+        .arg(".")
         .arg("--include")
         .arg("*.markdown")
         .arg("--verbose")
@@ -753,7 +769,8 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 1: Trying to include non-markdown files should yield nothing
     let mut cmd1 = Command::cargo_bin("rumdl")?;
-    cmd1.arg(".")
+    cmd1.arg("check")
+        .arg(".")
         .arg("--include")
         .arg("*.txt")
         .arg("--verbose") // Use verbose to ensure no "Processing file:" messages appear
@@ -765,7 +782,8 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 2: Excluding all .md files when only .md files exist
     let mut cmd2 = Command::cargo_bin("rumdl")?;
-    cmd2.arg(".")
+    cmd2.arg("check")
+        .arg(".")
         .arg("--exclude")
         .arg("*.md")
         .arg("--verbose")
@@ -778,7 +796,8 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
     // Test 3: Excluding both markdown types
     fs::write(dir_path.join("test.markdown"), "# MARKDOWN File\n")?;
     let mut cmd3 = Command::cargo_bin("rumdl")?;
-    cmd3.arg(".")
+    cmd3.arg("check")
+        .arg(".")
         .arg("--exclude")
         .arg("*.md,*.markdown")
         .arg("--verbose")
@@ -822,22 +841,33 @@ fn test_legacy_cli_works_and_warns() {
     let base_path = temp_dir.path();
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
+    // Test that direct file path doesn't work anymore
     let output = std::process::Command::new(rumdl_exe)
         .current_dir(base_path)
         .args(["README.md"])
         .output()
         .expect("Failed to execute command");
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    assert!(output.status.success(), "legacy CLI failed: {stderr}");
+    // Should fail and show help because "README.md" is not a valid subcommand
+    assert!(!output.status.success(), "legacy CLI should fail");
+    assert!(
+        stderr.contains("error:") || stderr.contains("Usage:"),
+        "Should show error or usage for invalid subcommand"
+    );
+
+    // Test that new syntax with 'check' works
+    let output = std::process::Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["check", "README.md"])
+        .output()
+        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(output.status.success(), "new CLI with check should work");
     assert!(
         stdout.contains("Success:") || stdout.contains("Issues:"),
         "Output missing summary"
-    );
-    assert!(
-        stderr.contains("Deprecation warning"),
-        "Should print deprecation warning for legacy CLI"
     );
 }
 

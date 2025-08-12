@@ -51,7 +51,7 @@ fn test_output_format_singular() {
     // Run the linter on a single file without fixes
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["single_file.md"])
+        .args(["check", "single_file.md"])
         .output()
         .expect("Failed to execute command");
 
@@ -79,7 +79,7 @@ fn test_output_format_plural() {
     // Run the linter on multiple files without fixes
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["single_file.md", "second_file.md"])
+        .args(["check", "single_file.md", "second_file.md"])
         .output()
         .expect("Failed to execute command");
 
@@ -101,7 +101,7 @@ fn test_output_format_fix_mode_singular() {
     // Run the linter on a single file with fix mode
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["--fix", "single_file.md"])
+        .args(["check", "single_file.md", "--fix"])
         .output()
         .expect("Failed to execute command");
 
@@ -136,7 +136,7 @@ fn test_output_format_fix_mode_plural() {
     // Run the linter on multiple files with fix mode
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["--fix", "single_file.md", "second_file.md"])
+        .args(["check", "single_file.md", "second_file.md", "--fix"])
         .output()
         .expect("Failed to execute command");
 
@@ -168,7 +168,7 @@ fn test_output_format_fix_mode_label() {
 
     // Run in normal mode first
     let output_normal = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path])
+        .args(["check", test_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -186,7 +186,7 @@ fn test_output_format_fix_mode_label() {
 
     // Now run in fix mode
     let output_fix = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--fix"])
+        .args(["check", test_file_path, "--fix"])
         .output()
         .expect("Failed to execute command");
 
@@ -211,7 +211,7 @@ fn test_multi_issue_output_format() {
 
     // First run in normal mode to check issue labeling
     let output_normal = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path])
+        .args(["check", test_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -249,7 +249,7 @@ fn test_multi_issue_output_format() {
 
     // Now run in fix mode to check fixed issue labeling
     let output_fix = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--fix"])
+        .args(["check", test_file_path, "--fix"])
         .output()
         .expect("Failed to execute command");
 
@@ -309,7 +309,7 @@ fn test_fixable_issues_labeling() {
 
     // Run the linter
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path])
+        .args(["check", test_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -330,7 +330,7 @@ fn test_fixable_issues_labeling() {
 
     // Run with fix mode and ensure the issue is fixed
     let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--fix"])
+        .args(["check", test_file_path, "--fix"])
         .output()
         .expect("Failed to execute command");
 
@@ -381,7 +381,7 @@ fn test_truly_unfixable_issues_labeling() {
 
     // Run the linter with custom config
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--config", config_file_path])
+        .args(["check", test_file_path, "--config", config_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -405,7 +405,7 @@ fn test_truly_unfixable_issues_labeling() {
 
     // Run with fix mode and ensure the issue is NOT fixed
     let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--fix", "--config", config_file_path])
+        .args(["check", test_file_path, "--fix", "--config", config_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -456,7 +456,7 @@ fn test_mixed_fixable_unfixable_issues() {
 
     // Run the linter in normal mode with custom config
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--config", config_file_path])
+        .args(["check", test_file_path, "--config", config_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -500,7 +500,7 @@ fn test_mixed_fixable_unfixable_issues() {
 
     // Run with fix mode and custom config
     let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--fix", "--config", config_file_path])
+        .args(["check", test_file_path, "--fix", "--config", config_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -568,7 +568,7 @@ fn test_color_output_disabled() {
 
     // Run with NO_COLOR environment variable to disable colored output
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path])
+        .args(["check", test_file_path])
         .env("NO_COLOR", "1")
         .output()
         .expect("Failed to execute command");
@@ -593,7 +593,7 @@ fn test_quiet_mode_output() {
 
     // Run with --quiet flag
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--quiet"])
+        .args(["check", test_file_path, "--quiet"])
         .output()
         .expect("Failed to execute command");
 
@@ -608,7 +608,7 @@ fn test_quiet_mode_output() {
 
     // Run with --quiet and --fix to ensure it still fixes issues but doesn't output
     let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--quiet", "--fix"])
+        .args(["check", test_file_path, "--quiet", "--fix"])
         .output()
         .expect("Failed to execute command");
 
@@ -635,7 +635,7 @@ fn test_verbose_mode_output() {
 
     // Run with --verbose flag
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--verbose"])
+        .args(["check", test_file_path, "--verbose"])
         .output()
         .expect("Failed to execute command");
 
@@ -676,13 +676,13 @@ fn test_exit_code_validation() {
 
     // Run linter on file with issues
     let output_with_issues = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([issue_file.to_str().unwrap()])
+        .args(["check", issue_file.to_str().unwrap()])
         .output()
         .expect("Failed to execute command");
 
     // Run linter on clean file
     let output_no_issues = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([clean_file.to_str().unwrap()])
+        .args(["check", clean_file.to_str().unwrap()])
         .output()
         .expect("Failed to execute command");
 
@@ -702,7 +702,7 @@ fn test_exit_code_validation() {
 
     // Verify fix mode results in exit code 0 if all issues fixed
     let output_fix = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([issue_file.to_str().unwrap(), "--fix"])
+        .args(["check", issue_file.to_str().unwrap(), "--fix"])
         .output()
         .expect("Failed to execute command");
 
@@ -734,7 +734,7 @@ fn test_rule_with_configuration() {
 
     // First run with default configuration (line length 80)
     let default_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path])
+        .args(["check", test_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -760,7 +760,7 @@ line_length = 70
 
     // Run with custom configuration (line length 70)
     let custom_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path])
+        .args(["check", test_file_path])
         .current_dir(temp_dir.path()) // Important: set working directory to where config file is
         .output()
         .expect("Failed to execute command");
@@ -801,7 +801,7 @@ fn test_fixed_content_validation() {
 
     // Run the linter to verify the issue exists
     let check_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path])
+        .args(["check", test_file_path])
         .output()
         .expect("Failed to execute command");
 
@@ -816,7 +816,7 @@ fn test_fixed_content_validation() {
 
     // Fix the file
     let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path, "--fix"])
+        .args(["check", test_file_path, "--fix"])
         .output()
         .expect("Failed to execute command");
 
@@ -835,7 +835,7 @@ fn test_fixed_content_validation() {
 
     // Run linter again to verify no issues remain
     let recheck_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args([test_file_path])
+        .args(["check", test_file_path])
         .output()
         .expect("Failed to execute command");
 

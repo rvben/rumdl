@@ -26,7 +26,7 @@ fn test_init_command_creates_and_loads_config() {
     // Run linter with default config (should detect MD001)
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md"])
+        .args(["check", "test.md"])
         .output()
         .unwrap();
 
@@ -106,7 +106,7 @@ ___
     // Run linter with all rules enabled
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["complex.md", "--verbose"])
+        .args(["check", "complex.md", "--verbose"])
         .output()
         .unwrap();
 
@@ -132,7 +132,7 @@ ___
     // Run the fix operation
     let _fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["complex.md", "--fix"])
+        .args(["check", "complex.md", "--fix"])
         .output()
         .unwrap();
 
@@ -169,7 +169,7 @@ Multiple blank lines above this one.
     // Run with default rules (should detect various issues)
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--verbose"])
+        .args(["check", "test.md", "--verbose"])
         .output()
         .unwrap();
 
@@ -224,7 +224,7 @@ Text immediately below heading (MD022)
     // Run linter for all rules
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--verbose"])
+        .args(["check", "test.md", "--verbose"])
         .output()
         .unwrap();
 
@@ -248,7 +248,7 @@ Text immediately below heading (MD022)
     // Test fix operation
     let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--fix", "--verbose"])
+        .args(["check", "test.md", "--fix", "--verbose"])
         .output()
         .unwrap();
 
@@ -293,7 +293,7 @@ Visit http://example.com for more information.
     // Run linter with default rules
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--verbose"])
+        .args(["check", "test.md", "--verbose"])
         .output()
         .unwrap();
 
@@ -321,7 +321,7 @@ Visit http://example.com for more information.
     // Test fix operation
     let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--fix", "--verbose"])
+        .args(["check", "test.md", "--fix", "--verbose"])
         .output()
         .unwrap();
 
@@ -350,7 +350,7 @@ fn test_profiling_features() {
     // Run with verbose output that should include rule names
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--verbose"])
+        .args(["check", "test.md", "--verbose"])
         .output()
         .unwrap();
 
@@ -399,7 +399,7 @@ fn test_low_coverage_rules() {
     // Run linter with all rules
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--verbose"])
+        .args(["check", "test.md", "--verbose"])
         .output()
         .unwrap();
 
@@ -425,7 +425,7 @@ fn test_low_coverage_rules() {
     // Test fix for these rules
     let _fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(base_path)
-        .args(["test.md", "--fix", "--verbose"])
+        .args(["check", "test.md", "--fix", "--verbose"])
         .output()
         .unwrap();
 

@@ -120,7 +120,7 @@ This document should lint cleanly with no false positives from Kramdown syntax.
     // Run rumdl on the Kramdown document
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(temp_dir.path())
-        .arg("kramdown_test.md")
+        .args(["check", "kramdown_test.md"])
         .output()
         .unwrap();
 
@@ -199,7 +199,7 @@ List with wrong marker:
 
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(temp_dir.path())
-        .arg("standard.md")
+        .args(["check", "standard.md"])
         .output()
         .unwrap();
 
@@ -230,7 +230,7 @@ The formula {x | x > 0} represents positive numbers.
 
     let output1 = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(temp_dir.path())
-        .arg("braces.md")
+        .args(["check", "braces.md"])
         .output()
         .unwrap();
 
@@ -257,7 +257,7 @@ Not a comment
 
     let output2 = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(temp_dir.path())
-        .arg("almost.md")
+        .args(["check", "almost.md"])
         .output()
         .unwrap();
 
@@ -346,7 +346,7 @@ More text with another footnote[^note].
 
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(temp_dir.path())
-        .arg("math_footnotes.md")
+        .args(["check", "math_footnotes.md"])
         .output()
         .unwrap();
 

@@ -54,7 +54,12 @@ This is a line that would normally exceed the default line length limit, but we'
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
 
     // Execute the command and capture output first
-    let assert = cmd.arg("--config").arg(&_config_path).arg(&markdown_path).assert();
+    let assert = cmd
+        .arg("check")
+        .arg(&markdown_path)
+        .arg("--config")
+        .arg(&_config_path)
+        .assert();
 
     // Get the output
     let output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
@@ -105,9 +110,10 @@ No blank line at end"#;
     // The output shows the command was successful, even though the exit code was 1
     // This is because the tool has fixed the issues but reports exit code 1 to indicate issues were found
     let assert = cmd
-        .arg("--fix") // Use --fix flag
+        .arg("check")
         .arg(&file1_path)
         .arg(&file2_path)
+        .arg("--fix") // Use --fix flag
         .assert();
 
     // Get the output to confirm fixes were applied
@@ -158,7 +164,11 @@ fn test_init_load_apply_config() {
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
 
     // Execute the command and capture output first
-    let assert = cmd.arg(&markdown_path).current_dir(temp_dir.path()).assert();
+    let assert = cmd
+        .arg("check")
+        .arg(&markdown_path)
+        .current_dir(temp_dir.path())
+        .assert();
 
     // May contain line length issues by default, depending on the default config
     // Just check that we can run the command
@@ -215,6 +225,7 @@ Link to [non-existent heading](#nowhere)
     // Run rumdl on the file using --no-config to get default behavior
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
     let assert = cmd
+        .arg("check")
         .arg(&markdown_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
@@ -232,8 +243,9 @@ Link to [non-existent heading](#nowhere)
     // Now with fix, using --no-config
     let mut fix_cmd = Command::cargo_bin("rumdl").unwrap();
     let fix_assert = fix_cmd
-        .arg("--fix")
+        .arg("check")
         .arg(&markdown_path)
+        .arg("--fix")
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
 
@@ -252,7 +264,7 @@ Link to [non-existent heading](#nowhere)
     let mut recheck_cmd = Command::cargo_bin("rumdl").unwrap();
 
     // Execute the command and capture output first
-    let recheck = recheck_cmd.arg(&markdown_path).assert();
+    let recheck = recheck_cmd.arg("check").arg(&markdown_path).assert();
 
     // Get the output before checking success
     let recheck_output = String::from_utf8(recheck.get_output().stdout.clone()).unwrap();
@@ -284,6 +296,7 @@ fn test_cli_options() {
     // Test with default output format (using --no-config)
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
     let assert = cmd
+        .arg("check")
         .arg(&markdown_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
@@ -305,9 +318,10 @@ fn test_cli_options() {
     // Test with disabled rules - only disable the rules that actually trigger
     let mut disabled_cmd = Command::cargo_bin("rumdl").unwrap();
     let disabled_assert = disabled_cmd
+        .arg("check")
+        .arg(&markdown_path)
         .arg("--disable")
         .arg("MD022,MD033") // Only disable the two rules that trigger
-        .arg(&markdown_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
     let disabled_output = String::from_utf8(disabled_assert.get_output().stdout.clone()).unwrap();
@@ -326,9 +340,10 @@ fn test_cli_options() {
     // Test enabling specific rules
     let mut enabled_cmd = Command::cargo_bin("rumdl").unwrap();
     let enabled_assert = enabled_cmd
+        .arg("check")
+        .arg(&markdown_path)
         .arg("--enable")
         .arg("MD030") // Enable MD030 to verify it doesn't trigger on invalid list syntax
-        .arg(&markdown_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
     let enabled_output = String::from_utf8(enabled_assert.get_output().stdout.clone()).unwrap();
@@ -342,6 +357,7 @@ fn test_cli_options() {
     fs::write(&options_test_path, "# Test\n\n<div>HTML</div>\n").unwrap();
     let mut default_cmd_options = Command::cargo_bin("rumdl").unwrap();
     let default_assert_options = default_cmd_options
+        .arg("check")
         .arg(&options_test_path)
         .arg("--no-config") // Use --no-config instead of dummy config
         .assert();
@@ -366,7 +382,7 @@ Text right after heading
     fs::write(&md022_path, md022_content).unwrap();
 
     let mut md022_cmd = Command::cargo_bin("rumdl").unwrap();
-    let md022_assert = md022_cmd.arg(&md022_path).arg("--no-config").assert();
+    let md022_assert = md022_cmd.arg("check").arg(&md022_path).arg("--no-config").assert();
     let md022_output = String::from_utf8(md022_assert.get_output().stdout.clone()).unwrap();
     assert!(
         md022_output.contains("MD022"),
@@ -384,7 +400,7 @@ Text right after heading
     fs::write(&md030_path, md030_content).unwrap();
 
     let mut md030_cmd = Command::cargo_bin("rumdl").unwrap();
-    let md030_assert = md030_cmd.arg(&md030_path).arg("--no-config").assert();
+    let md030_assert = md030_cmd.arg("check").arg(&md030_path).arg("--no-config").assert();
     let md030_output = String::from_utf8(md030_assert.get_output().stdout.clone()).unwrap();
     assert!(
         md030_output.contains("MD030"),
@@ -407,7 +423,7 @@ Another paragraph.
     fs::write(&md032_path, md032_content).unwrap();
 
     let mut md032_cmd = Command::cargo_bin("rumdl").unwrap();
-    let md032_assert = md032_cmd.arg(&md032_path).arg("--no-config").assert();
+    let md032_assert = md032_cmd.arg("check").arg(&md032_path).arg("--no-config").assert();
     let md032_output = String::from_utf8(md032_assert.get_output().stdout.clone()).unwrap();
     assert!(
         md032_output.contains("MD032"),
@@ -427,7 +443,7 @@ Another paragraph.
     fs::write(&md033_path, md033_content).unwrap();
 
     let mut md033_cmd = Command::cargo_bin("rumdl").unwrap();
-    let md033_assert = md033_cmd.arg(&md033_path).arg("--no-config").assert();
+    let md033_assert = md033_cmd.arg("check").arg(&md033_path).arg("--no-config").assert();
     let md033_output = String::from_utf8(md033_assert.get_output().stdout.clone()).unwrap();
     assert!(md033_output.contains("MD033"), "MD033 should trigger for inline HTML");
 
@@ -444,6 +460,7 @@ This is text with *emphasis* not a list.
 
     let mut invalid_cmd = Command::cargo_bin("rumdl").unwrap();
     let invalid_assert = invalid_cmd
+        .arg("check")
         .arg(&invalid_list_path)
         .arg("--no-config")
         .arg("--enable")

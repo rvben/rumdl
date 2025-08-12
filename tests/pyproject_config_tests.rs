@@ -101,7 +101,8 @@ fn test_pyproject_toml_config_loading() {
     .unwrap();
 
     // First run without config (should detect line length issue with default 80 chars)
-    let (success, stdout, _stderr) = run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
+    let (success, stdout, _stderr) =
+        run_rumdl_command(&["check", test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
 
     assert!(!success, "Command should fail with line length issues");
     assert!(stdout.contains("MD013"), "MD013 rule warning not found in stdout");
@@ -120,7 +121,8 @@ line-length = 100
     .unwrap();
 
     // Run again with the config (should not detect line length issue now)
-    let (success, stdout, stderr) = run_rumdl_command(&[test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
+    let (success, stdout, stderr) =
+        run_rumdl_command(&["check", test_file.to_str().unwrap(), "--verbose"], temp_dir.path());
 
     // Print output for debugging
     println!("STDOUT (pyproject_toml_config_loading):\n{stdout}");
@@ -173,16 +175,20 @@ line-length = 100
     fs::write(&kebab_test_file, test_file_content).unwrap();
 
     // Test snake_case config
-    let (snake_success, snake_stdout, snake_stderr) =
-        run_rumdl_command(&[snake_test_file.to_str().unwrap(), "--verbose"], snake_case_dir.path());
+    let (snake_success, snake_stdout, snake_stderr) = run_rumdl_command(
+        &["check", snake_test_file.to_str().unwrap(), "--verbose"],
+        snake_case_dir.path(),
+    );
 
     // Print output for debugging
     println!("STDOUT (snake_case):\n{snake_stdout}");
     println!("STDERR (snake_case):\n{snake_stderr}");
 
     // Test kebab-case config
-    let (kebab_success, kebab_stdout, kebab_stderr) =
-        run_rumdl_command(&[kebab_test_file.to_str().unwrap(), "--verbose"], kebab_case_dir.path());
+    let (kebab_success, kebab_stdout, kebab_stderr) = run_rumdl_command(
+        &["check", kebab_test_file.to_str().unwrap(), "--verbose"],
+        kebab_case_dir.path(),
+    );
 
     // Print output for debugging
     println!("STDOUT (kebab_case):\n{kebab_stdout}");
@@ -267,6 +273,7 @@ This line is much longer at 130 characters, which exceeds all three limits: 60 c
     // Run with explicit config path (should use line_length=120)
     let (explicit_success, explicit_stdout, _) = run_rumdl_command(
         &[
+            "check",
             test_file.to_str().unwrap(),
             "--config",
             custom_config_path.to_str().unwrap(),
@@ -275,7 +282,8 @@ This line is much longer at 130 characters, which exceeds all three limits: 60 c
     );
 
     // Run without explicit config (.rumdl.toml should take precedence over pyproject.toml)
-    let (default_success, default_stdout, _) = run_rumdl_command(&[test_file.to_str().unwrap()], temp_dir.path());
+    let (default_success, default_stdout, _) =
+        run_rumdl_command(&["check", test_file.to_str().unwrap()], temp_dir.path());
 
     // Both should fail but with different patterns
     assert!(!explicit_success, "Command should fail with explicit config");
