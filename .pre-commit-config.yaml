@@ -48,12 +48,17 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
 
-  # Markdown linting using rumdl itself
-  - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.0.45
+  # Markdown linting using rumdl itself (local binary)
+  - repo: local
     hooks:
       - id: rumdl
+        name: rumdl check
+        entry: ./target/release/rumdl check
+        language: system
+        files: \.md$
         exclude: ^(test_tmp|benchmark/test-data|docs/temp|CHANGELOG\.md)
+        pass_filenames: true
+        require_serial: true
 
   # Pre-push hooks for comprehensive validation
   - repo: local
