@@ -90,6 +90,16 @@ pub struct GlobalConfig {
     /// Output format for linting results (e.g., "text", "json", "pylint", etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_format: Option<String>,
+
+    /// Rules that are allowed to be fixed when --fix is used
+    /// If specified, only these rules will be fixed
+    #[serde(default)]
+    pub fixable: Vec<String>,
+
+    /// Rules that should never be fixed, even when --fix is used
+    /// Takes precedence over fixable
+    #[serde(default)]
+    pub unfixable: Vec<String>,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -111,6 +121,8 @@ impl Default for GlobalConfig {
             respect_gitignore: true,
             line_length: 80,
             output_format: None,
+            fixable: Vec::new(),
+            unfixable: Vec::new(),
         }
     }
 }
@@ -999,6 +1011,8 @@ pub struct SourcedGlobalConfig {
     pub respect_gitignore: SourcedValue<bool>,
     pub line_length: SourcedValue<u64>,
     pub output_format: Option<SourcedValue<String>>,
+    pub fixable: SourcedValue<Vec<String>>,
+    pub unfixable: SourcedValue<Vec<String>>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -1011,6 +1025,8 @@ impl Default for SourcedGlobalConfig {
             respect_gitignore: SourcedValue::new(true, ConfigSource::Default),
             line_length: SourcedValue::new(80, ConfigSource::Default),
             output_format: None,
+            fixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
+            unfixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
         }
     }
 }
@@ -1076,6 +1092,29 @@ impl SourcedConfig {
                 .first()
                 .and_then(|o| o.file.clone()),
             fragment.global.respect_gitignore.overrides.first().and_then(|o| o.line),
+        );
+        self.global.line_length.merge_override(
+            fragment.global.line_length.value,
+            fragment.global.line_length.source,
+            fragment
+                .global
+                .line_length
+                .overrides
+                .first()
+                .and_then(|o| o.file.clone()),
+            fragment.global.line_length.overrides.first().and_then(|o| o.line),
+        );
+        self.global.fixable.merge_override(
+            fragment.global.fixable.value,
+            fragment.global.fixable.source,
+            fragment.global.fixable.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.fixable.overrides.first().and_then(|o| o.line),
+        );
+        self.global.unfixable.merge_override(
+            fragment.global.unfixable.value,
+            fragment.global.unfixable.source,
+            fragment.global.unfixable.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.unfixable.overrides.first().and_then(|o| o.line),
         );
 
         // Merge output_format if present
@@ -1269,6 +1308,14 @@ impl SourcedConfig {
                 None,
                 None,
             );
+            sourced_config
+                .global
+                .fixable
+                .merge_override(cli.fixable.value.clone(), ConfigSource::Cli, None, None);
+            sourced_config
+                .global
+                .unfixable
+                .merge_override(cli.unfixable.value.clone(), ConfigSource::Cli, None, None);
             // No rule-specific CLI overrides implemented yet
         }
 
@@ -1298,6 +1345,8 @@ impl From<SourcedConfig> for Config {
             respect_gitignore: sourced.global.respect_gitignore.value,
             line_length: sourced.global.line_length.value,
             output_format: sourced.global.output_format.as_ref().map(|v| v.value.clone()),
+            fixable: sourced.global.fixable.value,
+            unfixable: sourced.global.unfixable.value,
         };
         Config { global, rules }
     }
@@ -1549,6 +1598,24 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                     .push_override(value, source, file.clone(), None);
             }
         }
+        if let Some(fixable) = rumdl_table.get("fixable")
+            && let Ok(values) = Vec::<String>::deserialize(fixable.clone())
+        {
+            let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+            fragment
+                .global
+                .fixable
+                .push_override(normalized_values, source, file.clone(), None);
+        }
+        if let Some(unfixable) = rumdl_table.get("unfixable")
+            && let Ok(values) = Vec::<String>::deserialize(unfixable.clone())
+        {
+            let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+            fragment
+                .global
+                .unfixable
+                .push_override(normalized_values, source, file.clone(), None);
+        }
 
         // --- Re-introduce special line-length handling ---
         let mut found_line_length_val: Option<toml::Value> = None;
@@ -1590,6 +1657,8 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 "line-length",
                 "output_format",
                 "output-format",
+                "fixable",
+                "unfixable",
             ]
             .contains(&norm_rule_key.as_str())
             {
@@ -1683,6 +1752,9 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         || !fragment.global.disable.value.is_empty()
         || !fragment.global.include.value.is_empty()
         || !fragment.global.exclude.value.is_empty()
+        || !fragment.global.fixable.value.is_empty()
+        || !fragment.global.unfixable.value.is_empty()
+        || fragment.global.output_format.is_some()
         || !fragment.rules.is_empty();
     if has_any { Ok(Some(fragment)) } else { Ok(None) }
 }
@@ -1814,6 +1886,46 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                     } else {
                         log::warn!(
                             "[WARN] Expected string for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "fixable" => {
+                    if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
+                        let values: Vec<String> = formatted_array
+                            .iter()
+                            .filter_map(|item| item.as_str())
+                            .map(normalize_key)
+                            .collect();
+                        fragment
+                            .global
+                            .fixable
+                            .push_override(values, source, file.clone(), None);
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected array for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "unfixable" => {
+                    if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
+                        let values: Vec<String> = formatted_array
+                            .iter()
+                            .filter_map(|item| item.as_str())
+                            .map(normalize_key)
+                            .collect();
+                        fragment
+                            .global
+                            .unfixable
+                            .push_override(values, source, file.clone(), None);
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected array for global key '{}' in {}, found {}",
                             key,
                             path,
                             value_item.type_name()

@@ -7,11 +7,14 @@ fn create_test_file() -> (tempfile::TempDir, std::path::PathBuf) {
     let temp_dir = tempdir().unwrap();
     let test_file = temp_dir.path().join("test.md");
 
-    let content = r#"# Test Heading
-Content with trailing space 
+    let content = format!(
+        r#"# Test Heading
+Content with trailing space{}
 ## Second heading
 More content
-"#;
+"#,
+        "   " // Add trailing spaces programmatically to trigger MD009
+    );
 
     fs::write(&test_file, content).unwrap();
     (temp_dir, test_file)
@@ -70,7 +73,8 @@ fn test_grouped_output_format() {
         .stdout(predicate::str::contains("MD022:"))
         .stdout(predicate::str::contains("MD009:"))
         .stdout(predicate::str::contains("1:1 Expected"))
-        .stdout(predicate::str::contains("2:28 Trailing"));
+        .stdout(predicate::str::contains("2:28"))
+        .stdout(predicate::str::contains("trailing spaces"));
 }
 
 #[test]
@@ -225,9 +229,7 @@ fn test_output_format_with_fix_mode() {
     let test_file = temp_dir.path().join("test.md");
 
     // Create content with fixable issues
-    let content = r#"# Test
-Content with trailing space 
-"#;
+    let content = "# Test\nContent with trailing space   \n";
 
     fs::write(&test_file, content).unwrap();
 

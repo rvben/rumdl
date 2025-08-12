@@ -2044,6 +2044,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
                         quiet,
                         &output_format,
                         &output_writer,
+                        &config,
                     )
                 })
                 .collect();
@@ -2098,6 +2099,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
                         quiet,
                         &output_format,
                         &output_writer,
+                        &config,
                     );
 
                 total_files_processed += 1;
@@ -2354,6 +2356,7 @@ fn print_statistics(warnings: &[rumdl::rule::LintWarning]) {
 }
 
 // Process file with output formatter
+#[allow(clippy::too_many_arguments)]
 fn process_file_with_formatter(
     file_path: &str,
     rules: &[Box<dyn Rule>],
@@ -2362,6 +2365,7 @@ fn process_file_with_formatter(
     quiet: bool,
     output_format: &rumdl::output::OutputFormat,
     output_writer: &rumdl::output::OutputWriter,
+    config: &rumdl_config::Config,
 ) -> (bool, usize, usize, usize, Vec<rumdl::rule::LintWarning>) {
     let formatter = output_format.create_formatter();
 
@@ -2387,7 +2391,7 @@ fn process_file_with_formatter(
     // Fix issues if requested
     let mut warnings_fixed = 0;
     if _fix {
-        warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, file_path, quiet);
+        warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, file_path, quiet, config);
 
         // In fix mode, show warnings with [fixed] for issues that were fixed
         if !quiet {
@@ -2528,6 +2532,7 @@ fn apply_fixes(
     content: &mut String,
     file_path: &str,
     quiet: bool,
+    config: &rumdl_config::Config,
 ) -> usize {
     let mut warnings_fixed = 0;
 
@@ -2549,6 +2554,26 @@ fn apply_fixes(
             });
 
             if has_non_disabled_warnings {
+                // Check fixable/unfixable configuration
+                let rule_name = rule.name();
+
+                // If unfixable list contains this rule, skip fixing
+                if config
+                    .global
+                    .unfixable
+                    .iter()
+                    .any(|r| r.eq_ignore_ascii_case(rule_name))
+                {
+                    continue;
+                }
+
+                // If fixable list is specified and doesn't contain this rule, skip fixing
+                if !config.global.fixable.is_empty()
+                    && !config.global.fixable.iter().any(|r| r.eq_ignore_ascii_case(rule_name))
+                {
+                    continue;
+                }
+
                 let ctx = LintContext::new(content);
                 match rule.fix(&ctx) {
                     Ok(fixed_content) => {

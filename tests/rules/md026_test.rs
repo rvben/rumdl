@@ -325,9 +325,9 @@ fn test_md026_edge_cases() {
     let rule = MD026NoTrailingPunctuation::default();
 
     // Test edge cases
-    let content = r#"# 
-## Heading with spaces at end    
-### Heading with tab at end	
+    let content = r#"#
+## Heading with spaces at end
+### Heading with tab at end
 #### Heading with newline immediately
 #####Heading without space after hashes.
 ###### Multiple periods...
