@@ -399,6 +399,22 @@ impl MD051LinkFragments {
                 return false;
             }
 
+            // Check for Liquid syntax used by Jekyll and other static site generators
+            // Liquid tags: {% ... %} for control flow and includes
+            // Liquid variables: {{ ... }} for outputting values
+            // These are template directives that reference external content and should be skipped
+            // We check for proper bracket order to avoid false positives
+            if let Some(tag_start) = path_part.find("{%")
+                && path_part[tag_start + 2..].contains("%}")
+            {
+                return true;
+            }
+            if let Some(var_start) = path_part.find("{{")
+                && path_part[var_start + 2..].contains("}}")
+            {
+                return true;
+            }
+
             // Check if it looks like a file path:
             // - Contains a file extension (dot followed by letters)
             // - Contains path separators
@@ -749,5 +765,174 @@ mod tests {
         // Only the second link should trigger a warning
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("#testwithunderscores"));
+    }
+
+    #[test]
+    fn test_liquid_tags_ignored() {
+        let rule = MD051LinkFragments::new();
+
+        // Test various Liquid tag patterns with fragments (commonly used by Jekyll)
+        let content = r#"# Test Liquid Tag Links
+
+## CVE-2022-0811
+
+This is a heading that exists.
+
+## Some Anchor
+
+Another heading.
+
+## Technical Details
+
+More content here.
+
+### Testing Liquid cross-file links
+
+[Liquid post_url link]({% post_url 2023-03-25-htb-vessel %}#cve-2022-0811)
+[Another Liquid link]({% post_url 2023-09-09-htb-pikatwoo %}#some-anchor)
+[Third Liquid link]({% post_url 2024-01-15-some-post %}#technical-details)
+
+### Testing Liquid include with fragment
+
+[Liquid include link]({% include file.html %}#section)
+
+### Testing other liquid tags
+
+[Liquid link tag]({% link _posts/2023-01-01-post.md %}#heading)
+[Liquid variable]({{ site.url }}/page#fragment)
+
+### Regular links that should still be validated
+
+[Valid internal link](#some-anchor)
+[Invalid internal link](#non-existent-anchor)
+"#;
+
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the invalid internal link should trigger a warning
+        // All Liquid tag links should be ignored
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only have one warning for the invalid internal link"
+        );
+        assert!(
+            result[0].message.contains("#non-existent-anchor"),
+            "Warning should be for the non-existent anchor, not Liquid tag links"
+        );
+    }
+
+    #[test]
+    fn test_liquid_variables_ignored() {
+        let rule = MD051LinkFragments::new();
+
+        // Test Liquid variable patterns ({{ }}) with fragments
+        let content = r#"# Test Liquid Variables
+
+## Valid Section
+
+This section exists.
+
+## Links with Liquid Variables
+
+These should NOT be flagged as invalid:
+
+- [Site URL]({{ site.url }}/page#anchor)
+- [Page URL]({{ page.url }}#fragment)
+- [Base URL]({{ site.baseurl }}/docs#section)
+- [Variable Path]({{ post.url }}#heading)
+"#;
+
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // No errors should be found for Liquid variable links
+        assert_eq!(result.len(), 0, "Liquid variable links should not be flagged");
+    }
+
+    #[test]
+    fn test_liquid_post_url_regression() {
+        // Specific test for the regression reported in issue #39 comments
+        let rule = MD051LinkFragments::new();
+        let content = r#"# Post Title
+
+This is very similar to what I did on [Vessel]({% post_url 2023-03-25-htb-vessel %}#cve-2022-0811), though through Kubernetes this time.
+
+## Some Section
+
+Content here.
+"#;
+
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have no warnings - Liquid tag link should be ignored
+        assert_eq!(
+            result.len(),
+            0,
+            "Liquid post_url tags should not trigger MD051 warnings"
+        );
+    }
+
+    #[test]
+    fn test_mixed_liquid_and_regular_links() {
+        let rule = MD051LinkFragments::new();
+        let content = r#"# Mixed Links Test
+
+## Valid Section
+
+Some content.
+
+## Another Section
+
+More content.
+
+### Links
+
+[Liquid tag link]({% post_url 2023-01-01-post %}#section) - should be ignored
+[Valid link](#valid-section) - should pass
+[Invalid link](#invalid-section) - should fail
+[Another Liquid tag]({% include file.md %}#part) - should be ignored
+[Cross-file](other.md#heading) - should be ignored (cross-file)
+"#;
+
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the invalid internal link should fail
+        assert_eq!(result.len(), 1, "Should only warn about the invalid internal link");
+        assert!(result[0].message.contains("#invalid-section"));
+    }
+
+    #[test]
+    fn test_liquid_syntax_detection() {
+        // Test Liquid tags ({% %})
+        assert!(MD051LinkFragments::is_cross_file_link(
+            "{% post_url 2023-03-25-htb-vessel %}#cve-2022-0811"
+        ));
+        assert!(MD051LinkFragments::is_cross_file_link(
+            "{% link _posts/2023-03-25-post.md %}#section"
+        ));
+        assert!(MD051LinkFragments::is_cross_file_link(
+            "{% include anchor.html %}#fragment"
+        ));
+
+        // Test Liquid variables ({{ }})
+        assert!(MD051LinkFragments::is_cross_file_link("{{ site.url }}/page#anchor"));
+        assert!(MD051LinkFragments::is_cross_file_link("{{ page.url }}#fragment"));
+        assert!(MD051LinkFragments::is_cross_file_link(
+            "{{ site.baseurl }}/docs#section"
+        ));
+        assert!(MD051LinkFragments::is_cross_file_link("{{ post.url }}#heading"));
+
+        // Regular fragments should not be detected as Liquid
+        assert!(!MD051LinkFragments::is_cross_file_link("#regular-fragment"));
+
+        // Malformed or reversed brackets should not be detected as Liquid
+        assert!(!MD051LinkFragments::is_cross_file_link("%}{%#fragment"));
+        assert!(!MD051LinkFragments::is_cross_file_link("}}{{#fragment"));
+        assert!(!MD051LinkFragments::is_cross_file_link("%}some{%#fragment"));
+        assert!(!MD051LinkFragments::is_cross_file_link("}}text{{#fragment"));
     }
 }
