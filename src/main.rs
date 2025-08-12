@@ -90,18 +90,14 @@ fn load_config_with_cli_error_handling_with_dir(
 }
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None, arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 
     /// Control colored output: auto, always, never
     #[arg(long, global = true, default_value = "auto", value_parser = ["auto", "always", "never"], help = "Control colored output: auto, always, never")]
     color: String,
-
-    /// Legacy: allow positional paths for backwards compatibility
-    #[arg(required = false, hide = true)]
-    paths: Vec<String>,
 
     /// Path to configuration file
     #[arg(long, global = true, help = "Path to configuration file")]
@@ -114,51 +110,6 @@ struct Cli {
         help = "Ignore all configuration files and use built-in defaults"
     )]
     no_config: bool,
-
-    /// Fix issues automatically where possible
-    #[arg(short, long, default_value = "false", hide = true)]
-    _fix: bool,
-
-    /// List all available rules
-    #[arg(short, long, default_value = "false", hide = true)]
-    list_rules: bool,
-
-    /// Disable specific rules (comma-separated)
-    #[arg(short, long, hide = true)]
-    disable: Option<String>,
-
-    /// Enable only specific rules (comma-separated)
-    #[arg(short, long, hide = true)]
-    enable: Option<String>,
-
-    /// Exclude specific files or directories (comma-separated glob patterns)
-    #[arg(long, hide = true)]
-    exclude: Option<String>,
-
-    /// Include only specific files or directories (comma-separated glob patterns).
-    #[arg(long, hide = true)]
-    include: Option<String>,
-
-    /// Respect .gitignore files when scanning directories
-    #[arg(
-        long,
-        default_value = "true",
-        help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)",
-        hide = true
-    )]
-    respect_gitignore: bool,
-
-    /// Show detailed output
-    #[arg(short, long, hide = true)]
-    verbose: bool,
-
-    /// Show profiling information
-    #[arg(long, hide = true)]
-    profile: bool,
-
-    /// Quiet mode
-    #[arg(short, long, hide = true)]
-    quiet: bool,
 }
 
 #[derive(Subcommand)]
@@ -243,14 +194,14 @@ enum ConfigSubcommand {
 
 #[derive(Args, Debug)]
 struct CheckArgs {
-    /// Files or directories to lint.
-    /// If provided, these paths take precedence over include patterns.
+    /// Files or directories to lint
     #[arg(required = false)]
     paths: Vec<String>,
 
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false")]
     _fix: bool,
+    /// Files or directories to lint
 
     /// List all available rules
     #[arg(short, long, default_value = "false")]
@@ -738,7 +689,7 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
 
             println!(
                 "\n{} Found {} issues in {} {} ({}ms)",
-                "Issues:".yellow().bold(),
+                "Issues:".yellow(),
                 total_issues,
                 files_display,
                 file_text,
@@ -1075,9 +1026,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Catch panics and print a message, exit 1
     let result = std::panic::catch_unwind(|| {
-        match &cli.command {
-            Some(Commands::Init { pyproject }) => {
-                if *pyproject {
+        match cli.command {
+            Commands::Init { pyproject } => {
+                if pyproject {
                     // Handle pyproject.toml initialization
                     let config_content = rumdl_config::generate_pyproject_config();
 
@@ -1161,15 +1112,15 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Check(args)) => {
+            Commands::Check(args) => {
                 // If --no-config is set, skip config loading
                 if cli.no_config {
-                    run_check(args, None, cli.no_config);
+                    run_check(&args, None, cli.no_config);
                 } else {
-                    run_check(args, cli.config.as_deref(), cli.no_config);
+                    run_check(&args, cli.config.as_deref(), cli.no_config);
                 }
             }
-            Some(Commands::Rule { rule }) => {
+            Commands::Rule { rule } => {
                 use rumdl::rules::*;
                 let all_rules: Vec<Box<dyn Rule>> = vec![
                     Box::new(MD001HeadingIncrement),
@@ -1249,14 +1200,14 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Explain { rule }) => {
-                handle_explain_command(rule);
+            Commands::Explain { rule } => {
+                handle_explain_command(&rule);
             }
-            Some(Commands::Config {
+            Commands::Config {
                 subcmd,
                 defaults,
                 output,
-            }) => {
+            } => {
                 // Handle config subcommands
                 if let Some(ConfigSubcommand::Get { key }) = subcmd {
                     if let Some((section_part, field_part)) = key.split_once('.') {
@@ -1437,7 +1388,7 @@ build-backend = \"setuptools.build_meta\"
                     // --- CONFIG VALIDATION --- (Duplicated from original position, needs to run for display)
                     let all_rules_reg = rumdl::rules::all_rules(&rumdl_config::Config::default()); // Rename to avoid conflict
                     let registry_reg = rumdl_config::RuleRegistry::from_rules(&all_rules_reg);
-                    let sourced_reg = if *defaults {
+                    let sourced_reg = if defaults {
                         // For defaults, create a SourcedConfig that includes all rule defaults
                         let mut default_sourced = rumdl_config::SourcedConfig::default();
 
@@ -1477,7 +1428,7 @@ build-backend = \"setuptools.build_meta\"
 
                     // If --output toml is set, print as valid TOML
                     if output.as_deref() == Some("toml") {
-                        if *defaults {
+                        if defaults {
                             // For defaults with TOML output, generate a complete default config
                             let mut default_config = rumdl_config::Config::default();
 
@@ -1514,9 +1465,9 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Server { port, stdio, verbose }) => {
+            Commands::Server { port, stdio, verbose } => {
                 // Setup logging for the LSP server
-                if *verbose {
+                if verbose {
                     env_logger::Builder::from_default_env()
                         .filter_level(log::LevelFilter::Debug)
                         .init();
@@ -1532,7 +1483,7 @@ build-backend = \"setuptools.build_meta\"
                 runtime.block_on(async {
                     if let Some(port) = port {
                         // TCP mode for debugging
-                        if let Err(e) = rumdl::lsp::start_tcp_server(*port).await {
+                        if let Err(e) = rumdl::lsp::start_tcp_server(port).await {
                             eprintln!("Failed to start LSP server on port {port}: {e}");
                             exit::tool_error();
                         }
@@ -1547,16 +1498,16 @@ build-backend = \"setuptools.build_meta\"
                     }
                 });
             }
-            Some(Commands::Import {
+            Commands::Import {
                 file,
                 output,
                 format,
                 dry_run,
-            }) => {
+            } => {
                 use rumdl::markdownlint_config;
 
                 // Load the markdownlint config file
-                let ml_config = match markdownlint_config::load_markdownlint_config(file) {
+                let ml_config = match markdownlint_config::load_markdownlint_config(&file) {
                     Ok(config) => config,
                     Err(e) => {
                         eprintln!("{}: {}", "Import error".red().bold(), e);
@@ -1565,7 +1516,7 @@ build-backend = \"setuptools.build_meta\"
                 };
 
                 // Convert to rumdl config format
-                let fragment = ml_config.map_to_sourced_rumdl_config_fragment(Some(file));
+                let fragment = ml_config.map_to_sourced_rumdl_config_fragment(Some(&file));
 
                 // Generate the output
                 let output_content = match format.as_str() {
@@ -1754,7 +1705,7 @@ build-backend = \"setuptools.build_meta\"
                     }
                 };
 
-                if *dry_run {
+                if dry_run {
                     // Just print the converted config
                     println!("{output_content}");
                 } else {
@@ -1782,9 +1733,9 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Vscode { force, update, status }) => {
+            Commands::Vscode { force, update, status } => {
                 // Handle VS Code extension installation
-                match rumdl::vscode::handle_vscode_command(*force, *update, *status) {
+                match rumdl::vscode::handle_vscode_command(force, update, status) {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("{}: {}", "Error".red().bold(), e);
@@ -1792,46 +1743,9 @@ build-backend = \"setuptools.build_meta\"
                     }
                 }
             }
-            Some(Commands::Version) => {
+            Commands::Version => {
                 // Use clap's version info
                 println!("rumdl {}", env!("CARGO_PKG_VERSION"));
-            }
-            None => {
-                // Legacy: rumdl . or rumdl [PATHS...]
-                if !cli.paths.is_empty() {
-                    let args = CheckArgs {
-                        paths: cli.paths.clone(),
-                        _fix: cli._fix,
-                        list_rules: cli.list_rules,
-                        disable: cli.disable.clone(),
-                        enable: cli.enable.clone(),
-                        extend_enable: None,
-                        extend_disable: None,
-                        exclude: cli.exclude.clone(),
-                        include: cli.include.clone(),
-                        respect_gitignore: cli.respect_gitignore,
-                        verbose: cli.verbose,
-                        profile: cli.profile,
-                        statistics: false, // Default to false for legacy mode
-                        quiet: cli.quiet,
-                        output: "text".to_string(),
-                        output_format: None,
-                        stdin: false,
-                        stderr: false,
-                        silent: false,
-                    };
-                    eprintln!(
-                        "{}: Deprecation warning: Running 'rumdl .' or 'rumdl [PATHS...]' without a subcommand is deprecated and will be removed in a future release. Please use 'rumdl check .' instead.",
-                        "[rumdl]".yellow().bold()
-                    );
-                    run_check(&args, cli.config.as_deref(), cli.no_config);
-                } else {
-                    eprintln!(
-                        "{}: No files or directories specified. Please provide at least one path to lint.",
-                        "Error".red().bold()
-                    );
-                    exit::tool_error();
-                }
             }
         }
     });
@@ -2496,12 +2410,22 @@ fn process_file_with_formatter(
                     });
 
                 let rule_name = warning.rule_name.unwrap_or("unknown");
-                let fix_indicator = if was_fixed { " [fixed]" } else { "" };
+                let fix_indicator = if was_fixed {
+                    " [fixed]".green().to_string()
+                } else {
+                    String::new()
+                };
 
                 // Format: file:line:column: [rule] message [fixed/*/]
+                // Use colors similar to TextFormatter
                 let line = format!(
-                    "{}:{}:{}: [{:5}] {}{}",
-                    file_path, warning.line, warning.column, rule_name, warning.message, fix_indicator
+                    "{}:{}:{}: {} {}{}",
+                    file_path.blue().underline(),
+                    warning.line.to_string().cyan(),
+                    warning.column.to_string().cyan(),
+                    format!("[{rule_name:5}]").yellow(),
+                    warning.message,
+                    fix_indicator
                 );
 
                 output.push_str(&line);
@@ -2638,7 +2562,7 @@ fn apply_fixes(
                         if !quiet {
                             eprintln!(
                                 "{} Failed to apply fix for rule {}: {}",
-                                "Warning:".yellow().bold(),
+                                "Warning:".yellow(),
                                 rule.name(),
                                 err
                             );
