@@ -101,6 +101,11 @@ test-push:
 test-ci:
 	cargo nextest run --profile ci
 
+test-performance:
+	@echo "Running performance tests (this may take a few minutes)..."
+	@echo "Tests run serially to reduce noise - be patient!"
+	cargo nextest run --profile performance
+
 clean:
 	cargo clean
 

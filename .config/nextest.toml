@@ -22,6 +22,10 @@ status-level = "pass"
 
 [profile.ci]
 
+# Skip performance tests in CI (they're flaky due to resource variability)
+# Exclude specific integration test binaries and performance-related test functions
+default-filter = 'not (package(rumdl) and binary(deeply_nested_lists_performance_test)) and not (package(rumdl) and binary(performance_validation_tests)) and not (package(rumdl) and binary(perf_check)) and not test(/performance|benchmark/)'
+
 # More conservative in CI
 test-threads = "num-cpus"
 
@@ -80,3 +84,23 @@ retries = 0
 
 # Fail fast on first failure
 fail-fast = true
+
+# Performance testing profile - for scheduled/manual runs
+[profile.performance]
+
+# Only run performance and benchmark tests
+default-filter = 'test(performance) or test(benchmark) or test(deeply_nested)'
+
+# Run tests serially to reduce noise
+test-threads = 1
+
+# Show detailed output
+failure-output = "immediate"
+success-output = "immediate"
+status-level = "all"
+
+# Allow retries for flaky tests
+retries = { backoff = "exponential", count = 3, delay = "1s", max-delay = "10s" }
+
+# Don't fail fast - run all performance tests
+fail-fast = false

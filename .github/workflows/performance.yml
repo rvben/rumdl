@@ -1,0 +1,55 @@
+name: Performance Tests
+
+on:
+  # Run weekly on Sunday at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * 0'
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: 'Run with verbose output'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  performance:
+    name: Run Performance Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          experimental: true
+
+      - name: Install mise tools
+        run: mise install
+
+      - name: Install Rust components
+        run: |
+          rustup component add rustfmt
+          rustup component add clippy
+          cargo install cargo-nextest
+
+      - name: Run performance tests
+        run: |
+          cargo nextest run --profile performance
+        env:
+          RUST_BACKTRACE: 1
+          RUST_LOG: ${{ inputs.verbose == 'true' && 'debug' || 'warn' }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-test-results
+          path: |
+            target/nextest/default/*.xml
+            target/nextest/performance/*.xml
+          retention-days: 30
