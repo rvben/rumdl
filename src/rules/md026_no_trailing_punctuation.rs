@@ -190,20 +190,17 @@ impl MD026NoTrailingPunctuation {
     // Optimized ATX heading fix using unified regex
     #[inline]
     fn fix_atx_heading(&self, line: &str, re: &Regex) -> String {
+        // Check if the full line has a Kramdown header ID
+        if has_header_id(line) {
+            // Return the line unchanged
+            return line.to_string();
+        }
+
         if let Some(captures) = ATX_HEADING_UNIFIED.captures(line) {
             let indentation = captures.get(1).unwrap().as_str();
             let hashes = captures.get(2).unwrap().as_str();
             let space = captures.get(3).unwrap().as_str();
             let content = captures.get(4).unwrap().as_str();
-
-            // If content has a valid Kramdown header ID, don't fix it
-            if has_header_id(content) {
-                // Return the line unchanged
-                if let Some(trailing) = captures.get(5) {
-                    return format!("{}{}{}{}{}", indentation, hashes, space, content, trailing.as_str());
-                }
-                return format!("{indentation}{hashes}{space}{content}");
-            }
 
             // Otherwise, remove trailing punctuation
             let fixed_content = self.remove_trailing_punctuation(content, re);
@@ -308,11 +305,14 @@ impl Rule for MD026NoTrailingPunctuation {
                     continue;
                 }
 
-                // For headers with potential Kramdown syntax, we need to be more careful
-                let text_to_check = if has_header_id(&heading.text) {
+                // Check if the full line has a Kramdown header ID
+                if has_header_id(&line_info.content) {
                     // Valid Kramdown ID - skip this header entirely
                     continue;
-                } else if heading.text.contains("{") && heading.text.trim().ends_with("}") {
+                }
+
+                // For headers with potential Kramdown syntax, we need to be more careful
+                let text_to_check = if heading.text.contains("{") && heading.text.trim().ends_with("}") {
                     // Has curly braces but not a valid Kramdown ID
                     // Check for punctuation before the opening brace
                     if let Some(brace_pos) = heading.text.rfind('{') {
@@ -413,11 +413,14 @@ impl Rule for MD026NoTrailingPunctuation {
                     continue;
                 }
 
-                // Handle headers with potential Kramdown syntax
-                let text_to_check = if has_header_id(&heading.text) {
+                // Check if the full line has a Kramdown header ID
+                if has_header_id(&line_info.content) {
                     // Valid Kramdown ID - skip this header entirely
                     continue;
-                } else if heading.text.contains("{") && heading.text.trim().ends_with("}") {
+                }
+
+                // Handle headers with potential Kramdown syntax
+                let text_to_check = if heading.text.contains("{") && heading.text.trim().ends_with("}") {
                     // Has curly braces but not a valid Kramdown ID
                     // Check for punctuation before the opening brace
                     if let Some(brace_pos) = heading.text.rfind('{') {

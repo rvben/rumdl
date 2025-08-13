@@ -11,7 +11,9 @@ lazy_static! {
     static ref SPAN_IAL_PATTERN: Regex = Regex::new(r"\{[:\.#][^}]*\}$").unwrap();
 
     /// Pattern for Kramdown header IDs: # Header {#custom-id}
-    static ref HEADER_ID_PATTERN: Regex = Regex::new(r"\s*\{#[a-zA-Z][\w\-:.]*\}\s*$").unwrap();
+    /// Permissive but safe: Unicode letters/numbers, hyphens, underscores, colons (Kramdown allows)
+    /// Rejects: spaces, quotes, brackets, HTML/CSS special chars
+    static ref HEADER_ID_PATTERN: Regex = Regex::new(r"\s*\{#[\w\-:]+\}\s*$").unwrap();
 
     /// Pattern for Kramdown extensions opening: {::comment}, {::nomarkdown}, etc.
     static ref EXTENSION_OPEN_PATTERN: Regex = Regex::new(r"^\s*\{::([a-z]+)(?:\s+[^}]*)?\}\s*$").unwrap();
@@ -112,6 +114,41 @@ pub fn has_header_id(line: &str) -> bool {
 /// Remove header ID from a heading line if present
 pub fn remove_header_id(line: &str) -> String {
     HEADER_ID_PATTERN.replace(line, "").to_string()
+}
+
+/// Extract custom header ID from a heading line
+/// Returns a tuple of (clean_text, Option<custom_id>)
+///
+/// # Examples
+/// ```
+/// use rumdl::utils::kramdown_utils::extract_header_id;
+///
+/// let (text, id) = extract_header_id("## Header {#custom-id}");
+/// assert_eq!(text, "## Header");
+/// assert_eq!(id, Some("custom-id".to_string()));
+///
+/// let (text, id) = extract_header_id("## Normal Header");
+/// assert_eq!(text, "## Normal Header");
+/// assert_eq!(id, None);
+/// ```
+pub fn extract_header_id(line: &str) -> (String, Option<String>) {
+    if let Some(captures) = HEADER_ID_PATTERN.captures(line)
+        && let Some(id_match) = captures.get(0)
+    {
+        // Extract the clean text without the ID
+        let clean_text = line[..id_match.start()].trim_end().to_string();
+
+        // Extract the ID from {#custom-id} format
+        let id_str = id_match.as_str().trim();
+        let id = id_str
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .trim_start_matches('#')
+            .to_string();
+
+        return (clean_text, Some(id));
+    }
+    (line.to_string(), None)
 }
 
 /// Check if a line is a Kramdown extension opening tag

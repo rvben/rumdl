@@ -197,8 +197,12 @@ pub struct HeadingInfo {
     pub marker_column: usize,
     /// Column where heading text starts
     pub content_column: usize,
-    /// The heading text (without markers)
+    /// The heading text (without markers and without custom ID syntax)
     pub text: String,
+    /// Custom header ID if present (e.g., from {#custom-id} syntax)
+    pub custom_id: Option<String>,
+    /// Original heading text including custom ID syntax
+    pub raw_text: String,
     /// Whether it has a closing sequence (for ATX)
     pub has_closing_sequence: bool,
     /// The closing sequence if present
@@ -1118,13 +1122,19 @@ impl<'a> LintContext<'a> {
 
                 let content_column = marker_column + hashes.len() + spaces_after.len();
 
+                // Extract custom header ID if present
+                let raw_text = text.trim().to_string();
+                let (clean_text, custom_id) = crate::utils::kramdown_utils::extract_header_id(&raw_text);
+
                 lines[i].heading = Some(HeadingInfo {
                     level,
                     style: HeadingStyle::ATX,
                     marker: hashes.to_string(),
                     marker_column,
                     content_column,
-                    text: text.trim().to_string(),
+                    text: clean_text,
+                    custom_id,
+                    raw_text,
                     has_closing_sequence: has_closing,
                     closing_sequence: closing_seq,
                 });
@@ -1146,13 +1156,19 @@ impl<'a> LintContext<'a> {
                         HeadingStyle::Setext2
                     };
 
+                    // Extract custom header ID if present
+                    let raw_text = line.trim().to_string();
+                    let (clean_text, custom_id) = crate::utils::kramdown_utils::extract_header_id(&raw_text);
+
                     lines[i].heading = Some(HeadingInfo {
                         level,
                         style,
                         marker: underline.to_string(),
                         marker_column: next_line.len() - next_line.trim_start().len(),
                         content_column: lines[i].indent,
-                        text: line.trim().to_string(),
+                        text: clean_text,
+                        custom_id,
+                        raw_text,
                         has_closing_sequence: false,
                         closing_sequence: String::new(),
                     });

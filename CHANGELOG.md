@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.116] - 2025-08-13
+
+### Added
+- Kramdown-style custom header IDs support (#44)
+  - Headers can now have custom IDs using the `{#custom-id}` syntax
+  - Custom IDs are preserved when fixing MD051 (link fragments)
+  - MD026 (trailing punctuation) now ignores headers with custom IDs
+  - Safe character validation: accepts Unicode letters/numbers, hyphens, underscores, and colons
+  - Rejects problematic characters like spaces, quotes, brackets, and HTML/CSS special chars
+
+### Fixed
+- Pre-release script now correctly handles dynamic versioning in pyproject.toml
+- Added Cargo.lock validation and `cargo publish --dry-run` checks to prevent release failures
+
 ## [0.0.115] - 2025-08-12
 
 ## [0.0.114] - 2025-08-09
@@ -310,7 +324,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.115...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.116...HEAD
+[0.0.116]: https://github.com/rvben/rumdl/compare/v0.0.115...v0.0.116
 [0.0.115]: https://github.com/rvben/rumdl/compare/v0.0.114...v0.0.115
 [0.0.114]: https://github.com/rvben/rumdl/compare/v0.0.113...v0.0.114
 [0.0.113]: https://github.com/rvben/rumdl/compare/v0.0.112...v0.0.113

@@ -84,7 +84,13 @@ impl MD051LinkFragments {
                     continue;
                 }
 
-                // Generate fragment based on configured style
+                // If heading has a custom ID, add it as a valid anchor
+                if let Some(custom_id) = &heading.custom_id {
+                    headings.insert(custom_id.clone());
+                }
+
+                // ALWAYS generate the normal anchor too (for backward compatibility)
+                // This ensures both the custom ID and the generated anchor work
                 let fragment = match self.anchor_style {
                     AnchorStyle::GitHub => self.heading_to_fragment_github(&heading.text),
                     AnchorStyle::Kramdown => self.heading_to_fragment_kramdown(&heading.text),

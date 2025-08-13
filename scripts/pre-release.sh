@@ -73,15 +73,24 @@ run_check "Release build" "cargo build --release"
 echo "6. Checking documentation..."
 run_check "Documentation" "cargo doc --no-deps"
 
-# 7. Verify Cargo.toml version
+# 7. Verify Cargo.toml version (pyproject.toml uses dynamic versioning from Cargo.toml)
 echo "7. Checking version consistency..."
 CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
-PY_VERSION=$(grep '^version' pyproject.toml | head -1 | cut -d'"' -f2)
-if [ "$CARGO_VERSION" != "$PY_VERSION" ]; then
-    echo -e "${RED}Version mismatch: Cargo.toml ($CARGO_VERSION) vs pyproject.toml ($PY_VERSION)${NC}"
-    FAILED=1
+# pyproject.toml uses dynamic = ["version"] to read from Cargo.toml
+if grep -q 'dynamic = \["version"\]' pyproject.toml; then
+    echo -e "${GREEN}✓${NC} Version $CARGO_VERSION (pyproject.toml uses dynamic versioning)"
 else
-    echo -e "${GREEN}✓${NC} Version $CARGO_VERSION is consistent"
+    # Fallback: check if there's a static version in pyproject.toml
+    PY_VERSION=$(grep '^version' pyproject.toml | head -1 | cut -d'"' -f2)
+    if [ -z "$PY_VERSION" ]; then
+        echo -e "${YELLOW}⚠${NC} pyproject.toml should use dynamic = [\"version\"] for version"
+        # Not a failure, just a warning
+    elif [ "$CARGO_VERSION" != "$PY_VERSION" ]; then
+        echo -e "${RED}Version mismatch: Cargo.toml ($CARGO_VERSION) vs pyproject.toml ($PY_VERSION)${NC}"
+        FAILED=1
+    else
+        echo -e "${GREEN}✓${NC} Version $CARGO_VERSION is consistent"
+    fi
 fi
 
 # 8. Check for uncommitted changes
@@ -110,6 +119,20 @@ if git tag -l | grep -q "^$TAG_VERSION$"; then
 else
     echo -e "${GREEN}✓${NC} Tag $TAG_VERSION is available"
 fi
+
+# 11. Verify Cargo.lock is up to date
+echo "11. Verifying Cargo.lock is up to date..."
+if cargo update --workspace --dry-run 2>&1 | grep -q "Updating"; then
+    echo -e "${RED}✗ Cargo.lock needs updating${NC}"
+    echo "   Run: cargo update --workspace"
+    FAILED=1
+else
+    echo -e "${GREEN}✓${NC} Cargo.lock is up to date"
+fi
+
+# 12. Test cargo publish with --dry-run
+echo "12. Testing cargo publish (dry run)..."
+run_check "Cargo publish dry-run" "cargo publish --dry-run --locked"
 
 echo ""
 echo "====================================="
