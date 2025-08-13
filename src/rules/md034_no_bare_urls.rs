@@ -57,9 +57,6 @@ lazy_static! {
     // Updated to support IPv6 addresses
     static ref REFERENCE_DEF_RE: Regex = Regex::new(r"^\s*\[[^\]]+\]:\s*(?:https?|ftps?)://\S+$").unwrap();
 
-    // Pattern to match URLs inside HTML attributes (src, href, srcset, etc.)
-    static ref HTML_ATTRIBUTE_URL: Regex = Regex::new(r#"(?:src|href|srcset|content|data-\w+)\s*=\s*["']([^"']*)["']"#).unwrap();
-
     // Pattern to match HTML comments
     static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r#"<!--[\s\S]*?-->"#).unwrap();
 }
@@ -114,14 +111,18 @@ impl MD034NoBareUrls {
         // First, find all markdown link ranges across the entire content
         let mut excluded_ranges: Vec<(usize, usize)> = Vec::new();
 
-        // Markdown links: [text](url) - handle multi-line
+        // Markdown links: [text](url) - exclude both destination and entire link text
         for cap in MARKDOWN_LINK_PATTERN.captures_iter(content) {
             if let Some(dest) = cap.get(1) {
                 excluded_ranges.push((dest.start(), dest.end()));
             }
+            // Also exclude the entire link to handle URLs in link text
+            if let Some(full_match) = cap.get(0) {
+                excluded_ranges.push((full_match.start(), full_match.end()));
+            }
         }
 
-        // Markdown images: ![alt](url) - handle multi-line
+        // Markdown images: ![alt](url)
         for cap in MARKDOWN_IMAGE_PATTERN.captures_iter(content) {
             if let Some(dest) = cap.get(2) {
                 excluded_ranges.push((dest.start(), dest.end()));
@@ -135,11 +136,9 @@ impl MD034NoBareUrls {
             }
         }
 
-        // HTML attribute URLs: src="url", href="url", etc.
-        for cap in HTML_ATTRIBUTE_URL.captures_iter(content) {
-            if let Some(url_attr) = cap.get(1) {
-                excluded_ranges.push((url_attr.start(), url_attr.end()));
-            }
+        // HTML tags: exclude everything inside them
+        for html_tag in ctx.html_tags().iter() {
+            excluded_ranges.push((html_tag.byte_offset, html_tag.byte_end));
         }
 
         // HTML comments: <!-- url -->

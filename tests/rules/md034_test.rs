@@ -558,6 +558,47 @@ fn test_multiline_markdown_links_not_flagged() {
 }
 
 #[test]
+fn test_issue_48_url_in_link_text() {
+    // Issue #48: URL within link text should not be flagged as a bare URL
+    let rule = MD034NoBareUrls;
+    let content = "Also don't forget that the next time you need to figure out which `datetime` format you need, **[use the strptime tool at https://pym.dev/strptime](https://www.pythonmorsels.com/strptime/)**!";
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // The URL https://pym.dev/strptime is part of the link text and should NOT be flagged
+    assert!(
+        result.is_empty() || result.iter().all(|w| !w.message.contains("URL")),
+        "URL within link text should not be flagged as bare URL. Found {} warnings: {:#?}",
+        result.len(),
+        result
+    );
+}
+
+#[test]
+fn test_issue_47_urls_emails_in_html_attributes() {
+    // Issue #47: Email addresses and URLs in HTML attributes should not be flagged
+    let rule = MD034NoBareUrls;
+    let content = r#"# Example
+
+This is **some text**.
+
+<input type="email" name="fields[email]" id="drip-email" placeholder="email@domain.com">
+<input name="fields[url]" value="https://www.example.com">"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Neither the email in placeholder nor the URL in value should be flagged
+    assert!(
+        result.is_empty(),
+        "Emails and URLs within HTML attributes should not be flagged. Found {} warnings: {:#?}",
+        result.len(),
+        result
+    );
+}
+
+#[test]
 fn test_mixed_multiline_links_and_bare_urls() {
     let rule = MD034NoBareUrls;
     // Test content with both multi-line markdown links (should not be flagged) and bare URLs (should be flagged)
