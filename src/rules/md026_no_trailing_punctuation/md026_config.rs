@@ -1,6 +1,11 @@
 use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
+/// Default punctuation to check for MD026
+/// Matches markdownlint's default: ".,;:!。，；：！"
+/// We only include ASCII punctuation for now
+pub const DEFAULT_PUNCTUATION: &str = ".,;:!";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD026Config {
     #[serde(default = "default_punctuation")]
@@ -16,7 +21,7 @@ impl Default for MD026Config {
 }
 
 fn default_punctuation() -> String {
-    ".,;".to_string()
+    DEFAULT_PUNCTUATION.to_string()
 }
 
 impl RuleConfig for MD026Config {

@@ -2,7 +2,6 @@
 ///
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::kramdown_utils::has_header_id;
 use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -11,14 +10,14 @@ use std::ops::Range;
 use std::sync::RwLock;
 
 mod md026_config;
-use md026_config::MD026Config;
+use md026_config::{DEFAULT_PUNCTUATION, MD026Config};
 
 lazy_static! {
     // Optimized single regex for all ATX heading types (normal, closed, indented 1-3 spaces)
     static ref ATX_HEADING_UNIFIED: Regex = Regex::new(r"^( {0,3})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
 
-    // Fast check patterns for early returns - more restrictive
-    static ref QUICK_PUNCTUATION_CHECK: Regex = Regex::new(r"[.,;]").unwrap();
+    // Fast check patterns for early returns - match defaults
+    static ref QUICK_PUNCTUATION_CHECK: Regex = Regex::new(&format!(r"[{}]", regex::escape(DEFAULT_PUNCTUATION))).unwrap();
 
     // Regex cache for punctuation patterns
     static ref PUNCTUATION_REGEX_CACHE: RwLock<HashMap<String, Regex>> = RwLock::new(HashMap::new());
@@ -34,7 +33,7 @@ impl MD026NoTrailingPunctuation {
     pub fn new(punctuation: Option<String>) -> Self {
         Self {
             config: MD026Config {
-                punctuation: punctuation.unwrap_or_else(|| ".,;".to_string()), // More restrictive by default
+                punctuation: punctuation.unwrap_or_else(|| DEFAULT_PUNCTUATION.to_string()),
             },
         }
     }
@@ -68,16 +67,6 @@ impl MD026NoTrailingPunctuation {
     #[inline]
     fn has_trailing_punctuation(&self, text: &str, re: &Regex) -> bool {
         let trimmed = text.trim();
-
-        // Only apply lenient rules for the default punctuation setting
-        // When users specify custom punctuation, they want strict behavior
-        if self.config.punctuation == ".,;" {
-            // Check for common legitimate punctuation patterns before applying the rule
-            if self.is_legitimate_punctuation(trimmed) {
-                return false;
-            }
-        }
-
         re.is_match(trimmed)
     }
 
@@ -102,85 +91,6 @@ impl MD026NoTrailingPunctuation {
         }
     }
 
-    /// Check if punctuation in a heading is legitimate and should be allowed
-    #[inline]
-    fn is_legitimate_punctuation(&self, text: &str) -> bool {
-        let text = text.trim();
-
-        // Allow question marks in question headings
-        if text.ends_with('?') {
-            // Check if it's likely a genuine question
-            let question_words = [
-                "what", "why", "how", "when", "where", "who", "which", "can", "should", "would", "could", "is", "are",
-                "do", "does", "did",
-            ];
-            let lower_text = text.to_lowercase();
-            if question_words.iter().any(|&word| lower_text.starts_with(word)) {
-                return true;
-            }
-        }
-
-        // Allow colons in common categorical/labeling patterns
-        if text.ends_with(':') {
-            // Common patterns that legitimately use colons
-            let colon_patterns = [
-                "faq",
-                "api",
-                "note",
-                "warning",
-                "error",
-                "info",
-                "tip",
-                "chapter",
-                "step",
-                "version",
-                "part",
-                "section",
-                "method",
-                "function",
-                "class",
-                "module",
-                "reference",
-                "guide",
-                "tutorial",
-                "example",
-                "demo",
-                "usage",
-                "syntax",
-            ];
-
-            let lower_text = text.to_lowercase();
-
-            // Check if it starts with any of these patterns
-            if colon_patterns.iter().any(|&pattern| lower_text.starts_with(pattern)) {
-                return true;
-            }
-
-            // Check for numbered items like "Step 1:", "Chapter 2:", "Version 1.0:"
-            if regex::Regex::new(r"^(step|chapter|part|section|version)\s*\d")
-                .unwrap()
-                .is_match(&lower_text)
-            {
-                return true;
-            }
-        }
-
-        // Allow exclamation marks in specific contexts (less common, but sometimes legitimate)
-        if text.ends_with('!') {
-            // Only allow for very specific patterns like "Important!", "New!", "Warning!"
-            let exclamation_patterns = ["important", "new", "warning", "alert", "notice", "attention"];
-            let lower_text = text.to_lowercase();
-            if exclamation_patterns
-                .iter()
-                .any(|&pattern| lower_text.starts_with(pattern))
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
     // Remove trailing punctuation from text
     #[inline]
     fn remove_trailing_punctuation(&self, text: &str, re: &Regex) -> String {
@@ -190,20 +100,24 @@ impl MD026NoTrailingPunctuation {
     // Optimized ATX heading fix using unified regex
     #[inline]
     fn fix_atx_heading(&self, line: &str, re: &Regex) -> String {
-        // Check if the full line has a Kramdown header ID
-        if has_header_id(line) {
-            // Return the line unchanged
-            return line.to_string();
-        }
-
         if let Some(captures) = ATX_HEADING_UNIFIED.captures(line) {
             let indentation = captures.get(1).unwrap().as_str();
             let hashes = captures.get(2).unwrap().as_str();
             let space = captures.get(3).unwrap().as_str();
             let content = captures.get(4).unwrap().as_str();
 
-            // Otherwise, remove trailing punctuation
-            let fixed_content = self.remove_trailing_punctuation(content, re);
+            // Check if content ends with a custom header ID like {#my-id}
+            // If so, we need to fix punctuation before the ID
+            let fixed_content = if let Some(id_pos) = content.rfind(" {#") {
+                // Has a custom ID - fix punctuation before it
+                let before_id = &content[..id_pos];
+                let id_part = &content[id_pos..];
+                let fixed_before = self.remove_trailing_punctuation(before_id, re);
+                format!("{fixed_before}{id_part}")
+            } else {
+                // No custom ID - just remove trailing punctuation
+                self.remove_trailing_punctuation(content, re)
+            };
 
             // Preserve any trailing hashes if present
             if let Some(trailing) = captures.get(5) {
@@ -273,7 +187,7 @@ impl Rule for MD026NoTrailingPunctuation {
 
         // Quick check for any punctuation we care about
         // For custom punctuation, we need to check differently
-        if self.config.punctuation == ".,;" {
+        if self.config.punctuation == DEFAULT_PUNCTUATION {
             if !QUICK_PUNCTUATION_CHECK.is_match(content) {
                 return Ok(Vec::new());
             }
@@ -305,25 +219,10 @@ impl Rule for MD026NoTrailingPunctuation {
                     continue;
                 }
 
-                // Check if the full line has a Kramdown header ID
-                if has_header_id(&line_info.content) {
-                    // Valid Kramdown ID - skip this header entirely
-                    continue;
-                }
-
-                // For headers with potential Kramdown syntax, we need to be more careful
-                let text_to_check = if heading.text.contains("{") && heading.text.trim().ends_with("}") {
-                    // Has curly braces but not a valid Kramdown ID
-                    // Check for punctuation before the opening brace
-                    if let Some(brace_pos) = heading.text.rfind('{') {
-                        heading.text[..brace_pos].trim().to_string()
-                    } else {
-                        heading.text.clone()
-                    }
-                } else {
-                    // Regular header without Kramdown syntax
-                    heading.text.clone()
-                };
+                // LintContext already strips Kramdown IDs from heading.text
+                // So we just check the heading text directly for trailing punctuation
+                // This correctly flags "# Heading." even if it has {#id}
+                let text_to_check = heading.text.clone();
 
                 if self.has_trailing_punctuation(&text_to_check, &re) {
                     // Find the trailing punctuation
@@ -379,7 +278,7 @@ impl Rule for MD026NoTrailingPunctuation {
 
         // Quick check for punctuation
         // For custom punctuation, we need to check differently
-        if self.config.punctuation == ".,;" {
+        if self.config.punctuation == DEFAULT_PUNCTUATION {
             if !QUICK_PUNCTUATION_CHECK.is_match(content) {
                 return Ok(content.to_string());
             }
@@ -413,25 +312,9 @@ impl Rule for MD026NoTrailingPunctuation {
                     continue;
                 }
 
-                // Check if the full line has a Kramdown header ID
-                if has_header_id(&line_info.content) {
-                    // Valid Kramdown ID - skip this header entirely
-                    continue;
-                }
-
-                // Handle headers with potential Kramdown syntax
-                let text_to_check = if heading.text.contains("{") && heading.text.trim().ends_with("}") {
-                    // Has curly braces but not a valid Kramdown ID
-                    // Check for punctuation before the opening brace
-                    if let Some(brace_pos) = heading.text.rfind('{') {
-                        heading.text[..brace_pos].trim().to_string()
-                    } else {
-                        heading.text.clone()
-                    }
-                } else {
-                    // Regular header without Kramdown syntax
-                    heading.text.clone()
-                };
+                // LintContext already strips custom header IDs from heading.text
+                // So we just check the heading text directly for trailing punctuation
+                let text_to_check = heading.text.clone();
 
                 // Check and fix trailing punctuation
                 if self.has_trailing_punctuation(&text_to_check, &re) {
@@ -547,26 +430,24 @@ mod tests {
     }
 
     #[test]
-    fn test_default_legitimate_question() {
+    fn test_question_marks_not_in_default() {
         let rule = MD026NoTrailingPunctuation::new(None);
         let content = "# What is Rust?\n# How does it work?\n# Is it fast?";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Question marks in questions should be allowed by default"
-        );
+        assert!(result.is_empty(), "Question marks are not in default punctuation list");
     }
 
     #[test]
-    fn test_legitimate_colons() {
+    fn test_colons_in_default() {
         let rule = MD026NoTrailingPunctuation::new(None);
         let content = "# FAQ:\n# API Reference:\n# Step 1:\n# Version 2.0:";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Colons in categorical headings should be allowed by default"
+        assert_eq!(
+            result.len(),
+            4,
+            "Colons are in default punctuation list and should be flagged"
         );
     }
 

@@ -7,9 +7,10 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    static ref CLOSED_ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)(#+)([^#\s].*?)([^#\s])(#+)\s*$").unwrap();
-    static ref CLOSED_ATX_NO_SPACE_START_PATTERN: Regex = Regex::new(r"^(\s*)(#+)([^#\s].*?)\s(#+)\s*$").unwrap();
-    static ref CLOSED_ATX_NO_SPACE_END_PATTERN: Regex = Regex::new(r"^(\s*)(#+)\s(.*?)([^#\s])(#+)\s*$").unwrap();
+    // Updated patterns to handle optional custom IDs like {#custom-id} after closing hashes
+    static ref CLOSED_ATX_NO_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)(#+)([^#\s].*?)([^#\s])(#+)(\s*(?:\{#[^}]+\})?\s*)$").unwrap();
+    static ref CLOSED_ATX_NO_SPACE_START_PATTERN: Regex = Regex::new(r"^(\s*)(#+)([^#\s].*?)\s(#+)(\s*(?:\{#[^}]+\})?\s*)$").unwrap();
+    static ref CLOSED_ATX_NO_SPACE_END_PATTERN: Regex = Regex::new(r"^(\s*)(#+)\s(.*?)([^#\s])(#+)(\s*(?:\{#[^}]+\})?\s*)$").unwrap();
 }
 
 #[derive(Clone)]
@@ -39,20 +40,23 @@ impl MD020NoMissingSpaceClosedAtx {
             let content = &captures[3];
             let last_char = &captures[4];
             let closing_hashes = &captures[5];
-            format!("{indentation}{opening_hashes} {content}{last_char} {closing_hashes}")
+            let custom_id = &captures[6];
+            format!("{indentation}{opening_hashes} {content}{last_char} {closing_hashes}{custom_id}")
         } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
             let content = &captures[3];
             let closing_hashes = &captures[4];
-            format!("{indentation}{opening_hashes} {content} {closing_hashes}")
+            let custom_id = &captures[5];
+            format!("{indentation}{opening_hashes} {content} {closing_hashes}{custom_id}")
         } else if let Some(captures) = CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line) {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
             let content = &captures[3];
             let last_char = &captures[4];
             let closing_hashes = &captures[5];
-            format!("{indentation}{opening_hashes} {content}{last_char} {closing_hashes}")
+            let custom_id = &captures[6];
+            format!("{indentation}{opening_hashes} {content}{last_char} {closing_hashes}{custom_id}")
         } else {
             line.to_string()
         }
@@ -79,11 +83,13 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     continue;
                 }
 
-                // Only check closed ATX headings
-                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) && heading.has_closing_sequence {
+                // Check all ATX headings (both properly closed and malformed)
+                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     let line = &line_info.content;
 
                     // Check if line matches closed ATX pattern without space
+                    // This will detect both properly closed headings with missing space
+                    // and malformed attempts at closed headings like "# Heading#"
                     if self.is_closed_atx_heading_without_space(line) {
                         let line_index = LineIndex::new(ctx.content.to_string());
                         let line_range = line_index.line_content_range(line_num + 1);
@@ -162,9 +168,8 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     continue;
                 }
 
-                // Fix closed ATX headings without space
+                // Fix ATX headings without space (both properly closed and malformed)
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
-                    && heading.has_closing_sequence
                     && self.is_closed_atx_heading_without_space(&line_info.content)
                 {
                     lines.push(self.fix_closed_atx_heading(&line_info.content));

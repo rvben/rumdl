@@ -14,35 +14,37 @@ fn test_md026_valid() {
 #[test]
 fn test_md026_invalid() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With new lenient rules: ! and ? are generally allowed, . still flagged
+    // Default punctuation is ".,;:!" so ! and . are flagged, ? is not
     let content = "# Heading 1!\n## Heading 2?\n### Heading 3.\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // Only the period should be flagged with the new lenient behavior
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 3);
+    // ! and . should be flagged, ? should not
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].line, 1); // !
+    assert_eq!(result[1].line, 3); // .
 }
 
 #[test]
 fn test_md026_mixed() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With lenient rules, exclamation marks are generally allowed
+    // Exclamation marks are now in the default punctuation list
     let content = "# Heading 1\n## Heading 2!\n### Heading 3\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // No issues expected with the new lenient behavior
-    assert_eq!(result.len(), 0);
+    // Heading 2 should be flagged for the exclamation mark
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 2);
 }
 
 #[test]
 fn test_md026_fix() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With lenient rules, only period should be fixed
+    // Default punctuation is ".,;:!" so ! and . are fixed, ? is not
     let content = "# Heading 1!\n## Heading 2?\n### Heading 3.\n";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
-    // Only the period should be removed with the new lenient behavior
-    assert_eq!(result, "# Heading 1!\n## Heading 2?\n### Heading 3\n");
+    // ! and . should be removed, ? should remain
+    assert_eq!(result, "# Heading 1\n## Heading 2?\n### Heading 3\n");
 }
 
 #[test]
@@ -60,26 +62,28 @@ fn test_md026_custom_punctuation() {
 #[test]
 fn test_md026_setext_headings() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With lenient rules, ! and ? are generally allowed
+    // Default punctuation is ".,;:!" so ! is flagged, ? is not
     let content = "Heading 1!\n=======\nHeading 2?\n-------\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // No issues expected with the new lenient behavior
-    assert_eq!(result.len(), 0);
+    // Only the exclamation mark should be flagged
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 1);
 }
 
 #[test]
 fn test_md026_closed_atx() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With lenient rules, ! and ? are generally allowed
+    // Default punctuation is ".,;:!" so ! is flagged, ? is not
     let content = "# Heading 1! #\n## Heading 2? ##\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // No issues expected with the new lenient behavior
-    assert_eq!(result.len(), 0);
+    // Only the exclamation mark should be flagged
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 1);
     let fixed = rule.fix(&ctx).unwrap();
-    // Content should remain unchanged
-    assert_eq!(fixed, "# Heading 1! #\n## Heading 2? ##\n");
+    // Exclamation mark should be removed
+    assert_eq!(fixed, "# Heading 1 #\n## Heading 2? ##\n");
 }
 
 #[test]
@@ -103,18 +107,20 @@ fn test_md026_with_code_blocks() {
 #[test]
 fn test_md026_with_front_matter() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With lenient rules, exclamation marks are generally allowed
+    // Default punctuation is ".,;:!" so ! is flagged
     let content = "---\ntitle: This is a title with punctuation!\ndate: 2023-01-01\n---\n\n# Correct heading\n## Heading with punctuation!\n";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    // No issues expected with the new lenient behavior
-    assert_eq!(result.len(), 0, "No headings should be detected with lenient rules");
+    // The second heading should be flagged for the exclamation mark
+    assert_eq!(result.len(), 1, "Second heading should be flagged");
+    assert_eq!(result[0].line, 7); // Line 7 is "## Heading with punctuation!"
 
     let fixed = rule.fix(&ctx).unwrap();
-    // Content should remain unchanged
+    // Exclamation mark should be removed from the heading (not the front matter)
     assert_eq!(
-        fixed, content,
-        "Fix should not modify content when no issues are detected"
+        fixed,
+        "---\ntitle: This is a title with punctuation!\ndate: 2023-01-01\n---\n\n# Correct heading\n## Heading with punctuation\n",
+        "Fix should remove punctuation from heading only"
     );
 }
 
@@ -136,30 +142,31 @@ fn test_md026_multiple_trailing_punctuation() {
 #[test]
 fn test_md026_indented_headings() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With lenient rules, ! and ? are generally allowed
+    // Default punctuation is ".,;:!" so ! is flagged, ? is not
     let content = "  # Indented heading!\n    ## Deeply indented heading?";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-    // No issues expected with the new lenient behavior
-    assert_eq!(result.len(), 0, "No headings should be detected with lenient rules");
+    // Only the exclamation mark should be flagged
+    assert_eq!(result.len(), 1, "Should flag exclamation mark");
+    assert_eq!(result[0].line, 1);
 
     let fixed = rule.fix(&ctx).unwrap();
-    // Content should remain unchanged
-    assert_eq!(fixed, content);
+    // Exclamation mark should be removed, question mark should remain
+    assert_eq!(fixed, "  # Indented heading\n    ## Deeply indented heading?");
 }
 
 #[test]
 fn test_md026_fix_setext_headings() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With lenient rules, ! and ? are generally allowed
+    // Default punctuation is ".,;:!" so ! is fixed, ? is not
     let content = "Heading 1!\n=======\nHeading 2?\n-------";
     let ctx = LintContext::new(content);
 
     let fixed = rule.fix(&ctx).unwrap();
 
-    // Content should remain unchanged with lenient behavior
-    assert_eq!(fixed, content, "Content should not be modified with lenient rules");
+    // ! should be removed, ? should remain
+    assert_eq!(fixed, "Heading 1\n=======\nHeading 2?\n-------");
 }
 
 #[test]
@@ -211,66 +218,6 @@ fn test_md026_non_standard_punctuation() {
         fixed,
         "# Heading 1\n## Heading 2\n### Heading 3\n#### Heading 4#\n##### Heading 5!\n"
     );
-}
-
-#[test]
-fn test_md026_legitimate_punctuation_patterns() {
-    let rule = MD026NoTrailingPunctuation::default();
-
-    // Test legitimate colon usage
-    let colon_content = r#"# FAQ: Frequently Asked Questions
-## API: Methods
-### Step 1: Setup
-#### Version 2.0: New Features
-##### Chapter 1: Introduction
-###### Error: File Not Found
-####### Note: Implementation Details"#;
-
-    let ctx = LintContext::new(colon_content);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Legitimate colon patterns should not be flagged");
-
-    // Test legitimate question marks
-    let question_content = r#"# What is Markdown?
-## How does it work?
-### Why use this tool?
-#### When should I run it?
-##### Where can I find help?
-###### Which option is best?
-####### Can this be automated?
-######## Should we continue?
-######### Would this work?
-########## Could this help?
-########### Is this correct?
-############ Are we done?
-############# Do we proceed?
-############## Does this work?
-############### Did it succeed?"#;
-
-    let ctx = LintContext::new(question_content);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Legitimate question patterns should not be flagged");
-
-    // Test legitimate exclamation marks
-    let exclamation_content = r#"# Important!
-## New!
-### Warning!
-#### Alert!
-##### Notice!
-###### Attention!"#;
-
-    let ctx = LintContext::new(exclamation_content);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Legitimate exclamation patterns should not be flagged");
-
-    // Test that inappropriate punctuation is still flagged
-    let bad_content = r#"# This is a regular sentence.
-## Random heading;
-### This seems wrong,"#;
-
-    let ctx = LintContext::new(bad_content);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3, "Inappropriate punctuation should still be flagged");
 }
 
 #[test]

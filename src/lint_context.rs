@@ -1092,10 +1092,23 @@ impl<'a> LintContext<'a> {
                 let level = hashes.len() as u8;
                 let marker_column = leading_spaces.len();
 
-                // Check for closing sequence
+                // Check for closing sequence, but handle custom IDs that might come after
                 let (text, has_closing, closing_seq) = {
-                    // Find the start of a potential closing sequence
-                    let trimmed_rest = rest.trim_end();
+                    // First check if there's a custom ID at the end
+                    let (rest_without_id, custom_id_part) = if let Some(id_start) = rest.rfind(" {#") {
+                        // Check if this looks like a valid custom ID (ends with })
+                        if rest[id_start..].trim_end().ends_with('}') {
+                            // Split off the custom ID
+                            (&rest[..id_start], &rest[id_start..])
+                        } else {
+                            (rest, "")
+                        }
+                    } else {
+                        (rest, "")
+                    };
+
+                    // Now look for closing hashes in the part before the custom ID
+                    let trimmed_rest = rest_without_id.trim_end();
                     if let Some(last_hash_pos) = trimmed_rest.rfind('#') {
                         // Look for the start of the hash sequence
                         let mut start_of_hashes = last_hash_pos;
@@ -1103,19 +1116,36 @@ impl<'a> LintContext<'a> {
                             start_of_hashes -= 1;
                         }
 
-                        // Check if this is a valid closing sequence (all hashes to end of line)
+                        // Check if there's at least one space before the closing hashes
+                        let has_space_before = start_of_hashes == 0
+                            || trimmed_rest
+                                .chars()
+                                .nth(start_of_hashes - 1)
+                                .is_some_and(|c| c.is_whitespace());
+
+                        // Check if this is a valid closing sequence (all hashes to end of trimmed part)
                         let potential_closing = &trimmed_rest[start_of_hashes..];
                         let is_all_hashes = potential_closing.chars().all(|c| c == '#');
 
-                        if is_all_hashes {
-                            // This is a closing sequence, regardless of spacing
+                        if is_all_hashes && has_space_before {
+                            // This is a closing sequence
                             let closing_hashes = potential_closing.to_string();
-                            let text_part = rest[..start_of_hashes].trim_end();
-                            (text_part.to_string(), true, closing_hashes)
+                            // The text is everything before the closing hashes
+                            // Don't include the custom ID here - it will be extracted later
+                            let text_part = if !custom_id_part.is_empty() {
+                                // If we have a custom ID, append it back to get the full rest
+                                // This allows the extract_header_id function to handle it properly
+                                format!("{}{}", rest_without_id[..start_of_hashes].trim_end(), custom_id_part)
+                            } else {
+                                rest_without_id[..start_of_hashes].trim_end().to_string()
+                            };
+                            (text_part, true, closing_hashes)
                         } else {
+                            // Not a valid closing sequence, return the full content
                             (rest.to_string(), false, String::new())
                         }
                     } else {
+                        // No hashes found, return the full content
                         (rest.to_string(), false, String::new())
                     }
                 };
