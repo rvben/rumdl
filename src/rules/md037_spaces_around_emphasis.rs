@@ -3,7 +3,9 @@
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
-use crate::utils::emphasis_utils::{EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns};
+use crate::utils::emphasis_utils::{
+    EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
+};
 use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use lazy_static::lazy_static;
@@ -314,14 +316,17 @@ impl MD037NoSpaceInEmphasis {
         offset: usize,
         warnings: &mut Vec<LintWarning>,
     ) {
+        // Replace inline code to avoid false positives with emphasis markers inside backticks
+        let processed_content = replace_inline_code(content);
+
         // Find all emphasis markers using optimized parsing
-        let markers = find_emphasis_markers(content);
+        let markers = find_emphasis_markers(&processed_content);
         if markers.is_empty() {
             return;
         }
 
         // Find valid emphasis spans
-        let spans = find_emphasis_spans(content, markers);
+        let spans = find_emphasis_spans(&processed_content, markers);
 
         // Check each span for spacing issues
         for span in spans {
@@ -471,6 +476,21 @@ This has * real spaced emphasis * that should be flagged."#;
         assert!(result[0].message.contains("Spaces inside emphasis markers"));
         // Should be the "* real spaced *" text on line 1
         assert!(result[0].line == 1);
+    }
+
+    #[test]
+    fn test_issue_49_asterisk_in_inline_code() {
+        // Test for issue #49 - Asterisk within backticks identified as for emphasis
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Test case from issue #49
+        let content = "The `__mul__` method is needed for left-hand multiplication (`vector * 3`) and `__rmul__` is needed for right-hand multiplication (`3 * vector`).";
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag asterisks inside inline code as emphasis (issue #49). Got: {result:?}"
+        );
     }
 
     #[test]

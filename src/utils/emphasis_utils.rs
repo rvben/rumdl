@@ -56,6 +56,7 @@ pub struct EmphasisSpan {
 }
 
 /// Enhanced inline code replacement with optimized performance
+/// Replaces inline code with 'X' characters to prevent false positives in emphasis detection
 #[inline]
 pub fn replace_inline_code(line: &str) -> String {
     // Quick check: if no backticks, return original
@@ -72,7 +73,8 @@ pub fn replace_inline_code(line: &str) -> String {
         {
             let match_start = full_match.start();
             let match_end = full_match.end();
-            let placeholder = " ".repeat(match_end - match_start);
+            // Use 'X' instead of spaces to avoid false positives for "spaces in emphasis"
+            let placeholder = "X".repeat(match_end - match_start);
 
             result.replace_range(match_start + offset..match_end + offset, &placeholder);
             offset += placeholder.len() - (match_end - match_start);
