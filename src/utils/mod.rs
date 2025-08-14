@@ -13,6 +13,7 @@ pub mod kramdown_utils;
 pub mod markdown_elements;
 pub mod range_utils;
 pub mod regex_cache;
+pub mod skip_context;
 pub mod string_interner;
 pub mod table_utils;
 pub mod text_reflow;

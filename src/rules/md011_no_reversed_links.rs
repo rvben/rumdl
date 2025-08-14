@@ -3,6 +3,7 @@
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
+use crate::utils::skip_context::{is_in_front_matter, is_in_html_comment, is_in_math_context};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -216,6 +217,21 @@ impl Rule for MD011NoReversedLinks {
                     continue;
                 }
 
+                // Skip if in HTML comment
+                if is_in_html_comment(content, match_byte_pos) {
+                    continue;
+                }
+
+                // Skip if in math context
+                if is_in_math_context(ctx, match_byte_pos) {
+                    continue;
+                }
+
+                // Skip if in front matter (line_num is 0-based)
+                if is_in_front_matter(content, line_num) {
+                    continue;
+                }
+
                 // Check if the match contains escaped brackets or parentheses
                 let match_text = match_obj.as_str();
 
@@ -280,6 +296,21 @@ impl Rule for MD011NoReversedLinks {
                 // Check if this specific match is within a code block or inline code span
                 let match_byte_pos = byte_pos + start;
                 if ctx.is_in_code_block_or_span(match_byte_pos) {
+                    continue;
+                }
+
+                // Skip if in HTML comment
+                if is_in_html_comment(content, match_byte_pos) {
+                    continue;
+                }
+
+                // Skip if in math context
+                if is_in_math_context(ctx, match_byte_pos) {
+                    continue;
+                }
+
+                // Skip if in front matter (line_num is 0-based)
+                if is_in_front_matter(content, line_num) {
                     continue;
                 }
 
@@ -367,6 +398,7 @@ impl Rule for MD011NoReversedLinks {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+    use crate::utils::skip_context::is_in_front_matter;
 
     #[test]
     fn test_capture_group_order_fix() {
@@ -449,6 +481,68 @@ mod tests {
             let result = rule.check(&ctx).unwrap();
             if !result.is_empty() {
                 println!("Rule fix produces: {}", result[0].fix.as_ref().unwrap().replacement);
+            }
+        }
+    }
+
+    #[test]
+    fn test_front_matter_detection() {
+        let content = r#"---
+title: "My Post"
+tags: ["test", "example"]
+description: "Pattern (like)[this] in frontmatter"
+---
+
+# Content
+
+Regular (https://example.com)[reversed link] that should be flagged.
+
++++
+title = "TOML frontmatter"
+tags = ["more", "tags"]
+pattern = "(toml)[pattern]"
++++
+
+# More Content
+
+Another (https://test.com)[reversed] link should be flagged."#;
+
+        // Test line by line
+        for (idx, line) in content.lines().enumerate() {
+            let line_num = idx; // 0-based
+            let in_fm = is_in_front_matter(content, line_num);
+
+            println!("Line {:2} (0-idx: {:2}): in_fm={:5} | {:?}", idx + 1, idx, in_fm, line);
+
+            // Lines 0-4 should be in YAML front matter
+            if idx <= 4 {
+                assert!(
+                    in_fm,
+                    "Line {} (0-idx: {}) should be in YAML front matter but got false. Content: {:?}",
+                    idx + 1,
+                    idx,
+                    line
+                );
+            }
+            // Lines 10-14 are NOT front matter (TOML block not at beginning)
+            else if (10..=14).contains(&idx) {
+                assert!(
+                    !in_fm,
+                    "Line {} (0-idx: {}) should NOT be in front matter (TOML block not at beginning). Content: {:?}",
+                    idx + 1,
+                    idx,
+                    line
+                );
+            }
+            // Everything else should NOT be in front matter
+            else {
+                assert!(
+                    !in_fm,
+                    "Line {} (0-idx: {}) should NOT be in front matter but got true. Content: {:?}",
+                    idx + 1,
+                    idx,
+                    line
+                );
             }
         }
     }

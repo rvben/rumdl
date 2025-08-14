@@ -1,7 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
+use crate::utils::skip_context::{is_in_front_matter, is_in_math_context, is_in_table_cell};
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -19,9 +19,9 @@ lazy_static! {
     static ref REF_IMAGE_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
 
     // Pattern for shortcut reference links [reference]
-    // Must not be preceded by ] (to avoid matching second part of [text][ref])
+    // Must not be preceded by ] or ) (to avoid matching second part of [text][ref] or reversed links (url)[text])
     // Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
-    static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
+    static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
 
     // Pattern to match inline links and images (to exclude them)
     static ref INLINE_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();
@@ -152,8 +152,18 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
+            // Skip links inside math contexts
+            if is_in_math_context(ctx, link.byte_offset) {
+                continue;
+            }
+
+            // Skip links inside table cells
+            if is_in_table_cell(ctx, link.line, link.start_col) {
+                continue;
+            }
+
             // Skip links inside frontmatter (convert from 1-based to 0-based line numbers)
-            if FrontMatterUtils::is_in_front_matter(content, link.line.saturating_sub(1)) {
+            if is_in_front_matter(content, link.line.saturating_sub(1)) {
                 continue;
             }
 
@@ -202,8 +212,18 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
+            // Skip images inside math contexts
+            if is_in_math_context(ctx, image.byte_offset) {
+                continue;
+            }
+
+            // Skip images inside table cells
+            if is_in_table_cell(ctx, image.line, image.start_col) {
+                continue;
+            }
+
             // Skip images inside frontmatter (convert from 1-based to 0-based line numbers)
-            if FrontMatterUtils::is_in_front_matter(content, image.line.saturating_sub(1)) {
+            if is_in_front_matter(content, image.line.saturating_sub(1)) {
                 continue;
             }
 
@@ -259,7 +279,7 @@ impl MD052ReferenceLinkImages {
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip lines in frontmatter (line_num is already 0-based)
-            if FrontMatterUtils::is_in_front_matter(content, line_num) {
+            if is_in_front_matter(content, line_num) {
                 continue;
             }
 
@@ -330,6 +350,16 @@ impl MD052ReferenceLinkImages {
 
                             // Skip if inside HTML tag
                             if Self::is_in_html_tag(ctx, byte_pos) {
+                                continue;
+                            }
+
+                            // Skip if inside math context
+                            if is_in_math_context(ctx, byte_pos) {
+                                continue;
+                            }
+
+                            // Skip if inside table cell
+                            if is_in_table_cell(ctx, line_num + 1, col) {
                                 continue;
                             }
 

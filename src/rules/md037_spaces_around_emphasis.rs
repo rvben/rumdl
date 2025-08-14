@@ -8,6 +8,7 @@ use crate::utils::emphasis_utils::{
 };
 use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
+use crate::utils::skip_context::{is_in_html_comment, is_in_math_context, is_in_table_cell};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -118,7 +119,7 @@ impl Rule for MD037NoSpaceInEmphasis {
             self.check_line_for_emphasis_issues_fast(line, line_num + 1, &mut warnings);
         }
 
-        // Filter out warnings for emphasis markers that are inside links
+        // Filter out warnings for emphasis markers that are inside links, HTML comments, or math
         let mut filtered_warnings = Vec::new();
         let mut line_start_pos = 0;
 
@@ -131,8 +132,12 @@ impl Rule for MD037NoSpaceInEmphasis {
                     // Calculate byte position of the warning
                     let byte_pos = line_start_pos + (warning.column - 1);
 
-                    // Only keep warnings that are not inside links
-                    if !self.is_in_link(ctx, byte_pos) {
+                    // Skip if inside links, HTML comments, math contexts, or tables
+                    if !self.is_in_link(ctx, byte_pos)
+                        && !is_in_html_comment(content, byte_pos)
+                        && !is_in_math_context(ctx, byte_pos)
+                        && !is_in_table_cell(ctx, line_num, warning.column)
+                    {
                         filtered_warnings.push(warning.clone());
                     }
                 }
