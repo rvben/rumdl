@@ -227,12 +227,19 @@ fn test_partially_escaped_brackets() {
 #[test]
 fn test_escaped_brackets_with_undefined_ref() {
     let rule = MD052ReferenceLinkImages::new();
-    // The pattern \[text][undefined] still has [undefined] as a reference
+    // The pattern \[text][undefined] should not detect [undefined] as a reference
+    // because the entire construct is treated as escaped/literal text in CommonMark
     let content = r#"This is \[escaped][undefined] but undefined is not defined."#;
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].message, "Reference 'undefined' not found");
+    assert_eq!(result.len(), 0);
+
+    // However, a separate [undefined] should still be detected
+    let content2 = r#"This is \[escaped] and [undefined] but undefined is not defined."#;
+    let ctx2 = LintContext::new(content2);
+    let result2 = rule.check(&ctx2).unwrap();
+    assert_eq!(result2.len(), 1);
+    assert_eq!(result2[0].message, "Reference 'undefined' not found");
 }
 
 #[test]

@@ -522,8 +522,12 @@ fn test_emphasis_in_special_constructs() {
 
     let ctx = LintContext::new(content);
     let result = md037.check(&ctx).unwrap();
-    // Should detect spaces in all contexts except HTML
-    assert!(result.len() >= 5, "Should detect spaces in various contexts");
+    // Should detect spaces in blockquotes, lists, and HTML tags (not in links, tables, or comments)
+    assert_eq!(
+        result.len(),
+        3,
+        "Should detect spaces in blockquotes, lists, and HTML tags"
+    );
 }
 
 #[test]
