@@ -1146,3 +1146,57 @@ fn test_performance_with_many_links() {
         ctx.links.len()
     );
 }
+
+#[test]
+fn test_custom_header_id_formats() {
+    // Test all supported custom header ID formats
+    let content = r#"# Kramdown Style {#kramdown-id}
+
+Some content here.
+
+## Python-markdown with spaces { #spaced-id }
+
+More content.
+
+### Python-markdown with colon {:#colon-id}
+
+Even more content.
+
+#### Python-markdown full format {: #full-format }
+
+Final content.
+
+Links to test all formats:
+- [Link to kramdown](#kramdown-id)
+- [Link to spaced](#spaced-id)
+- [Link to colon](#colon-id)
+- [Link to full format](#full-format)
+
+Links that should fail:
+- [Link to nonexistent](#nonexistent-id)
+"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the nonexistent fragment
+    assert_eq!(result.len(), 1, "Expected 1 warning for nonexistent fragment");
+    assert!(
+        result[0].message.contains("nonexistent-id"),
+        "Warning should be about nonexistent fragment, got: {}",
+        result[0].message
+    );
+
+    // All valid custom ID formats should be recognized
+    for warning in &result {
+        assert!(
+            !warning.message.contains("kramdown-id")
+                && !warning.message.contains("spaced-id")
+                && !warning.message.contains("colon-id")
+                && !warning.message.contains("full-format"),
+            "Valid custom ID format should not be flagged as missing: {}",
+            warning.message
+        );
+    }
+}
