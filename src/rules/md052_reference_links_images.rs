@@ -73,6 +73,17 @@ impl MD052ReferenceLinkImages {
         false
     }
 
+    /// Check if a byte position is within an HTML tag
+    fn is_in_html_tag(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        // Check HTML tags
+        for html_tag in ctx.html_tags().iter() {
+            if html_tag.byte_offset <= byte_pos && byte_pos < html_tag.byte_end {
+                return true;
+            }
+        }
+        false
+    }
+
     fn extract_references(&self, content: &str) -> HashSet<String> {
         let mut references = HashSet::new();
         let mut in_code_block = false;
@@ -316,6 +327,12 @@ impl MD052ReferenceLinkImages {
                             if Self::is_in_html_comment(content, byte_pos) {
                                 continue;
                             }
+
+                            // Skip if inside HTML tag
+                            if Self::is_in_html_tag(ctx, byte_pos) {
+                                continue;
+                            }
+
                             let byte_end = byte_pos + (full_match.end() - full_match.start());
 
                             // Check if this shortcut ref overlaps with any parsed link/image
@@ -721,6 +738,29 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_issue_51_html_attribute_not_reference() {
+        // Test for issue #51 - HTML attributes with square brackets shouldn't be treated as references
+        let rule = MD052ReferenceLinkImages::new();
+        let content = r#"# Example
+
+## Test
+
+Want to fill out this form?
+
+<form method="post">
+    <input type="email" name="fields[email]" id="drip-email" placeholder="email@domain.com">
+</form>"#;
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "HTML attributes with square brackets should not be flagged as undefined references"
+        );
     }
 
     #[test]
