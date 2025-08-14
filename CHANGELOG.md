@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.117] - 2025-08-14
 
+### Fixed
+- MD037: Fixed false positive with asterisks in inline code spans (issue #49)
+  - Inline code content is now properly masked before emphasis detection
+- MD011: Fixed false positive with array access patterns in link titles (issue #50)
+  - Context detection now properly skips patterns inside code spans
+- MD052: Fixed false positive with square brackets in HTML attributes (issue #51)
+  - HTML tag detection prevents reference checking within HTML elements
+- Added centralized skip context detection for improved accuracy across rules
+
 ## [0.0.116] - 2025-08-13
 
 ### Added
