@@ -8,10 +8,10 @@ use std::collections::HashSet;
 lazy_static! {
     // Pre-compiled optimized patterns for quick checks
     static ref QUICK_MARKDOWN_CHECK: Regex = Regex::new(r"[*_`\[\]]").unwrap();
-    // Match emphasis only when not part of snake_case (requires space or start/end)
-    static ref EMPHASIS_PATTERN: Regex = Regex::new(r"\*+([^*]+)\*+|\b_([^_]+)_\b").unwrap();
+    // GitHub only strips asterisks (*), not underscores (_) - underscores are preserved
+    static ref EMPHASIS_PATTERN: Regex = Regex::new(r"\*+([^*]+)\*+").unwrap();
     static ref CODE_PATTERN: Regex = Regex::new(r"`([^`]+)`").unwrap();
-    static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\]]+)\]\([^)]+\)|\[([^\]]+)\]\[[^\]]*\]").unwrap();
+    static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|\[([^\]]+)\]\[[^\]]*\]").unwrap();
     static ref TOC_SECTION_START: Regex = Regex::new(r"(?i)^#+\s*(table\s+of\s+contents?|contents?|toc)\s*$").unwrap();
 }
 
@@ -124,7 +124,7 @@ impl MD051LinkFragments {
     /// Fragment generation following GitHub's official algorithm
     /// GitHub preserves most Unicode characters, underscores, and consecutive hyphens
     #[inline]
-    fn heading_to_fragment_github(&self, heading: &str) -> String {
+    pub fn heading_to_fragment_github(&self, heading: &str) -> String {
         if heading.is_empty() {
             return String::new();
         }
@@ -136,8 +136,8 @@ impl MD051LinkFragments {
             heading.to_string()
         };
 
-        // Trim whitespace
-        let text = text.trim();
+        // NOTE: GitHub does NOT trim whitespace - it preserves leading/trailing spaces
+        // and converts them to hyphens. This matches the official github-slugger behavior.
 
         // GitHub's EXACT algorithm from github-slugger npm package:
         // function slug(value, maintainCase) {
@@ -275,9 +275,9 @@ impl MD051LinkFragments {
     fn strip_markdown_formatting_fast(&self, text: &str) -> String {
         let mut result = text.to_string();
 
-        // Strip emphasis (bold/italic)
-        if result.contains('*') || result.contains('_') {
-            result = EMPHASIS_PATTERN.replace_all(&result, "$1$2").to_string();
+        // Strip emphasis (only asterisks, underscores are preserved per GitHub spec)
+        if result.contains('*') {
+            result = EMPHASIS_PATTERN.replace_all(&result, "$1").to_string();
         }
 
         // Strip inline code
@@ -285,9 +285,9 @@ impl MD051LinkFragments {
             result = CODE_PATTERN.replace_all(&result, "$1").to_string();
         }
 
-        // Strip links
+        // Strip links (GitHub keeps both link text and URL)
         if result.contains('[') {
-            result = LINK_PATTERN.replace_all(&result, "$1$2").to_string();
+            result = LINK_PATTERN.replace_all(&result, "$1$2$3").to_string();
         }
 
         result
@@ -572,11 +572,11 @@ mod tests {
         );
 
         // Accented characters normalized
-        assert_eq!(rule.heading_to_fragment_kramdown("Café"), "cafe");
-        assert_eq!(rule.heading_to_fragment_kramdown("Über uns"), "uber-uns");
+        assert_eq!(rule.heading_to_fragment_kramdown("Café"), "caf");
+        assert_eq!(rule.heading_to_fragment_kramdown("Über uns"), "ber-uns");
 
-        // Leading/trailing hyphens removed
-        assert_eq!(rule.heading_to_fragment_kramdown("---test---"), "test");
+        // Leading hyphens removed, trailing preserved
+        assert_eq!(rule.heading_to_fragment_kramdown("---test---"), "test---");
     }
 
     #[test]
@@ -958,8 +958,8 @@ More content.
             ("Email: user@example.com", "email-userexamplecom"),
             // Edge cases
             ("", ""),
-            (" ", ""),
-            ("   ", ""),
+            (" ", "-"),
+            ("   ", "---"),
             ("-", "-"),
             ("---", "---"),
             ("_", "_"),

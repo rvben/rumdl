@@ -35,10 +35,10 @@ fn test_md051_unicode_headings() {
             "## Español con Ñ\n\n[Link](#espanol-con-n)",
             1, // Should flag - missing tildes
         ),
-        // Emojis (GitHub strips emojis from fragments)
+        // Emojis (GitHub strips emojis from fragments but leaves double hyphen)
         (
-            "## Emoji 🎉 Party\n\n[Link](#emoji-party)",
-            0, // Should not flag - emojis are stripped
+            "## Emoji 🎉 Party\n\n[Link](#emoji--party)",
+            0, // Should not flag - emojis are stripped but space remains as hyphen
         ),
         (
             "## Emoji 🎉 Party\n\n[Link](#emoji-🎉-party)",
@@ -77,14 +77,14 @@ fn test_md051_fragment_generation() {
 
     // Test the heading_to_fragment_fast method directly
     let test_cases = vec![
-        ("Café Menu ☕", "café-menu"),
+        ("Café Menu ☕", "café-menu-"), // ☕ emoji becomes empty, trailing space becomes hyphen
         ("日本語 (Japanese)", "日本語-japanese"),
         ("Español con Ñ", "español-con-ñ"),
-        ("Emoji 🎉 Party", "emoji-party"),
+        ("Emoji 🎉 Party", "emoji--party"), // 🎉 becomes empty, space around it becomes double hyphen
         ("Mixed CASE with УниКОД", "mixed-case-with-уникод"),
-        ("Multiple   Spaces", "multiple-spaces"),
+        ("Multiple   Spaces", "multiple---spaces"), // Three spaces become three hyphens
         ("Über café 北京", "über-café-北京"),
-        ("Special & Characters", "special-characters"), // & removed per GitHub spec
+        ("Special & Characters", "special--characters"), // & removed, space around becomes double hyphen
         ("!!!Leading and Trailing!!!", "leading-and-trailing"),
     ];
 
@@ -130,19 +130,18 @@ fn test_md051_unicode_edge_cases() {
 fn test_md051_complex_unicode_edge_cases() {
     let rule = MD051LinkFragments::new();
 
-    // These are known limitations - zero-width spaces and combining diacritics
-    // are complex Unicode features that may not be fully supported
-    let content = r#"
+    // These are complex Unicode features - GitHub handles them correctly
+    let content = "
 ## Zero-width\u{200B}space
 ## Combining diacritics e̊
 
 [Link 1](#zero-widthspace)
-[Link 2](#combining-diacritics-e)
-"#;
+[Link 2](#combining-diacritics-e̊)
+";
 
     let ctx = LintContext::new(content);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Only zero-width space doesn't match - combining diacritics work
-    assert_eq!(warnings.len(), 1, "Zero-width spaces are not handled correctly");
+    // Both should work correctly - zero-width space is removed, combining diacritics preserved
+    assert_eq!(warnings.len(), 0, "Complex Unicode should be handled correctly");
 }

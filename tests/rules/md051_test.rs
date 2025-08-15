@@ -30,11 +30,11 @@ fn test_multiple_headings() {
 
 #[test]
 fn test_special_characters() {
-    let ctx = LintContext::new("# Test & Heading!\n\nThis is a [link](somepath#test-heading) to the heading.");
+    let ctx = LintContext::new("# Test & Heading!\n\nThis is a [link](somepath#test--heading) to the heading.");
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
-    // "Test & Heading!" should become "test-heading" (& and ! removed as punctuation per GitHub spec)
-    // So the link to #test-heading should be VALID and no warnings should be generated
+    // "Test & Heading!" should become "test--heading" (& becomes -- per GitHub spec, ! removed)
+    // So the link to #test--heading should be VALID and no warnings should be generated
     assert_eq!(result.len(), 0);
 }
 
@@ -230,7 +230,7 @@ fn test_multiple_formatting_styles() {
         r#"
 # Heading with _underscores_ and **asterisks** mixed
 
-[Link to heading](#heading-with-underscores-and-asterisks-mixed)
+[Link to heading](#heading-with-_underscores_-and-asterisks-mixed)
 "#,
     );
 
@@ -253,7 +253,7 @@ fn test_complex_nested_formatting() {
         r#"
 # **Bold** with *italic* and `code` and [link](https://example.com)
 
-[Link to heading](#bold-with-italic-and-code-and-link)
+[Link to heading](#bold-with-italic-and-code-and-linkhttpsexamplecom)
 "#,
     );
 
@@ -442,11 +442,11 @@ fn test_md051_fragment_generation_regression() {
         ("Simple Heading", "simple-heading"),
         ("1. Numbered Heading", "1-numbered-heading"),
         ("Heading with Spaces", "heading-with-spaces"),
-        // Ampersand cases (& should be removed per GitHub spec)
-        ("Test & Example", "test-example"),
+        // Ampersand cases (& becomes -- per GitHub spec)
+        ("Test & Example", "test--example"),
         ("A&B", "ab"),
-        ("A & B", "a-b"),
-        ("Multiple & Ampersands & Here", "multiple-ampersands-here"),
+        ("A & B", "a--b"),
+        ("Multiple & Ampersands & Here", "multiple--ampersands--here"),
         // Special characters
         ("Test. Period", "test-period"),
         ("Test: Colon", "test-colon"),
@@ -455,13 +455,16 @@ fn test_md051_fragment_generation_regression() {
         ("Test (Parentheses)", "test-parentheses"),
         ("Test [Brackets]", "test-brackets"),
         // Complex cases
-        ("1. Heading with Numbers & Symbols!", "1-heading-with-numbers-symbols"),
-        ("Multiple!!! Exclamations & Symbols???", "multiple-exclamations-symbols"),
+        ("1. Heading with Numbers & Symbols!", "1-heading-with-numbers--symbols"),
+        (
+            "Multiple!!! Exclamations & Symbols???",
+            "multiple-exclamations--symbols",
+        ),
         (
             "Heading with (Parentheses) & [Brackets]",
-            "heading-with-parentheses-brackets",
+            "heading-with-parentheses--brackets",
         ),
-        ("Special Characters: @#$%^&*()", "special-characters"),
+        ("Special Characters: @#$%^&*()", "special-characters-"),
         // Edge cases
         ("Only!!! Symbols!!!", "only-symbols"),
         ("   Spaces   ", "spaces"), // Leading/trailing spaces
@@ -496,19 +499,19 @@ fn test_md051_real_world_scenarios() {
 # Main Title
 
 ## 1. Getting Started & Setup
-[Link to setup](#1-getting-started-setup)
+[Link to setup](#1-getting-started--setup)
 
 ## 2. Configuration & Options
-[Link to config](#2-configuration-options)
+[Link to config](#2-configuration--options)
 
 ## 3. Advanced Usage (Examples)
 [Link to advanced](#3-advanced-usage-examples)
 
 ## 4. FAQ & Troubleshooting
-[Link to FAQ](#4-faq-troubleshooting)
+[Link to FAQ](#4-faq--troubleshooting)
 
 ## 5. API Reference: Methods & Properties
-[Link to API](#5-api-reference-methods-properties)
+[Link to API](#5-api-reference-methods--properties)
 "#;
 
     let rule = MD051LinkFragments::new();
@@ -530,13 +533,13 @@ fn test_md051_ampersand_variations() {
 
     let content = r#"
 # Test & Example
-[Link 1](#test-example)
+[Link 1](#test--example)
 
 # A&B
 [Link 2](#ab)
 
 # Multiple & Symbols & Here
-[Link 3](#multiple-symbols-here)
+[Link 3](#multiple--symbols--here)
 
 # Test&End
 [Link 4](#testend)
@@ -887,7 +890,7 @@ Ambiguous paths (treated as fragment-only):
 - [Spaces no extension](my file#section)
 
 Fragment tests:
-- [Valid unicode](#café-restaurant)
+- [Valid unicode](#café--restaurant)
 - [Valid heading](#test-heading)
 - [Invalid](#missing-heading)
 "#;
@@ -898,8 +901,8 @@ Fragment tests:
 
     // Should flag ambiguous paths + invalid fragment = 4 warnings
     // 3 ambiguous paths (#section) + 1 missing fragment
-    // Note: #café-restaurant should NOT be flagged as it matches "Café & Restaurant" heading
-    // (& is removed as punctuation per GitHub spec)
+    // Note: #café--restaurant should NOT be flagged as it matches "Café & Restaurant" heading
+    // (& becomes -- per GitHub spec)
     assert_eq!(
         result.len(),
         4,
@@ -1013,9 +1016,9 @@ fn test_fragment_normalization_edge_cases() {
 
 Fragment tests with normalization:
 - [Valid basic](#test-heading)
-- [Valid special](#special-characters-symbols)
+- [Valid special](#special-characters--symbols)
 - [Valid code](#code-inline-example)
-- [Valid spaces](#multiple-spaces)
+- [Valid spaces](#multiple---spaces)
 - [Valid case insensitive](#Test-Heading)
 - [Invalid symbols](#special-characters-&-symbols)
 - [Invalid spacing](#multiple   spaces)
@@ -1352,10 +1355,10 @@ fn debug_issue_39_fragment_generation() {
 ## API Reference: Methods & Properties
 
 Links for testing:
-- [Testing coverage](#testing-coverage)
-- [Complex path](#cbrown-sbrown-unsafe-paths)
-- [Simple arrow](#cbrown-sbrown)
-- [API ref](#api-reference-methods-properties)
+- [Testing coverage](#testing--coverage)
+- [Complex path](#cbrown----sbrown---unsafe-paths)
+- [Simple arrow](#cbrown---sbrown)
+- [API ref](#api-reference-methods--properties)
 "#;
 
     let rule = MD051LinkFragments::new();
@@ -1414,10 +1417,10 @@ fn test_issue_39_complex_punctuation_arrows() {
 ## Double Arrow ==> Test
 
 Links to test:
-- [Complex unsafe](#cbrown-sbrown-unsafe-paths)
-- [Simple arrow](#cbrown-sbrown)
-- [Bidirectional](#arrow-test-bidirectional)
-- [Double arrow](#double-arrow-test)
+- [Complex unsafe](#cbrown----sbrown---unsafe-paths)
+- [Simple arrow](#cbrown---sbrown)
+- [Bidirectional](#arrow-test---bidirectional)
+- [Double arrow](#double-arrow--test)
 "#;
 
     let rule = MD051LinkFragments::new();
@@ -1444,9 +1447,9 @@ fn test_issue_39_ampersand_and_colons() {
 ## Config: Database & Cache Settings
 
 Links to test:
-- [Testing coverage](#testing-coverage)
-- [API reference](#api-reference-methods-properties)
-- [Config settings](#config-database-cache-settings)
+- [Testing coverage](#testing--coverage)
+- [API reference](#api-reference-methods--properties)
+- [Config settings](#config-database--cache-settings)
 "#;
 
     let rule = MD051LinkFragments::new();
@@ -1476,9 +1479,9 @@ fn test_issue_39_mixed_punctuation_clusters() {
 
 Links to test:
 - [Setup guide](#step-1-setup-prerequisites)
-- [Error page](#error-404-not-found)
+- [Error page](#error-404---not-found)
 - [FAQ section](#faq-whats-next)
-- [Release notes](#version-201-release-notes)
+- [Release notes](#version-201---release-notes)
 "#;
 
     let rule = MD051LinkFragments::new();
@@ -1505,9 +1508,9 @@ fn test_issue_39_consecutive_hyphens_and_spaces() {
 ## Test - Single - Hyphen
 
 Links to test:
-- [Multiple](#test-multiple-hyphens)
-- [Spaced](#test-spaced-hyphens)
-- [Single](#test-single-hyphen)
+- [Multiple](#test-----multiple-hyphens)
+- [Spaced](#test------spaced-hyphens)
+- [Single](#test---single---hyphen)
 "#;
 
     let rule = MD051LinkFragments::new();
@@ -1539,7 +1542,7 @@ Links to test:
 - [PHP request](#php-_request)
 - [Sched debug](#sched_debug)
 - [LDAP monitor](#add-ldap_monitor-to-delegator)
-- [Complex path](#cbrown-sbrown-unsafe-paths)
+- [Complex path](#cbrown----sbrown---unsafe-paths)
 "#;
 
     let rule = MD051LinkFragments::new();
