@@ -10,12 +10,6 @@ lazy_static! {
     /// Pattern for Kramdown span IAL: text{:.class #id key="value"}
     static ref SPAN_IAL_PATTERN: Regex = Regex::new(r"\{[:\.#][^}]*\}$").unwrap();
 
-    /// Pattern for custom header IDs supporting both kramdown and python-markdown attr-list formats
-    /// Supports: {#id}, { #id }, {:#id}, {: #id } (all variations with optional colon and spaces)
-    /// Permissive but safe: Unicode letters/numbers, hyphens, underscores, colons (Kramdown allows)
-    /// Rejects: spaces in ID, quotes, brackets, HTML/CSS special chars
-    static ref HEADER_ID_PATTERN: Regex = Regex::new(r"\s*\{\s*:?\s*#\s*[\w\-:]+\s*\}\s*$").unwrap();
-
     /// Pattern for Kramdown extensions opening: {::comment}, {::nomarkdown}, etc.
     static ref EXTENSION_OPEN_PATTERN: Regex = Regex::new(r"^\s*\{::([a-z]+)(?:\s+[^}]*)?\}\s*$").unwrap();
 
@@ -98,82 +92,6 @@ pub fn remove_span_ial(text: &str) -> &str {
     }
 }
 
-/// Check if a heading line has a Kramdown header ID
-///
-/// # Examples
-/// ```
-/// use rumdl::utils::kramdown_utils::has_header_id;
-///
-/// assert!(has_header_id("# Header {#custom-id}"));
-/// assert!(has_header_id("## Section {#section-1}"));
-/// assert!(!has_header_id("# Regular Header"));
-/// ```
-pub fn has_header_id(line: &str) -> bool {
-    HEADER_ID_PATTERN.is_match(line)
-}
-
-/// Remove header ID from a heading line if present
-pub fn remove_header_id(line: &str) -> String {
-    HEADER_ID_PATTERN.replace(line, "").to_string()
-}
-
-/// Extract custom header ID from a heading line
-/// Returns a tuple of (clean_text, Option<custom_id>)
-///
-/// Supports both kramdown and python-markdown attr-list formats:
-/// - `{#custom-id}` (kramdown style)
-/// - `{ #custom-id }` (attr-list with spaces)
-/// - `{:#custom-id}` (attr-list with colon)
-/// - `{: #custom-id }` (attr-list with colon and spaces)
-///
-/// # Examples
-/// ```
-/// use rumdl::utils::kramdown_utils::extract_header_id;
-///
-/// let (text, id) = extract_header_id("## Header {#custom-id}");
-/// assert_eq!(text, "## Header");
-/// assert_eq!(id, Some("custom-id".to_string()));
-///
-/// let (text, id) = extract_header_id("## Header { #spaced-id }");
-/// assert_eq!(text, "## Header");
-/// assert_eq!(id, Some("spaced-id".to_string()));
-///
-/// let (text, id) = extract_header_id("## Header {: #colon-id }");
-/// assert_eq!(text, "## Header");
-/// assert_eq!(id, Some("colon-id".to_string()));
-///
-/// let (text, id) = extract_header_id("## Normal Header");
-/// assert_eq!(text, "## Normal Header");
-/// assert_eq!(id, None);
-/// ```
-pub fn extract_header_id(line: &str) -> (String, Option<String>) {
-    if let Some(captures) = HEADER_ID_PATTERN.captures(line)
-        && let Some(id_match) = captures.get(0)
-    {
-        // Extract the clean text without the ID
-        let clean_text = line[..id_match.start()].trim_end().to_string();
-
-        // Extract the ID from various formats: {#id}, { #id }, {:#id}, {: #id }
-        let id_str = id_match.as_str().trim();
-
-        // Remove braces and extract content
-        let inner = id_str.trim_start_matches('{').trim_end_matches('}').trim();
-
-        // Handle optional colon and find the hash
-        let after_colon = if inner.starts_with(':') {
-            inner.trim_start_matches(':').trim()
-        } else {
-            inner
-        };
-
-        // Extract ID after hash
-        let id = after_colon.trim_start_matches('#').trim().to_string();
-
-        return (clean_text, Some(id));
-    }
-    (line.to_string(), None)
-}
-
 /// Check if a line is a Kramdown extension opening tag
 ///
 /// Extensions include: comment, nomarkdown, options
@@ -246,7 +164,6 @@ pub fn is_definition_list_item(line: &str) -> bool {
 pub fn has_kramdown_syntax(line: &str) -> bool {
     is_kramdown_block_attribute(line)
         || has_span_ial(line)
-        || has_header_id(line)
         || is_kramdown_extension(line)
         || is_eob_marker(line)
         || is_footnote_definition(line)
@@ -308,78 +225,5 @@ mod tests {
         assert!(is_kramdown_block_attribute("  {:.wrap}  "));
         assert!(is_kramdown_block_attribute("\t{:#id}\t"));
         assert!(is_kramdown_block_attribute(" {:.class #id} "));
-    }
-
-    #[test]
-    fn test_header_id_detection() {
-        // Kramdown style (original format)
-        assert!(has_header_id("# Header {#custom-id}"));
-        assert!(has_header_id("## Section {#section-1}"));
-
-        // Python-markdown attr-list with spaces
-        assert!(has_header_id("# Header { #spaced-id }"));
-        assert!(has_header_id("## Section { #section-with-spaces }"));
-
-        // Python-markdown attr-list with colon
-        assert!(has_header_id("# Header {:#colon-id}"));
-        assert!(has_header_id("## Section {: #colon-with-spaces }"));
-
-        // Combined colon and spaces
-        assert!(has_header_id("# Header {: #full-format }"));
-
-        // Should not match
-        assert!(!has_header_id("# Regular Header"));
-        assert!(!has_header_id("# Header { no hash }"));
-        assert!(!has_header_id("# Header {#}")); // Empty ID
-    }
-
-    #[test]
-    fn test_header_id_extraction() {
-        // Kramdown style (original format)
-        let (text, id) = extract_header_id("## Header {#test-id}");
-        assert_eq!(text, "## Header");
-        assert_eq!(id, Some("test-id".to_string()));
-
-        // Python-markdown attr-list with spaces
-        let (text, id) = extract_header_id("# Title { #spaced-id }");
-        assert_eq!(text, "# Title");
-        assert_eq!(id, Some("spaced-id".to_string()));
-
-        // Python-markdown attr-list with colon (no spaces)
-        let (text, id) = extract_header_id("### Subsection {:#compact-colon}");
-        assert_eq!(text, "### Subsection");
-        assert_eq!(id, Some("compact-colon".to_string()));
-
-        // Python-markdown attr-list with colon and spaces
-        let (text, id) = extract_header_id("#### Deep Section {: #colon-spaces }");
-        assert_eq!(text, "#### Deep Section");
-        assert_eq!(id, Some("colon-spaces".to_string()));
-
-        // No header ID
-        let (text, id) = extract_header_id("## Normal Header");
-        assert_eq!(text, "## Normal Header");
-        assert_eq!(id, None);
-
-        // Complex ID with allowed characters
-        let (text, id) = extract_header_id("# Header {#complex-id_with:colons}");
-        assert_eq!(text, "# Header");
-        assert_eq!(id, Some("complex-id_with:colons".to_string()));
-    }
-
-    #[test]
-    fn test_header_id_edge_cases() {
-        // Test that extra spaces are handled correctly
-        let (text, id) = extract_header_id("# Header {  :   #   extra-spaces   }");
-        assert_eq!(text, "# Header");
-        assert_eq!(id, Some("extra-spaces".to_string()));
-
-        // Test minimal format variations
-        let (text, id) = extract_header_id("# Header {#a}");
-        assert_eq!(text, "# Header");
-        assert_eq!(id, Some("a".to_string()));
-
-        let (text, id) = extract_header_id("# Header {:# b}");
-        assert_eq!(text, "# Header");
-        assert_eq!(id, Some("b".to_string()));
     }
 }

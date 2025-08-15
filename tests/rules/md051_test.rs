@@ -1202,6 +1202,142 @@ Links that should fail:
 }
 
 #[test]
+fn test_extended_attr_list_support() {
+    // Test attr-list with classes and other attributes alongside IDs
+    let content = r#"# Simple ID { #simple-id }
+
+## ID with single class {: #with-class .highlight }
+
+### ID with multiple classes {: #multi-class .class1 .class2 }
+
+#### ID with key-value attributes {: #with-attrs data-test="value" style="color: red" }
+
+##### Complex combination {: #complex .highlight .important data-role="button" title="Test" }
+
+###### Edge case with quotes {: #quotes title="Has \"nested\" quotes" }
+
+Links to test extended attr-list support:
+- [Simple ID](#simple-id)
+- [With class](#with-class)
+- [Multiple classes](#multi-class)
+- [With attributes](#with-attrs)
+- [Complex](#complex)
+- [Quotes](#quotes)
+
+Links that should fail:
+- [Nonexistent](#nonexistent)
+"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the nonexistent fragment
+    assert_eq!(result.len(), 1, "Expected 1 warning for nonexistent fragment");
+    assert!(
+        result[0].message.contains("nonexistent"),
+        "Warning should be about nonexistent fragment, got: {}",
+        result[0].message
+    );
+
+    // All valid attr-list IDs should be recognized
+    for warning in &result {
+        assert!(
+            !warning.message.contains("simple-id")
+                && !warning.message.contains("with-class")
+                && !warning.message.contains("multi-class")
+                && !warning.message.contains("with-attrs")
+                && !warning.message.contains("complex")
+                && !warning.message.contains("quotes"),
+            "Valid attr-list ID should not be flagged as missing: {}",
+            warning.message
+        );
+    }
+}
+
+#[test]
+fn test_jekyll_kramdown_next_line_attr_list() {
+    // Test Jekyll/kramdown style attr-list on the line following the header
+    let content = r#"# Main Title
+
+## ATX Header
+{#atx-next-line}
+
+### Another ATX
+{ #atx-spaced }
+
+#### ATX with Class
+{: #atx-with-class .highlight}
+
+##### ATX Complex
+{: #atx-complex .class1 .class2 data-test="value"}
+
+Links to test next-line attr-list:
+- [ATX Next Line](#atx-next-line)
+- [ATX Spaced](#atx-spaced)
+- [ATX with Class](#atx-with-class)
+- [ATX Complex](#atx-complex)
+
+Links that should fail:
+- [Nonexistent](#nonexistent-next-line)
+"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the nonexistent fragment
+    assert_eq!(result.len(), 1, "Expected 1 warning for nonexistent fragment");
+    assert!(
+        result[0].message.contains("nonexistent-next-line"),
+        "Warning should be about nonexistent fragment, got: {}",
+        result[0].message
+    );
+
+    // All valid next-line attr-list IDs should be recognized
+    for warning in &result {
+        assert!(
+            !warning.message.contains("atx-next-line")
+                && !warning.message.contains("atx-spaced")
+                && !warning.message.contains("atx-with-class")
+                && !warning.message.contains("atx-complex"),
+            "Valid next-line attr-list ID should not be flagged as missing: {}",
+            warning.message
+        );
+    }
+}
+
+#[test]
+fn test_mixed_inline_and_next_line_attr_list() {
+    // Test mixing inline and next-line attr-list in the same document
+    let content = r#"# Mixed Styles
+
+## Inline Style {#inline-id}
+
+### Next Line Style
+{#next-line-id}
+
+#### Inline with Class {: #inline-class .highlight }
+
+##### Next Line with Class
+{: #next-line-class .important }
+
+Links:
+- [Inline](#inline-id)
+- [Next Line](#next-line-id)
+- [Inline Class](#inline-class)
+- [Next Line Class](#next-line-class)
+"#;
+
+    let ctx = LintContext::new(content);
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no warnings - all IDs should be found
+    assert_eq!(result.len(), 0, "Expected no warnings, got: {result:?}");
+}
+
+#[test]
 fn debug_issue_39_fragment_generation() {
     // Debug test to see what fragments are actually generated
     let content = r#"

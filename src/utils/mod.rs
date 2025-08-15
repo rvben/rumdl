@@ -9,6 +9,7 @@ pub mod early_returns;
 pub mod element_cache;
 pub mod emphasis_utils;
 pub mod fix_utils;
+pub mod header_id_utils;
 pub mod kramdown_utils;
 pub mod markdown_elements;
 pub mod range_utils;

@@ -1154,7 +1154,19 @@ impl<'a> LintContext<'a> {
 
                 // Extract custom header ID if present
                 let raw_text = text.trim().to_string();
-                let (clean_text, custom_id) = crate::utils::kramdown_utils::extract_header_id(&raw_text);
+                let (clean_text, mut custom_id) = crate::utils::header_id_utils::extract_header_id(&raw_text);
+
+                // If no custom ID was found on the header line, check the next line for standalone attr-list
+                if custom_id.is_none() && i + 1 < content_lines.len() && i + 1 < lines.len() {
+                    let next_line = content_lines[i + 1];
+                    if !lines[i + 1].in_code_block
+                        && crate::utils::header_id_utils::is_standalone_attr_list(next_line)
+                        && let Some(next_line_id) =
+                            crate::utils::header_id_utils::extract_standalone_attr_list_id(next_line)
+                    {
+                        custom_id = Some(next_line_id);
+                    }
+                }
 
                 lines[i].heading = Some(HeadingInfo {
                     level,
@@ -1188,7 +1200,19 @@ impl<'a> LintContext<'a> {
 
                     // Extract custom header ID if present
                     let raw_text = line.trim().to_string();
-                    let (clean_text, custom_id) = crate::utils::kramdown_utils::extract_header_id(&raw_text);
+                    let (clean_text, mut custom_id) = crate::utils::header_id_utils::extract_header_id(&raw_text);
+
+                    // If no custom ID was found on the header line, check the line after underline for standalone attr-list
+                    if custom_id.is_none() && i + 2 < content_lines.len() && i + 2 < lines.len() {
+                        let attr_line = content_lines[i + 2];
+                        if !lines[i + 2].in_code_block
+                            && crate::utils::header_id_utils::is_standalone_attr_list(attr_line)
+                            && let Some(attr_line_id) =
+                                crate::utils::header_id_utils::extract_standalone_attr_list_id(attr_line)
+                        {
+                            custom_id = Some(attr_line_id);
+                        }
+                    }
 
                     lines[i].heading = Some(HeadingInfo {
                         level,
