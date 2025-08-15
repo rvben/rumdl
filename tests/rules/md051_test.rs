@@ -1200,3 +1200,221 @@ Links that should fail:
         );
     }
 }
+
+#[test]
+fn debug_issue_39_fragment_generation() {
+    // Debug test to see what fragments are actually generated
+    let content = r#"
+# Testing & Coverage
+
+## cbrown --> sbrown: --unsafe-paths
+
+## cbrown -> sbrown
+
+## The End - yay
+
+## API Reference: Methods & Properties
+
+Links for testing:
+- [Testing coverage](#testing-coverage)
+- [Complex path](#cbrown-sbrown-unsafe-paths)
+- [Simple arrow](#cbrown-sbrown)
+- [API ref](#api-reference-methods-properties)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    println!("Number of errors: {}", result.len());
+    for warning in &result {
+        println!("Warning: {}", warning.message);
+    }
+
+    // If we fixed it correctly, we should have 0 errors
+    if result.is_empty() {
+        println!("SUCCESS: All fragments now match!");
+    } else {
+        println!("STILL BROKEN: Fragment generation needs more work");
+    }
+}
+
+/// Regression tests for Issue #39: Two bugs in Links [MD051]
+/// These tests ensure that the complex punctuation handling bugs are fixed and won't regress
+
+#[test]
+fn test_issue_39_duplicate_headings() {
+    // Test case from issue 39: links to the second of repeated headers
+    let content = r#"
+# Title
+
+## Section
+
+This is a [reference](#section-1) to the second section.
+
+## Section
+
+There will be another section.
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no errors - link to second section should work
+    assert_eq!(result.len(), 0, "Link to duplicate heading should work");
+}
+
+#[test]
+fn test_issue_39_complex_punctuation_arrows() {
+    // Test case from issue 39: complex arrow punctuation patterns
+    let content = r#"
+## cbrown --> sbrown: --unsafe-paths
+
+## cbrown -> sbrown
+
+## Arrow Test <-> bidirectional
+
+## Double Arrow ==> Test
+
+Links to test:
+- [Complex unsafe](#cbrown-sbrown-unsafe-paths)
+- [Simple arrow](#cbrown-sbrown)
+- [Bidirectional](#arrow-test-bidirectional)
+- [Double arrow](#double-arrow-test)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no errors - all complex punctuation should be handled correctly
+    assert_eq!(
+        result.len(),
+        0,
+        "Complex arrow patterns should work: {:?}",
+        result.iter().map(|r| &r.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_issue_39_ampersand_and_colons() {
+    // Test case from issue 39: headers with ampersands and colons
+    let content = r#"
+# Testing & Coverage
+
+## API Reference: Methods & Properties
+
+## Config: Database & Cache Settings
+
+Links to test:
+- [Testing coverage](#testing-coverage)
+- [API reference](#api-reference-methods-properties)
+- [Config settings](#config-database-cache-settings)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no errors - ampersands and colons should be handled correctly
+    assert_eq!(
+        result.len(),
+        0,
+        "Ampersand and colon patterns should work: {:?}",
+        result.iter().map(|r| &r.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_issue_39_mixed_punctuation_clusters() {
+    // Test edge cases with multiple types of punctuation in clusters
+    let content = r#"
+## Step 1: Setup (Prerequisites)
+
+## Error #404 - Not Found!
+
+## FAQ: What's Next?
+
+## Version 2.0.1 - Release Notes
+
+Links to test:
+- [Setup guide](#step-1-setup-prerequisites)
+- [Error page](#error-404-not-found)
+- [FAQ section](#faq-whats-next)
+- [Release notes](#version-201-release-notes)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no errors - mixed punctuation should be handled correctly
+    assert_eq!(
+        result.len(),
+        0,
+        "Mixed punctuation clusters should work: {:?}",
+        result.iter().map(|r| &r.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_issue_39_consecutive_hyphens_and_spaces() {
+    // Test that consecutive hyphens are collapsed properly
+    let content = r#"
+## Test --- Multiple Hyphens
+
+## Test  --  Spaced Hyphens
+
+## Test - Single - Hyphen
+
+Links to test:
+- [Multiple](#test-multiple-hyphens)
+- [Spaced](#test-spaced-hyphens)
+- [Single](#test-single-hyphen)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no errors - consecutive hyphens should be collapsed
+    assert_eq!(
+        result.len(),
+        0,
+        "Consecutive hyphens should be collapsed: {:?}",
+        result.iter().map(|r| &r.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_issue_39_edge_cases_from_comments() {
+    // Test specific patterns mentioned in issue 39 comments
+    let content = r#"
+### PHP $_REQUEST
+
+### sched_debug
+
+#### Add ldap_monitor to delegator$
+
+### cbrown --> sbrown: --unsafe-paths
+
+Links to test:
+- [PHP request](#php-_request)
+- [Sched debug](#sched_debug)
+- [LDAP monitor](#add-ldap_monitor-to-delegator)
+- [Complex path](#cbrown-sbrown-unsafe-paths)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no errors - all edge cases should work
+    assert_eq!(
+        result.len(),
+        0,
+        "Edge cases from issue comments should work: {:?}",
+        result.iter().map(|r| &r.message).collect::<Vec<_>>()
+    );
+}

@@ -52,6 +52,7 @@ mod md047_test;
 mod md048_test;
 mod md049_test;
 mod md050_test;
+mod md051_issue_39_regression_test;
 mod md051_test;
 mod md051_unicode_test;
 mod md052_test;
