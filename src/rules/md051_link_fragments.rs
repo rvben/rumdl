@@ -1,4 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::kramdown_utils;
 use crate::utils::regex_cache::get_cached_regex;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -164,7 +165,7 @@ impl MD051LinkFragments {
     }
 
     /// Fragment generation following kramdown's algorithm
-    /// kramdown strips diacritics but keeps base letters, removes underscores
+    /// Uses the official kramdown implementation from kramdown_utils
     #[inline]
     fn heading_to_fragment_kramdown(&self, heading: &str) -> String {
         if heading.is_empty() {
@@ -178,75 +179,8 @@ impl MD051LinkFragments {
             heading.to_string()
         };
 
-        // Trim whitespace first
-        let text = text.trim();
-
-        // Check if this would result in empty/non-Latin content
-        let has_latin = text
-            .chars()
-            .any(|c| c.is_ascii_alphabetic() || (c as u32 >= 0x00C0 && c as u32 <= 0x024F)); // Latin extended
-
-        if !has_latin {
-            // kramdown generates generic "section" for non-Latin scripts
-            return "section".to_string();
-        }
-
-        // Follow kramdown's algorithm
-        let mut result = String::with_capacity(text.len());
-        let mut found_letter = false;
-
-        for c in text.chars() {
-            // Skip leading non-letters
-            if !found_letter && !Self::is_kramdown_letter(c) {
-                continue;
-            }
-            if Self::is_kramdown_letter(c) {
-                found_letter = true;
-            }
-
-            // Process character
-            if c.is_ascii_alphabetic() {
-                result.push(c.to_ascii_lowercase());
-            } else if c.is_ascii_digit() && found_letter {
-                result.push(c);
-            } else if c == ' ' || c == '-' {
-                result.push('-');
-            } else if let Some(replacement) = Self::kramdown_normalize_char(c) {
-                // kramdown normalizes accented characters
-                result.push_str(replacement);
-            }
-            // Skip underscores and other characters
-        }
-
-        // Remove leading and trailing hyphens
-        result.trim_matches('-').to_string()
-    }
-
-    /// Check if character is considered a letter by kramdown
-    #[inline]
-    fn is_kramdown_letter(c: char) -> bool {
-        c.is_ascii_alphabetic() ||
-        // Latin-1 Supplement and Extended Latin
-        (c as u32 >= 0x00C0 && c as u32 <= 0x024F)
-    }
-
-    /// Normalize accented characters for kramdown (simplified)
-    #[inline]
-    fn kramdown_normalize_char(c: char) -> Option<&'static str> {
-        match c {
-            'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => Some("a"),
-            'È' | 'É' | 'Ê' | 'Ë' | 'è' | 'é' | 'ê' | 'ë' => Some("e"),
-            'Ì' | 'Í' | 'Î' | 'Ï' | 'ì' | 'í' | 'î' | 'ï' => Some("i"),
-            'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => Some("o"),
-            'Ù' | 'Ú' | 'Û' | 'Ü' | 'ù' | 'ú' | 'û' | 'ü' => Some("u"),
-            'Ý' | 'ý' | 'ÿ' => Some("y"),
-            'Ñ' | 'ñ' => Some("n"),
-            'Ç' | 'ç' => Some("c"),
-            'ß' => Some("ss"),
-            'Æ' | 'æ' => Some("ae"),
-            'Œ' | 'œ' => Some("oe"),
-            _ => None,
-        }
+        // Use the official kramdown algorithm from utils
+        kramdown_utils::heading_to_fragment(&text)
     }
 
     /// Fragment generation for Bitbucket style
@@ -274,14 +208,27 @@ impl MD051LinkFragments {
             heading.to_string()
         };
 
-        // Step 2: Apply deburr (accent removal) - use kramdown normalization
+        // Step 2: Apply deburr (accent removal) - basic accent normalization
         let mut result = String::with_capacity(text.len());
         for c in text.chars() {
-            if let Some(replacement) = Self::kramdown_normalize_char(c) {
-                result.push_str(replacement);
-            } else {
-                result.push(c);
-            }
+            let replacement = match c {
+                'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => "a",
+                'È' | 'É' | 'Ê' | 'Ë' | 'è' | 'é' | 'ê' | 'ë' => "e",
+                'Ì' | 'Í' | 'Î' | 'Ï' | 'ì' | 'í' | 'î' | 'ï' => "i",
+                'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => "o",
+                'Ù' | 'Ú' | 'Û' | 'Ü' | 'ù' | 'ú' | 'û' | 'ü' => "u",
+                'Ý' | 'ý' | 'ÿ' => "y",
+                'Ñ' | 'ñ' => "n",
+                'Ç' | 'ç' => "c",
+                'ß' => "ss",
+                'Æ' | 'æ' => "ae",
+                'Œ' | 'œ' => "oe",
+                _ => {
+                    result.push(c);
+                    continue;
+                }
+            };
+            result.push_str(replacement);
         }
         text = result;
 

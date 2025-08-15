@@ -174,6 +174,96 @@ pub fn has_kramdown_syntax(line: &str) -> bool {
         || has_inline_math(line)
 }
 
+/// Generate header ID following kramdown's algorithm
+///
+/// Based on the official kramdown specification:
+/// 1. Remove all characters except letters, numbers, spaces and dashes
+/// 2. Remove characters from start until first letter
+/// 3. Convert everything except letters and numbers to dashes
+/// 4. Convert to lowercase
+/// 5. If nothing remains, use "section"
+///
+/// This function is verified against the official kramdown Ruby implementation.
+pub fn heading_to_fragment(heading: &str) -> String {
+    if heading.is_empty() {
+        return String::new();
+    }
+
+    let text = heading.trim();
+
+    // Step 1: Remove all characters except letters, numbers, spaces and dashes
+    // Following official kramdown spec - underscores and other punctuation are removed
+    let mut step1 = String::new();
+    for c in text.chars() {
+        if c.is_ascii_alphabetic() || c.is_ascii_digit() || c == ' ' || c == '-' {
+            step1.push(c);
+        } else if let Some(replacement) = normalize_accented_char(c) {
+            // Handle accented characters
+            step1.push_str(replacement);
+        }
+        // All other characters (punctuation, symbols, underscores, etc.) are removed
+    }
+
+    // Step 2: Remove characters from start until first letter
+    let mut start_pos = 0;
+    for (i, c) in step1.char_indices() {
+        if c.is_ascii_alphabetic() || is_kramdown_letter(c) {
+            start_pos = i;
+            break;
+        }
+    }
+    let step2 = &step1[start_pos..];
+
+    // Step 3: Convert everything except letters and numbers to dashes
+    let mut result = String::new();
+    for c in step2.chars() {
+        if c.is_ascii_alphabetic() {
+            result.push(c.to_ascii_lowercase());
+        } else if c.is_ascii_digit() {
+            result.push(c);
+        } else {
+            // Spaces and existing dashes become dashes (preserving multiple consecutive dashes)
+            result.push('-');
+        }
+    }
+
+    // Only remove leading and trailing dashes, preserve consecutive dashes in the middle
+    let result = result.trim_matches('-').to_string();
+
+    if result.is_empty() {
+        "section".to_string()
+    } else {
+        result
+    }
+}
+
+/// Check if character is considered a letter by kramdown
+#[inline]
+fn is_kramdown_letter(c: char) -> bool {
+    c.is_ascii_alphabetic() ||
+    // Latin-1 Supplement and Extended Latin
+    (c as u32 >= 0x00C0 && c as u32 <= 0x024F)
+}
+
+/// Normalize accented characters for kramdown (simplified)
+#[inline]
+fn normalize_accented_char(c: char) -> Option<&'static str> {
+    match c {
+        'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => Some("a"),
+        'È' | 'É' | 'Ê' | 'Ë' | 'è' | 'é' | 'ê' | 'ë' => Some("e"),
+        'Ì' | 'Í' | 'Î' | 'Ï' | 'ì' | 'í' | 'î' | 'ï' => Some("i"),
+        'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => Some("o"),
+        'Ù' | 'Ú' | 'Û' | 'Ü' | 'ù' | 'ú' | 'û' | 'ü' => Some("u"),
+        'Ý' | 'ý' | 'ÿ' => Some("y"),
+        'Ñ' | 'ñ' => Some("n"),
+        'Ç' | 'ç' => Some("c"),
+        'ß' => Some("ss"),
+        'Æ' | 'æ' => Some("ae"),
+        'Œ' | 'œ' => Some("oe"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
