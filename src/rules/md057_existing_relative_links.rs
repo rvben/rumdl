@@ -195,19 +195,6 @@ impl MD057ExistingRelativeLinks {
             }
         }
     }
-
-    /// Extract a URL from a Markdown link segment
-    #[allow(dead_code)]
-    fn extract_url_from_link<'a>(&self, link_text: &'a str) -> Option<(&'a str, usize)> {
-        // Find the URL part using regex
-        URL_EXTRACT_REGEX.captures(link_text).and_then(move |caps| {
-            caps.get(1).map(|url_match| {
-                let url = url_match.as_str().trim();
-                let position = url_match.start();
-                (url, position)
-            })
-        })
-    }
 }
 
 impl Rule for MD057ExistingRelativeLinks {

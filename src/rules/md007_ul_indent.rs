@@ -5,7 +5,7 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severi
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::{ElementCache, ListMarkerType};
-use crate::utils::regex_cache::{CODE_FENCE_REGEX, UNORDERED_LIST_MARKER_REGEX};
+use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use toml;
 
 mod md007_config;
@@ -68,30 +68,6 @@ impl MD007ULIndent {
             }
         }
         (false, None)
-    }
-
-    #[allow(dead_code)]
-    fn is_in_code_block(content: &str, line_idx: usize) -> bool {
-        // Use centralized code fence pattern
-
-        let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_block = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            if i > line_idx {
-                break;
-            }
-
-            if CODE_FENCE_REGEX.is_match(line.trim_start()) {
-                in_code_block = !in_code_block;
-            }
-
-            if i == line_idx {
-                return in_code_block;
-            }
-        }
-
-        false
     }
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "rumdl"
-version = "0.0.118"
+version = "0.0.119"
 edition = "2024"
 rust-version = "1.89.0"
 description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"
@@ -23,6 +23,7 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "rumdl"
 path = "src/main.rs"
+
 
 # Benchmark binaries - only built when explicitly requested
 [[bin]]

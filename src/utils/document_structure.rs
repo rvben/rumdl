@@ -120,14 +120,6 @@ pub struct BlockquoteRange {
     pub end_line: usize,
 }
 
-/// Code block processing state
-#[allow(dead_code)]
-enum InternalCodeBlockState {
-    None,
-    InFenced,
-    InIndented,
-}
-
 /// OPTIMIZATION 1: Inline code span representation
 #[derive(Debug, Clone)]
 pub struct CodeSpan {

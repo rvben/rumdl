@@ -99,7 +99,7 @@ fn test_complex_heading_structures() {
 
     // Test with special characters in headings/links
     let ctx = LintContext::new(
-        "# Heading & Special! Characters\n\n[Link](somepath#heading-special-characters)\n[Bad Link](somepath#heading-special-characters-bad)",
+        "# Heading & Special! Characters\n\n[Link](somepath#heading--special-characters)\n[Bad Link](somepath#heading-special-characters-bad)",
     );
     let result = rule.check(&ctx).unwrap();
 

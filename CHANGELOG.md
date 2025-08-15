@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.119] - 2025-08-15
+
+### Fixed
+- **MD051**: Fixed GitHub anchor generation algorithm to correctly handle consecutive spaces
+  - "Test & Heading!" now correctly generates "test--heading" instead of "test-heading"
+  - Improved compliance with GitHub's official anchor generation behavior
+  - Fixed whitespace normalization bug that was collapsing multiple spaces to single spaces
+
+### Improved
+- **Code Quality**: Removed all `#[allow(dead_code)]` violations in codebase
+  - Removed unused `InternalCodeBlockState` enum from document_structure.rs
+  - Removed unused `extract_url_from_link` function from md057_existing_relative_links.rs
+  - Removed unused `is_in_code_block` function from md007_ul_indent.rs
+
 ## [0.0.118] - 2025-08-14
 
 ## [0.0.117] - 2025-08-14
@@ -124,7 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.99] - 2025-07-22
 
 ### Fixed
-- MD034: Added support for `ftps://` URLs 
+- MD034: Added support for `ftps://` URLs
 - MD034: Fixed detection of URLs in HTML comments (now properly ignored)
 - MD039: Fixed escaped character handling in link text
 - MD044: Fixed clippy warnings and improved pattern matching for proper names
@@ -202,7 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Performance Improvements
 - Implemented lazy code span loading - 3.8x speedup for 94% of rules that don't use code spans
 - MD013: 34.5% faster check operations through aggressive early returns
-- MD038: 14% faster by leveraging lazy code span loading  
+- MD038: 14% faster by leveraging lazy code span loading
 - MD044: 93.5% faster with global regex caching
 - MD047: 8.3% faster using pre-computed line data
 - MD053: 39.7% faster by leveraging pre-parsed reference definitions
