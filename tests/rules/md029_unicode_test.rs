@@ -45,8 +45,8 @@ fn test_unicode_nested_ordered_lists() {
    1. Nested item with مرحبا
    2. Another nested with こんにちは
 2. Back to first level with ñáéíóú
-   3. New nested section with русский
-   4. Final nested with עברית";
+   1. New nested section with русский
+   2. Final nested with עברית";
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
     assert!(

@@ -544,21 +544,21 @@ impl MD029OrderedListPrefix {
         false
     }
 
-    /// Find the parent unordered item for an ordered item
+    /// Find the closest parent list item for an ordered item (can be ordered or unordered)
     /// Returns the line number of the parent, or 0 if no parent found
-    fn find_parent_unordered_item(
+    fn find_parent_list_item(
         &self,
         ctx: &crate::lint_context::LintContext,
         ordered_line: usize,
         ordered_indent: usize,
     ) -> usize {
-        // Look backward from the ordered item to find its unordered parent
+        // Look backward from the ordered item to find its closest parent
         for line_num in (1..ordered_line).rev() {
             if let Some(line_info) = ctx.line_info(line_num) {
                 if let Some(list_item) = &line_info.list_item {
                     // Found a list item - check if it could be the parent
-                    if list_item.marker_column < ordered_indent && !list_item.is_ordered {
-                        // This unordered item is at a lower indentation, so it's the parent
+                    if list_item.marker_column < ordered_indent {
+                        // This list item is at a lower indentation, so it's the parent
                         return line_num;
                     }
                 }
@@ -614,8 +614,8 @@ impl MD029OrderedListPrefix {
         let mut level_groups: LevelGroups = std::collections::HashMap::new();
 
         for (line_num, line_info, list_item) in all_items {
-            // Find the parent unordered item for this ordered item
-            let parent_line = self.find_parent_unordered_item(ctx, line_num, list_item.marker_column);
+            // Find the closest parent list item (ordered or unordered) for this ordered item
+            let parent_line = self.find_parent_list_item(ctx, line_num, list_item.marker_column);
 
             // Group by both marker column (indentation level) and parent context
             level_groups

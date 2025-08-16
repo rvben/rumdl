@@ -363,18 +363,11 @@ fn test_performance_with_many_small_lists() {
     // Should complete quickly even with many errors
     assert!(duration.as_millis() < 500, "Should complete within 500ms");
 
-    // Let's be more precise: verify the actual behavior
-    // If the rule is treating all items as one big sequence instead of separate lists,
-    // that would be wrong and needs fixing
-    if result.len() > 100 {
-        println!("CRITICAL: Found {} errors instead of expected 100", result.len());
-        println!("This suggests the rule may be incorrectly grouping separate lists");
-
-        // For now, let's allow this but flag it for investigation
-        assert!(result.len() >= 100, "Should find at least the expected errors");
-    } else {
-        assert_eq!(result.len(), 100, "Should find exactly 2 errors per list * 50 lists");
-    }
+    // Should find at least 100 errors (2 per intended list)
+    assert!(
+        result.len() >= 100,
+        "Should find at least 100 errors (2 per intended list)"
+    );
 }
 
 #[test]
@@ -768,4 +761,316 @@ fn test_md029_simple_insufficient_indent() {
     assert_eq!(result.len(), 2, "Both '10.' items should be flagged");
     assert!(result[0].message.contains("10 does not match style (expected 1)"));
     assert!(result[1].message.contains("10 does not match style (expected 1)"));
+}
+
+#[test]
+fn test_md029_nested_ordered_lists_issue_52() {
+    // Test for GitHub issue #52: nested ordered lists incorrectly treated as continuous sequence
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Exact test case from issue #52
+    let content = r#"# Title
+
+1. Top 1
+   1. Sub 1
+   1. Sub 2
+2. Top 2
+   1. Sub 3
+   1. Sub 4"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag 2 errors (not 3 as the bug produced):
+    // - Line 5: "1. Sub 2" should be "2. Sub 2"
+    // - Line 8: "1. Sub 4" should be "2. Sub 4"
+    // Line 7: "1. Sub 3" should NOT be flagged (correctly starts new nested sequence)
+    assert_eq!(result.len(), 2, "Should only flag 2 errors after fix");
+
+    // Verify the specific errors - they should be on lines 5 and 8
+    let line_5_error = result.iter().find(|w| w.line == 5);
+    let line_8_error = result.iter().find(|w| w.line == 8);
+
+    assert!(line_5_error.is_some(), "Should have error on line 5");
+    assert!(line_8_error.is_some(), "Should have error on line 8");
+
+    assert!(
+        line_5_error
+            .unwrap()
+            .message
+            .contains("1 does not match style (expected 2)"),
+        "Line 5 should expect 2, got: {}",
+        line_5_error.unwrap().message
+    );
+    assert!(
+        line_8_error
+            .unwrap()
+            .message
+            .contains("1 does not match style (expected 2)"),
+        "Line 8 should expect 2, got: {}",
+        line_8_error.unwrap().message
+    );
+
+    // Test the fix function produces correct output
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected_fixed = r#"# Title
+
+1. Top 1
+   1. Sub 1
+   2. Sub 2
+2. Top 2
+   1. Sub 3
+   2. Sub 4"#;
+
+    assert_eq!(fixed, expected_fixed, "Fix should produce correct nested numbering");
+}
+
+#[test]
+fn test_md029_nested_ordered_lists_bug() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Test case from issue #52 - nested ordered lists should restart numbering
+    let content = r#"# Title
+
+1. Top 1
+   1. Sub 1
+   1. Sub 2
+2. Top 2
+   1. Sub 3
+   1. Sub 4"#;
+
+    let ctx = LintContext::new(content);
+
+    // Debug info
+    println!("List blocks found:");
+    for (i, block) in ctx.list_blocks.iter().enumerate() {
+        println!(
+            "  Block {}: lines {}-{}, item_lines: {:?}, is_ordered: {}",
+            i, block.start_line, block.end_line, block.item_lines, block.is_ordered
+        );
+    }
+
+    println!("Line info for list items:");
+    for line_num in 1..=ctx.content.lines().count() {
+        if let Some(line_info) = ctx.line_info(line_num) {
+            if let Some(list_item) = &line_info.list_item {
+                println!(
+                    "  Line {}: '{}' - marker: '{}', column: {}, ordered: {}",
+                    line_num,
+                    line_info.content.trim(),
+                    list_item.marker,
+                    list_item.marker_column,
+                    list_item.is_ordered
+                );
+            }
+        }
+    }
+
+    let result = rule.check(&ctx).unwrap();
+
+    println!("Found {} warnings:", result.len());
+    for warning in &result {
+        println!("  Line {}: {}", warning.line, warning.message);
+    }
+
+    // Expected behavior: nested ordered lists should restart numbering at each level
+    // So we should NOT get warnings for the nested "1." items
+    // But the current implementation incorrectly treats them as one continuous sequence
+
+    // This test currently fails - documenting the bug
+    // The nested "1. Sub 1", "1. Sub 3" should NOT be flagged as errors
+    // Only the second "1. Sub 2" and "1. Sub 4" should be flagged (should be "2.")
+
+    // Expected warnings:
+    // - Line 5: "1. Sub 2" should be "2. Sub 2"
+    // - Line 8: "1. Sub 4" should be "2. Sub 4"
+
+    // Now the fix is working correctly!
+    // We should get exactly 2 warnings for the second items in each nested sequence
+    assert_eq!(
+        result.len(),
+        2,
+        "Should have exactly 2 warnings for nested sequence numbering"
+    );
+
+    // Check that the correct lines are flagged with the correct expected numbers
+    assert!(
+        result
+            .iter()
+            .any(|w| w.line == 5 && w.message.contains("1 does not match style (expected 2)")),
+        "Line 5 (1. Sub 2) should be flagged as needing to be 2"
+    );
+    assert!(
+        result
+            .iter()
+            .any(|w| w.line == 8 && w.message.contains("1 does not match style (expected 2)")),
+        "Line 8 (1. Sub 4) should be flagged as needing to be 2"
+    );
+
+    // Test the fix function too
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected_fixed = r#"# Title
+
+1. Top 1
+   1. Sub 1
+   2. Sub 2
+2. Top 2
+   1. Sub 3
+   2. Sub 4"#;
+
+    assert_eq!(
+        fixed, expected_fixed,
+        "Fix should correct the nested sequence numbering"
+    );
+}
+
+// Additional edge cases for nested lists to ensure robustness
+
+#[test]
+fn test_md029_triple_nested_ordered_lists() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    let content = r#"1. Level 1 item 1
+   1. Level 2 item 1
+      1. Level 3 item 1
+      2. Level 3 item 2
+   2. Level 2 item 2
+      1. Level 3 item 3
+      1. Level 3 item 4 - wrong
+2. Level 1 item 2
+   1. Level 2 item 3
+      1. Level 3 item 5
+      3. Level 3 item 6 - wrong"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should detect 2 errors: lines 7 and 11 (second items at level 3 under different parents)
+    assert_eq!(result.len(), 2, "Should detect 2 errors in triple-nested structure");
+
+    // Verify specific errors
+    let line_7_error = result.iter().find(|w| w.line == 7);
+    let line_11_error = result.iter().find(|w| w.line == 11);
+
+    assert!(line_7_error.is_some(), "Should have error on line 7");
+    assert!(line_11_error.is_some(), "Should have error on line 11");
+
+    assert!(
+        line_7_error
+            .unwrap()
+            .message
+            .contains("1 does not match style (expected 2)")
+    );
+    assert!(
+        line_11_error
+            .unwrap()
+            .message
+            .contains("3 does not match style (expected 2)")
+    );
+}
+
+#[test]
+fn test_md029_ordered_under_unordered_parents() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    let content = r#"- Unordered parent 1
+  1. Nested ordered 1
+  1. Nested ordered 2 (should be 2)
+- Unordered parent 2  
+  1. New sequence starts at 1
+  3. Should be 2
+- Unordered parent 3
+  1. Another sequence starts at 1"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should find 2 errors: second items under each unordered parent
+    assert_eq!(
+        result.len(),
+        2,
+        "Should find 2 errors in ordered lists under unordered parents"
+    );
+
+    // Verify the errors are on the expected lines
+    let has_line_3_error = result.iter().any(|w| w.line == 3 && w.message.contains("expected 2"));
+    let has_line_6_error = result.iter().any(|w| w.line == 6 && w.message.contains("expected 2"));
+
+    assert!(has_line_3_error, "Should have error on line 3");
+    assert!(has_line_6_error, "Should have error on line 6");
+}
+
+#[test]
+fn test_md029_lists_with_code_block_interruptions() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    let content = r#"1. First item
+   ```python
+   code block
+   ```
+2. Second item (should maintain sequence)
+   1. Nested item
+   ```rust
+   more code
+   ```
+   1. Should be 2 after code block"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should find 1 error: the nested "1." that should be "2."
+    assert_eq!(result.len(), 1, "Should find 1 error for nested item after code block");
+    assert!(result[0].message.contains("1 does not match style (expected 2)"));
+}
+
+#[test]
+fn test_md029_mixed_indentation_robustness() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+
+    // Mix of 2, 3, and 4 space indentation
+    let content = r#"1. Normal item
+  1. 2-space nested (non-standard)
+    1. 4-space nested
+    3. Should be 2
+   1. 3-space nested (back to standard)  
+   5. Should be 2"#;
+
+    let ctx = LintContext::new(content);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should handle mixed indentation gracefully and detect numbering errors
+    assert!(
+        !result.is_empty(),
+        "Should detect numbering errors despite mixed indentation"
+    );
+}
+
+#[test]
+fn test_md029_all_styles_with_nesting() {
+    // Test that all ListStyle variants work with nested scenarios without crashing
+    let styles = vec![
+        ListStyle::One,
+        ListStyle::OneOne,
+        ListStyle::Ordered,
+        ListStyle::Ordered0,
+    ];
+
+    let content = r#"1. Top level
+   1. Nested level
+   2. Second nested
+2. Second top
+   1. Another nested"#;
+
+    for style in styles {
+        let rule = MD029OrderedListPrefix::new(style.clone());
+        let ctx = LintContext::new(content);
+        let result = rule.check(&ctx);
+
+        // Just verify it doesn't crash and produces some result
+        assert!(result.is_ok(), "Style {style:?} should not crash on nested lists");
+
+        // Test that fix works too
+        let fixed = rule.fix(&ctx);
+        assert!(fixed.is_ok(), "Style {style:?} fix should not crash on nested lists");
+    }
 }
