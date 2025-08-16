@@ -2,6 +2,7 @@
 //! Shared utilities for rumdl, including document structure analysis, code block handling, regex helpers, and string extensions.
 //! Provides reusable traits and functions for rule implementations and core linter logic.
 
+pub mod anchor_styles;
 pub mod ast_utils;
 pub mod code_block_utils;
 pub mod document_structure;
