@@ -57,9 +57,9 @@ That last one is usually done to avoid a name collision or *sometimes* to make a
     for issue in &result {
         // Check that we're not incorrectly flagging the second list's numbering
         assert!(
-            !issue.message.contains("expected 5") &&
-            !issue.message.contains("expected 6") &&
-            !issue.message.contains("expected 7"),
+            !issue.message.contains("expected 5")
+                && !issue.message.contains("expected 6")
+                && !issue.message.contains("expected 7"),
             "Lists separated by headings should not be treated as continuous. Found: {}",
             issue.message
         );
@@ -87,8 +87,7 @@ This is a paragraph between the lists.
     // Should not report MD029 errors for the second list
     for issue in &result {
         assert!(
-            !issue.message.contains("expected 3") &&
-            !issue.message.contains("expected 4"),
+            !issue.message.contains("expected 3") && !issue.message.contains("expected 4"),
             "Lists separated by paragraphs should not be treated as continuous. Found: {}",
             issue.message
         );
@@ -116,8 +115,7 @@ fn test_lists_separated_by_horizontal_rule() {
     // Should not report MD029 errors for the second list
     for issue in &result {
         assert!(
-            !issue.message.contains("expected 3") &&
-            !issue.message.contains("expected 4"),
+            !issue.message.contains("expected 3") && !issue.message.contains("expected 4"),
             "Lists separated by horizontal rules should not be treated as continuous. Found: {}",
             issue.message
         );
@@ -145,8 +143,7 @@ fn test_lists_separated_by_blockquote() {
     // Should not report MD029 errors for the second list
     for issue in &result {
         assert!(
-            !issue.message.contains("expected 3") &&
-            !issue.message.contains("expected 4"),
+            !issue.message.contains("expected 3") && !issue.message.contains("expected 4"),
             "Lists separated by blockquotes should not be treated as continuous. Found: {}",
             issue.message
         );
@@ -176,8 +173,7 @@ fn test_deeply_nested_lists_with_separator() {
     // Should not report MD029 errors for the second list
     for issue in &result {
         assert!(
-            !issue.message.contains("expected 3") &&
-            !issue.message.contains("expected 5"),
+            !issue.message.contains("expected 3") && !issue.message.contains("expected 5"),
             "Deeply nested lists separated by headings should reset numbering. Found: {}",
             issue.message
         );
@@ -202,7 +198,11 @@ fn test_multiple_blank_lines_between_list_items() {
 
     // This SHOULD report an MD029 error since blank lines alone don't separate lists
     // The third item should be "3." not something else
-    assert_eq!(result.len(), 0, "Multiple blank lines alone should not cause MD029 errors");
+    assert_eq!(
+        result.len(),
+        0,
+        "Multiple blank lines alone should not cause MD029 errors"
+    );
 }
 
 #[test]
@@ -229,8 +229,7 @@ print("Hello")
     // Should not report MD029 errors for the second list
     for issue in &result {
         assert!(
-            !issue.message.contains("expected 3") &&
-            !issue.message.contains("expected 4"),
+            !issue.message.contains("expected 3") && !issue.message.contains("expected 4"),
             "Lists separated by code blocks should not be treated as continuous. Found: {}",
             issue.message
         );
@@ -260,8 +259,7 @@ fn test_table_between_lists() {
     // Should not report MD029 errors for the second list
     for issue in &result {
         assert!(
-            !issue.message.contains("expected 3") &&
-            !issue.message.contains("expected 4"),
+            !issue.message.contains("expected 3") && !issue.message.contains("expected 4"),
             "Lists separated by tables should not be treated as continuous. Found: {}",
             issue.message
         );
@@ -286,7 +284,11 @@ fn test_html_comment_between_lists() {
     let result = rule.check(&ctx).unwrap();
 
     // HTML comments at top level separate lists, so we expect an MD029 error
-    assert_eq!(result.len(), 1, "HTML comments at top level should separate lists and cause MD029 error for incorrect numbering");
+    assert_eq!(
+        result.len(),
+        1,
+        "HTML comments at top level should separate lists and cause MD029 error for incorrect numbering"
+    );
 }
 
 #[test]
@@ -311,8 +313,7 @@ fn test_mixed_list_types() {
     // Should not report MD029 errors - unordered list separates the ordered lists
     for issue in &result {
         assert!(
-            !issue.message.contains("expected 3") &&
-            !issue.message.contains("expected 4"),
+            !issue.message.contains("expected 3") && !issue.message.contains("expected 4"),
             "Ordered lists separated by unordered lists should reset numbering. Found: {}",
             issue.message
         );

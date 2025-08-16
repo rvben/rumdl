@@ -1,4 +1,4 @@
-use crate::utils::code_block_utils::CodeBlockUtils;
+use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -1352,31 +1352,37 @@ impl<'a> LintContext<'a> {
         for (line_idx, line_info) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
-            // Handle code blocks - they should continue the list if properly indented
+            // Enhanced code block handling using Design #3's context analysis
             if line_info.in_code_block {
                 if let Some(ref mut block) = current_block {
-                    // For code blocks to continue a list, they need to be indented
-                    // at least 2 spaces beyond the list marker
                     // Calculate minimum indentation for list continuation
-                    // For ordered lists, use the last marker width (e.g., 3 for "1. ", 4 for "10. ")
-                    // For unordered lists like "- ", content starts at column 2, so continuations need at least 2 spaces
-                    let min_continuation_indent = if block.is_ordered {
-                        current_indent_level + last_marker_width
-                    } else {
-                        current_indent_level + 2 // Unordered lists need at least 2 spaces (e.g., "- " = 2 chars)
-                    };
+                    let min_continuation_indent = CodeBlockUtils::calculate_min_continuation_indent(lines, line_idx);
 
-                    if line_info.indent >= min_continuation_indent {
-                        // Code blocks at list continuation level should continue the list
-                        block.end_line = line_num;
-                        continue;
+                    // Analyze code block context using the three-tier classification
+                    let context = CodeBlockUtils::analyze_code_block_context(lines, line_idx, min_continuation_indent);
+
+                    match context {
+                        CodeBlockContext::Indented => {
+                            // Code block is properly indented - continues the list
+                            block.end_line = line_num;
+                            continue;
+                        }
+                        CodeBlockContext::Standalone => {
+                            // Code block separates lists - end current block
+                            let completed_block = current_block.take().unwrap();
+                            list_blocks.push(completed_block);
+                            continue;
+                        }
+                        CodeBlockContext::Adjacent => {
+                            // Edge case - use conservative behavior (continue list)
+                            block.end_line = line_num;
+                            continue;
+                        }
                     }
+                } else {
+                    // No current list block - skip code block lines
+                    continue;
                 }
-                // If we have a current block and hit a non-indented code block, end it
-                if let Some(block) = current_block.take() {
-                    list_blocks.push(block);
-                }
-                continue;
             }
 
             // Extract blockquote prefix if any
@@ -1417,9 +1423,7 @@ impl<'a> LintContext<'a> {
                                 let check_info = &lines[check_idx];
                                 // Check for content that breaks the list
                                 let is_list_breaking_content = if check_info.in_code_block {
-                                    // Code blocks break lists only if they're standalone (with blank lines before/after)
-                                    // and not properly indented as list continuation
-                                    
+                                    // Use enhanced code block classification for list separation
                                     let last_item_marker_width =
                                         if block_last_item_line > 0 && block_last_item_line <= lines.len() {
                                             lines[block_last_item_line - 1]
@@ -1438,29 +1442,28 @@ impl<'a> LintContext<'a> {
                                         };
 
                                     let min_continuation = if block.is_ordered { last_item_marker_width } else { 2 };
-                                    let is_properly_indented = check_info.indent >= min_continuation;
-                                    
-                                    // For code blocks, only break if not properly indented
-                                    // The standalone vs adjacent distinction should be handled at the block level
-                                    !is_properly_indented
+
+                                    // Analyze code block context using our enhanced classification
+                                    let context = CodeBlockUtils::analyze_code_block_context(
+                                        lines,
+                                        check_line - 1,
+                                        min_continuation,
+                                    );
+
+                                    // Standalone code blocks break lists, indented ones continue them
+                                    matches!(context, CodeBlockContext::Standalone)
                                 } else if !check_info.is_blank && check_info.list_item.is_none() {
                                     // Check for structural separators that should break lists (from issue #42)
                                     let line_content = check_info.content.trim();
-                                    
-                                    // Headings break lists
-                                    if check_info.heading.is_some() {
-                                        true
-                                    }
-                                    // Horizontal rules break lists
-                                    else if line_content.starts_with("---") || line_content.starts_with("***") || line_content.starts_with("___") {
-                                        true
-                                    }
-                                    // Tables break lists (simple heuristic: contains |)
-                                    else if line_content.contains('|') {
-                                        true  
-                                    }
-                                    // Blockquotes break lists
-                                    else if line_content.starts_with(">") {
+
+                                    // Any of these structural separators break lists
+                                    if check_info.heading.is_some()
+                                        || line_content.starts_with("---")
+                                        || line_content.starts_with("***")
+                                        || line_content.starts_with("___")
+                                        || line_content.contains('|')
+                                        || line_content.starts_with(">")
+                                    {
                                         true
                                     }
                                     // Other non-list content - check if properly indented
@@ -1482,7 +1485,8 @@ impl<'a> LintContext<'a> {
                                                 3 // fallback
                                             };
 
-                                        let min_continuation = if block.is_ordered { last_item_marker_width } else { 2 };
+                                        let min_continuation =
+                                            if block.is_ordered { last_item_marker_width } else { 2 };
                                         check_info.indent < min_continuation
                                     }
                                 } else {
@@ -1639,7 +1643,7 @@ impl<'a> LintContext<'a> {
                                         // Check for meaningful content
                                         let line_indent =
                                             between_line.content.len() - between_line.content.trim_start().len();
-                                        
+
                                         // Structural separators (code fences, headings, etc.) are meaningful and should BREAK lists
                                         if trimmed.starts_with("```")
                                             || trimmed.starts_with("~~~")
@@ -1652,7 +1656,7 @@ impl<'a> LintContext<'a> {
                                         {
                                             return true; // These are structural separators - meaningful content that breaks lists
                                         }
-                                        
+
                                         // Only properly indented content continues the list
                                         line_indent >= min_continuation_indent
                                     } else {
@@ -1740,7 +1744,7 @@ impl<'a> LintContext<'a> {
                         || line_content.starts_with("___")
                         || line_content.starts_with(">")
                         || line_content.contains('|'); // Tables
-                    
+
                     let is_lazy_continuation = last_list_item_line == line_num - 1
                         && !is_structural_separator
                         && !line_info.is_blank
@@ -2193,10 +2197,10 @@ impl<'a> ListBlockMerger<'a> {
     fn can_merge_with_blank_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
         // Check if there are structural separators between the blocks
         // If has_meaningful_content_between returns true, it means there are structural separators
-        if has_meaningful_content_between(current, next, &self.lines) {
+        if has_meaningful_content_between(current, next, self.lines) {
             return false; // Structural separators prevent merging
         }
-        
+
         // Only merge unordered lists with same marker across single blank
         !current.is_ordered && current.marker == next.marker
     }
@@ -2204,10 +2208,10 @@ impl<'a> ListBlockMerger<'a> {
     /// Check if ordered lists can be merged when there's content between them
     fn can_merge_with_content_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
         // Do not merge lists if there are structural separators between them
-        if has_meaningful_content_between(current, next, &self.lines) {
+        if has_meaningful_content_between(current, next, self.lines) {
             return false; // Structural separators prevent merging
         }
-        
+
         // Only consider merging ordered lists if there's no structural content between
         current.is_ordered && next.is_ordered
     }
@@ -2269,7 +2273,7 @@ fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: 
             }
 
             // Check for structural separators that should separate lists (CommonMark compliant)
-            
+
             // Headings separate lists
             if line_info.heading.is_some() {
                 return true; // Has meaningful content - headings separate lists
@@ -2293,14 +2297,14 @@ fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: 
             // Code block fences separate lists (unless properly indented as list content)
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 let line_indent = line_info.content.len() - line_info.content.trim_start().len();
-                
+
                 // Check if this code block is properly indented as list continuation
                 let min_continuation_indent = if current.is_ordered {
                     current.nesting_level + current.max_marker_width
                 } else {
                     current.nesting_level + 2
                 };
-                
+
                 if line_indent < min_continuation_indent {
                     // This is a standalone code block that separates lists
                     return true; // Has meaningful content - standalone code blocks separate lists
@@ -2336,21 +2340,21 @@ fn is_horizontal_rule(trimmed: &str) -> bool {
     if trimmed.len() < 3 {
         return false;
     }
-    
+
     // Check for three or more consecutive -, *, or _ characters (with optional spaces)
     let chars: Vec<char> = trimmed.chars().collect();
-    if let Some(&first_char) = chars.first() {
-        if first_char == '-' || first_char == '*' || first_char == '_' {
-            let mut count = 0;
-            for &ch in &chars {
-                if ch == first_char {
-                    count += 1;
-                } else if ch != ' ' && ch != '\t' {
-                    return false; // Non-matching, non-whitespace character
-                }
+    if let Some(&first_char) = chars.first()
+        && (first_char == '-' || first_char == '*' || first_char == '_')
+    {
+        let mut count = 0;
+        for &ch in &chars {
+            if ch == first_char {
+                count += 1;
+            } else if ch != ' ' && ch != '\t' {
+                return false; // Non-matching, non-whitespace character
             }
-            return count >= 3;
         }
+        return count >= 3;
     }
     false
 }

@@ -118,7 +118,6 @@ impl Rule for MD029OrderedListPrefix {
             let prev_block = blocks_with_ordered[i - 1];
             let current_block = blocks_with_ordered[i];
 
-
             // This catches the pattern: 1. item / - sub / 1. item (should be 2.)
             let has_only_unindented_lists =
                 self.has_only_unindented_lists_between(ctx, prev_block.end_line, current_block.start_line);
@@ -407,8 +406,6 @@ impl MD029OrderedListPrefix {
         }
     }
 
-    /// Check if there's only code blocks/fences between two list blocks
-
     /// Check if blocks are separated only by unindented list items
     /// This helps detect the pattern: 1. item / - sub / 1. item (should be 2.)
     fn has_only_unindented_lists_between(
@@ -492,6 +489,31 @@ impl MD029OrderedListPrefix {
             return false;
         }
 
+        // Calculate minimum continuation indent from the previous block's last item
+        let min_continuation_indent =
+            if let Some(prev_block) = ctx.list_blocks.iter().find(|block| block.end_line == end_line) {
+                // Get the last list item from the previous block
+                if let Some(&last_item_line) = prev_block.item_lines.last() {
+                    if let Some(line_info) = ctx.line_info(last_item_line) {
+                        if let Some(list_item) = &line_info.list_item {
+                            if list_item.is_ordered {
+                                list_item.marker.len() + 1 // Add 1 for space after ordered markers
+                            } else {
+                                2 // Unordered lists need at least 2 spaces
+                            }
+                        } else {
+                            3 // Fallback
+                        }
+                    } else {
+                        3 // Fallback
+                    }
+                } else {
+                    3 // Fallback
+                }
+            } else {
+                3 // Fallback
+            };
+
         for line_num in (end_line + 1)..start_line {
             if let Some(line_info) = ctx.line_info(line_num) {
                 let trimmed = line_info.content.trim();
@@ -501,14 +523,23 @@ impl MD029OrderedListPrefix {
                     continue;
                 }
 
-                // If in code block, it's fine
-                if line_info.in_code_block {
-                    continue;
-                }
+                // Enhanced code block analysis
+                if line_info.in_code_block || trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    // Check if this is a standalone code block that should separate lists
+                    if line_info.in_code_block {
+                        // Use the new classification system to determine if this code block separates lists
+                        let context = crate::utils::code_block_utils::CodeBlockUtils::analyze_code_block_context(
+                            &ctx.lines,
+                            line_num - 1,
+                            min_continuation_indent,
+                        );
 
-                // If this is a code fence line, it's fine
-                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    continue;
+                        // If it's a standalone code block, lists should be separated
+                        if matches!(context, crate::utils::code_block_utils::CodeBlockContext::Standalone) {
+                            return false; // Lists are separated, not continuous
+                        }
+                    }
+                    continue; // Other code block lines (indented/adjacent) don't break continuity
                 }
 
                 // If there's a heading, lists are definitely separated

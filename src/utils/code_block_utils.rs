@@ -4,6 +4,17 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 
+/// Classification of code blocks relative to list contexts
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodeBlockContext {
+    /// Code block that separates lists (root-level, with blank lines)
+    Standalone,
+    /// Code block that continues a list (properly indented)
+    Indented,
+    /// Code block adjacent to list content (edge case, defaults to non-breaking)
+    Adjacent,
+}
+
 lazy_static! {
     static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(```|~~~)").unwrap();
     static ref CODE_SPAN_PATTERN: Regex = Regex::new(r"`+").unwrap();
@@ -143,6 +154,108 @@ impl CodeBlockUtils {
     /// Check if a position is within a code block or code span
     pub fn is_in_code_block_or_span(blocks: &[(usize, usize)], pos: usize) -> bool {
         blocks.iter().any(|&(start, end)| pos >= start && pos < end)
+    }
+
+    /// Analyze code block context relative to list parsing
+    /// This is the core function implementing Design #3's three-tier classification
+    pub fn analyze_code_block_context(
+        lines: &[crate::lint_context::LineInfo],
+        line_idx: usize,
+        min_continuation_indent: usize,
+    ) -> CodeBlockContext {
+        if let Some(line_info) = lines.get(line_idx) {
+            // Rule 1: Indentation Analysis - Is it sufficiently indented for list continuation?
+            if line_info.indent >= min_continuation_indent {
+                return CodeBlockContext::Indented;
+            }
+
+            // Rule 2: Blank Line Context - Check for structural separation indicators
+            let (prev_blanks, next_blanks) = Self::count_surrounding_blank_lines(lines, line_idx);
+
+            // Rule 3: Standalone Detection - Insufficient indentation + blank line separation
+            // This is the key fix: root-level code blocks with blank lines separate lists
+            if prev_blanks > 0 || next_blanks > 0 {
+                return CodeBlockContext::Standalone;
+            }
+
+            // Rule 4: Default - Adjacent (conservative, non-breaking for edge cases)
+            CodeBlockContext::Adjacent
+        } else {
+            // Fallback for invalid line index
+            CodeBlockContext::Adjacent
+        }
+    }
+
+    /// Count blank lines before and after the given line index
+    fn count_surrounding_blank_lines(lines: &[crate::lint_context::LineInfo], line_idx: usize) -> (usize, usize) {
+        let mut prev_blanks = 0;
+        let mut next_blanks = 0;
+
+        // Count blank lines before (look backwards)
+        for i in (0..line_idx).rev() {
+            if let Some(line) = lines.get(i) {
+                if line.is_blank {
+                    prev_blanks += 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Count blank lines after (look forwards)
+        for i in (line_idx + 1)..lines.len() {
+            if let Some(line) = lines.get(i) {
+                if line.is_blank {
+                    next_blanks += 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        (prev_blanks, next_blanks)
+    }
+
+    /// Calculate minimum indentation required for code block to continue a list
+    /// Based on the most recent list item's marker width
+    pub fn calculate_min_continuation_indent(
+        lines: &[crate::lint_context::LineInfo],
+        current_line_idx: usize,
+    ) -> usize {
+        // Look backwards to find the most recent list item
+        for i in (0..current_line_idx).rev() {
+            if let Some(line_info) = lines.get(i) {
+                if let Some(list_item) = &line_info.list_item {
+                    // Calculate minimum continuation indent for this list item
+                    return if list_item.is_ordered {
+                        list_item.marker_column + list_item.marker.len() + 1 // +1 for space after marker
+                    } else {
+                        list_item.marker_column + 2 // Unordered lists need marker + space (min 2)
+                    };
+                }
+
+                // Stop at structural separators that would break list context
+                if line_info.heading.is_some() || Self::is_structural_separator(&line_info.content) {
+                    break;
+                }
+            }
+        }
+
+        0 // No list context found
+    }
+
+    /// Check if content is a structural separator (headings, horizontal rules, etc.)
+    fn is_structural_separator(content: &str) -> bool {
+        let trimmed = content.trim();
+        trimmed.starts_with("---")
+            || trimmed.starts_with("***")
+            || trimmed.starts_with("___")
+            || trimmed.contains('|') // Tables
+            || trimmed.starts_with(">") // Blockquotes
     }
 }
 

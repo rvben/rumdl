@@ -852,17 +852,17 @@ fn test_md029_nested_ordered_lists_bug() {
 
     println!("Line info for list items:");
     for line_num in 1..=ctx.content.lines().count() {
-        if let Some(line_info) = ctx.line_info(line_num) {
-            if let Some(list_item) = &line_info.list_item {
-                println!(
-                    "  Line {}: '{}' - marker: '{}', column: {}, ordered: {}",
-                    line_num,
-                    line_info.content.trim(),
-                    list_item.marker,
-                    list_item.marker_column,
-                    list_item.is_ordered
-                );
-            }
+        if let Some(line_info) = ctx.line_info(line_num)
+            && let Some(list_item) = &line_info.list_item
+        {
+            println!(
+                "  Line {}: '{}' - marker: '{}', column: {}, ordered: {}",
+                line_num,
+                line_info.content.trim(),
+                list_item.marker,
+                list_item.marker_column,
+                list_item.is_ordered
+            );
         }
     }
 
@@ -976,7 +976,7 @@ fn test_md029_ordered_under_unordered_parents() {
     let content = r#"- Unordered parent 1
   1. Nested ordered 1
   1. Nested ordered 2 (should be 2)
-- Unordered parent 2  
+- Unordered parent 2
   1. New sequence starts at 1
   3. Should be 2
 - Unordered parent 3
@@ -1032,7 +1032,7 @@ fn test_md029_mixed_indentation_robustness() {
   1. 2-space nested (non-standard)
     1. 4-space nested
     3. Should be 2
-   1. 3-space nested (back to standard)  
+   1. 3-space nested (back to standard)
    5. Should be 2"#;
 
     let ctx = LintContext::new(content);
