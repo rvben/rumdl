@@ -118,9 +118,6 @@ impl Rule for MD029OrderedListPrefix {
             let prev_block = blocks_with_ordered[i - 1];
             let current_block = blocks_with_ordered[i];
 
-            // Check if there are only code blocks/fences between these list blocks
-            let between_content_is_code_only =
-                self.is_only_code_between_blocks(ctx, prev_block.end_line, current_block.start_line);
 
             // This catches the pattern: 1. item / - sub / 1. item (should be 2.)
             let has_only_unindented_lists =
@@ -130,6 +127,10 @@ impl Rule for MD029OrderedListPrefix {
             // Check specifically for headings between the blocks
             let has_heading_between =
                 self.has_heading_between_blocks(ctx, prev_block.end_line, current_block.start_line);
+
+            // Check if there are only code blocks/fences between these list blocks
+            let between_content_is_code_only =
+                self.is_only_code_between_blocks(ctx, prev_block.end_line, current_block.start_line);
 
             // Group blocks if:
             // 1. They have only code between them, OR
@@ -407,47 +408,6 @@ impl MD029OrderedListPrefix {
     }
 
     /// Check if there's only code blocks/fences between two list blocks
-    fn is_only_code_between_blocks(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        end_line: usize,
-        start_line: usize,
-    ) -> bool {
-        if end_line >= start_line {
-            return false;
-        }
-
-        for line_num in (end_line + 1)..start_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                let trimmed = line_info.content.trim();
-
-                // Skip empty lines
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                // If in code block, it's fine
-                if line_info.in_code_block {
-                    continue;
-                }
-
-                // If this is a code fence line, it's fine
-                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    continue;
-                }
-
-                // If there's a heading, lists are definitely separated
-                if line_info.heading.is_some() {
-                    return false;
-                }
-
-                // Any other non-empty content means lists are truly separated
-                return false;
-            }
-        }
-
-        true
-    }
 
     /// Check if blocks are separated only by unindented list items
     /// This helps detect the pattern: 1. item / - sub / 1. item (should be 2.)
@@ -516,6 +476,48 @@ impl MD029OrderedListPrefix {
                 if !trimmed.is_empty() && !trimmed.starts_with("```") && !trimmed.starts_with("~~~") {
                     return false;
                 }
+            }
+        }
+
+        true
+    }
+
+    fn is_only_code_between_blocks(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        end_line: usize,
+        start_line: usize,
+    ) -> bool {
+        if end_line >= start_line {
+            return false;
+        }
+
+        for line_num in (end_line + 1)..start_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                let trimmed = line_info.content.trim();
+
+                // Skip empty lines
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                // If in code block, it's fine
+                if line_info.in_code_block {
+                    continue;
+                }
+
+                // If this is a code fence line, it's fine
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    continue;
+                }
+
+                // If there's a heading, lists are definitely separated
+                if line_info.heading.is_some() {
+                    return false;
+                }
+
+                // Any other non-empty content means lists are truly separated
+                return false;
             }
         }
 

@@ -24,6 +24,8 @@ mod md026_kramdown_test;
 mod md026_test;
 mod md027_test;
 mod md028_test;
+mod md029_code_block_separation_test;
+mod md029_issue42_test;
 mod md029_test;
 mod md030_test;
 mod md031_kramdown_test;

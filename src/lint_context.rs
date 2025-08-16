@@ -1409,17 +1409,20 @@ impl<'a> LintContext<'a> {
                     // Check if there's non-list content between the last item and this one
                     let has_non_list_content = {
                         let mut found_non_list = false;
-                        for check_line in (last_list_item_line + 1)..line_num {
+                        // Use the last item from the current block, not the global last_list_item_line
+                        let block_last_item_line = block.item_lines.last().copied().unwrap_or(block.end_line);
+                        for check_line in (block_last_item_line + 1)..line_num {
                             let check_idx = check_line - 1;
                             if check_idx < lines.len() {
                                 let check_info = &lines[check_idx];
-                                if !check_info.is_blank && !check_info.in_code_block && check_info.list_item.is_none() {
-                                    // Found non-blank, non-list content
-                                    // Check if it's indented enough to be a continuation
-                                    // Get the marker width of the last list item
+                                // Check for content that breaks the list
+                                let is_list_breaking_content = if check_info.in_code_block {
+                                    // Code blocks break lists only if they're standalone (with blank lines before/after)
+                                    // and not properly indented as list continuation
+                                    
                                     let last_item_marker_width =
-                                        if last_list_item_line > 0 && last_list_item_line <= lines.len() {
-                                            lines[last_list_item_line - 1]
+                                        if block_last_item_line > 0 && block_last_item_line <= lines.len() {
+                                            lines[block_last_item_line - 1]
                                                 .list_item
                                                 .as_ref()
                                                 .map(|li| {
@@ -1435,11 +1438,61 @@ impl<'a> LintContext<'a> {
                                         };
 
                                     let min_continuation = if block.is_ordered { last_item_marker_width } else { 2 };
-                                    if check_info.indent < min_continuation {
-                                        // Not indented enough, so it breaks the list
-                                        found_non_list = true;
-                                        break;
+                                    let is_properly_indented = check_info.indent >= min_continuation;
+                                    
+                                    // For code blocks, only break if not properly indented
+                                    // The standalone vs adjacent distinction should be handled at the block level
+                                    !is_properly_indented
+                                } else if !check_info.is_blank && check_info.list_item.is_none() {
+                                    // Check for structural separators that should break lists (from issue #42)
+                                    let line_content = check_info.content.trim();
+                                    
+                                    // Headings break lists
+                                    if check_info.heading.is_some() {
+                                        true
                                     }
+                                    // Horizontal rules break lists
+                                    else if line_content.starts_with("---") || line_content.starts_with("***") || line_content.starts_with("___") {
+                                        true
+                                    }
+                                    // Tables break lists (simple heuristic: contains |)
+                                    else if line_content.contains('|') {
+                                        true  
+                                    }
+                                    // Blockquotes break lists
+                                    else if line_content.starts_with(">") {
+                                        true
+                                    }
+                                    // Other non-list content - check if properly indented
+                                    else {
+                                        let last_item_marker_width =
+                                            if block_last_item_line > 0 && block_last_item_line <= lines.len() {
+                                                lines[block_last_item_line - 1]
+                                                    .list_item
+                                                    .as_ref()
+                                                    .map(|li| {
+                                                        if li.is_ordered {
+                                                            li.marker.len() + 1 // Add 1 for the space after ordered list markers
+                                                        } else {
+                                                            li.marker.len()
+                                                        }
+                                                    })
+                                                    .unwrap_or(3) // fallback to 3 if no list item found
+                                            } else {
+                                                3 // fallback
+                                            };
+
+                                        let min_continuation = if block.is_ordered { last_item_marker_width } else { 2 };
+                                        check_info.indent < min_continuation
+                                    }
+                                } else {
+                                    false
+                                };
+
+                                if is_list_breaking_content {
+                                    // Not indented enough, so it breaks the list
+                                    found_non_list = true;
+                                    break;
                                 }
                             }
                         }
@@ -1574,8 +1627,9 @@ impl<'a> LintContext<'a> {
                                 && item.is_ordered == block.is_ordered
                                 && block.blockquote_prefix.trim() == next_blockquote_prefix.trim()
                             {
-                                // Check if there was meaningful content between the list items
-                                let has_meaningful_content = (line_idx + 1..check_idx).any(|idx| {
+                                // Check if there was meaningful content between the list items (unused now)
+                                // This variable is kept for potential future use but is currently replaced by has_structural_separators
+                                let _has_meaningful_content = (line_idx + 1..check_idx).any(|idx| {
                                     if let Some(between_line) = lines.get(idx) {
                                         let trimmed = between_line.content.trim();
                                         // Skip empty lines
@@ -1585,21 +1639,72 @@ impl<'a> LintContext<'a> {
                                         // Check for meaningful content
                                         let line_indent =
                                             between_line.content.len() - between_line.content.trim_start().len();
-                                        // Code fences or properly indented content
-                                        trimmed.starts_with("```")
+                                        
+                                        // Structural separators (code fences, headings, etc.) are meaningful and should BREAK lists
+                                        if trimmed.starts_with("```")
                                             || trimmed.starts_with("~~~")
-                                            || line_indent >= min_continuation_indent
+                                            || trimmed.starts_with("---")
+                                            || trimmed.starts_with("***")
+                                            || trimmed.starts_with("___")
+                                            || trimmed.starts_with(">")
+                                            || trimmed.contains('|') // Tables
+                                            || between_line.heading.is_some()
+                                        {
+                                            return true; // These are structural separators - meaningful content that breaks lists
+                                        }
+                                        
+                                        // Only properly indented content continues the list
+                                        line_indent >= min_continuation_indent
                                     } else {
                                         false
                                     }
                                 });
 
                                 if block.is_ordered {
-                                    // For ordered lists: only continue if there's meaningful content
-                                    found_continuation = has_meaningful_content;
+                                    // For ordered lists: don't continue if there are structural separators
+                                    // Check if there are structural separators between the list items
+                                    let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
+                                        if let Some(between_line) = lines.get(idx) {
+                                            let trimmed = between_line.content.trim();
+                                            if trimmed.is_empty() {
+                                                return false;
+                                            }
+                                            // Check for structural separators that break lists
+                                            trimmed.starts_with("```")
+                                                || trimmed.starts_with("~~~")
+                                                || trimmed.starts_with("---")
+                                                || trimmed.starts_with("***")
+                                                || trimmed.starts_with("___")
+                                                || trimmed.starts_with(">")
+                                                || trimmed.contains('|') // Tables
+                                                || between_line.heading.is_some()
+                                        } else {
+                                            false
+                                        }
+                                    });
+                                    found_continuation = !has_structural_separators;
                                 } else {
-                                    // For unordered lists: continue regardless
-                                    found_continuation = true;
+                                    // For unordered lists: also check for structural separators
+                                    let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
+                                        if let Some(between_line) = lines.get(idx) {
+                                            let trimmed = between_line.content.trim();
+                                            if trimmed.is_empty() {
+                                                return false;
+                                            }
+                                            // Check for structural separators that break lists
+                                            trimmed.starts_with("```")
+                                                || trimmed.starts_with("~~~")
+                                                || trimmed.starts_with("---")
+                                                || trimmed.starts_with("***")
+                                                || trimmed.starts_with("___")
+                                                || trimmed.starts_with(">")
+                                                || trimmed.contains('|') // Tables
+                                                || between_line.heading.is_some()
+                                        } else {
+                                            false
+                                        }
+                                    });
+                                    found_continuation = !has_structural_separators;
                                 }
                             }
                         }
@@ -1625,8 +1730,19 @@ impl<'a> LintContext<'a> {
                     // For lazy continuation to apply, the line must either:
                     // 1. Have no indentation (true lazy continuation)
                     // 2. Have sufficient indentation for the list type
+                    // BUT structural separators (headings, code blocks, etc.) should never be lazy continuations
+                    let line_content = line_info.content.trim();
+                    let is_structural_separator = line_info.heading.is_some()
+                        || line_content.starts_with("```")
+                        || line_content.starts_with("~~~")
+                        || line_content.starts_with("---")
+                        || line_content.starts_with("***")
+                        || line_content.starts_with("___")
+                        || line_content.starts_with(">")
+                        || line_content.contains('|'); // Tables
+                    
                     let is_lazy_continuation = last_list_item_line == line_num - 1
-                        && line_info.heading.is_none()
+                        && !is_structural_separator
                         && !line_info.is_blank
                         && (line_info.indent == 0 || line_info.indent >= min_required_indent);
 
@@ -2075,14 +2191,25 @@ impl<'a> ListBlockMerger<'a> {
 
     /// Check if unordered lists can be merged with a single blank line between
     fn can_merge_with_blank_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
+        // Check if there are structural separators between the blocks
+        // If has_meaningful_content_between returns true, it means there are structural separators
+        if has_meaningful_content_between(current, next, &self.lines) {
+            return false; // Structural separators prevent merging
+        }
+        
         // Only merge unordered lists with same marker across single blank
         !current.is_ordered && current.marker == next.marker
     }
 
     /// Check if ordered lists can be merged when there's content between them
     fn can_merge_with_content_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
-        // Only consider merging ordered lists with meaningful content between
-        current.is_ordered && next.is_ordered && has_meaningful_content_between(current, next, self.lines)
+        // Do not merge lists if there are structural separators between them
+        if has_meaningful_content_between(current, next, &self.lines) {
+            return false; // Structural separators prevent merging
+        }
+        
+        // Only consider merging ordered lists if there's no structural content between
+        current.is_ordered && next.is_ordered
     }
 
     /// Check if there are only blank lines between blocks
@@ -2141,33 +2268,90 @@ fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: 
                 continue;
             }
 
+            // Check for structural separators that should separate lists (CommonMark compliant)
+            
+            // Headings separate lists
+            if line_info.heading.is_some() {
+                return true; // Has meaningful content - headings separate lists
+            }
+
+            // Horizontal rules separate lists (---, ***, ___)
+            if is_horizontal_rule(trimmed) {
+                return true; // Has meaningful content - horizontal rules separate lists
+            }
+
+            // Tables separate lists (lines containing |)
+            if trimmed.contains('|') && trimmed.len() > 1 {
+                return true; // Has meaningful content - tables separate lists
+            }
+
+            // Blockquotes separate lists
+            if trimmed.starts_with('>') {
+                return true; // Has meaningful content - blockquotes separate lists
+            }
+
+            // Code block fences separate lists (unless properly indented as list content)
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                let line_indent = line_info.content.len() - line_info.content.trim_start().len();
+                
+                // Check if this code block is properly indented as list continuation
+                let min_continuation_indent = if current.is_ordered {
+                    current.nesting_level + current.max_marker_width
+                } else {
+                    current.nesting_level + 2
+                };
+                
+                if line_indent < min_continuation_indent {
+                    // This is a standalone code block that separates lists
+                    return true; // Has meaningful content - standalone code blocks separate lists
+                }
+            }
+
             // Check if this line has proper indentation for list continuation
             let line_indent = line_info.content.len() - line_info.content.trim_start().len();
 
-            // If the line is indented enough to be list continuation content, it's meaningful
-            // For ordered lists, use actual marker width; for unordered, 2 spaces
+            // Calculate minimum indentation needed to be list continuation
             let min_indent = if current.is_ordered {
                 current.nesting_level + current.max_marker_width
             } else {
                 current.nesting_level + 2
             };
 
-            // Check if the line has sufficient indentation to be a continuation
-            if line_indent >= min_indent {
-                return true;
+            // If the line is not indented enough to be list continuation, it's meaningful content
+            if line_indent < min_indent {
+                return true; // Has meaningful content - content not indented as list continuation
             }
 
-            // Code fences are meaningful content
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                return true;
-            }
-
-            // Any other non-blank content at this level breaks the sequence
-            return false;
+            // If we reach here, the line is properly indented as list continuation
+            // Continue checking other lines
         }
     }
 
-    // Only blank lines between blocks - should not merge
+    // Only blank lines or properly indented list continuation content between blocks
+    false
+}
+
+/// Check if a line is a horizontal rule (---, ***, ___)
+fn is_horizontal_rule(trimmed: &str) -> bool {
+    if trimmed.len() < 3 {
+        return false;
+    }
+    
+    // Check for three or more consecutive -, *, or _ characters (with optional spaces)
+    let chars: Vec<char> = trimmed.chars().collect();
+    if let Some(&first_char) = chars.first() {
+        if first_char == '-' || first_char == '*' || first_char == '_' {
+            let mut count = 0;
+            for &ch in &chars {
+                if ch == first_char {
+                    count += 1;
+                } else if ch != ' ' && ch != '\t' {
+                    return false; // Non-matching, non-whitespace character
+                }
+            }
+            return count >= 3;
+        }
+    }
     false
 }
 

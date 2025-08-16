@@ -285,8 +285,8 @@ fn test_html_comment_between_lists() {
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 
-    // HTML comments alone typically don't separate lists
-    assert_eq!(result.len(), 0, "HTML comments alone typically don't cause MD029 errors if numbering is correct");
+    // HTML comments at top level separate lists, so we expect an MD029 error
+    assert_eq!(result.len(), 1, "HTML comments at top level should separate lists and cause MD029 error for incorrect numbering");
 }
 
 #[test]
