@@ -389,93 +389,7 @@ impl MD051LinkFragments {
         }
     }
 
-    /// Fragment generation for Bitbucket style
-    /// Bitbucket adds 'markdown-header-' prefix to all anchors
-    #[inline]
-    fn heading_to_fragment_bitbucket(&self, heading: &str) -> String {
-        if heading.is_empty() {
-            return String::new();
-        }
 
-        // Official Bitbucket algorithm (from bitbucket-slug npm package):
-        // 1. Remove markdown formatting
-        // 2. Apply deburr (accent removal)
-        // 3. Remove link URLs: ](...)
-        // 4. Replace space-hyphen-space patterns with spaces
-        // 5. Remove non-word/digit/space/hyphen characters
-        // 6. Collapse whitespace
-        // 7. Lowercase and trim
-        // 8. Convert spaces to hyphens
-
-        // Step 1: Strip markdown formatting
-        let mut text = if QUICK_MARKDOWN_CHECK.is_match(heading) {
-            self.strip_markdown_formatting_fast(heading)
-        } else {
-            heading.to_string()
-        };
-
-        // Step 2: Apply deburr (accent removal) - basic accent normalization
-        let mut result = String::with_capacity(text.len());
-        for c in text.chars() {
-            let replacement = match c {
-                'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => "a",
-                'È' | 'É' | 'Ê' | 'Ë' | 'è' | 'é' | 'ê' | 'ë' => "e",
-                'Ì' | 'Í' | 'Î' | 'Ï' | 'ì' | 'í' | 'î' | 'ï' => "i",
-                'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => "o",
-                'Ù' | 'Ú' | 'Û' | 'Ü' | 'ù' | 'ú' | 'û' | 'ü' => "u",
-                'Ý' | 'ý' | 'ÿ' => "y",
-                'Ñ' | 'ñ' => "n",
-                'Ç' | 'ç' => "c",
-                'ß' => "ss",
-                'Æ' | 'æ' => "ae",
-                'Œ' | 'œ' => "oe",
-                _ => {
-                    result.push(c);
-                    continue;
-                }
-            };
-            result.push_str(replacement);
-        }
-        text = result;
-
-        // Step 3: Remove link URLs (]: ](...)
-        // For simplicity, we can skip this as markdown formatting is already stripped
-
-        // Step 4: Replace space-hyphen-space patterns with single spaces
-        // This handles cases like "A - B - C" -> "A B C"
-        text = text.replace(" - ", " ");
-        // Also handle multiple hyphens between spaces
-        while text.contains(" -- ") || text.contains(" --- ") {
-            text = text.replace(" -- ", " ");
-            text = text.replace(" --- ", " ");
-        }
-
-        // Step 5: Remove non-word/digit/space/hyphen characters
-        // JavaScript \w is ASCII only: [a-zA-Z0-9_]
-        let mut cleaned = String::with_capacity(text.len());
-        for c in text.chars() {
-            if c.is_ascii_alphanumeric() || c == '_' || c.is_whitespace() || c == '-' {
-                cleaned.push(c);
-            }
-        }
-        text = cleaned;
-
-        // Step 6: Collapse multiple whitespace to single spaces
-        while text.contains("  ") {
-            text = text.replace("  ", " ");
-        }
-
-        // Step 7: Lowercase and trim
-        text = text.to_lowercase().trim().to_string();
-
-        // Step 8: Convert spaces to hyphens and add prefix
-        let fragment = text.replace(' ', "-");
-        if fragment.is_empty() {
-            "markdown-header-".to_string()
-        } else {
-            format!("markdown-header-{fragment}")
-        }
-    }
 
     /// Strip markdown formatting from heading text (optimized for common patterns)
     fn strip_markdown_formatting_fast(&self, text: &str) -> String {
@@ -721,7 +635,6 @@ impl Rule for MD051LinkFragments {
                 match style_str.to_lowercase().as_str() {
                     "kramdown" => AnchorStyle::Kramdown,
                     "jekyll" => AnchorStyle::Jekyll,
-                    "bitbucket" => AnchorStyle::Bitbucket,
                     _ => AnchorStyle::GitHub,
                 }
             } else {
@@ -735,7 +648,11 @@ impl Rule for MD051LinkFragments {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let value: toml::Value = toml::from_str(r#"anchor-style = "github""#).ok()?;
+        let value: toml::Value = toml::from_str(r#"
+# Anchor generation style to match your target platform
+# Options: "github" (default), "jekyll", "kramdown"
+anchor-style = "github"
+"#).ok()?;
         Some(("MD051".to_string(), value))
     }
 }
@@ -805,74 +722,9 @@ mod tests {
         assert_eq!(rule.heading_to_fragment_kramdown("---test---"), "test---");
     }
 
-    #[test]
-    fn test_heading_to_fragment_bitbucket_comprehensive() {
-        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Bitbucket);
 
-        // Test cases verified against official bitbucket-slug npm package
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("test_with_underscores"),
-            "markdown-header-test_with_underscores"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("Hello World"),
-            "markdown-header-hello-world"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("Double--Hyphen"),
-            "markdown-header-double--hyphen"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("Triple---Dash"),
-            "markdown-header-triple---dash"
-        );
-        assert_eq!(rule.heading_to_fragment_bitbucket("A - B - C"), "markdown-header-a-b-c");
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("Café au Lait"),
-            "markdown-header-cafe-au-lait"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("123 Numbers"),
-            "markdown-header-123-numbers"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("Version 2.1.0"),
-            "markdown-header-version-210"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("__dunder__"),
-            "markdown-header-__dunder__"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("_private_method"),
-            "markdown-header-_private_method"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("Pre-existing-hyphens"),
-            "markdown-header-pre-existing-hyphens"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_bitbucket("Simple-Hyphen"),
-            "markdown-header-simple-hyphen"
-        );
-        assert_eq!(rule.heading_to_fragment_bitbucket("你好世界"), "markdown-header-");
-        assert_eq!(rule.heading_to_fragment_bitbucket("こんにちは"), "markdown-header-");
-        assert_eq!(rule.heading_to_fragment_bitbucket("!!!"), "markdown-header-");
-        assert_eq!(rule.heading_to_fragment_bitbucket("---"), "markdown-header----");
-        assert_eq!(rule.heading_to_fragment_bitbucket("..."), "markdown-header-");
-    }
 
-    #[test]
-    fn test_bitbucket_style_validation() {
-        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Bitbucket);
-        let content = "# My Section\n\n[correct](#markdown-header-my-section)\n[wrong](#my-section)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
 
-        // Only the second link should trigger a warning
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("#my-section"));
-    }
 
     #[test]
     fn test_issue_39_heading_with_hyphens() {
@@ -1204,7 +1056,7 @@ More content.
         ];
 
         for (input, expected) in test_cases {
-            let actual = rule.heading_to_fragment_github(input);
+            let actual = AnchorStyle::GitHub.generate_fragment(input);
             assert_eq!(
                 actual, expected,
                 "Failed for input: {input:?}\nExpected: {expected:?}\nActual: {actual:?}"
@@ -1309,7 +1161,7 @@ More content.
         ];
 
         for (input, expected) in test_cases {
-            let actual = rule.heading_to_fragment_github_official(input);
+            let actual = AnchorStyle::GitHub.generate_fragment(input);
             assert_eq!(
                 actual, expected,
                 "GitHub Official Algorithm Failed for input: {input:?}\nExpected: {expected:?}\nActual: {actual:?}\n\
@@ -1320,108 +1172,47 @@ More content.
 
     #[test]
     fn debug_cbrown_issue() {
-        let rule = MD051LinkFragments::new();
+        // Test the critical issue #39 case using the new modular system
         let input = "cbrown --> sbrown: --unsafe-paths";
         
-        // Manual step-by-step processing
-        let text = input.to_lowercase();
-        println!("Step 0 - Input: {:?}", text);
+        // Test with GitHub style (should handle arrows correctly)
+        let github_result = AnchorStyle::GitHub.generate_fragment(input);
+        println!("GitHub result: {:?}", github_result);
         
-        // Simulate the algorithm step by step
-        let chars: Vec<char> = text.chars().collect();
-        let mut result = String::new();
-        let mut i = 0;
-        
-        while i < chars.len() {
-            let c = chars[i];
-            println!("Step {} - Processing char {:?} at position {}", i, c, i);
-            
-            // Check for -->
-            if i + 2 < chars.len() && chars[i] == '-' && chars[i + 1] == '-' && chars[i + 2] == '>' {
-                println!("  Found --> pattern, adding ----");
-                result.push_str("----");
-                i += 3;
-                continue;
-            }
-            
-            match c {
-                c if c.is_alphabetic() => {
-                    println!("  Adding letter: {}", c);
-                    result.push(c);
-                },
-                c if c.is_ascii_digit() => {
-                    println!("  Adding digit: {}", c);
-                    result.push(c);
-                },
-                '_' => {
-                    println!("  Adding underscore");
-                    result.push(c);
-                },
-                '-' => {
-                    println!("  Adding hyphen");
-                    result.push(c);
-                },
-                ' ' => {
-                    println!("  Converting space to hyphen");
-                    result.push('-');
-                },
-                _ => {
-                    println!("  Removing character: {:?}", c);
-                }
-            }
-            
-            i += 1;
-        }
-        
-        println!("Final result: {:?}", result);
-        println!("Expected:     {:?}", "cbrown----sbrown---unsafe-paths");
-        
-        assert_eq!(result, "cbrown----sbrown---unsafe-paths");
+        // The expected result should match GitHub.com's actual behavior
+        // This test verifies the critical arrow pattern handling
+        assert_eq!(github_result, "cbrown----sbrown---unsafe-paths");
     }
 
     #[test]
     fn test_github_official_vs_current_implementation() {
-        let rule = MD051LinkFragments::new();
-        
-        // Test cases where the current implementation differs from GitHub.com's actual behavior
-        let critical_differences = vec![
-            // Issue #39 - Arrow patterns
-            ("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths", "cbrown----sbrown---unsafe-paths"),
-            ("cbrown -> sbrown", "cbrown---sbrown", "cbrown---sbrown"),
+        // Test GitHub anchor generation against verified expectations
+        let test_cases = vec![
+            // Issue #39 - Arrow patterns - these need to be fixed to match actual GitHub.com behavior
+            ("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths"),
+            ("cbrown -> sbrown", "cbrown---sbrown"),
             
             // Ampersand handling
-            ("Testing & Coverage", "testing--coverage", "testing--coverage"),
+            ("Testing & Coverage", "testing--coverage"),
             
-            // Leading/trailing hyphens
-            ("---Leading and Trailing---", "leading-and-trailing", "---leading-and-trailing---"),
+            // Leading/trailing hyphens should be preserved in GitHub.com 
+            ("---Leading and Trailing---", "---leading-and-trailing---"),
             
-            // Multiple spaces
-            ("Multiple   Spaces", "multiple-spaces", "multiple---spaces"),
+            // Multiple spaces become multiple hyphens
+            ("Multiple   Spaces", "multiple---spaces"),
         ];
 
-        for (input, current_expected, official_expected) in critical_differences {
-            let current_actual = rule.heading_to_fragment_github(input);
-            let official_actual = rule.heading_to_fragment_github_official(input);
+        for (input, expected) in test_cases {
+            let actual = AnchorStyle::GitHub.generate_fragment(input);
             
-            // Verify current implementation behavior
+            println!("Testing: '{input}'");
+            println!("  Expected: '{expected}'");
+            println!("  Actual:   '{actual}'");
+            
             assert_eq!(
-                current_actual, current_expected,
-                "Current implementation changed for: {input:?}"
+                actual, expected,
+                "GitHub anchor generation failed for: '{input}'"
             );
-            
-            // Verify new official implementation matches GitHub.com
-            assert_eq!(
-                official_actual, official_expected,
-                "Official implementation doesn't match GitHub.com for: {input:?}"
-            );
-            
-            // Show the difference when they don't match
-            if current_actual != official_actual {
-                println!("DIFFERENCE for '{input}':");
-                println!("  Current:  '{current_actual}'");
-                println!("  Official: '{official_actual}'");
-                println!("  GitHub:   '{official_expected}'");
-            }
         }
     }
 
@@ -1531,7 +1322,7 @@ More content.
         ];
 
         for (input, expected) in test_cases {
-            let actual = rule.heading_to_fragment_jekyll_official(input);
+            let actual = AnchorStyle::Jekyll.generate_fragment(input);
             assert_eq!(
                 actual, expected,
                 "Jekyll Official Failed for input: {input:?}\nExpected: {expected:?}\nActual: {actual:?}\n\
@@ -1562,8 +1353,8 @@ More content.
         ];
 
         for (input, jekyll_expected, github_expected) in difference_cases {
-            let jekyll_actual = jekyll_rule.heading_to_fragment_jekyll_official(input);
-            let github_actual = github_rule.heading_to_fragment_github(input);
+            let jekyll_actual = AnchorStyle::Jekyll.generate_fragment(input);
+            let github_actual = AnchorStyle::GitHub.generate_fragment(input);
             
             assert_eq!(
                 jekyll_actual, jekyll_expected,
@@ -1640,7 +1431,7 @@ More content.
         ];
 
         for (input, expected) in arrow_cases {
-            let actual = rule.heading_to_fragment_jekyll_official(input);
+            let actual = AnchorStyle::Jekyll.generate_fragment(input);
             assert_eq!(
                 actual, expected,
                 "Jekyll arrow pattern failed for: {input:?}\nExpected: {expected:?}\nActual: {actual:?}"
@@ -1669,7 +1460,7 @@ More content.
         ];
 
         for (input, expected) in unicode_cases {
-            let actual = rule.heading_to_fragment_jekyll_official(input);
+            let actual = AnchorStyle::Jekyll.generate_fragment(input);
             assert_eq!(
                 actual, expected,
                 "Jekyll Unicode handling failed for: {input:?}"
@@ -1685,7 +1476,7 @@ More content.
         ];
 
         for (input, expected) in emoji_cases {
-            let actual = rule.heading_to_fragment_jekyll_official(input);
+            let actual = AnchorStyle::Jekyll.generate_fragment(input);
             assert_eq!(
                 actual, expected,
                 "Jekyll emoji handling failed for: {input:?}"
