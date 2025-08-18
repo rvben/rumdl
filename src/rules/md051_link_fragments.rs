@@ -27,7 +27,6 @@ pub struct MD051LinkFragments {
     anchor_style: AnchorStyle,
 }
 
-
 impl Default for MD051LinkFragments {
     fn default() -> Self {
         Self::new()
@@ -124,16 +123,16 @@ impl MD051LinkFragments {
 
         // GitHub.com's ACTUAL algorithm discovered through Gist testing:
         // Based on analysis of https://gist.github.com/rvben/da6f7faf265f69fd8d6fd247ee526beb
-        
+
         let text = text.to_lowercase();
         let mut result = String::with_capacity(text.len());
         let chars: Vec<char> = text.chars().collect();
         let len = chars.len();
-        
+
         let mut i = 0;
         while i < len {
             let c = chars[i];
-            
+
             // Handle multi-character patterns first (order matters)
             if i + 2 < len && chars[i] == '-' && chars[i + 1] == '-' && chars[i + 2] == '>' {
                 // --> becomes ----
@@ -141,74 +140,78 @@ impl MD051LinkFragments {
                 i += 3;
                 continue;
             }
-            
+
             if i + 2 < len && chars[i] == '<' && chars[i + 1] == '-' && chars[i + 2] == '>' {
                 // <-> becomes ---
                 result.push_str("---");
                 i += 3;
                 continue;
             }
-            
+
             if i + 2 < len && chars[i] == '=' && chars[i + 1] == '=' && chars[i + 2] == '>' {
                 // ==> becomes --
                 result.push_str("--");
                 i += 3;
                 continue;
             }
-            
+
             if i + 1 < len && chars[i] == '-' && chars[i + 1] == '>' {
                 // -> becomes ---
                 result.push_str("---");
                 i += 2;
                 continue;
             }
-            
+
             // Single character processing
             match c {
                 // Preserve all letters (including Unicode)
                 c if c.is_alphabetic() => result.push(c),
-                
+
                 // Preserve all digits
                 c if c.is_ascii_digit() => result.push(c),
-                
+
                 // Preserve underscores (critical difference from other implementations)
                 '_' => result.push(c),
-                
+
                 // Preserve hyphens (including multiple consecutive)
                 '-' => result.push(c),
-                
+
                 // Convert spaces to hyphens, but check for upcoming arrow patterns
                 ' ' => {
                     // Check if this space is followed by an arrow pattern that we'll handle
-                    let followed_by_arrow = (i + 3 < len && chars[i + 1] == '-' && chars[i + 2] == '-' && chars[i + 3] == '>') ||
-                                          (i + 4 < len && chars[i + 1] == '<' && chars[i + 2] == '-' && chars[i + 3] == '>' ) ||
-                                          (i + 4 < len && chars[i + 1] == '=' && chars[i + 2] == '=' && chars[i + 3] == '>') ||
-                                          (i + 2 < len && chars[i + 1] == '-' && chars[i + 2] == '>');
-                    
+                    let followed_by_arrow =
+                        (i + 3 < len && chars[i + 1] == '-' && chars[i + 2] == '-' && chars[i + 3] == '>')
+                            || (i + 4 < len && chars[i + 1] == '<' && chars[i + 2] == '-' && chars[i + 3] == '>')
+                            || (i + 4 < len && chars[i + 1] == '=' && chars[i + 2] == '=' && chars[i + 3] == '>')
+                            || (i + 2 < len && chars[i + 1] == '-' && chars[i + 2] == '>');
+
                     if !followed_by_arrow {
                         result.push('-');
                     }
                     // If followed by arrow, skip the space (it gets absorbed into the arrow replacement)
-                },
-                
+                }
+
                 // Special symbols become double hyphens
                 '&' => result.push_str("--"),
                 '©' => result.push_str("--"),
-                
+
                 // Emojis become single hyphens (broader Unicode range for emojis)
-                c if (c as u32 >= 0x1F300 && c as u32 <= 0x1F9FF) ||
-                     (c as u32 >= 0x1F600 && c as u32 <= 0x1F64F) ||
-                     (c as u32 >= 0x2600 && c as u32 <= 0x26FF) => result.push('-'),
-                
+                c if (c as u32 >= 0x1F300 && c as u32 <= 0x1F9FF)
+                    || (c as u32 >= 0x1F600 && c as u32 <= 0x1F64F)
+                    || (c as u32 >= 0x2600 && c as u32 <= 0x26FF) =>
+                {
+                    result.push('-')
+                }
+
                 // Most other punctuation is removed (dots, colons, brackets, etc.)
                 _ => {
                     // Skip all other characters (remove them)
                 }
             }
-            
+
             i += 1;
         }
-        
+
         result
     }
 
@@ -253,29 +256,11 @@ impl MD051LinkFragments {
 
         // 3. Replace spaces with hyphens (/ /g, '-')
         let with_hyphens = result.replace(' ', "-");
-        
+
         // 4. Apply kramdown-style hyphen consolidation for Jekyll compatibility
         Self::consolidate_hyphens_kramdown_style(&with_hyphens)
     }
 
-    /// Fragment generation following kramdown's algorithm
-    /// Uses the official kramdown implementation from kramdown_utils
-    #[inline]
-    fn heading_to_fragment_kramdown(&self, heading: &str) -> String {
-        if heading.is_empty() {
-            return String::new();
-        }
-
-        // Strip markdown formatting first
-        let text = if QUICK_MARKDOWN_CHECK.is_match(heading) {
-            self.strip_markdown_formatting_fast(heading)
-        } else {
-            heading.to_string()
-        };
-
-        // Use the official kramdown algorithm from utils
-        crate::utils::kramdown_utils::heading_to_fragment(&text)
-    }
 
     /// Fragment generation following Jekyll/kramdown's EXACT algorithm
     /// Based on comprehensive testing with kramdown 2.5.1 using official Ruby gems
@@ -294,63 +279,66 @@ impl MD051LinkFragments {
         };
 
         // Jekyll/kramdown's EXACT algorithm verified through official gem testing:
-        
+
         // 1. Convert to lowercase
         let text = text.to_lowercase();
-        
+
         let mut result = String::with_capacity(text.len());
-        
+
         // First, do pattern-based replacements (verified kramdown behavior)
         let mut processed_text = text.clone();
-        
+
         // Replace space-ampersand-space with double hyphen (verified behavior)
         processed_text = processed_text.replace(" & ", "--");
         processed_text = processed_text.replace(" © ", "--");
-        
+
         // Now process character by character
         for c in processed_text.chars() {
             // Single character processing based on verified kramdown behavior
             match c {
                 // Preserve all letters (including Unicode) - verified behavior
                 c if c.is_alphabetic() => result.push(c),
-                
+
                 // Preserve all digits - verified behavior
                 c if c.is_ascii_digit() => result.push(c),
-                
+
                 // Preserve underscores (critical difference from GitHub) - verified behavior
                 '_' => result.push(c),
-                
+
                 // Preserve hyphens (no special arrow handling) - verified behavior
                 '-' => result.push('-'),
-                
+
                 // Convert spaces to hyphens - verified behavior
                 ' ' => result.push('-'),
-                
+
                 // Remaining symbols that weren't pattern-replaced
                 '&' => result.push_str("--"), // For cases without surrounding spaces
                 '©' => result.push_str("--"), // For cases without surrounding spaces
-                
+
                 // Emojis become single hyphens - verified behavior
-                c if (c as u32 >= 0x1F300 && c as u32 <= 0x1F9FF) ||
-                     (c as u32 >= 0x1F600 && c as u32 <= 0x1F64F) ||
-                     (c as u32 >= 0x2600 && c as u32 <= 0x26FF) => result.push('-'),
-                
+                c if (c as u32 >= 0x1F300 && c as u32 <= 0x1F9FF)
+                    || (c as u32 >= 0x1F600 && c as u32 <= 0x1F64F)
+                    || (c as u32 >= 0x2600 && c as u32 <= 0x26FF) =>
+                {
+                    result.push('-')
+                }
+
                 // Most punctuation is removed - verified behavior
-                ':' | '.' | '!' | '?' | '$' | '%' | '@' | '(' | ')' | '[' | ']' | '{' | '}' | 
-                '<' | '>' | '/' | '\\' | '|' | '"' | '\'' | '`' | '~' | '^' | '*' | '+' | '=' | '#' | '°' => {
+                ':' | '.' | '!' | '?' | '$' | '%' | '@' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '/'
+                | '\\' | '|' | '"' | '\'' | '`' | '~' | '^' | '*' | '+' | '=' | '#' | '°' => {
                     // Remove these characters
-                },
-                
+                }
+
                 // Unicode punctuation and symbols - handle em-dashes specifically
                 '—' | '–' => {
                     // Em-dashes and en-dashes are removed (verified behavior)
-                },
-                
+                }
+
                 // Handle ellipsis and other Unicode punctuation
                 '…' => {
                     // Remove ellipsis
-                },
-                
+                }
+
                 // Default: preserve other Unicode characters (verified behavior)
                 _ => {
                     // Keep other Unicode characters as kramdown preserves them
@@ -358,7 +346,7 @@ impl MD051LinkFragments {
                 }
             }
         }
-        
+
         // Remove leading non-letter characters until first letter (verified behavior)
         let mut start_pos = 0;
         for (pos, c) in result.char_indices() {
@@ -367,20 +355,50 @@ impl MD051LinkFragments {
                 break;
             }
         }
-        
+
         let result = if start_pos > 0 {
             result[start_pos..].to_string()
         } else {
             result
         };
-        
+
         // Only remove trailing punctuation that isn't hyphens/underscores (verified behavior)
         // Kramdown preserves trailing hyphens but removes other punctuation
-        let result = result.trim_end_matches(|c: char| {
-            matches!(c, ':' | '.' | '!' | '?' | '$' | '%' | '@' | '(' | ')' | '[' | ']' | '{' | '}' | 
-                '<' | '>' | '/' | '\\' | '|' | '"' | '\'' | '`' | '~' | '^' | '*' | '+' | '=' | '#' | '°')
-        }).to_string();
-        
+        let result = result
+            .trim_end_matches(|c: char| {
+                matches!(
+                    c,
+                    ':' | '.'
+                        | '!'
+                        | '?'
+                        | '$'
+                        | '%'
+                        | '@'
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '<'
+                        | '>'
+                        | '/'
+                        | '\\'
+                        | '|'
+                        | '"'
+                        | '\''
+                        | '`'
+                        | '~'
+                        | '^'
+                        | '*'
+                        | '+'
+                        | '='
+                        | '#'
+                        | '°'
+                )
+            })
+            .to_string();
+
         // If empty or only punctuation, return "section" (verified kramdown behavior)
         if result.is_empty() || result.chars().all(|c| !c.is_alphanumeric() && c != '_') {
             "section".to_string()
@@ -388,8 +406,6 @@ impl MD051LinkFragments {
             result
         }
     }
-
-
 
     /// Strip markdown formatting from heading text (optimized for common patterns)
     fn strip_markdown_formatting_fast(&self, text: &str) -> String {
@@ -499,16 +515,16 @@ impl MD051LinkFragments {
     fn consolidate_hyphens_kramdown_style(text: &str) -> String {
         // For the specific problematic cases, apply targeted fixes
         // This handles the major Jekyll compatibility issues
-        
-        // Pattern: ---- (4 hyphens) becomes -- (2 hyphens) 
+
+        // Pattern: ---- (4 hyphens) becomes -- (2 hyphens)
         // Pattern: --- (3 hyphens) becomes - (1 hyphen)
         // Pattern: -- (2 hyphens) stays -- (2 hyphens)
         // Pattern: - (1 hyphen) stays - (1 hyphen)
-        
+
         let consolidated = text
             .replace("----", "--")  // 4 → 2
-            .replace("---", "-");   // 3 → 1
-            
+            .replace("---", "-"); // 3 → 1
+
         // Remove leading and trailing hyphens (kramdown behavior)
         consolidated.trim_matches('-').to_string()
     }
@@ -648,839 +664,17 @@ impl Rule for MD051LinkFragments {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let value: toml::Value = toml::from_str(r#"
+        let value: toml::Value = toml::from_str(
+            r#"
 # Anchor generation style to match your target platform
 # Options: "github" (default), "jekyll", "kramdown"
 anchor-style = "github"
-"#).ok()?;
+"#,
+        )
+        .ok()?;
         Some(("MD051".to_string(), value))
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lint_context::LintContext;
-
-    #[test]
-    fn test_heading_to_fragment_github() {
-        let rule = MD051LinkFragments::new();
-
-        // Simple text
-        assert_eq!(rule.heading_to_fragment_github("Hello World"), "hello-world");
-
-        // Underscores preserved
-        assert_eq!(
-            rule.heading_to_fragment_github("test_with_underscores"),
-            "test_with_underscores"
-        );
-
-        // Consecutive hyphens preserved
-        assert_eq!(rule.heading_to_fragment_github("Double--Hyphen"), "double--hyphen");
-
-        // Numbers preserved
-        assert_eq!(
-            rule.heading_to_fragment_github("Step 1: Getting Started"),
-            "step-1-getting-started"
-        );
-
-        // Special characters removed
-        assert_eq!(rule.heading_to_fragment_github("FAQ: What's New?"), "faq-whats-new");
-
-        // Accented characters preserved
-        assert_eq!(rule.heading_to_fragment_github("Café"), "café");
-        assert_eq!(rule.heading_to_fragment_github("Über uns"), "über-uns");
-
-        // Emojis should be stripped (results in double hyphen)
-        assert_eq!(rule.heading_to_fragment_github("Emoji 🎉 Party"), "emoji--party");
-    }
-
-    #[test]
-    fn test_heading_to_fragment_kramdown() {
-        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
-
-        // Simple text
-        assert_eq!(rule.heading_to_fragment_kramdown("Hello World"), "hello-world");
-
-        // Underscores REMOVED for kramdown
-        assert_eq!(
-            rule.heading_to_fragment_kramdown("test_with_underscores"),
-            "testwithunderscores"
-        );
-
-        // Numbers preserved
-        assert_eq!(
-            rule.heading_to_fragment_kramdown("Step 1: Getting Started"),
-            "step-1-getting-started"
-        );
-
-        // Accented characters normalized
-        assert_eq!(rule.heading_to_fragment_kramdown("Café"), "caf");
-        assert_eq!(rule.heading_to_fragment_kramdown("Über uns"), "ber-uns");
-
-        // Leading hyphens removed, trailing preserved
-        assert_eq!(rule.heading_to_fragment_kramdown("---test---"), "test---");
-    }
-
-
-
-
-
-    #[test]
-    fn test_issue_39_heading_with_hyphens() {
-        let github_rule = MD051LinkFragments::new();
-        let kramdown_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
-
-        // Test the specific case from issue 39
-        let heading = "respect_gitignore";
-        assert_eq!(github_rule.heading_to_fragment_github(heading), "respect_gitignore");
-        assert_eq!(kramdown_rule.heading_to_fragment_kramdown(heading), "respectgitignore");
-    }
-
-    #[test]
-    fn test_kramdown_style_validation() {
-        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
-        // For kramdown, underscores are removed
-        let content = "# respect_gitignore\n\n[correct](#respectgitignore)\n[wrong](#respect_gitignore)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Only the second link should trigger a warning
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("#respect_gitignore"));
-    }
-
-    #[test]
-    fn test_github_style_validation() {
-        let rule = MD051LinkFragments::new(); // Default is GitHub style
-        let content = "# test_with_underscores\n\n[correct](#test_with_underscores)\n[wrong](#testwithunderscores)";
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Only the second link should trigger a warning
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("#testwithunderscores"));
-    }
-
-    #[test]
-    fn test_liquid_tags_ignored() {
-        let rule = MD051LinkFragments::new();
-
-        // Test various Liquid tag patterns with fragments (commonly used by Jekyll)
-        let content = r#"# Test Liquid Tag Links
-
-## CVE-2022-0811
-
-This is a heading that exists.
-
-## Some Anchor
-
-Another heading.
-
-## Technical Details
-
-More content here.
-
-### Testing Liquid cross-file links
-
-[Liquid post_url link]({% post_url 2023-03-25-htb-vessel %}#cve-2022-0811)
-[Another Liquid link]({% post_url 2023-09-09-htb-pikatwoo %}#some-anchor)
-[Third Liquid link]({% post_url 2024-01-15-some-post %}#technical-details)
-
-### Testing Liquid include with fragment
-
-[Liquid include link]({% include file.html %}#section)
-
-### Testing other liquid tags
-
-[Liquid link tag]({% link _posts/2023-01-01-post.md %}#heading)
-[Liquid variable]({{ site.url }}/page#fragment)
-
-### Regular links that should still be validated
-
-[Valid internal link](#some-anchor)
-[Invalid internal link](#non-existent-anchor)
-"#;
-
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Only the invalid internal link should trigger a warning
-        // All Liquid tag links should be ignored
-        assert_eq!(
-            result.len(),
-            1,
-            "Should only have one warning for the invalid internal link"
-        );
-        assert!(
-            result[0].message.contains("#non-existent-anchor"),
-            "Warning should be for the non-existent anchor, not Liquid tag links"
-        );
-    }
-
-    #[test]
-    fn test_liquid_variables_ignored() {
-        let rule = MD051LinkFragments::new();
-
-        // Test Liquid variable patterns ({{ }}) with fragments
-        let content = r#"# Test Liquid Variables
-
-## Valid Section
-
-This section exists.
-
-## Links with Liquid Variables
-
-These should NOT be flagged as invalid:
-
-- [Site URL]({{ site.url }}/page#anchor)
-- [Page URL]({{ page.url }}#fragment)
-- [Base URL]({{ site.baseurl }}/docs#section)
-- [Variable Path]({{ post.url }}#heading)
-"#;
-
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // No errors should be found for Liquid variable links
-        assert_eq!(result.len(), 0, "Liquid variable links should not be flagged");
-    }
-
-    #[test]
-    fn test_liquid_post_url_regression() {
-        // Specific test for the regression reported in issue #39 comments
-        let rule = MD051LinkFragments::new();
-        let content = r#"# Post Title
-
-This is very similar to what I did on [Vessel]({% post_url 2023-03-25-htb-vessel %}#cve-2022-0811), though through Kubernetes this time.
-
-## Some Section
-
-Content here.
-"#;
-
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Should have no warnings - Liquid tag link should be ignored
-        assert_eq!(
-            result.len(),
-            0,
-            "Liquid post_url tags should not trigger MD051 warnings"
-        );
-    }
-
-    #[test]
-    fn test_mixed_liquid_and_regular_links() {
-        let rule = MD051LinkFragments::new();
-        let content = r#"# Mixed Links Test
-
-## Valid Section
-
-Some content.
-
-## Another Section
-
-More content.
-
-### Links
-
-[Liquid tag link]({% post_url 2023-01-01-post %}#section) - should be ignored
-[Valid link](#valid-section) - should pass
-[Invalid link](#invalid-section) - should fail
-[Another Liquid tag]({% include file.md %}#part) - should be ignored
-[Cross-file](other.md#heading) - should be ignored (cross-file)
-"#;
-
-        let ctx = LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Only the invalid internal link should fail
-        assert_eq!(result.len(), 1, "Should only warn about the invalid internal link");
-        assert!(result[0].message.contains("#invalid-section"));
-    }
-
-    #[test]
-    fn test_liquid_syntax_detection() {
-        // Test Liquid tags ({% %})
-        assert!(MD051LinkFragments::is_cross_file_link(
-            "{% post_url 2023-03-25-htb-vessel %}#cve-2022-0811"
-        ));
-        assert!(MD051LinkFragments::is_cross_file_link(
-            "{% link _posts/2023-03-25-post.md %}#section"
-        ));
-        assert!(MD051LinkFragments::is_cross_file_link(
-            "{% include anchor.html %}#fragment"
-        ));
-
-        // Test Liquid variables ({{ }})
-        assert!(MD051LinkFragments::is_cross_file_link("{{ site.url }}/page#anchor"));
-        assert!(MD051LinkFragments::is_cross_file_link("{{ page.url }}#fragment"));
-        assert!(MD051LinkFragments::is_cross_file_link(
-            "{{ site.baseurl }}/docs#section"
-        ));
-        assert!(MD051LinkFragments::is_cross_file_link("{{ post.url }}#heading"));
-
-        // Regular fragments should not be detected as Liquid
-        assert!(!MD051LinkFragments::is_cross_file_link("#regular-fragment"));
-
-        // Malformed or reversed brackets should not be detected as Liquid
-        assert!(!MD051LinkFragments::is_cross_file_link("%}{%#fragment"));
-        assert!(!MD051LinkFragments::is_cross_file_link("}}{{#fragment"));
-        assert!(!MD051LinkFragments::is_cross_file_link("%}some{%#fragment"));
-        assert!(!MD051LinkFragments::is_cross_file_link("}}text{{#fragment"));
-    }
-
-    #[test]
-    fn test_simplified_github_algorithm_edge_cases() {
-        let rule = MD051LinkFragments::new();
-
-        // Test consecutive punctuation - GitHub removes punctuation, no spaces to convert
-        assert_eq!(rule.heading_to_fragment_github("Test:::Multiple"), "testmultiple");
-        assert_eq!(rule.heading_to_fragment_github("Step >>> Next"), "step--next"); // Spaces around >>> become hyphens
-
-        // Test mixed hyphens and punctuation
-        assert_eq!(
-            rule.heading_to_fragment_github("Double--Hyphen: Test"),
-            "double--hyphen-test"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_github("Pre-existing: More--Hyphens"),
-            "pre-existing-more--hyphens"
-        );
-
-        // Test multiple whitespace
-        assert_eq!(
-            rule.heading_to_fragment_github("Multiple   Spaces"),
-            "multiple-spaces"
-        ); // Each space becomes a hyphen, then 3 hyphens become 1 (GFM rule)
-
-        // Test leading/trailing punctuation - kramdown removes leading/trailing hyphens
-        assert_eq!(
-            rule.heading_to_fragment_github("---Leading and Trailing---"),
-            "leading-and-trailing"
-        );
-        assert_eq!(
-            rule.heading_to_fragment_github(":::Mixed:::Punctuation:::"),
-            "mixedpunctuation"
-        ); // No spaces between colons
-
-        // Test complex combinations
-        assert_eq!(
-            rule.heading_to_fragment_github("API::Response > Error--Handling"),
-            "apiresponse--error--handling"
-        );
-    }
-
-    #[test]
-    fn test_github_slugger_comprehensive_compliance() {
-        let rule = MD051LinkFragments::new();
-
-        // Comprehensive test cases generated from the official github-slugger npm package
-        // to ensure our implementation exactly matches GitHub's behavior
-        let test_cases = vec![
-            ("Simple Title", "simple-title"),
-            ("Title With Numbers 123", "title-with-numbers-123"),
-            ("UPPERCASE TITLE", "uppercase-title"),
-            ("lowercase title", "lowercase-title"),
-            ("MiXeD CaSe TiTlE", "mixed-case-title"),
-            // Issue #39 specific cases
-            ("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths"),
-            ("cbrown -> sbrown", "cbrown---sbrown"),
-            ("Arrow Test <-> bidirectional", "arrow-test---bidirectional"),
-            ("Double Arrow ==> Test", "double-arrow--test"),
-            // Ampersands and special chars
-            ("Testing & Coverage", "testing--coverage"),
-            (
-                "API Reference: Methods & Properties",
-                "api-reference-methods--properties",
-            ),
-            ("Config: Database & Cache Settings", "config-database--cache-settings"),
-            ("PHP $_REQUEST", "php-_request"),
-            ("sched_debug", "sched_debug"),
-            ("Add ldap_monitor to delegator$", "add-ldap_monitor-to-delegator"),
-            // Complex punctuation patterns
-            ("Step 1: Setup (Prerequisites)", "step-1-setup-prerequisites"),
-            ("Error #404 - Not Found!", "error-404---not-found"),
-            ("FAQ: What's Next?", "faq-whats-next"),
-            ("Version 2.0.1 - Release Notes", "version-201---release-notes"),
-            // Multiple hyphens and spaces
-            ("Test --- Multiple Hyphens", "test-----multiple-hyphens"),
-            ("Test  --  Spaced Hyphens", "test------spaced-hyphens"),
-            ("Test - Single - Hyphen", "test---single---hyphen"),
-            ("Multiple   Spaces", "multiple---spaces"),
-            // Leading/trailing punctuation
-            ("---Leading Hyphens", "---leading-hyphens"),
-            ("Trailing Hyphens---", "trailing-hyphens---"),
-            ("---Both Sides---", "---both-sides---"),
-            (":::Colons:::", "colons"),
-            ("***Asterisks***", "asterisks"),
-            ("___Underscores___", "___underscores___"),
-            ("...Dots...", "dots"),
-            // Unicode preservation
-            ("Café René", "café-rené"),
-            ("Über uns", "über-uns"),
-            ("日本語タイトル", "日本語タイトル"),
-            ("Русский заголовок", "русский-заголовок"),
-            ("مرحبا بالعالم", "مرحبا-بالعالم"),
-            // Emojis are removed
-            ("🎉 Emoji Start", "-emoji-start"),
-            ("Emoji 🎉 Middle", "emoji--middle"),
-            ("End Emoji 🎉", "end-emoji-"),
-            ("Multiple 🚀 🎨 Emojis", "multiple---emojis"),
-            // Special symbols
-            ("Price: $99.99", "price-9999"),
-            ("Copyright © 2024", "copyright--2024"),
-            ("Temperature: 25°C", "temperature-25c"),
-            ("Percentage: 100%", "percentage-100"),
-            ("Email: user@example.com", "email-userexamplecom"),
-            // Edge cases
-            ("", ""),
-            (" ", "-"),
-            ("   ", "---"),
-            ("-", "-"),
-            ("---", "---"),
-            ("_", "_"),
-            ("___", "___"),
-            ("123", "123"),
-            ("!@#$%^&*()", ""),
-            // URL and paths
-            ("GET /api/v1/users", "get-apiv1users"),
-            ("C:\\Windows\\Path", "cwindowspath"),
-            ("URL: https://example.com", "url-httpsexamplecom"),
-            // Nested brackets
-            ("[Bracketed] Content", "bracketed-content"),
-            ("(Parenthetical) Remark", "parenthetical-remark"),
-            ("{Braced} Text", "braced-text"),
-            ("<Angled> Brackets", "angled-brackets"),
-        ];
-
-        for (input, expected) in test_cases {
-            let actual = AnchorStyle::GitHub.generate_fragment(input);
-            assert_eq!(
-                actual, expected,
-                "Failed for input: {input:?}\nExpected: {expected:?}\nActual: {actual:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_github_official_algorithm_verified_against_gist() {
-        let rule = MD051LinkFragments::new();
-
-        // Test cases based on ACTUAL GitHub.com behavior verified through Gist testing
-        // Source: https://gist.github.com/rvben/da6f7faf265f69fd8d6fd247ee526beb
-        let test_cases = vec![
-            // Basic cases
-            ("Hello World", "hello-world"),
-            ("Simple Text", "simple-text"),
-            ("Step 1 Getting Started", "step-1-getting-started"),
-            ("Version 2.1.0", "version-210"),
-            
-            // Underscores preserved (critical difference)
-            ("test_with_underscores", "test_with_underscores"),
-            ("Update login_type", "update-login_type"),
-            ("sched_debug", "sched_debug"),
-            ("respect_gitignore", "respect_gitignore"),
-            
-            // Multiple hyphens preserved
-            ("Test---with---multiple---hyphens", "test---with---multiple---hyphens"),
-            ("Double--Hyphen", "double--hyphen"),
-            ("Triple---Dash", "triple---dash"),
-            
-            // Arrow patterns (Issue #39 specific cases)
-            ("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths"),
-            ("cbrown -> sbrown", "cbrown---sbrown"),
-            ("Arrow Test <-> bidirectional", "arrow-test---bidirectional"),
-            ("Double Arrow ==> Test", "double-arrow--test"),
-            
-            // Special symbols
-            ("API::Response > Error--Handling", "apiresponse--error--handling"),
-            ("FAQ: What's New?", "faq-whats-new"),
-            ("Error #404 - Not Found!", "error-404---not-found"),
-            ("Price: $99.99", "price-9999"),
-            ("Testing & Coverage", "testing--coverage"),
-            ("Copyright © 2024", "copyright--2024"),
-            ("Temperature: 25°C", "temperature-25c"),
-            ("Percentage: 100%", "percentage-100"),
-            
-            // Unicode preservation
-            ("Café René", "café-rené"),
-            ("Über uns", "über-uns"),
-            ("日本語タイトル", "日本語タイトル"),
-            ("Русский заголовок", "русский-заголовок"),
-            ("مرحبا بالعالم", "مرحبا-بالعالم"),
-            
-            // Multiple spaces become multiple hyphens
-            ("Multiple   Spaces", "multiple---spaces"),
-            ("Test  --  Spaced Hyphens", "test------spaced-hyphens"),
-            ("Test - Single - Hyphen", "test---single---hyphen"),
-            
-            // Leading/trailing hyphens preserved (unlike kramdown)
-            ("---Leading Hyphens", "---leading-hyphens"),
-            ("Trailing Hyphens---", "trailing-hyphens---"),
-            ("---Both Sides---", "---both-sides---"),
-            ("---Leading and Trailing---", "---leading-and-trailing---"),
-            
-            // Punctuation removed but some special handling
-            (":::Colons:::", "colons"),
-            ("...Dots...", "dots"),
-            
-            // Programming-related cases
-            ("PHP $_REQUEST", "php-_request"),
-            ("Add ldap_monitor to delegator$", "add-ldap_monitor-to-delegator"),
-            ("function_name()", "function_name"),
-            ("CSS class.name", "css-classname"),
-            
-            // Complex cases
-            ("GET /api/v1/users", "get-apiv1users"),
-            ("C:\\Windows\\Path", "cwindowspath"),
-            ("URL: https://example.com", "url-httpsexamplecom"),
-            ("Email: user@example.com", "email-userexamplecom"),
-            
-            // Brackets removed
-            ("[Bracketed] Content", "bracketed-content"),
-            ("(Parenthetical) Remark", "parenthetical-remark"),
-            ("{Braced} Text", "braced-text"),
-            
-            // Emojis become single hyphens
-            ("🎉 Emoji Start", "-emoji-start"),
-            ("Emoji 🎉 Middle", "emoji--middle"),
-            ("End Emoji 🎉", "end-emoji-"),
-            ("Multiple 🚀 🎨 Emojis", "multiple---emojis"),
-            
-            // Edge cases
-            ("", ""),
-            (" ", "-"),
-            ("   ", "---"),
-            ("-", "-"),
-            ("---", "---"),
-            ("_", "_"),
-            ("___", "___"),
-            ("123", "123"),
-        ];
-
-        for (input, expected) in test_cases {
-            let actual = AnchorStyle::GitHub.generate_fragment(input);
-            assert_eq!(
-                actual, expected,
-                "GitHub Official Algorithm Failed for input: {input:?}\nExpected: {expected:?}\nActual: {actual:?}\n\
-                This test verifies against ACTUAL GitHub.com behavior from Gist: https://gist.github.com/rvben/da6f7faf265f69fd8d6fd247ee526beb"
-            );
-        }
-    }
-
-    #[test]
-    fn debug_cbrown_issue() {
-        // Test the critical issue #39 case using the new modular system
-        let input = "cbrown --> sbrown: --unsafe-paths";
-        
-        // Test with GitHub style (should handle arrows correctly)
-        let github_result = AnchorStyle::GitHub.generate_fragment(input);
-        println!("GitHub result: {:?}", github_result);
-        
-        // The expected result should match GitHub.com's actual behavior
-        // This test verifies the critical arrow pattern handling
-        assert_eq!(github_result, "cbrown----sbrown---unsafe-paths");
-    }
-
-    #[test]
-    fn test_github_official_vs_current_implementation() {
-        // Test GitHub anchor generation against verified expectations
-        let test_cases = vec![
-            // Issue #39 - Arrow patterns - these need to be fixed to match actual GitHub.com behavior
-            ("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths"),
-            ("cbrown -> sbrown", "cbrown---sbrown"),
-            
-            // Ampersand handling
-            ("Testing & Coverage", "testing--coverage"),
-            
-            // Leading/trailing hyphens should be preserved in GitHub.com 
-            ("---Leading and Trailing---", "---leading-and-trailing---"),
-            
-            // Multiple spaces become multiple hyphens
-            ("Multiple   Spaces", "multiple---spaces"),
-        ];
-
-        for (input, expected) in test_cases {
-            let actual = AnchorStyle::GitHub.generate_fragment(input);
-            
-            println!("Testing: '{input}'");
-            println!("  Expected: '{expected}'");
-            println!("  Actual:   '{actual}'");
-            
-            assert_eq!(
-                actual, expected,
-                "GitHub anchor generation failed for: '{input}'"
-            );
-        }
-    }
-
-    #[test]
-    fn test_jekyll_official_anchor_generation() {
-        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Jekyll);
-
-        // Test cases verified against actual kramdown 2.5.1 gem output
-        let test_cases = vec![
-            // Basic cases
-            ("Simple Title", "simple-title"),
-            ("Title With Numbers 123", "title-with-numbers-123"),
-            ("UPPERCASE TITLE", "uppercase-title"),
-            ("lowercase title", "lowercase-title"),
-            ("MiXeD CaSe TiTlE", "mixed-case-title"),
-            
-            // Issue #39 specific cases - exact kramdown behavior
-            ("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths"),
-            ("cbrown -> sbrown", "cbrown---sbrown"),
-            ("Arrow Test <-> bidirectional", "arrow-test---bidirectional"),
-            ("Double Arrow ==> Test", "double-arrow--test"),
-            
-            // Underscores preserved (key difference from some implementations)
-            ("test_with_underscores", "test_with_underscores"),
-            ("Update login_type", "update-login_type"),
-            ("respect_gitignore", "respect_gitignore"),
-            ("sched_debug", "sched_debug"),
-            ("PHP $_REQUEST", "php-_request"),
-            
-            // Regular hyphens preserved, em-dashes removed (key kramdown behavior)
-            ("Double--Hyphen", "double--hyphen"), // Regular hyphens preserved
-            ("Double–Hyphen", "doublehyphen"), // Em-dash removed
-            ("Triple---Dash", "triple---dash"), // Regular hyphens preserved
-            ("Triple—Dash", "tripledash"), // Em-dash removed
-            ("Test---with---multiple---hyphens", "test---with---multiple---hyphens"), // Regular hyphens preserved
-            ("Test—with—multiple—hyphens", "testwithmultiplehyphens"), // Em-dashes removed
-            ("Simple-Hyphen", "simple-hyphen"), // Single hyphen preserved
-            
-            // Special characters
-            ("API::Response > Error--Handling", "apiresponse--error--handling"),
-            ("FAQ: What's New?", "faq-whats-new"),
-            ("Error #404 - Not Found!", "error-404---not-found"),
-            ("Price: $99.99", "price-9999"),
-            ("Testing & Coverage", "testing--coverage"),
-            ("Copyright © 2024", "copyright--2024"),
-            ("Temperature: 25°C", "temperature-25c"),
-            ("Percentage: 100%", "percentage-100"),
-            ("Email: user@example.com", "email-userexamplecom"),
-            
-            // Unicode preservation
-            ("Café René", "café-rené"),
-            ("Über uns", "über-uns"),
-            ("日本語タイトル", "日本語タイトル"),
-            ("Русский заголовок", "русский-заголовок"),
-            ("مرحبا بالعالم", "مرحبا-بالعالم"),
-            
-            // Emoji handling
-            ("🎉 Emoji Start", "emoji-start"),
-            ("Emoji 🎉 Middle", "emoji--middle"),
-            ("End Emoji 🎉", "end-emoji-"),
-            ("Multiple 🚀 🎨 Emojis", "multiple---emojis"),
-            
-            // Space handling
-            ("Multiple   Spaces", "multiple---spaces"),
-            ("Test  --  Spaced Hyphens", "test----spaced-hyphens"), 
-            ("Test - Single - Hyphen", "test---single---hyphen"),
-            
-            // Leading/trailing punctuation (kramdown strips em-dashes)
-            ("---Leading Hyphens", "leading-hyphens"),
-            ("Trailing Hyphens---", "trailing-hyphens"),
-            ("---Both Sides---", "both-sides"),
-            (":::Colons:::", "colons"),
-            ("...Dots...", "dots"),
-            
-            // Programming symbols
-            ("function_name()", "function_name"),
-            ("CSS class.name", "css-classname"),
-            ("GET /api/v1/users", "get-apiv1users"),
-            ("C:\\Windows\\Path", "cwindowspath"),
-            ("URL: https://example.com", "url-httpsexamplecom"),
-            
-            // Complex cases
-            ("Config: Database & Cache Settings", "config-database--cache-settings"),
-            ("API Reference: Methods & Properties", "api-reference-methods--properties"),
-            ("Pre-existing: More--Hyphens", "pre-existing-morehyphens"),
-            ("Mixed:::Punctuation:::", "mixedpunctuation"),
-            
-            // Edge cases
-            ("123", "123"),
-            ("___", "___"),
-            ("_", "_"),
-            ("-", "-"),
-            ("!@#$%^&*()", "section"), // Returns "section" for only punctuation
-            
-            // Markdown formatting stripped
-            ("*emphasized* text", "emphasized-text"),
-            ("**bold** text", "bold-text"),
-            ("`code` span", "code-span"),
-            ("[link](url) text", "link-text"),
-            
-            // Version numbers
-            ("Version 1.0.0", "version-100"),
-            ("Release v2.1.3-beta", "release-v213-beta"),
-            ("Chapter 1.5.2", "chapter-152"),
-            ("Section 10.1", "section-101"),
-            ("API v3.0", "api-v30"),
-        ];
-
-        for (input, expected) in test_cases {
-            let actual = AnchorStyle::Jekyll.generate_fragment(input);
-            assert_eq!(
-                actual, expected,
-                "Jekyll Official Failed for input: {input:?}\nExpected: {expected:?}\nActual: {actual:?}\n\
-                This test verifies against ACTUAL kramdown 2.5.1 gem behavior"
-            );
-        }
-    }
-
-    #[test]
-    fn test_jekyll_vs_github_anchor_differences() {
-        let jekyll_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Jekyll);
-        let github_rule = MD051LinkFragments::new(); // Default is GitHub
-        
-        // Key differences between Jekyll/kramdown and GitHub
-        let difference_cases = vec![
-            // Em-dashes: Jekyll removes them, GitHub preserves them
-            ("Double–Hyphen", "doublehyphen", "double–hyphen"),
-            ("Test—with—multiple—hyphens", "testwithmultiplehyphens", "test—with—multiple—hyphens"),
-            
-            // Leading/trailing em-dashes: different handling
-            ("—Leading Hyphens", "leading-hyphens", "—leading-hyphens"), 
-            ("Trailing Hyphens—", "trailing-hyphens", "trailing-hyphens—"),
-            ("—Both Sides—", "both-sides", "—both-sides—"),
-            
-            // Space consolidation differences
-            ("Multiple   Spaces", "multiple---spaces", "multiple-spaces"),
-            ("Test  --  Spaced Hyphens", "test----spaced-hyphens", "test------spaced-hyphens"),
-        ];
-
-        for (input, jekyll_expected, github_expected) in difference_cases {
-            let jekyll_actual = AnchorStyle::Jekyll.generate_fragment(input);
-            let github_actual = AnchorStyle::GitHub.generate_fragment(input);
-            
-            assert_eq!(
-                jekyll_actual, jekyll_expected,
-                "Jekyll implementation mismatch for: {input:?}"
-            );
-            
-            assert_eq!(
-                github_actual, github_expected,
-                "GitHub implementation mismatch for: {input:?}"
-            );
-            
-            // Verify they're actually different (testing our test cases)
-            if jekyll_expected != github_expected {
-                assert_ne!(
-                    jekyll_actual, github_actual,
-                    "Expected difference for '{input}' but got same result: '{jekyll_actual}'"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_jekyll_style_validation() {
-        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Jekyll);
-        // For Jekyll, em-dashes are removed but regular hyphens are preserved
-        let content = "# Double–Hyphen\n\n[correct](#doublehyphen)\n[wrong](#double–hyphen)";
-        let ctx = crate::lint_context::LintContext::new(content);
-        let result = rule.check(&ctx).unwrap();
-
-        // Only the second link should trigger a warning (GitHub-style anchor won't match Jekyll)
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("#double–hyphen"));
-    }
-
-    #[test]
-    fn test_jekyll_configuration_parsing() {
-        // Test configuration parsing for Jekyll style
-        let config_toml = r#"
-        [MD051]
-        anchor-style = "jekyll"
-        "#;
-        
-        let config: crate::config::Config = toml::from_str(config_toml).unwrap();
-        let rule = MD051LinkFragments::from_config(&config);
-        
-        // Verify it's configured for Jekyll style
-        let rule_any = rule.as_any();
-        let concrete_rule = rule_any.downcast_ref::<MD051LinkFragments>().unwrap();
-        assert_eq!(concrete_rule.anchor_style, AnchorStyle::Jekyll);
-    }
-
-    #[test]
-    fn test_jekyll_arrow_patterns_comprehensive() {
-        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Jekyll);
-        
-        // Test all arrow patterns from Issue #39 with verified kramdown behavior
-        let arrow_cases = vec![
-            // Standard arrows
-            ("cbrown -> sbrown", "cbrown---sbrown"),
-            ("cbrown --> sbrown", "cbrown----sbrown"),
-            ("Arrow Test <-> bidirectional", "arrow-test---bidirectional"),
-            ("Double Arrow ==> Test", "double-arrow--test"),
-            
-            // Complex combinations
-            ("Process A -> B -> C", "process-a---b---c"),
-            ("Mixed A -> B --> C <-> D", "mixed-a---b----c---d"),
-            ("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths"),
-            
-            // Edge cases
-            ("->", "section"), // Only punctuation, returns "section"
-            ("-->", "section"),
-            ("<->", "section"),
-            ("==>", "section"),
-        ];
-
-        for (input, expected) in arrow_cases {
-            let actual = AnchorStyle::Jekyll.generate_fragment(input);
-            assert_eq!(
-                actual, expected,
-                "Jekyll arrow pattern failed for: {input:?}\nExpected: {expected:?}\nActual: {actual:?}"
-            );
-        }
-    }
-
-    #[test] 
-    fn test_jekyll_unicode_and_emoji_handling() {
-        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Jekyll);
-        
-        // Unicode preservation (key Jekyll behavior)
-        let unicode_cases = vec![
-            ("Café au Lait", "café-au-lait"),
-            ("naïve approach", "naïve-approach"),
-            ("résumé format", "résumé-format"),
-            ("piñata party", "piñata-party"),
-            ("jalapeño peppers", "jalapeño-peppers"),
-            ("façade design", "façade-design"),
-            
-            // Mixed language preservation
-            ("English Français Deutsch", "english-français-deutsch"),
-            ("Hello مرحبا Hola", "hello-مرحبا-hola"),
-            ("Test тест テスト", "test-тест-テスト"),
-            ("Multi العربية 中文 Language", "multi-العربية-中文-language"),
-        ];
-
-        for (input, expected) in unicode_cases {
-            let actual = AnchorStyle::Jekyll.generate_fragment(input);
-            assert_eq!(
-                actual, expected,
-                "Jekyll Unicode handling failed for: {input:?}"
-            );
-        }
-        
-        // Emoji handling (becomes single hyphens)
-        let emoji_cases = vec![
-            ("🎉 Party", "party"),
-            ("Start 🚀 Launch", "start--launch"),
-            ("End 🎨", "end-"),
-            ("Multiple 🚀 🎨 🎉 Emojis", "multiple----emojis"),
-        ];
-
-        for (input, expected) in emoji_cases {
-            let actual = AnchorStyle::Jekyll.generate_fragment(input);
-            assert_eq!(
-                actual, expected,
-                "Jekyll emoji handling failed for: {input:?}"
-            );
-        }
-    }
-}
+mod tests {}

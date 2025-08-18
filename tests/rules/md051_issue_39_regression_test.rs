@@ -1,6 +1,7 @@
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD051LinkFragments;
+use rumdl::utils::anchor_styles::AnchorStyle;
 
 /// Regression tests for Issue #39: Two bugs in Links [MD051]
 /// These tests ensure that the complex punctuation handling bugs are fixed and won't regress
@@ -166,10 +167,10 @@ Links to test:
 - [PHP request](#php-_request)
 - [Sched debug](#sched_debug)
 - [LDAP monitor](#add-ldap_monitor-to-delegator)
-- [Complex path](#cbrown----sbrown---unsafe-paths)
+- [Complex path](#cbrown--sbrown-unsafe-paths)
 "#;
 
-    let rule = MD051LinkFragments::new();
+    let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Jekyll);
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 

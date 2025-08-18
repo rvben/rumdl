@@ -11,7 +11,7 @@
 //! verified against the official tools/platforms.
 
 pub mod github;
-pub mod jekyll; 
+pub mod jekyll;
 pub mod kramdown;
 
 use serde::{Deserialize, Serialize};
@@ -19,8 +19,10 @@ use serde::{Deserialize, Serialize};
 /// Anchor generation style for heading fragments
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum AnchorStyle {
     /// GitHub/GFM style (default): preserves underscores, removes punctuation
+    #[default]
     GitHub,
     /// Jekyll/kramdown with GFM style: matches Jekyll/GitHub Pages behavior
     Jekyll,
@@ -28,11 +30,6 @@ pub enum AnchorStyle {
     Kramdown,
 }
 
-impl Default for AnchorStyle {
-    fn default() -> Self {
-        AnchorStyle::GitHub
-    }
-}
 
 impl AnchorStyle {
     /// Generate an anchor fragment using the specified style
@@ -57,16 +54,25 @@ mod tests {
         assert_eq!(serde_json::to_string(&AnchorStyle::Kramdown).unwrap(), "\"kramdown\"");
 
         // Test deserialization
-        assert_eq!(serde_json::from_str::<AnchorStyle>("\"github\"").unwrap(), AnchorStyle::GitHub);
-        assert_eq!(serde_json::from_str::<AnchorStyle>("\"jekyll\"").unwrap(), AnchorStyle::Jekyll);
-        assert_eq!(serde_json::from_str::<AnchorStyle>("\"kramdown\"").unwrap(), AnchorStyle::Kramdown);
+        assert_eq!(
+            serde_json::from_str::<AnchorStyle>("\"github\"").unwrap(),
+            AnchorStyle::GitHub
+        );
+        assert_eq!(
+            serde_json::from_str::<AnchorStyle>("\"jekyll\"").unwrap(),
+            AnchorStyle::Jekyll
+        );
+        assert_eq!(
+            serde_json::from_str::<AnchorStyle>("\"kramdown\"").unwrap(),
+            AnchorStyle::Kramdown
+        );
     }
 
     #[test]
     fn test_anchor_style_differences() {
         let test_cases = [
             "cbrown --> sbrown: --unsafe-paths",
-            "Update login_type", 
+            "Update login_type",
             "Test---with---multiple---hyphens",
             "API::Response > Error--Handling",
         ];

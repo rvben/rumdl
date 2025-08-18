@@ -176,12 +176,14 @@ pub fn has_kramdown_syntax(line: &str) -> bool {
 
 /// Generate header ID following kramdown's algorithm
 ///
-/// Based on the official kramdown specification:
-/// 1. Remove all characters except letters, numbers, spaces and dashes
-/// 2. Remove characters from start until first letter
-/// 3. Convert everything except letters and numbers to dashes
-/// 4. Convert to lowercase
-/// 5. If nothing remains, use "section"
+/// Based on the official kramdown 2.5.1 Ruby gem behavior (verified through testing):
+/// 1. Special symbol replacements (space & space -> --, space > space -> --, --> -> --)
+/// 2. Remove all characters except letters, numbers, spaces and dashes
+/// 3. Remove characters from start until first letter
+/// 4. Convert spaces to dashes, letters to lowercase, preserve numbers
+/// 5. Apply kramdown's hyphen consolidation ONLY to pre-existing hyphens
+/// 6. Remove leading dashes, preserve trailing dashes
+/// 7. If nothing remains, use "section"
 ///
 /// This function is verified against the official kramdown Ruby implementation.
 pub fn heading_to_fragment(heading: &str) -> String {
@@ -190,26 +192,77 @@ pub fn heading_to_fragment(heading: &str) -> String {
     }
 
     let text = heading.trim();
-
     if text.is_empty() {
         return "section".to_string();
     }
 
-    // Step 1: Remove all characters except letters, numbers, spaces and dashes
-    // Following official kramdown spec - underscores and other punctuation are removed
-    // NOTE: kramdown removes accented characters entirely, unlike GitHub which normalizes them
+    // Step 1: Remove all characters except letters, numbers, spaces and dashes FIRST
+    // This is crucial - kramdown removes colons and other chars before symbol replacement
     let mut step1 = String::new();
     for c in text.chars() {
         if c.is_ascii_alphabetic() || c.is_ascii_digit() || c == ' ' || c == '-' {
             step1.push(c);
         }
-        // All other characters including accented characters are removed in kramdown
+        // All other characters (::, _, accented chars, etc.) are REMOVED entirely
     }
 
-    // Step 2: Remove characters from start until first letter
+    // Step 2: Apply special symbol replacements AFTER character filtering
+    let mut processed = step1;
+
+    // Handle special arrow sequences first
+    processed = processed.replace("-->", "--");
+
+    // Handle spaced symbols (& and > with spaces become double hyphens)
+    processed = processed.replace(" & ", "--");
+    processed = processed.replace(" > ", "--");
+
+    // Step 3: Apply hyphen consolidation to existing hyphens
+    let chars: Vec<char> = processed.chars().collect();
+    let mut hyphen_consolidated = String::new();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+
+        if c == '-' {
+            // Count consecutive hyphens
+            let mut hyphen_count = 0;
+            let mut j = i;
+            while j < chars.len() && chars[j] == '-' {
+                hyphen_count += 1;
+                j += 1;
+            }
+
+            // Apply kramdown consolidation rules to existing hyphens:
+            match hyphen_count {
+                1 => hyphen_consolidated.push('-'),
+                2 => {}                                  // 2 existing hyphens -> removed
+                3 => {}                                  // 3 existing hyphens -> removed
+                4 => hyphen_consolidated.push('-'),      // 4 -> 1
+                5 => {}                                  // 5 -> removed
+                6 => hyphen_consolidated.push_str("--"), // 6 -> 2
+                _ => {
+                    if hyphen_count % 2 == 0 && hyphen_count >= 6 {
+                        hyphen_consolidated.push_str("--");
+                    } else if hyphen_count % 4 == 0 {
+                        hyphen_consolidated.push('-');
+                    }
+                }
+            }
+
+            i = j;
+        } else {
+            hyphen_consolidated.push(c);
+            i += 1;
+        }
+    }
+
+    processed = hyphen_consolidated;
+
+    // Step 4: Remove characters from start until first letter
     let mut start_pos = 0;
     let mut found_letter = false;
-    for (i, c) in step1.char_indices() {
+    for (i, c) in processed.char_indices() {
         if c.is_ascii_alphabetic() {
             start_pos = i;
             found_letter = true;
@@ -217,14 +270,13 @@ pub fn heading_to_fragment(heading: &str) -> String {
         }
     }
 
-    // If no letters found, return "section" for numbers-only or empty content
     if !found_letter {
         return "section".to_string();
     }
 
-    let step2 = &step1[start_pos..];
+    let step2 = &processed[start_pos..];
 
-    // Step 3: Convert everything except letters and numbers to dashes
+    // Step 5: Convert characters to final form (spaces become hyphens, no consolidation)
     let mut result = String::new();
     for c in step2.chars() {
         if c.is_ascii_alphabetic() {
@@ -232,18 +284,18 @@ pub fn heading_to_fragment(heading: &str) -> String {
         } else if c.is_ascii_digit() {
             result.push(c);
         } else {
-            // Spaces and existing dashes become dashes (preserving multiple consecutive dashes)
+            // Spaces and remaining hyphens become hyphens (no further consolidation)
             result.push('-');
         }
     }
 
-    // Only remove leading dashes, but preserve trailing dashes from space conversion
-    let result = result.trim_start_matches('-').to_string();
+    // Step 6: Remove leading dashes only, preserve trailing dashes
+    let trimmed = result.trim_start_matches('-').to_string();
 
-    if result.is_empty() {
+    if trimmed.is_empty() {
         "section".to_string()
     } else {
-        result
+        trimmed
     }
 }
 

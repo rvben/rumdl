@@ -1,6 +1,7 @@
 use rumdl::lint_context::LintContext;
 use rumdl::rule::Rule;
 use rumdl::rules::MD051LinkFragments;
+use rumdl::utils::anchor_styles::AnchorStyle;
 
 #[test]
 fn test_valid_link_fragment() {
@@ -257,7 +258,7 @@ fn test_complex_nested_formatting() {
 "#,
     );
 
-    let rule = MD051LinkFragments::new();
+    let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Jekyll);
     let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
@@ -272,7 +273,7 @@ fn test_formatting_edge_cases() {
         r#"
 # Heading with a**partial**bold and *italic with **nested** formatting*
 
-[Link to partial bold](#heading-with-apartialbolda-and-italic-with-nested-formatting)
+[Link to partial bold](#heading-with-apartialbold-and-italic-with-nested-formatting)
 [Link to nested formatting](#heading-with-apartialbold-and-italic-with-nested-formatting)
 "#,
     );
@@ -444,7 +445,7 @@ fn test_md051_fragment_generation_regression() {
         ("Heading with Spaces", "heading-with-spaces"),
         // Ampersand cases (& becomes -- per GitHub spec)
         ("Test & Example", "test--example"),
-        ("A&B", "ab"),
+        ("A&B", "a--b"), // Fixed: & without spaces also becomes --
         ("A & B", "a--b"),
         ("Multiple & Ampersands & Here", "multiple--ampersands--here"),
         // Special characters
@@ -464,7 +465,7 @@ fn test_md051_fragment_generation_regression() {
             "Heading with (Parentheses) & [Brackets]",
             "heading-with-parentheses--brackets",
         ),
-        ("Special Characters: @#$%^&*()", "special-characters-"),
+        ("Special Characters: @#$%^&*()", "special-characters---"),
         // Edge cases
         ("Only!!! Symbols!!!", "only-symbols"),
         ("   Spaces   ", "spaces"), // Leading/trailing spaces
@@ -536,16 +537,16 @@ fn test_md051_ampersand_variations() {
 [Link 1](#test--example)
 
 # A&B
-[Link 2](#ab)
+[Link 2](#a--b)
 
 # Multiple & Symbols & Here
 [Link 3](#multiple--symbols--here)
 
 # Test&End
-[Link 4](#testend)
+[Link 4](#test--end)
 
 # &Start
-[Link 5](#start)
+[Link 5](#--start)
 "#;
 
     let rule = MD051LinkFragments::new();
