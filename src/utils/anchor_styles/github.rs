@@ -37,7 +37,9 @@ lazy_static! {
     // Limited repetition depth to prevent catastrophic backtracking
     // Match both asterisk and underscore emphasis (with proper nesting handling)
     static ref EMPHASIS_ASTERISK: Regex = Regex::new(r"\*{1,3}([^*]+?)\*{1,3}").unwrap();
-    static ref EMPHASIS_UNDERSCORE: Regex = Regex::new(r"_{1,2}([^_]+?)_{1,2}").unwrap();
+    // Match emphasis underscores - only when they wrap text, not in snake_case
+    // This pattern matches _text_ or __text__ but not test_with_underscores
+    static ref EMPHASIS_UNDERSCORE: Regex = Regex::new(r"\b_{1,2}([^_\s][^_]*?)_{1,2}\b").unwrap();
     static ref CODE_PATTERN: Regex = Regex::new(r"`([^`]{0,500})`").unwrap();
     // Match image and link patterns
     // Using simple approach: match the brackets and parentheses, extract only the bracket content
@@ -49,7 +51,7 @@ lazy_static! {
 
     // RTL override and dangerous Unicode control patterns
     static ref DANGEROUS_UNICODE_PATTERN: Regex = Regex::new(r"[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]").unwrap();
-    
+
     // Ampersand and copyright with whitespace patterns
     static ref AMPERSAND_WITH_SPACES: Regex = Regex::new(r"\s+&\s+").unwrap();
     static ref COPYRIGHT_WITH_SPACES: Regex = Regex::new(r"\s+©\s+").unwrap();
@@ -109,25 +111,33 @@ pub fn heading_to_fragment(heading: &str) -> String {
 fn heading_to_fragment_internal(heading: &str) -> String {
     // Save original heading state for edge detection
     let _original_heading_lower = heading.to_lowercase();
-    
+
     // Security Step 2: Unicode normalization to prevent homograph attacks
     // NFC normalization ensures canonical representation
     let normalized: String = heading.nfc().collect();
 
-    // Security Step 3: Filter dangerous Unicode characters
-    let sanitized = sanitize_unicode(&normalized);
+    // Step 3: Handle emoji sequences BEFORE sanitizing ZWJ
+    // This preserves multi-component emojis and keycaps
+    let emoji_processed = process_emoji_sequences(&normalized);
 
-    // Step 4: Convert to lowercase
+    // Security Step 4: Filter dangerous Unicode characters
+    let sanitized = sanitize_unicode(&emoji_processed);
+
+    // Step 5: Convert to lowercase
     let mut text = sanitized.to_lowercase();
 
     // Step 5: Remove markdown formatting while preserving inner text
     // Process multiple times to handle nested emphasis (e.g., **_text_**)
     // Using ReDoS-resistant patterns with bounded repetition
-    for _ in 0..3 {  // Max 3 levels of nesting to prevent infinite loops
+    for _ in 0..3 {
+        // Max 3 levels of nesting to prevent infinite loops
         let prev = text.clone();
         text = EMPHASIS_ASTERISK.replace_all(&text, "$1").to_string();
+        // Strip emphasis underscores - the regex now properly handles snake_case preservation
         text = EMPHASIS_UNDERSCORE.replace_all(&text, "$1").to_string();
-        if text == prev { break; }  // No more changes
+        if text == prev {
+            break;
+        } // No more changes
     }
     text = CODE_PATTERN.replace_all(&text, "$1").to_string();
     // Handle images first, then links
@@ -150,9 +160,9 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     // First remove em-dashes and en-dashes entirely
     text = text.replace(['–', '—'], "");
 
-    // Step 8: Handle emojis - Replace with double hyphens and remove adjacent spaces
-    // Note: GitHub replaces emoji + surrounding spaces with just --
-    text = replace_emojis_with_double_hyphen(&text);
+    // Step 8: Replace emoji markers with double hyphens
+    // The emoji sequences were already marked as §EMOJI§ during pre-processing
+    text = text.replace("§emoji§", "--");  // After lowercasing, the marker is lowercase
 
     // Step 9: Special symbol replacements
     // Use regex to handle multiple spaces/tabs around ampersand
@@ -163,38 +173,164 @@ fn heading_to_fragment_internal(heading: &str) -> String {
 
     // Step 10: Character-by-character processing
     let mut result = String::with_capacity(text.len()); // Pre-allocate for efficiency
-    let mut last_was_space = false;
 
     for c in text.chars() {
+        let code = c as u32;
         if c.is_ascii_alphabetic() || c.is_ascii_digit() || c == '_' || c == '-' {
             // Preserve letters, numbers, underscores, and hyphens
             result.push(c);
-            last_was_space = false;
+        } else if c == '§' {
+            // Preserve our marker character
+            result.push(c);
+        } else if code == 0x20E3 {
+            // Preserve combining keycap for keycap sequences
+            // Note: FE0F should only be preserved as part of a keycap, not standalone
+            // The keycap preservation is handled in process_emoji_sequences
+            result.push(c);
+        } else if code == 0xFE0F {
+            // Only preserve variation selector if it's preceded by a keycap base
+            if let Some(prev) = result.chars().last() {
+                if is_keycap_base(prev) {
+                    result.push(c);
+                }
+                // Otherwise filter it out
+            }
         } else if c.is_alphabetic() && is_safe_unicode_letter(c) {
             // Preserve Unicode letters (like é, ñ, etc.) but only safe ones
             result.push(c);
-            last_was_space = false;
         } else if c.is_numeric() {
             // Preserve all numeric characters (digits from any script)
             result.push(c);
-            last_was_space = false;
         } else if c.is_whitespace() {
-            // Convert any whitespace to single hyphen (collapse consecutive spaces)
-            if !last_was_space {
-                result.push('-');
-                last_was_space = true;
-            }
-        } else {
-            // ASCII punctuation is removed (no replacement)
-            // Unicode symbols have already been handled above
-            last_was_space = false;
+            // Convert each whitespace character to a hyphen
+            // GitHub preserves multiple spaces as multiple hyphens
+            result.push('-');
         }
+        // ASCII punctuation is removed (no replacement)
+        // Unicode symbols have already been handled above
     }
 
     // GitHub does NOT trim leading/trailing hyphens, even those from symbol removal
     // "---leading" → "---leading"
-    // "© 2024" → "-2024" 
+    // "© 2024" → "-2024"
     // "trailing---" → "trailing---"
+    result
+}
+
+/// Process emoji sequences before sanitization
+/// Handles multi-component emojis, keycaps, and flags as units
+fn process_emoji_sequences(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        // Check for regional indicator pairs (country flags) FIRST
+        if is_regional_indicator(c) {
+            // Remove preceding space if any
+            if result.ends_with(' ') {
+                result.pop();
+            }
+            
+            if let Some(&next) = chars.peek() {
+                if is_regional_indicator(next) {
+                    chars.next();
+                    // Replace flag pair with marker
+                    result.push_str("§EMOJI§");
+                } else {
+                    // Single regional indicator
+                    result.push_str("§EMOJI§");
+                }
+            } else {
+                result.push_str("§EMOJI§");
+            }
+            
+            // Skip following space if any
+            if let Some(&next) = chars.peek() {
+                if next == ' ' {
+                    chars.next();
+                }
+            }
+        }
+        // Check for keycap sequences - these should be PRESERVED
+        else if is_keycap_base(c) {
+            let mut keycap_seq = String::new();
+            keycap_seq.push(c);
+            
+            // Check for variation selector and/or combining keycap
+            let mut has_keycap = false;
+            while let Some(&next) = chars.peek() {
+                if next as u32 == 0xFE0F || next as u32 == 0x20E3 {
+                    keycap_seq.push(next);
+                    chars.next();
+                    if next as u32 == 0x20E3 {
+                        has_keycap = true;
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            
+            if has_keycap {
+                // Preserve the entire keycap sequence
+                result.push_str(&keycap_seq);
+            } else {
+                // Not a keycap, just push the original character
+                result.push(c);
+                // Push back any variation selectors we consumed
+                for ch in keycap_seq.chars().skip(1) {
+                    result.push(ch);
+                }
+            }
+        }
+        // Check for emoji sequences with ZWJ
+        else if is_emoji_or_symbol(c) {
+            // Remove preceding space if any
+            if result.ends_with(' ') {
+                result.pop();
+            }
+            
+            // Collect the entire emoji sequence including ZWJs
+            let mut emoji_seq = String::new();
+            emoji_seq.push(c);
+            
+            // Keep consuming ZWJ sequences and following emojis
+            while let Some(&next) = chars.peek() {
+                if next as u32 == 0x200D {  // ZWJ
+                    emoji_seq.push(next);
+                    chars.next();
+                    // After ZWJ, expect another emoji component
+                    if let Some(&emoji) = chars.peek() {
+                        if is_emoji_or_symbol(emoji) || is_regional_indicator(emoji) {
+                            emoji_seq.push(emoji);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                } else if next as u32 == 0xFE0F {  // Variation selector
+                    emoji_seq.push(next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            
+            // Replace entire emoji sequence with marker
+            result.push_str("§EMOJI§");
+            
+            // Skip following space if any
+            if let Some(&next) = chars.peek() {
+                if next == ' ' {
+                    chars.next();
+                }
+            }
+        }
+        else {
+            result.push(c);
+        }
+    }
+    
     result
 }
 
@@ -258,134 +394,26 @@ fn is_safe_unicode_letter(c: char) -> bool {
     (0x4E00..=0x9FFF).contains(&code) ||       // CJK Unified Ideographs
     (0xAC00..=0xD7AF).contains(&code) ||       // Hangul Syllables (Korean)
     (0xA000..=0xA48F).contains(&code) ||       // Yi Syllables
-    (0xA490..=0xA4CF).contains(&code)          // Yi Radicals
+    (0xA490..=0xA4CF).contains(&code) // Yi Radicals
 }
 
-/// Replace emojis with double hyphens and handle surrounding spaces
-fn replace_emojis_with_double_hyphen(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    let mut prev_was_emoji = false;
-
-    while let Some(c) = chars.next() {
-        // Check if current char is emoji or part of emoji sequence
-        if is_emoji_or_symbol(c) {
-            // Remove preceding space if any
-            if result.ends_with(' ') {
-                result.pop();
-            }
-            
-            // Don't add any space - emoji with surrounding spaces becomes just --
-            result.push_str("--");
-            
-            // Skip following space if any
-            if let Some(&next) = chars.peek() {
-                if next == ' ' {
-                    chars.next();
-                }
-            }
-            prev_was_emoji = true;
-            continue;
-        } else if is_regional_indicator(c) {
-            // Handle country flag sequences
-            if let Some(&next_c) = chars.peek() {
-                if is_regional_indicator(next_c) {
-                    chars.next(); // Skip second regional indicator
-                    // Remove preceding space if any
-                    if result.ends_with(' ') {
-                        result.pop();
-                    }
-                    // Don't add any space - emoji with surrounding spaces becomes just --
-                    result.push_str("--");
-                    // Skip following space if any
-                    if let Some(&next) = chars.peek() {
-                        if next == ' ' {
-                            chars.next();
-                        }
-                    }
-                    prev_was_emoji = true;
-                    continue;
-                }
-            }
-            // Single regional indicator
-            // Remove preceding space if any
-            if result.ends_with(' ') {
-                result.pop();
-            }
-            // Don't add any space - emoji with surrounding spaces becomes just --
-            result.push_str("--");
-            // Skip following space if any
-            if let Some(&next) = chars.peek() {
-                if next == ' ' {
-                    chars.next();
-                }
-            }
-            prev_was_emoji = true;
-            continue;
-        } else if is_keycap_base(c) {
-            // Check if it's a keycap sequence
-            let mut is_keycap = false;
-            let mut skip_count = 0;
-            if let Some(&next) = chars.peek() {
-                if next as u32 == 0xFE0F || next as u32 == 0x20E3 {
-                    is_keycap = true;
-                    if next as u32 == 0xFE0F {
-                        // Check for combining keycap after variation selector
-                        let mut temp_chars = chars.clone();
-                        temp_chars.next();
-                        if let Some(&next2) = temp_chars.peek() {
-                            if next2 as u32 == 0x20E3 {
-                                skip_count = 2;
-                            } else {
-                                skip_count = 1;
-                            }
-                        } else {
-                            skip_count = 1;
-                        }
-                    } else {
-                        skip_count = 1;
-                    }
-                }
-            }
-            
-            if is_keycap {
-                for _ in 0..skip_count {
-                    chars.next();
-                }
-                // Remove preceding space if any
-                if result.ends_with(' ') {
-                    result.pop();
-                }
-                // Don't add any space - emoji with surrounding spaces becomes just --
-                result.push_str("--");
-                // Skip following space if any
-                if let Some(&next) = chars.peek() {
-                    if next == ' ' {
-                        chars.next();
-                    }
-                }
-                prev_was_emoji = true;
-                continue;
-            }
-        }
-        
-        // Skip space before non-emoji if previous was emoji
-        if prev_was_emoji && c == ' ' {
-            prev_was_emoji = false;
-            continue;
-        }
-        
-        prev_was_emoji = false;
-        result.push(c);
-    }
-
-    result
-}
 
 /// Comprehensive emoji and symbol detection
 /// Covers all major emoji ranges including newer additions and symbols
 fn is_emoji_or_symbol(c: char) -> bool {
     let code = c as u32;
+    
+    // Exclude dangerous unicode characters that should be filtered, not replaced
+    // These include bidirectional overrides, zero-width chars, etc.
+    if (0x202A..=0x202E).contains(&code) ||  // Bidirectional formatting
+       (0x2066..=0x2069).contains(&code) ||  // Isolate formatting
+       (0x200B..=0x200D).contains(&code) ||  // Zero-width chars
+       (0x200E..=0x200F).contains(&code) ||  // LTR/RTL marks
+       code == 0x061C ||                     // Arabic Letter Mark
+       code == 0x2060 ||                     // Word Joiner
+       code == 0xFEFF {                      // Zero Width No-Break Space
+        return false;
+    }
 
     // Core emoji ranges
     (0x1F600..=0x1F64F).contains(&code) ||  // Emoticons
@@ -416,8 +444,7 @@ fn is_emoji_or_symbol(c: char) -> bool {
     (0x25A0..=0x25FF).contains(&code) ||    // Geometric Shapes
     (0x2000..=0x206F).contains(&code) ||    // General Punctuation (includes dangerous chars)
 
-    // Variation selectors and combining marks used in emoji
-    (0xFE00..=0xFE0F).contains(&code) ||    // Variation Selectors
+    // Combining marks used in emoji (but not variation selectors - those are handled separately)
     (0x20D0..=0x20FF).contains(&code) // Combining Diacritical Marks for Symbols
 }
 
@@ -449,10 +476,12 @@ mod tests {
 
     #[test]
     fn test_github_underscores() {
-        // GitHub preserves underscores (critical difference from kramdown)
+        // GitHub preserves underscores in snake_case but removes emphasis markdown
         assert_eq!(heading_to_fragment("test_with_underscores"), "test_with_underscores");
         assert_eq!(heading_to_fragment("Update login_type"), "update-login_type");
-        assert_eq!(heading_to_fragment("__dunder__"), "__dunder__");
+        assert_eq!(heading_to_fragment("__dunder__"), "dunder"); // Emphasis removed
+        assert_eq!(heading_to_fragment("_emphasized_"), "emphasized"); // Single underscore emphasis
+        assert_eq!(heading_to_fragment("__double__ underscore"), "double-underscore");
     }
 
     #[test]
@@ -650,21 +679,22 @@ mod tests {
     #[test]
     fn test_security_comprehensive_emoji_detection() {
         // Test comprehensive emoji detection including country flags and keycaps
+        // Note: GitHub preserves keycap emojis but removes other emojis
 
         // Country flags (regional indicators)
         let flag_test = "Hello 🇺🇸 World 🇬🇧 Test";
         let result = heading_to_fragment(flag_test);
         assert_eq!(result, "hello--world--test"); // Flags should be removed
 
-        // Keycap sequences
+        // Keycap sequences - GitHub PRESERVES these
         let keycap_test = "Step 1️⃣ and 2️⃣ complete";
         let result = heading_to_fragment(keycap_test);
-        assert_eq!(result, "step--and--complete"); // Keycaps should be removed
+        assert_eq!(result, "step-1️⃣-and-2️⃣-complete"); // Keycaps are PRESERVED by GitHub
 
         // Complex emoji sequences
         let complex_emoji = "Test 👨‍👩‍👧‍👦 family";
         let result = heading_to_fragment(complex_emoji);
-        assert_eq!(result, "test--family"); // Complex emoji should be removed
+        assert_eq!(result, "test--family"); // Complex emoji should be single --
 
         // Mixed emoji and symbols
         let mixed_symbols = "Math ∑ ∆ 🧮 symbols";

@@ -25,7 +25,8 @@ lazy_static! {
     // Match emphasis patterns - asterisks and underscores
     // Process multiple times to handle nested patterns
     static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*+([^*]*?)\*+").unwrap();
-    static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"_+([^_]*?)_+").unwrap();
+    // Match emphasis underscores only at word boundaries, not in snake_case
+    static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"\b_+([^_\s][^_]*?)_+\b").unwrap();
     static ref CODE_PATTERN: Regex = Regex::new(r"`+([^`]*?)`+").unwrap();
     // Match images and links separately to handle nested brackets properly
     static ref IMAGE_PATTERN: Regex = Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap();
@@ -53,13 +54,14 @@ fn is_safe_unicode_letter(c: char) -> bool {
         if (0xE000..=0xF8FF).contains(&code) ||    // Private Use Area
            (0xFE00..=0xFE0F).contains(&code) ||    // Variation Selectors
            (0x200B..=0x200D).contains(&code) ||    // Zero-width characters
-           (0x202A..=0x202E).contains(&code)       // Bidirectional overrides
+           (0x202A..=0x202E).contains(&code)
+        // Bidirectional overrides
         {
             return false;
         }
         return true;
     }
-    
+
     false
 }
 
@@ -124,11 +126,14 @@ pub fn heading_to_fragment(heading: &str) -> String {
 
     // Step 4: Remove markdown formatting while preserving inner text
     // Process multiple times to handle nested patterns like **_text_**
-    for _ in 0..3 {  // Max 3 levels of nesting
+    for _ in 0..3 {
+        // Max 3 levels of nesting
         let prev = text.clone();
         text = ASTERISK_PATTERN.replace_all(&text, "$1").to_string();
         text = UNDERSCORE_PATTERN.replace_all(&text, "$1").to_string();
-        if text == prev { break; }  // No more changes
+        if text == prev {
+            break;
+        } // No more changes
     }
 
     // Process code spans
