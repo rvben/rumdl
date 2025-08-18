@@ -257,14 +257,13 @@ impl MD051LinkFragments {
         // 3. Replace spaces with hyphens (/ /g, '-')
         let with_hyphens = result.replace(' ', "-");
 
-        // 4. Apply kramdown-style hyphen consolidation for Jekyll compatibility
+        // 4. Apply kramdown-style hyphen consolidation for kramdown-gfm compatibility
         Self::consolidate_hyphens_kramdown_style(&with_hyphens)
     }
 
-
-    /// Fragment generation following Jekyll/kramdown's EXACT algorithm
+    /// Fragment generation following kramdown GFM's EXACT algorithm
     /// Based on comprehensive testing with kramdown 2.5.1 using official Ruby gems
-    /// This implementation matches the exact behavior verified through Jekyll processing
+    /// This implementation matches the exact behavior verified through kramdown GFM processing
     #[inline]
     pub fn heading_to_fragment_jekyll_official(&self, heading: &str) -> String {
         if heading.is_empty() {
@@ -278,7 +277,7 @@ impl MD051LinkFragments {
             heading.to_string()
         };
 
-        // Jekyll/kramdown's EXACT algorithm verified through official gem testing:
+        // Kramdown GFM's EXACT algorithm verified through official gem testing:
 
         // 1. Convert to lowercase
         let text = text.to_lowercase();
@@ -511,10 +510,10 @@ impl MD051LinkFragments {
     }
 
     /// Apply kramdown-style hyphen consolidation based on observed patterns
-    /// This is a pragmatic implementation to match the most common Jekyll/kramdown cases
+    /// This is a pragmatic implementation to match the most common kramdown GFM cases
     fn consolidate_hyphens_kramdown_style(text: &str) -> String {
         // For the specific problematic cases, apply targeted fixes
-        // This handles the major Jekyll compatibility issues
+        // This handles the major kramdown GFM compatibility issues
 
         // Pattern: ---- (4 hyphens) becomes -- (2 hyphens)
         // Pattern: --- (3 hyphens) becomes - (1 hyphen)
@@ -650,7 +649,8 @@ impl Rule for MD051LinkFragments {
             if let Some(style_str) = rule_config.values.get("anchor-style").and_then(|v| v.as_str()) {
                 match style_str.to_lowercase().as_str() {
                     "kramdown" => AnchorStyle::Kramdown,
-                    "jekyll" => AnchorStyle::Jekyll,
+                    "kramdown-gfm" => AnchorStyle::KramdownGfm,
+                    "jekyll" => AnchorStyle::KramdownGfm,  // Backward compatibility alias
                     _ => AnchorStyle::GitHub,
                 }
             } else {
@@ -667,7 +667,8 @@ impl Rule for MD051LinkFragments {
         let value: toml::Value = toml::from_str(
             r#"
 # Anchor generation style to match your target platform
-# Options: "github" (default), "jekyll", "kramdown"
+# Options: "github" (default), "kramdown-gfm", "kramdown"
+# Note: "jekyll" is accepted as an alias for "kramdown-gfm" (backward compatibility)
 anchor-style = "github"
 "#,
         )

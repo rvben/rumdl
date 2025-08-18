@@ -81,15 +81,23 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // Security: Limit input size to prevent DoS attacks
     const MAX_INPUT_SIZE: usize = 10 * 1024; // 10KB
     if heading.len() > MAX_INPUT_SIZE {
-        // Truncate excessive input
-        let truncated = &heading[..MAX_INPUT_SIZE];
-        // Find last char boundary to avoid splitting UTF-8
-        let safe_truncate = truncated
-            .char_indices()
-            .last()
-            .map(|(i, _)| i + truncated.chars().last().unwrap().len_utf8())
-            .unwrap_or(0);
-        return heading_to_fragment(&heading[..safe_truncate]);
+        // Find a safe truncation point that doesn't split UTF-8 characters
+        let mut truncate_pos = MAX_INPUT_SIZE;
+        while truncate_pos > 0 && !heading.is_char_boundary(truncate_pos) {
+            truncate_pos -= 1;
+        }
+        
+        if truncate_pos == 0 {
+            // Fallback: use char_indices to find a valid boundary
+            truncate_pos = heading
+                .char_indices()
+                .take_while(|(i, _)| *i < MAX_INPUT_SIZE)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
+        }
+        
+        return heading_to_fragment(&heading[..truncate_pos]);
     }
 
     let text = heading.trim();

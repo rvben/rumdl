@@ -170,7 +170,7 @@ Links to test:
 - [Complex path](#cbrown--sbrown-unsafe-paths)
 "#;
 
-    let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Jekyll);
+    let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::KramdownGfm);
     let ctx = LintContext::new(content);
     let result = rule.check(&ctx).unwrap();
 

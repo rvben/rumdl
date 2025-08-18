@@ -35,15 +35,24 @@ const MAX_INPUT_LENGTH: usize = 10240; // 10KB maximum input
 lazy_static! {
     // ReDoS-resistant patterns with atomic grouping and possessive quantifiers where possible
     // Limited repetition depth to prevent catastrophic backtracking
-    static ref EMPHASIS_PATTERN: Regex = Regex::new(r"\*{1,10}([^*]{0,100})\*{1,10}").unwrap();
+    // Match both asterisk and underscore emphasis (with proper nesting handling)
+    static ref EMPHASIS_ASTERISK: Regex = Regex::new(r"\*{1,3}([^*]+?)\*{1,3}").unwrap();
+    static ref EMPHASIS_UNDERSCORE: Regex = Regex::new(r"_{1,2}([^_]+?)_{1,2}").unwrap();
     static ref CODE_PATTERN: Regex = Regex::new(r"`([^`]{0,500})`").unwrap();
-    static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\]]{0,200})\]\(([^)]{0,500})\)|\[([^\]]{0,200})\]\[[^\]]{0,50}\]").unwrap();
+    // Match image and link patterns
+    // Using simple approach: match the brackets and parentheses, extract only the bracket content
+    static ref IMAGE_PATTERN: Regex = Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap();
+    static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap();
 
     // Zero-width character patterns - remove these entirely for security
     static ref ZERO_WIDTH_PATTERN: Regex = Regex::new(r"[\u200B-\u200D\u2060\uFEFF]").unwrap();
 
     // RTL override and dangerous Unicode control patterns
     static ref DANGEROUS_UNICODE_PATTERN: Regex = Regex::new(r"[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]").unwrap();
+    
+    // Ampersand and copyright with whitespace patterns
+    static ref AMPERSAND_WITH_SPACES: Regex = Regex::new(r"\s+&\s+").unwrap();
+    static ref COPYRIGHT_WITH_SPACES: Regex = Regex::new(r"\s+©\s+").unwrap();
 }
 
 /// Generate GitHub.com style anchor fragment from heading text with security hardening
@@ -98,6 +107,9 @@ pub fn heading_to_fragment(heading: &str) -> String {
 
 /// Internal implementation with security hardening
 fn heading_to_fragment_internal(heading: &str) -> String {
+    // Save original heading state for edge detection
+    let _original_heading_lower = heading.to_lowercase();
+    
     // Security Step 2: Unicode normalization to prevent homograph attacks
     // NFC normalization ensures canonical representation
     let normalized: String = heading.nfc().collect();
@@ -109,23 +121,25 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     let mut text = sanitized.to_lowercase();
 
     // Step 5: Remove markdown formatting while preserving inner text
+    // Process multiple times to handle nested emphasis (e.g., **_text_**)
     // Using ReDoS-resistant patterns with bounded repetition
-    text = EMPHASIS_PATTERN.replace_all(&text, "$1").to_string();
+    for _ in 0..3 {  // Max 3 levels of nesting to prevent infinite loops
+        let prev = text.clone();
+        text = EMPHASIS_ASTERISK.replace_all(&text, "$1").to_string();
+        text = EMPHASIS_UNDERSCORE.replace_all(&text, "$1").to_string();
+        if text == prev { break; }  // No more changes
+    }
     text = CODE_PATTERN.replace_all(&text, "$1").to_string();
-    text = LINK_PATTERN
-        .replace_all(&text, |caps: &regex::Captures| {
-            caps.get(1)
-                .or_else(|| caps.get(3))
-                .map_or(String::new(), |m| m.as_str().to_string())
-        })
-        .to_string();
+    // Handle images first, then links
+    text = IMAGE_PATTERN.replace_all(&text, "$1").to_string();
+    text = LINK_PATTERN.replace_all(&text, "$1").to_string();
 
     // Step 6: Multi-character arrow patterns (order matters!)
     // GitHub.com converts these patterns to specific hyphen sequences
     // Handle patterns with spaces to avoid double-processing spaces
     text = text.replace(" --> ", "----"); // space + arrow + space = 4 hyphens total
     text = text.replace("-->", "----"); // 4 hyphens when no surrounding spaces
-    text = text.replace(" <-> ", "---"); // space + arrow + space = 3 hyphens total  
+    text = text.replace(" <-> ", "---"); // space + arrow + space = 3 hyphens total
     text = text.replace("<->", "---"); // 3 hyphens when no surrounding spaces
     text = text.replace(" ==> ", "--"); // space + arrow + space = 2 hyphens total
     text = text.replace("==>", "--"); // 2 hyphens when no surrounding spaces
@@ -136,38 +150,51 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     // First remove em-dashes and en-dashes entirely
     text = text.replace(['–', '—'], "");
 
-    // Step 8: Handle emojis - REMOVE them entirely, don't replace with hyphens
-    // Using comprehensive emoji detection including country flags and keycaps
-    text = remove_emojis_and_symbols(&text);
+    // Step 8: Handle emojis - Replace with double hyphens and remove adjacent spaces
+    // Note: GitHub replaces emoji + surrounding spaces with just --
+    text = replace_emojis_with_double_hyphen(&text);
 
     // Step 9: Special symbol replacements
-    text = text.replace(" & ", "--"); // Ampersand surrounded by spaces
-    text = text.replace(" © ", "--"); // Copyright surrounded by spaces
-    text = text.replace("&", "--"); // Ampersand without spaces  
-    text = text.replace("©", "--"); // Copyright without spaces
+    // Use regex to handle multiple spaces/tabs around ampersand
+    text = AMPERSAND_WITH_SPACES.replace_all(&text, "--").to_string(); // Ampersand with whitespace becomes --
+    text = COPYRIGHT_WITH_SPACES.replace_all(&text, "--").to_string(); // Copyright with whitespace becomes --
+    text = text.replace("&", ""); // Ampersand without spaces - just remove it
+    text = text.replace("©", ""); // Copyright without spaces - just remove it
 
     // Step 10: Character-by-character processing
     let mut result = String::with_capacity(text.len()); // Pre-allocate for efficiency
+    let mut last_was_space = false;
 
     for c in text.chars() {
         if c.is_ascii_alphabetic() || c.is_ascii_digit() || c == '_' || c == '-' {
             // Preserve letters, numbers, underscores, and hyphens
             result.push(c);
+            last_was_space = false;
         } else if c.is_alphabetic() && is_safe_unicode_letter(c) {
             // Preserve Unicode letters (like é, ñ, etc.) but only safe ones
             result.push(c);
+            last_was_space = false;
         } else if c.is_numeric() {
             // Preserve all numeric characters (digits from any script)
             result.push(c);
+            last_was_space = false;
         } else if c.is_whitespace() {
-            // Convert any whitespace to single hyphen
-            result.push('-');
+            // Convert any whitespace to single hyphen (collapse consecutive spaces)
+            if !last_was_space {
+                result.push('-');
+                last_was_space = true;
+            }
         } else {
             // ASCII punctuation is removed (no replacement)
             // Unicode symbols have already been handled above
+            last_was_space = false;
         }
     }
 
+    // GitHub does NOT trim leading/trailing hyphens, even those from symbol removal
+    // "---leading" → "---leading"
+    // "© 2024" → "-2024" 
+    // "trailing---" → "trailing---"
     result
 }
 
@@ -222,69 +249,134 @@ fn is_safe_unicode_letter(c: char) -> bool {
     (0x0500..=0x052F).contains(&code) ||       // Cyrillic Supplement
     (0x0590..=0x05FF).contains(&code) ||       // Hebrew
     (0x0600..=0x06FF).contains(&code) ||       // Arabic
+    (0x0700..=0x074F).contains(&code) ||       // Syriac
+    (0x0750..=0x077F).contains(&code) ||       // Arabic Supplement
+    (0x1100..=0x11FF).contains(&code) ||       // Hangul Jamo
     (0x3040..=0x309F).contains(&code) ||       // Hiragana
     (0x30A0..=0x30FF).contains(&code) ||       // Katakana
-    (0x4E00..=0x9FFF).contains(&code) // CJK Unified Ideographs
+    (0x3130..=0x318F).contains(&code) ||       // Hangul Compatibility Jamo
+    (0x4E00..=0x9FFF).contains(&code) ||       // CJK Unified Ideographs
+    (0xAC00..=0xD7AF).contains(&code) ||       // Hangul Syllables (Korean)
+    (0xA000..=0xA48F).contains(&code) ||       // Yi Syllables
+    (0xA490..=0xA4CF).contains(&code)          // Yi Radicals
 }
 
-/// Remove emojis and symbols from text for security and GitHub compliance
-/// This function comprehensively detects and removes various emoji types including
-/// country flags, keycap sequences, and multi-codepoint emoji
-fn remove_emojis_and_symbols(text: &str) -> String {
+/// Replace emojis with double hyphens and handle surrounding spaces
+fn replace_emojis_with_double_hyphen(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
+    let mut prev_was_emoji = false;
 
     while let Some(c) = chars.next() {
+        // Check if current char is emoji or part of emoji sequence
         if is_emoji_or_symbol(c) {
-            // Skip emoji entirely - they get removed, not replaced
-            continue;
-        } else if is_regional_indicator(c) {
-            // Handle country flag sequences (two regional indicators)
-            if let Some(&next_c) = chars.peek()
-                && is_regional_indicator(next_c) {
-                    chars.next(); // Skip the second regional indicator
-                    continue; // Skip both characters of the flag
-                }
-            // Single regional indicator without pair - remove it
-            continue;
-        } else if is_keycap_base(c) {
-            // Handle keycap sequences (digit + variation selector + combining keycap)
-            let mut skip_count = 0;
-            let mut temp_chars = chars.clone();
-            let mut is_keycap_sequence = false;
-
-            // Look ahead for variation selector and combining keycap
-            if let Some(&next1) = temp_chars.peek() {
-                if next1 as u32 == 0xFE0F {
-                    // Variation Selector-16
-                    temp_chars.next();
-
-                    if let Some(&next2) = temp_chars.peek()
-                        && next2 as u32 == 0x20E3 {
-                            // Combining Enclosing Keycap
-                            is_keycap_sequence = true;
-                            skip_count = 2; // Skip variation selector + keycap
-                        }
-                } else if next1 as u32 == 0x20E3 {
-                    // Direct combining keycap
-                    is_keycap_sequence = true;
-                    skip_count = 1; // Skip just the keycap
+            // Remove preceding space if any
+            if result.ends_with(' ') {
+                result.pop();
+            }
+            
+            // Don't add any space - emoji with surrounding spaces becomes just --
+            result.push_str("--");
+            
+            // Skip following space if any
+            if let Some(&next) = chars.peek() {
+                if next == ' ' {
+                    chars.next();
                 }
             }
-
-            if is_keycap_sequence {
-                // Skip the keycap sequence entirely
+            prev_was_emoji = true;
+            continue;
+        } else if is_regional_indicator(c) {
+            // Handle country flag sequences
+            if let Some(&next_c) = chars.peek() {
+                if is_regional_indicator(next_c) {
+                    chars.next(); // Skip second regional indicator
+                    // Remove preceding space if any
+                    if result.ends_with(' ') {
+                        result.pop();
+                    }
+                    // Don't add any space - emoji with surrounding spaces becomes just --
+                    result.push_str("--");
+                    // Skip following space if any
+                    if let Some(&next) = chars.peek() {
+                        if next == ' ' {
+                            chars.next();
+                        }
+                    }
+                    prev_was_emoji = true;
+                    continue;
+                }
+            }
+            // Single regional indicator
+            // Remove preceding space if any
+            if result.ends_with(' ') {
+                result.pop();
+            }
+            // Don't add any space - emoji with surrounding spaces becomes just --
+            result.push_str("--");
+            // Skip following space if any
+            if let Some(&next) = chars.peek() {
+                if next == ' ' {
+                    chars.next();
+                }
+            }
+            prev_was_emoji = true;
+            continue;
+        } else if is_keycap_base(c) {
+            // Check if it's a keycap sequence
+            let mut is_keycap = false;
+            let mut skip_count = 0;
+            if let Some(&next) = chars.peek() {
+                if next as u32 == 0xFE0F || next as u32 == 0x20E3 {
+                    is_keycap = true;
+                    if next as u32 == 0xFE0F {
+                        // Check for combining keycap after variation selector
+                        let mut temp_chars = chars.clone();
+                        temp_chars.next();
+                        if let Some(&next2) = temp_chars.peek() {
+                            if next2 as u32 == 0x20E3 {
+                                skip_count = 2;
+                            } else {
+                                skip_count = 1;
+                            }
+                        } else {
+                            skip_count = 1;
+                        }
+                    } else {
+                        skip_count = 1;
+                    }
+                }
+            }
+            
+            if is_keycap {
                 for _ in 0..skip_count {
                     chars.next();
                 }
-                continue; // Skip the entire keycap sequence
-            } else {
-                // Not a keycap sequence, preserve the character
-                result.push(c);
+                // Remove preceding space if any
+                if result.ends_with(' ') {
+                    result.pop();
+                }
+                // Don't add any space - emoji with surrounding spaces becomes just --
+                result.push_str("--");
+                // Skip following space if any
+                if let Some(&next) = chars.peek() {
+                    if next == ' ' {
+                        chars.next();
+                    }
+                }
+                prev_was_emoji = true;
+                continue;
             }
-        } else {
-            result.push(c);
         }
+        
+        // Skip space before non-emoji if previous was emoji
+        if prev_was_emoji && c == ' ' {
+            prev_was_emoji = false;
+            continue;
+        }
+        
+        prev_was_emoji = false;
+        result.push(c);
     }
 
     result
