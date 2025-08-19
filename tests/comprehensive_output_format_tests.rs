@@ -126,8 +126,13 @@ fn test_github_output_format() {
     cmd.assert()
         .failure()
         .stdout(predicate::str::contains("::warning file="))
-        .stdout(predicate::str::contains("line=1,col=1,title=MD022::"))
-        .stdout(predicate::str::contains("line=2,col=28,title=MD009::"));
+        .stdout(predicate::str::contains("line=1,col=1,"))
+        .stdout(predicate::str::contains("title=MD022::"))
+        .stdout(predicate::str::contains("line=2,col=28,"))
+        .stdout(predicate::str::contains("title=MD009::"))
+        // Also check for new endLine/endColumn parameters
+        .stdout(predicate::str::contains("endLine="))
+        .stdout(predicate::str::contains("endColumn="));
 }
 
 #[test]

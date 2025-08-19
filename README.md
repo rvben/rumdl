@@ -67,6 +67,8 @@ It offers:
     - [VS Code Extension](#vs-code-extension)
   - [Usage](#usage)
   - [Pre-commit Integration](#pre-commit-integration)
+  - [CI/CD Integration](#cicd-integration)
+    - [GitHub Actions](#github-actions)
   - [Rules](#rules)
   - [Command-line Interface](#command-line-interface)
     - [Commands](#commands)
@@ -240,6 +242,19 @@ repos:
 - To automatically fix issues, add `args: [--fix]` to the hook configuration.
 
 When you run `pre-commit install` or `pre-commit run`, pre-commit will automatically install `rumdl` in an isolated Python environment using pip. You do **not** need to install rumdl manually.
+
+## CI/CD Integration
+
+### GitHub Actions
+
+rumdl can output annotations directly in GitHub Actions format, making issues appear inline in pull requests:
+
+```yaml
+- name: Lint Markdown
+  run: rumdl check --output-format github .
+```
+
+This produces annotations that GitHub automatically displays in the PR's "Files changed" tab. Supports error/warning severity levels and precise issue locations.
 
 ## Rules
 
