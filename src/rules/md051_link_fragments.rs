@@ -467,6 +467,12 @@ impl MD051LinkFragments {
                 return true;
             }
 
+            // Check if it's an absolute path (starts with /)
+            // These are links to other pages on the same site
+            if path_part.starts_with('/') {
+                return true;
+            }
+
             // Check if it looks like a file path:
             // - Contains a file extension (dot followed by letters)
             // - Contains path separators
@@ -598,6 +604,21 @@ impl Rule for MD051LinkFragments {
                         // Extract fragment (everything after #)
                         if let Some(fragment_pos) = url.find('#') {
                             let fragment = &url[fragment_pos + 1..];
+
+                            // Handle Liquid template syntax with filters
+                            // If we're inside a Liquid variable ({{ ... }}), extract just the fragment part
+                            // before any filters (marked by |)
+                            if url.contains("{{") && fragment.contains('|') {
+                                // For patterns like {{ "/tags#alternative-data-streams" | relative_url }}
+                                // We want to skip this entirely as it's a Liquid template
+                                continue;
+                            }
+
+                            // Also check if the fragment ends with template syntax that wasn't caught
+                            if fragment.ends_with("}}") || fragment.ends_with("%}") {
+                                // This is likely part of a Liquid template, skip it
+                                continue;
+                            }
 
                             // Skip empty fragments
                             if fragment.is_empty() {
