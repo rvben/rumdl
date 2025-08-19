@@ -160,9 +160,8 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     // First remove em-dashes and en-dashes entirely
     text = text.replace(['–', '—'], "");
 
-    // Step 8: Replace emoji markers with double hyphens
-    // The emoji sequences were already marked as §EMOJI§ during pre-processing
-    text = text.replace("§emoji§", "--");  // After lowercasing, the marker is lowercase
+    // Step 8: Emojis were already replaced with hyphens in process_emoji_sequences
+    // No further processing needed for emoji markers
 
     // Step 9: Special symbol replacements
     // Use regex to handle multiple spaces/tabs around ampersand
@@ -189,12 +188,12 @@ fn heading_to_fragment_internal(heading: &str) -> String {
             result.push(c);
         } else if code == 0xFE0F {
             // Only preserve variation selector if it's preceded by a keycap base
-            if let Some(prev) = result.chars().last() {
-                if is_keycap_base(prev) {
-                    result.push(c);
-                }
-                // Otherwise filter it out
+            if let Some(prev) = result.chars().last()
+                && is_keycap_base(prev)
+            {
+                result.push(c);
             }
+            // Otherwise filter it out
         } else if c.is_alphabetic() && is_safe_unicode_letter(c) {
             // Preserve Unicode letters (like é, ñ, etc.) but only safe ones
             result.push(c);
@@ -214,48 +213,192 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     // "---leading" → "---leading"
     // "© 2024" → "-2024"
     // "trailing---" → "trailing---"
-    result
+
+    // Step 11: Replace emoji markers with the correct number of hyphens
+    // Note: markers are lowercase after the lowercasing step above
+    // GitHub's behavior:
+    // - Single emoji at start: "-"
+    // - Single emoji at end: "-"
+    // - Single emoji between words: "--"
+    // - Multiple emojis with spaces: n+1 hyphens
+
+    // First, handle sequences of multiple emojis (longest first)
+    let mut final_result = result.clone();
+    for count in (2..=10).rev() {
+        let marker_seq = "§emoji§".repeat(count);
+        let replacement = "-".repeat(count + 1);
+        final_result = final_result.replace(&marker_seq, &replacement);
+    }
+
+    // Now handle single emoji markers based on context
+    // We need to be careful about position
+    while final_result.contains("§emoji§") {
+        if let Some(pos) = final_result.find("§emoji§") {
+            let before = if pos > 0 {
+                final_result.chars().nth(pos - 1)
+            } else {
+                None
+            };
+
+            let after_pos = pos + "§emoji§".len();
+            let after = if after_pos < final_result.len() {
+                final_result.chars().nth(after_pos)
+            } else {
+                None
+            };
+
+            // Determine replacement based on context
+            let replacement = if before.is_none() || after.is_none() {
+                // At start or end of string
+                "-"
+            } else {
+                // In the middle
+                "--"
+            };
+
+            final_result.replace_range(pos..pos + "§emoji§".len(), replacement);
+        } else {
+            break;
+        }
+    }
+
+    final_result
 }
 
 /// Process emoji sequences before sanitization
 /// Handles multi-component emojis, keycaps, and flags as units
+/// GitHub's behavior: consecutive symbols with spaces between them become n+1 hyphens
 fn process_emoji_sequences(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
 
     while let Some(c) = chars.next() {
-        // Check for regional indicator pairs (country flags) FIRST
-        if is_regional_indicator(c) {
+        // Check if this starts a symbol/emoji sequence
+        if is_emoji_or_symbol(c) || is_regional_indicator(c) {
             // Remove preceding space if any
             if result.ends_with(' ') {
                 result.pop();
             }
-            
-            if let Some(&next) = chars.peek() {
-                if is_regional_indicator(next) {
-                    chars.next();
-                    // Replace flag pair with marker
-                    result.push_str("§EMOJI§");
-                } else {
-                    // Single regional indicator
-                    result.push_str("§EMOJI§");
+
+            // Count symbols in this sequence (separated by single spaces)
+            let mut symbol_count = 1;
+
+            // Handle the current symbol
+            // If it's a regional indicator pair (flag)
+            if is_regional_indicator(c) {
+                if let Some(&next) = chars.peek()
+                    && is_regional_indicator(next)
+                {
+                    chars.next(); // Consume second part of flag
                 }
-            } else {
-                result.push_str("§EMOJI§");
             }
-            
-            // Skip following space if any
-            if let Some(&next) = chars.peek() {
-                if next == ' ' {
-                    chars.next();
+            // If it's an emoji with ZWJ sequences
+            else if is_emoji_or_symbol(c) {
+                // Consume the entire emoji sequence including ZWJs
+                while let Some(&next) = chars.peek() {
+                    if next as u32 == 0x200D {
+                        // ZWJ
+                        chars.next();
+                        // After ZWJ, expect another emoji component
+                        if let Some(&emoji) = chars.peek() {
+                            if is_emoji_or_symbol(emoji) || is_regional_indicator(emoji) {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    } else if next as u32 == 0xFE0F {
+                        // Variation selector
+                        chars.next();
+                    } else if is_emoji_or_symbol(next) || is_regional_indicator(next) {
+                        // Adjacent symbols without spaces are treated as a single unit
+                        // Don't increment symbol_count, just consume them
+                        chars.next();
+                        // Handle multi-part adjacent symbols
+                        if is_regional_indicator(next)
+                            && let Some(&next2) = chars.peek()
+                            && is_regional_indicator(next2)
+                        {
+                            chars.next();
+                        }
+                    } else {
+                        break;
+                    }
                 }
+            }
+
+            // Look for more symbols separated by single spaces
+            while let Some(&next) = chars.peek() {
+                if next == ' ' {
+                    // Peek ahead to see if there's a symbol after the space
+                    let mut temp_chars = chars.clone();
+                    temp_chars.next(); // Skip the space
+                    if let Some(&after_space) = temp_chars.peek() {
+                        if is_emoji_or_symbol(after_space) || is_regional_indicator(after_space) {
+                            // Consume the space and the symbol
+                            chars.next(); // Space
+                            let symbol = chars.next().unwrap(); // Symbol
+                            symbol_count += 1;
+
+                            // Handle multi-part symbols
+                            if is_regional_indicator(symbol) {
+                                if let Some(&next) = chars.peek()
+                                    && is_regional_indicator(next)
+                                {
+                                    chars.next();
+                                }
+                            } else if is_emoji_or_symbol(symbol) {
+                                // Handle ZWJ sequences
+                                while let Some(&next) = chars.peek() {
+                                    if next as u32 == 0x200D {
+                                        // ZWJ
+                                        chars.next();
+                                        if let Some(&emoji) = chars.peek() {
+                                            if is_emoji_or_symbol(emoji) || is_regional_indicator(emoji) {
+                                                chars.next();
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                    } else if next as u32 == 0xFE0F {
+                                        chars.next();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            break; // Not a symbol after space
+                        }
+                    } else {
+                        break; // Nothing after space
+                    }
+                } else {
+                    break; // Not a space
+                }
+            }
+
+            // Skip trailing space if any
+            if let Some(&next) = chars.peek()
+                && next == ' '
+            {
+                chars.next();
+            }
+
+            // Generate markers based on symbol count
+            // GitHub's pattern: n symbols with spaces = n+1 hyphens
+            // We use markers that will be replaced with the correct number of hyphens
+            result.push_str("§EMOJI§");
+            // Add extra markers for each additional symbol that was separated by spaces
+            for _ in 1..symbol_count {
+                result.push_str("§EMOJI§");
             }
         }
         // Check for keycap sequences - these should be PRESERVED
         else if is_keycap_base(c) {
             let mut keycap_seq = String::new();
             keycap_seq.push(c);
-            
+
             // Check for variation selector and/or combining keycap
             let mut has_keycap = false;
             while let Some(&next) = chars.peek() {
@@ -270,7 +413,7 @@ fn process_emoji_sequences(input: &str) -> String {
                     break;
                 }
             }
-            
+
             if has_keycap {
                 // Preserve the entire keycap sequence
                 result.push_str(&keycap_seq);
@@ -282,55 +425,12 @@ fn process_emoji_sequences(input: &str) -> String {
                     result.push(ch);
                 }
             }
-        }
-        // Check for emoji sequences with ZWJ
-        else if is_emoji_or_symbol(c) {
-            // Remove preceding space if any
-            if result.ends_with(' ') {
-                result.pop();
-            }
-            
-            // Collect the entire emoji sequence including ZWJs
-            let mut emoji_seq = String::new();
-            emoji_seq.push(c);
-            
-            // Keep consuming ZWJ sequences and following emojis
-            while let Some(&next) = chars.peek() {
-                if next as u32 == 0x200D {  // ZWJ
-                    emoji_seq.push(next);
-                    chars.next();
-                    // After ZWJ, expect another emoji component
-                    if let Some(&emoji) = chars.peek() {
-                        if is_emoji_or_symbol(emoji) || is_regional_indicator(emoji) {
-                            emoji_seq.push(emoji);
-                            chars.next();
-                        } else {
-                            break;
-                        }
-                    }
-                } else if next as u32 == 0xFE0F {  // Variation selector
-                    emoji_seq.push(next);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            
-            // Replace entire emoji sequence with marker
-            result.push_str("§EMOJI§");
-            
-            // Skip following space if any
-            if let Some(&next) = chars.peek() {
-                if next == ' ' {
-                    chars.next();
-                }
-            }
-        }
-        else {
+        } else {
+            // Regular character
             result.push(c);
         }
     }
-    
+
     result
 }
 
@@ -397,12 +497,11 @@ fn is_safe_unicode_letter(c: char) -> bool {
     (0xA490..=0xA4CF).contains(&code) // Yi Radicals
 }
 
-
 /// Comprehensive emoji and symbol detection
 /// Covers all major emoji ranges including newer additions and symbols
 fn is_emoji_or_symbol(c: char) -> bool {
     let code = c as u32;
-    
+
     // Exclude dangerous unicode characters that should be filtered, not replaced
     // These include bidirectional overrides, zero-width chars, etc.
     if (0x202A..=0x202E).contains(&code) ||  // Bidirectional formatting
@@ -411,7 +510,9 @@ fn is_emoji_or_symbol(c: char) -> bool {
        (0x200E..=0x200F).contains(&code) ||  // LTR/RTL marks
        code == 0x061C ||                     // Arabic Letter Mark
        code == 0x2060 ||                     // Word Joiner
-       code == 0xFEFF {                      // Zero Width No-Break Space
+       code == 0xFEFF
+    {
+        // Zero Width No-Break Space
         return false;
     }
 

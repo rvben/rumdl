@@ -102,8 +102,8 @@ fn regression_test_historical_patterns() {
         // Colon issues
         ("Title:Subtitle", "titlesubtitle"),
         ("Title: Subtitle", "title-subtitle"),
-        // Space normalization issues - updated to match GitHub behavior
-        ("Multiple   Spaces", "multiple-spaces"),
+        // Space normalization issues - GitHub preserves each space as a hyphen
+        ("Multiple   Spaces", "multiple---spaces"),
         ("Tab\tChar", "tab-char"),
         // Case handling issues
         ("MixedCASE", "mixedcase"),
@@ -310,14 +310,14 @@ fn regression_test_emoji_handling() {
 #[test]
 fn regression_test_mode_switching() {
     use rumdl::utils::anchor_styles::AnchorStyle;
-    
+
     let github_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::GitHub);
     let kramdown_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
 
     // Test cases where modes should differ
     let mode_test_cases = vec![
         ("test_method", "test_method", "testmethod"), // Underscores
-        ("Café Menu", "café-menu", "caf-menu"),      // Accents - updated to match actual kramdown behavior
+        ("Café Menu", "café-menu", "caf-menu"),       // Accents - updated to match actual kramdown behavior
     ];
 
     for (heading, github_expected, kramdown_expected) in mode_test_cases {

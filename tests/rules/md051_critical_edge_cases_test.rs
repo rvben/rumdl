@@ -237,7 +237,10 @@ fn test_cross_platform_line_endings() {
     // So "# Windows\r\nHeading" creates a heading "Windows", not "Windows Heading"
     let line_ending_tests = vec![
         ("# Windows\r\nHeading\r\n\r\n[Link](#windows)", "Windows CRLF"),
-        ("# Mac Classic\r\nHeading\r\r[Link](#mac-classic)", "Mac Classic with proper CRLF"),
+        (
+            "# Mac Classic\r\nHeading\r\r[Link](#mac-classic)",
+            "Mac Classic with proper CRLF",
+        ),
         ("# Mixed\r\nEndings\nHere\r[Link](#mixed)", "Mixed endings"),
         ("# Unix\nStandard\n\n[Link](#unix)", "Unix LF"),
     ];
@@ -389,7 +392,7 @@ fn test_combined_edge_cases() {
 
 ## Section with Unicode: Café & 中文 {}
 
-### Punctuation Heavy: !@#$%^&*(){}[]
+### Punctuation Heavy: !@#$%^&*(){{}}[]
 
 #### Long Heading: {}
 
@@ -403,7 +406,6 @@ fn test_combined_edge_cases() {
 [Invalid Link](#nonexistent-section)
 "#,
         "Unicode".repeat(10),
-        "Symbol".repeat(20),
         "Word".repeat(100),
         "-".repeat(50)
     );
