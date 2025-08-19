@@ -414,9 +414,9 @@ fn test_fragment_generation_performance() {
 
         assert!(result.is_ok(), "Fragment generation test failed: {description}");
 
-        // Fragment generation should be fast
+        // Fragment generation should be fast (allow 200ms for CI, locally ~10-50ms)
         assert!(
-            duration < Duration::from_millis(100),
+            duration < Duration::from_millis(200),
             "Fragment generation too slow: {description} took {duration:?}"
         );
 

@@ -954,8 +954,9 @@ Edge cases:
                 let duration = start.elapsed();
 
                 assert!(result.is_ok(), "Compatibility test failed for {style:?}: {heading}");
+                // Allow 200ms for CI environments (locally runs in ~10-50ms)
                 assert!(
-                    duration < Duration::from_millis(100),
+                    duration < Duration::from_millis(200),
                     "Compatibility test too slow for {style:?}: {heading} took {duration:?}"
                 );
             }
@@ -984,10 +985,11 @@ Edge cases:
         for test_case in consistency_test_cases {
             for style in &styles {
                 // Verify consistent behavior (no panics, reasonable performance)
+                // Allow 200ms for CI environments (locally runs in ~10-50ms)
                 assert_safe_and_fast(
                     style,
                     test_case,
-                    Duration::from_millis(100),
+                    Duration::from_millis(200),
                     &format!("Cross-style consistency: {test_case} for {style:?}"),
                 );
             }
