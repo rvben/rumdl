@@ -11,22 +11,22 @@ use std::time::Instant;
 fn test_extreme_deep_nesting_15_levels() {
     // Test extremely deep nesting that could cause stack overflow or performance issues
     let rule = MD029OrderedListPrefix::default();
-    
+
     let mut content = String::new();
     for level in 0..15 {
         let indent = "  ".repeat(level); // 2 spaces per level
         content.push_str(&format!("{}1. Level {} item\n", indent, level + 1));
         content.push_str(&format!("{}2. Level {} item 2\n", indent, level + 1));
     }
-    
+
     let ctx = LintContext::new(&content);
     let start = Instant::now();
     let result = rule.check(&ctx);
     let duration = start.elapsed();
-    
+
     assert!(result.is_ok(), "Deep nesting should not crash");
     assert!(duration.as_millis() < 1000, "Should complete within 1 second for deep nesting");
-    
+
     // Should detect 1 error per level for the second "1." that should be "2."
     let warnings = result.unwrap();
     assert_eq!(warnings.len(), 15, "Should detect wrong numbering at each level");
@@ -36,21 +36,21 @@ fn test_extreme_deep_nesting_15_levels() {
 fn test_massive_numbers_overflow_conditions() {
     // Test very large numbers that could cause overflow
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = format!("\
 {}. First item with max usize
 {}. Second item - overflow risk
-{}. Third item", 
-        usize::MAX, 
+{}. Third item",
+        usize::MAX,
         usize::MAX.saturating_sub(1),
         usize::MAX.saturating_sub(2)
     );
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx);
-    
+
     assert!(result.is_ok(), "Large numbers should not crash");
-    
+
     // Should detect numbering issues with massive numbers
     let warnings = result.unwrap();
     assert!(!warnings.is_empty(), "Should detect numbering issues with massive numbers");
@@ -60,7 +60,7 @@ fn test_massive_numbers_overflow_conditions() {
 fn test_unicode_digit_markers_vulnerability() {
     // Test Unicode digits that look like ASCII digits but aren't matched by \d+
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 𝟭. Unicode fullwidth digit one
 𝟮. Unicode fullwidth digit two
@@ -68,10 +68,10 @@ fn test_unicode_digit_markers_vulnerability() {
 ३. Devanagari digit three
 1. Regular ASCII digit
 2. Regular ASCII digit two";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Unicode digits should not be recognized as list markers
     // Only the ASCII digits should be processed
     assert_eq!(result.len(), 0, "Only ASCII digits should be recognized as ordered list markers");
@@ -81,17 +81,17 @@ fn test_unicode_digit_markers_vulnerability() {
 fn test_zero_width_and_invisible_characters() {
     // Test zero-width spaces and other invisible Unicode characters
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1.\u{200B} Item with zero-width space after dot
 2.\u{FEFF} Item with BOM character
 3.\u{00A0} Item with non-breaking space
 4.\u{2060} Item with word joiner
 5. \u{200C}Item with zero-width non-joiner in text";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should handle invisible characters gracefully
     assert!(result.is_empty(), "Invisible characters should not break list detection");
 }
@@ -100,7 +100,7 @@ fn test_zero_width_and_invisible_characters() {
 fn test_malformed_mixed_tab_space_indentation() {
     // Test mixing tabs and spaces in pathological ways
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1. Root item
 \t1. Tab-indented level 2
@@ -109,10 +109,10 @@ fn test_malformed_mixed_tab_space_indentation() {
  \t 1. Spaces-tab-space level 3 - wrong parent?
 \t\t1. Double tab level 3
     1. Four spaces level 2 - different from tab";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should handle mixed indentation without crashing
     println!("Mixed tab/space warnings: {}", result.len());
     assert!(result.len() > 0, "Should detect some numbering issues with mixed indentation");
@@ -122,17 +122,17 @@ fn test_malformed_mixed_tab_space_indentation() {
 fn test_empty_and_whitespace_only_list_items() {
     // Test edge cases with empty content
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
-1. 
-2.   
-3.    \t   
+1.
+2.
+3.    \t
 4. Normal item
 5. ";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should handle empty list items gracefully
     assert!(result.is_empty(), "Empty list items should not cause numbering errors if sequence is correct");
 }
@@ -141,7 +141,7 @@ fn test_empty_and_whitespace_only_list_items() {
 fn test_lists_in_nested_blockquotes_and_tables() {
     // Test complex nesting within other Markdown constructs
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 > 1. List in blockquote
 > 2. Second item
@@ -157,10 +157,10 @@ fn test_lists_in_nested_blockquotes_and_tables() {
 
 1. List after table
 2. Should start fresh";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Complex nesting should not crash
     println!("Complex nesting warnings: {}", result.len());
 }
@@ -169,7 +169,7 @@ fn test_lists_in_nested_blockquotes_and_tables() {
 fn test_pathological_parenthesis_markers() {
     // Test parenthesis markers which are valid but less common
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1) Parenthesis marker
 2) Second item
@@ -177,10 +177,10 @@ fn test_pathological_parenthesis_markers() {
 3) Should this be 3 or 4?
 2. Mixing markers
 5) Back to parenthesis";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should handle mixed markers appropriately
     assert!(!result.is_empty(), "Mixed marker types should cause some numbering issues");
 }
@@ -189,17 +189,17 @@ fn test_pathological_parenthesis_markers() {
 fn test_performance_killer_massive_document() {
     // Generate a large document with many nested lists to test performance
     let rule = MD029OrderedListPrefix::default();
-    
+
     let mut content = String::new();
-    
+
     // Create 100 separate list blocks, each with 10 items, some with errors
     for block in 0..100 {
         content.push_str(&format!("# Section {}\n\n", block));
-        
+
         for item in 1..=10 {
             let wrong_num = if item == 5 { item + 10 } else { item }; // Inject error at item 5
             content.push_str(&format!("{}. Item {} in block {}\n", wrong_num, item, block));
-            
+
             // Add some nested items occasionally
             if item % 3 == 0 {
                 content.push_str(&format!("   1. Nested item\n"));
@@ -208,15 +208,15 @@ fn test_performance_killer_massive_document() {
         }
         content.push_str("\n");
     }
-    
+
     let ctx = LintContext::new(&content);
     let start = Instant::now();
     let result = rule.check(&ctx);
     let duration = start.elapsed();
-    
+
     assert!(result.is_ok(), "Large document should not crash");
     assert!(duration.as_millis() < 5000, "Should complete within 5 seconds for large document");
-    
+
     let warnings = result.unwrap();
     // Should detect errors in many blocks
     assert!(warnings.len() > 100, "Should detect many errors in large document");
@@ -227,7 +227,7 @@ fn test_performance_killer_massive_document() {
 fn test_parent_detection_confusion() {
     // Test scenarios that could confuse the parent detection algorithm
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1. Level 1 item
    1. Level 2 nested
@@ -237,10 +237,10 @@ fn test_parent_detection_confusion() {
 1. New level 1 - should be 2?
       3. Orphaned deep item
    3. Level 2 under wrong parent?";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should handle parent detection edge cases
     println!("Parent detection confusion: {} warnings", result.len());
     for warning in &result {
@@ -252,7 +252,7 @@ fn test_parent_detection_confusion() {
 fn test_indentation_boundary_edge_cases() {
     // Test precise indentation boundaries that could cause off-by-one errors
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1. Root (0 spaces)
  1. One space (insufficient?)
@@ -265,10 +265,10 @@ fn test_indentation_boundary_edge_cases() {
    2. Three space level 2
   2. Two space - breaks nesting?
  2. One space continuation";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     println!("Indentation boundary cases: {} warnings", result.len());
     for warning in &result {
         println!("  Line {}: {}", warning.line, warning.message);
@@ -279,7 +279,7 @@ fn test_indentation_boundary_edge_cases() {
 fn test_real_world_copy_paste_artifacts() {
     // Simulate real-world copy-paste scenarios that could break parsing
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1. Regular item
 2. Item with\u{00A0}non-breaking space
@@ -289,10 +289,10 @@ fn test_real_world_copy_paste_artifacts() {
 6. Item\u{2029}with paragraph separator
 7. Item with combining chars: café (café vs cafe\u{0301})
 8. Final item";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should handle various whitespace artifacts
     println!("Copy-paste artifacts: {} warnings", result.len());
 }
@@ -301,7 +301,7 @@ fn test_real_world_copy_paste_artifacts() {
 fn test_automated_tool_malformed_markdown() {
     // Test markdown that might be generated by automated tools
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1.No space after dot
 2.  Extra spaces after dot
@@ -312,10 +312,10 @@ fn test_automated_tool_malformed_markdown() {
 100. Jump to large number
 101. Continue large sequence
 1. Reset to 1 again";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Should handle malformed spacing
     println!("Automated tool malformed: {} warnings", result.len());
 }
@@ -324,24 +324,24 @@ fn test_automated_tool_malformed_markdown() {
 fn test_stack_overflow_recursive_parent_detection() {
     // Test deeply nested structure that could cause stack overflow in recursive algorithms
     let rule = MD029OrderedListPrefix::default();
-    
+
     let mut content = String::new();
-    
+
     // Create a pattern that zigzags indentation to stress parent detection
     for i in 0..50 {
         let indent_level = (i % 10) + 1; // Cycle through indentation levels 1-10
         let indent = "  ".repeat(indent_level);
         content.push_str(&format!("{}1. Item at level {} (iteration {})\n", indent, indent_level, i));
     }
-    
+
     let ctx = LintContext::new(&content);
     let start = Instant::now();
     let result = rule.check(&ctx);
     let duration = start.elapsed();
-    
+
     assert!(result.is_ok(), "Zigzag nesting should not cause stack overflow");
     assert!(duration.as_millis() < 2000, "Should complete within 2 seconds for zigzag nesting");
-    
+
     println!("Zigzag nesting: {} warnings in {:?}", result.unwrap().len(), duration);
 }
 
@@ -349,7 +349,7 @@ fn test_stack_overflow_recursive_parent_detection() {
 fn test_unicode_normalization_edge_cases() {
     // Test Unicode normalization issues that could affect character counting
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1. Normal ASCII item
 2. Item with é (precomposed)
@@ -358,10 +358,10 @@ fn test_unicode_normalization_edge_cases() {
 5. Item with 👨‍👩‍👧‍👦 (family emoji)
 6. Item with \u{1F1FA}\u{1F1F8} (flag emoji)
 7. Final item";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     // Unicode normalization should not affect numbering
     assert!(result.is_empty(), "Unicode normalization should not affect list numbering");
 }
@@ -370,18 +370,18 @@ fn test_unicode_normalization_edge_cases() {
 fn test_memory_exhaustion_large_numbers() {
     // Test with very large number strings that could cause memory issues
     let rule = MD029OrderedListPrefix::default();
-    
+
     let large_number = "9".repeat(1000); // 1000-digit number
     let content = format!("\
 {}. Item with 1000-digit number
 2. Normal item
 3. Another normal item", large_number);
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx);
-    
+
     assert!(result.is_ok(), "Large numbers should not cause memory exhaustion");
-    
+
     // The 1000-digit number should cause numbering issues
     let warnings = result.unwrap();
     assert!(!warnings.is_empty(), "1000-digit number should cause numbering issues");
@@ -391,7 +391,7 @@ fn test_memory_exhaustion_large_numbers() {
 fn test_fix_function_pathological_cases() {
     // Test that the fix function handles pathological cases correctly
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1. Normal item
 1000000. Huge number
@@ -400,15 +400,15 @@ fn test_fix_function_pathological_cases() {
    999999. Huge nested number
    1. Reset nested
 2. Back to main";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.fix(&ctx);
-    
+
     assert!(result.is_ok(), "Fix should handle pathological numbers");
-    
+
     let fixed = result.unwrap();
     println!("Fixed pathological content:\n{}", fixed);
-    
+
     // Fixed content should have sequential numbering
     assert!(fixed.contains("1. Normal item"));
     assert!(fixed.contains("2. Huge number") || fixed.contains("2. "));
@@ -419,7 +419,7 @@ fn test_fix_function_pathological_cases() {
 fn test_parent_detection_with_code_block_interruptions() {
     // Test parent detection when code blocks interrupt list nesting
     let rule = MD029OrderedListPrefix::default();
-    
+
     let content = "\
 1. Parent item
    1. Child item
@@ -433,10 +433,10 @@ standalone code block
    3. Orphaned item - what's the parent?
 2. New parent
    1. Clear child of item 2";
-    
+
     let ctx = LintContext::new(&content);
     let result = rule.check(&ctx).unwrap();
-    
+
     println!("Code block interruption: {} warnings", result.len());
     for warning in &result {
         println!("  Line {}: {}", warning.line, warning.message);
@@ -447,9 +447,9 @@ standalone code block
 fn test_performance_worst_case_parent_detection() {
     // Create worst-case scenario for parent detection algorithm
     let rule = MD029OrderedListPrefix::default();
-    
+
     let mut content = String::new();
-    
+
     // Create a scenario where each item needs to search back through many items
     // to find its parent (worst case O(n²) behavior)
     for i in 0..100 {
@@ -462,14 +462,14 @@ fn test_performance_worst_case_parent_detection() {
             content.push_str(&format!("{}1. Item {} at depth {}\n", "  ".repeat(depth), i, depth));
         }
     }
-    
+
     let ctx = LintContext::new(&content);
     let start = Instant::now();
     let result = rule.check(&ctx);
     let duration = start.elapsed();
-    
+
     assert!(result.is_ok(), "Worst case parent detection should not crash");
     assert!(duration.as_millis() < 3000, "Should complete within 3 seconds for worst case");
-    
+
     println!("Worst case parent detection: {} warnings in {:?}", result.unwrap().len(), duration);
 }
