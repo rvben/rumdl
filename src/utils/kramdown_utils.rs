@@ -150,7 +150,7 @@ pub fn has_inline_math(text: &str) -> bool {
 /// Check if a line is a definition list item
 ///
 /// Definition lists in Kramdown use the pattern:
-/// ```
+/// ```text
 /// Term
 /// : Definition
 /// ```
