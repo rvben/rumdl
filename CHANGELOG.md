@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.121] - 2025-08-19
+
+### Fixed
+- **MD051**: Resolved remaining Issue #39 edge cases for link fragment validation
+  - Fixed ampersand handling at boundaries: "& text" → "--text", "text &" → "text-"
+  - Fixed cross-file link detection to properly ignore absolute paths (e.g., `/tags#anchor`)
+  - Improved Liquid template handling to skip links with filters (e.g., `{{ url | relative_url }}`)
+  - Fixed test expectations to match actual GitHub behavior for multiple spaces and trailing punctuation
+  - Verified Jekyll/kramdown GFM underscore handling works correctly for technical identifiers
+
+### Improved
+- **MD051**: Enhanced anchor generation accuracy and security
+  - Added comprehensive security hardening (Unicode normalization, RTL/LTR override prevention)
+  - Improved emoji detection and boundary handling
+  - Better performance with optimized regex patterns and early exit checks
+  - Added regression tests for all Issue #39 scenarios
+
 ## [0.0.120] - 2025-08-16
 
 ## [0.0.119] - 2025-08-15
@@ -353,7 +370,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.120...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.121...HEAD
+[0.0.121]: https://github.com/rvben/rumdl/compare/v0.0.120...v0.0.121
 [0.0.120]: https://github.com/rvben/rumdl/compare/v0.0.119...v0.0.120
 [0.0.119]: https://github.com/rvben/rumdl/compare/v0.0.118...v0.0.119
 [0.0.118]: https://github.com/rvben/rumdl/compare/v0.0.117...v0.0.118
