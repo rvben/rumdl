@@ -11,7 +11,7 @@ fn assert_fragments(test_cases: &[(&str, &str)]) {
     let rule = MD051LinkFragments::new();
 
     for (heading, expected_fragment) in test_cases {
-        let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
@@ -33,13 +33,13 @@ fn test_punctuation_removal_order() {
     // Test official GitHub/kramdown behavior for punctuation handling
     // Fixed: All official tools generate "--" for ampersands, not single "-"
     assert_fragments(&[
-        ("A & B", "a--b"),                   // ampersand becomes "--", space becomes "-"
-        ("A --> B", "a----b"),                // "-->" becomes "----", spaces absorbed
-        ("A: B", "a-b"),                     // colon removed, space becomes hyphen
-        ("A (B) C", "a-b-c"),                // parens removed, spaces become hyphens
-        ("A!!! B", "a-b"),                   // multiple punctuation removed
-        ("Pre -> Post", "pre---post"),        // "->": becomes "---"
-        ("Before: After", "before-after"),   // simple colon
+        ("A & B", "a--b"),                 // ampersand becomes "--", space becomes "-"
+        ("A --> B", "a----b"),             // "-->" becomes "----", spaces absorbed
+        ("A: B", "a-b"),                   // colon removed, space becomes hyphen
+        ("A (B) C", "a-b-c"),              // parens removed, spaces become hyphens
+        ("A!!! B", "a-b"),                 // multiple punctuation removed
+        ("Pre -> Post", "pre---post"),     // "->": becomes "---"
+        ("Before: After", "before-after"), // simple colon
     ]);
 }
 
@@ -49,22 +49,18 @@ fn test_consecutive_punctuation_handling() {
     // Current algorithm generates wrong fragments with multiple hyphens
     // Fixed: GitHub actually generates "cbrown----sbrown---unsafe-paths"
     // Verified against GitHub gist behavior
-    assert_fragments(&[
-        ("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths"),
-    ]);
+    assert_fragments(&[("cbrown --> sbrown: --unsafe-paths", "cbrown----sbrown---unsafe-paths")]);
 
     // Fixed: GitHub actually generates "cbrown---sbrown"
     // Verified against official behavior
-    assert_fragments(&[
-        ("cbrown -> sbrown", "cbrown---sbrown"),
-    ]);
+    assert_fragments(&[("cbrown -> sbrown", "cbrown---sbrown")]);
 
     // Additional complex punctuation patterns - fixed with actual GitHub behavior
     assert_fragments(&[
-        ("API!!! Methods??? & Properties", "api-methods--properties"),  // & becomes --
+        ("API!!! Methods??? & Properties", "api-methods--properties"), // & becomes --
         ("Step 1: (Optional) Setup", "step-1-optional-setup"),
-        ("Testing & Coverage & More", "testing--coverage--more"),      // & becomes --
-        ("One -> Two -> Three", "one---two---three"),                 // -> becomes ---
+        ("Testing & Coverage & More", "testing--coverage--more"), // & becomes --
+        ("One -> Two -> Three", "one---two---three"),             // -> becomes ---
         ("A: B: C", "a-b-c"),
     ]);
 }
@@ -74,11 +70,11 @@ fn test_ampersand_handling_variations() {
     // Test official GitHub ampersand handling behavior
     // Ampersand with spaces becomes "--", without spaces it's removed
     assert_fragments(&[
-        ("Testing & Coverage", "testing--coverage"),     // With spaces: & becomes --
-        ("A&B", "ab"),                                    // No spaces: & is removed
-        ("A & B & C", "a--b--c"),                         // Multiple ampersands with spaces
-        ("Testing&Development", "testingdevelopment"),   // Adjacent ampersand is removed
-        ("API & Documentation", "api--documentation"),   // Common pattern with spaces
+        ("Testing & Coverage", "testing--coverage"),   // With spaces: & becomes --
+        ("A&B", "ab"),                                 // No spaces: & is removed
+        ("A & B & C", "a--b--c"),                      // Multiple ampersands with spaces
+        ("Testing&Development", "testingdevelopment"), // Adjacent ampersand is removed
+        ("API & Documentation", "api--documentation"), // Common pattern with spaces
     ]);
 
     // Remove the variations test since official behavior is consistent
@@ -89,15 +85,15 @@ fn test_ampersand_handling_variations() {
 fn test_complex_punctuation_clusters() {
     // Test combinations of different punctuation types - fixed with GitHub behavior
     assert_fragments(&[
-        ("Title: (Part 1) - Overview", "title-part-1---overview"),  // Space + hyphen + space → ---
+        ("Title: (Part 1) - Overview", "title-part-1---overview"), // Space + hyphen + space → ---
         ("FAQ??? What's New!!!", "faq-whats-new"),
         ("Step 1: Setup (Required)", "step-1-setup-required"),
         (
             "API Reference: Methods & Properties",
-            "api-reference-methods--properties",  // & becomes --
+            "api-reference-methods--properties", // & becomes --
         ),
-        ("Version 2.0: New Features & Fixes", "version-20-new-features--fixes"),  // & becomes --
-        ("Install: (macOS) & (Windows)", "install-macos--windows"),  // & becomes --
+        ("Version 2.0: New Features & Fixes", "version-20-new-features--fixes"), // & becomes --
+        ("Install: (macOS) & (Windows)", "install-macos--windows"),              // & becomes --
     ]);
 }
 
@@ -106,9 +102,9 @@ fn test_special_character_edge_cases() {
     // Test punctuation characters that might be handled inconsistently - fixed with GitHub behavior
     assert_fragments(&[
         ("Quote \"Test\" Unquote", "quote-test-unquote"),
-        ("Em—Dash & En–Dash", "emdash--endash"),  // & becomes --, em/en dashes are removed entirely
-        ("Symbols: @#$%^&*()", "symbols-"),  // All symbols removed, just one hyphen from colon space
-        ("Math: x + y = z", "math-x--y--z"),  // spaces become hyphens, + becomes hyphen
+        ("Em—Dash & En–Dash", "emdash--endash"), // & becomes --, em/en dashes are removed entirely
+        ("Symbols: @#$%^&*()", "symbols-"),      // All symbols removed, just one hyphen from colon space
+        ("Math: x + y = z", "math-x--y--z"),     // spaces become hyphens, + becomes hyphen
         ("Code: foo(bar)", "code-foobar"),
         ("File.ext: Details", "fileext-details"),
     ]);
@@ -119,11 +115,11 @@ fn test_unicode_punctuation_edge_cases() {
     // Test Unicode punctuation that might be missed by ASCII-only filters
     assert_fragments(&[
         ("Smart \"Quotes\" Test", "smart-quotes-test"),
-        ("List • Item • Two", "list--item--two"),  // Bullet becomes --
-        ("Range … Ellipsis", "range--ellipsis"),  // Ellipsis becomes --
-        ("Math ÷ Division", "math--division"),  // Division sign becomes --
-        ("Degree 90° Angle", "degree-90-angle"),  // Degree symbol removed
-        ("Currency $100€ Price", "currency-100-price"),  // Currency symbols removed
+        ("List • Item • Two", "list--item--two"),       // Bullet becomes --
+        ("Range … Ellipsis", "range--ellipsis"),        // Ellipsis becomes --
+        ("Math ÷ Division", "math--division"),          // Division sign becomes --
+        ("Degree 90° Angle", "degree-90-angle"),        // Degree symbol removed
+        ("Currency $100€ Price", "currency-100-price"), // Currency symbols removed
     ]);
 }
 
@@ -131,11 +127,11 @@ fn test_unicode_punctuation_edge_cases() {
 fn test_mixed_script_edge_cases() {
     // Test mixed scripts with punctuation - fixed with actual GitHub behavior
     assert_fragments(&[
-        ("English & 中文", "english--中文"),          // & becomes --
-        ("Café & Restaurant", "café--restaurant"),     // & becomes --
-        ("Naïve & Smart", "naïve--smart"),             // & becomes --
-        ("Русский & English", "русский--english"),     // & becomes --
-        ("العربية & English", "العربية--english"),     // & becomes --
+        ("English & 中文", "english--中文"),       // & becomes --
+        ("Café & Restaurant", "café--restaurant"), // & becomes --
+        ("Naïve & Smart", "naïve--smart"),         // & becomes --
+        ("Русский & English", "русский--english"), // & becomes --
+        ("العربية & English", "العربية--english"), // & becomes --
     ]);
 }
 
@@ -143,12 +139,12 @@ fn test_mixed_script_edge_cases() {
 fn test_whitespace_punctuation_interaction() {
     // Test edge cases where punctuation is adjacent to various whitespace - fixed with GitHub behavior
     assert_fragments(&[
-        ("A  &  B", "a--b"),                       // Multiple spaces around ampersand: & becomes --
-        ("Trailing & ", "trailing--"),              // Trailing space after punctuation: & becomes --
-        (" & Leading", "--leading"),                // Leading space before punctuation: space+& becomes --
+        ("A  &  B", "a--b"),                      // Multiple spaces around ampersand: & becomes --
+        ("Trailing & ", "trailing--"),            // Trailing space after punctuation: & becomes --
+        (" & Leading", "--leading"),              // Leading space before punctuation: space+& becomes --
         ("Multiple   Spaces", "multiple-spaces"), // Multiple spaces without punctuation (no change)
     ]);
-    
+
     // These test cases with tabs/newlines need special handling since they create invalid headings
     // Tabs and newlines can't appear in markdown headings literally
 }
@@ -169,7 +165,7 @@ fn test_edge_case_heading_structures() {
 #[test]
 fn test_kramdown_vs_github_differences() {
     use rumdl::utils::anchor_styles::AnchorStyle;
-    
+
     // Test cases where Kramdown and GitHub modes should differ
     let github_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::GitHub);
     let kramdown_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);
@@ -178,47 +174,41 @@ fn test_kramdown_vs_github_differences() {
     // Test cases where different anchor styles should behave differently
     // Based on verified behavior from official tools
     let test_cases = vec![
-        ("test_method", "test_method", "test_method", "testmethod"),    // GitHub/GFM preserve _, pure kramdown removes _
-        ("Café Menu", "café-menu", "café-menu", "caf-menu"),             // Pure kramdown removes accents, others preserve
-        ("über_cool", "über_cool", "über_cool", "bercool"),              // Pure kramdown removes accents & _, others preserve _
+        ("test_method", "test_method", "test_method", "testmethod"), // GitHub/GFM preserve _, pure kramdown removes _
+        ("Café Menu", "café-menu", "café-menu", "caf-menu"),         // Pure kramdown removes accents, others preserve
+        ("über_cool", "über_cool", "über_cool", "bercool"), // Pure kramdown removes accents & _, others preserve _
         ("naïve_approach", "naïve_approach", "naïve_approach", "naveapproach"), // Pure kramdown removes accents & _
     ];
 
     for (heading, github_expected, kramdown_gfm_expected, kramdown_expected) in test_cases {
         // Test GitHub mode (preserves underscores)
-        let content = format!("# {}\n\n[Link](#{github_expected})", heading);
+        let content = format!("# {heading}\n\n[Link](#{github_expected})");
         let ctx = LintContext::new(&content);
         let result = github_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
             0,
-            "GitHub mode failed for '{}' -> '{}'",
-            heading,
-            github_expected
+            "GitHub mode failed for '{heading}' -> '{github_expected}'"
         );
 
         // Test Kramdown GFM mode (preserves underscores)
-        let content = format!("# {}\n\n[Link](#{kramdown_gfm_expected})", heading);
+        let content = format!("# {heading}\n\n[Link](#{kramdown_gfm_expected})");
         let ctx = LintContext::new(&content);
         let result = kramdown_gfm_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
             0,
-            "Kramdown GFM mode failed for '{}' -> '{}'",
-            heading,
-            kramdown_gfm_expected
+            "Kramdown GFM mode failed for '{heading}' -> '{kramdown_gfm_expected}'"
         );
 
         // Test Pure Kramdown mode (removes underscores)
-        let content = format!("# {}\n\n[Link](#{kramdown_expected})", heading);
+        let content = format!("# {heading}\n\n[Link](#{kramdown_expected})");
         let ctx = LintContext::new(&content);
         let result = kramdown_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
             0,
-            "Pure Kramdown mode failed for '{}' -> '{}'",
-            heading,
-            kramdown_expected
+            "Pure Kramdown mode failed for '{heading}' -> '{kramdown_expected}'"
         );
     }
 }
@@ -297,7 +287,7 @@ fn test_performance_with_complex_patterns() {
     let mut content = String::from("# Performance Test\n\n");
 
     // Add many complex headings
-    let complex_headings = vec![
+    let complex_headings = [
         "Complex: (Pattern) -> Result & More!!!",
         "API Reference: Methods & Properties",
         "Step 1: Setup (Required) & Configuration",
@@ -311,7 +301,7 @@ fn test_performance_with_complex_patterns() {
     ];
 
     for (i, heading) in complex_headings.iter().enumerate() {
-        content.push_str(&format!("## {}\n\n", heading));
+        content.push_str(&format!("## {heading}\n\n"));
         content.push_str("Some content here.\n\n");
 
         // Add links to some headings
@@ -348,23 +338,23 @@ fn test_regression_prevention_issue_39() {
 
     let issue_39_cases = vec![
         // Cases with corrected GitHub behavior
-        ("Testing & Coverage", "testing--coverage"),      // & becomes --
+        ("Testing & Coverage", "testing--coverage"), // & becomes --
         (
             "API Reference: Methods & Properties",
-            "api-reference-methods--properties",            // & becomes --
+            "api-reference-methods--properties", // & becomes --
         ),
         // These are the patterns that actually work with GitHub
     ];
 
     for (heading, expected_fragment) in issue_39_cases {
-        let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
         if result.is_empty() {
-            println!("✓ Issue 39 case PASSED: '{}' -> '{}'", heading, expected_fragment);
+            println!("✓ Issue 39 case PASSED: '{heading}' -> '{expected_fragment}'");
         } else {
-            println!("⚠ Issue 39 case NEEDS FIX: '{}' -> '{}'", heading, expected_fragment);
+            println!("⚠ Issue 39 case NEEDS FIX: '{heading}' -> '{expected_fragment}'");
             println!(
                 "  Current behavior produces warnings: {:?}",
                 result.iter().map(|w| &w.message).collect::<Vec<_>>()
@@ -374,10 +364,10 @@ fn test_regression_prevention_issue_39() {
 
     // Ensure the corrected cases work with actual GitHub behavior
     assert_fragments(&[
-        ("Testing & Coverage", "testing--coverage"),       // Corrected: & becomes --
+        ("Testing & Coverage", "testing--coverage"), // Corrected: & becomes --
         (
             "API Reference: Methods & Properties",
-            "api-reference-methods--properties",             // Corrected: & becomes --
+            "api-reference-methods--properties", // Corrected: & becomes --
         ),
     ]);
 }
@@ -420,7 +410,7 @@ fn test_zero_width_and_control_characters() {
         ("Soft\u{00AD}Hyphen", "softhyphen"), // Soft hyphen
         ("Word\u{2060}Joiner", "wordjoiner"), // Word joiner
     ]);
-    
+
     // Note: Tab and newline characters can't appear literally in markdown headings
     // They would break the heading syntax
 }

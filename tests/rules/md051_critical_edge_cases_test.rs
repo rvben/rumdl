@@ -29,15 +29,13 @@ fn test_extreme_length_headings() {
         let duration = start.elapsed();
 
         // Should not panic and should complete in reasonable time
-        assert!(result.is_ok(), "{} failed: should not panic", description);
+        assert!(result.is_ok(), "{description} failed: should not panic");
         assert!(
             duration < Duration::from_secs(5),
-            "{} took too long: {:?}",
-            description,
-            duration
+            "{description} took too long: {duration:?}"
         );
 
-        println!("{}: {} chars processed in {:?}", description, size, duration);
+        println!("{description}: {size} chars processed in {duration:?}");
     }
 }
 
@@ -59,7 +57,7 @@ fn test_redos_vulnerability_prevention() {
     ];
 
     for pattern in malicious_patterns {
-        let content = format!("# {}\n\n[Link](#test)", pattern);
+        let content = format!("# {pattern}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
@@ -70,11 +68,10 @@ fn test_redos_vulnerability_prevention() {
         assert!(result.is_ok(), "Should not panic on malicious pattern");
         assert!(
             duration < Duration::from_secs(2),
-            "Potential ReDoS vulnerability: pattern took {:?} to process",
-            duration
+            "Potential ReDoS vulnerability: pattern took {duration:?} to process"
         );
 
-        println!("Malicious pattern processed safely in {:?}", duration);
+        println!("Malicious pattern processed safely in {duration:?}");
     }
 }
 
@@ -109,16 +106,16 @@ fn test_unicode_security_edge_cases() {
     ];
 
     for (input, description) in security_test_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         // Should not panic on any Unicode edge case
         let result = std::panic::catch_unwind(|| rule.check(&ctx));
 
-        assert!(result.is_ok(), "Panic on Unicode security case: {}", description);
+        assert!(result.is_ok(), "Panic on Unicode security case: {description}");
 
         if let Ok(Ok(_warnings)) = result {
-            println!("✓ Unicode security case handled: {}", description);
+            println!("✓ Unicode security case handled: {description}");
         }
     }
 }
@@ -129,7 +126,7 @@ fn test_memory_exhaustion_prevention() {
     let rule = MD051LinkFragments::new();
 
     // Patterns that could cause memory explosion
-    let memory_bomb_patterns = vec![
+    let memory_bomb_patterns = [
         // Many consecutive hyphens (stress hyphen processing)
         (format!("test{}end", "-".repeat(10000)), "10K consecutive hyphens"),
         // Alternating pattern that might stress regex
@@ -143,7 +140,7 @@ fn test_memory_exhaustion_prevention() {
     ];
 
     for (pattern, description) in memory_bomb_patterns.iter() {
-        let content = format!("# {}\n\n[Link](#test)", pattern);
+        let content = format!("# {pattern}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
@@ -155,24 +152,20 @@ fn test_memory_exhaustion_prevention() {
         let duration = start.elapsed();
 
         // Should not crash and should not use excessive memory
-        assert!(result.is_ok(), "Memory bomb caused panic: {}", description);
+        assert!(result.is_ok(), "Memory bomb caused panic: {description}");
         assert!(
             duration < Duration::from_secs(3),
-            "Memory bomb took too long: {} - {:?}",
-            description,
-            duration
+            "Memory bomb took too long: {description} - {duration:?}"
         );
 
         // Memory usage should not explode (rough heuristic)
         let memory_growth = memory_after.saturating_sub(memory_before);
         assert!(
             memory_growth < 100_000_000, // 100MB limit
-            "Excessive memory growth: {} bytes for {}",
-            memory_growth,
-            description
+            "Excessive memory growth: {memory_growth} bytes for {description}"
         );
 
-        println!("✓ Memory bomb handled: {} in {:?}", description, duration);
+        println!("✓ Memory bomb handled: {description} in {duration:?}");
     }
 }
 
@@ -207,7 +200,7 @@ fn test_consecutive_hyphen_pathological_cases() {
     ];
 
     for (heading, description) in hyphen_stress_cases.iter() {
-        let content = format!("# {}\n\n[Link](#test)", heading);
+        let content = format!("# {heading}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
@@ -215,15 +208,13 @@ fn test_consecutive_hyphen_pathological_cases() {
         let duration = start.elapsed();
 
         // Should handle gracefully without hanging or crashing
-        assert!(result.is_ok(), "Hyphen stress case failed: {}", description);
+        assert!(result.is_ok(), "Hyphen stress case failed: {description}");
         assert!(
             duration < Duration::from_secs(2),
-            "Hyphen processing too slow: {} - {:?}",
-            description,
-            duration
+            "Hyphen processing too slow: {description} - {duration:?}"
         );
 
-        println!("✓ Hyphen stress case: {} in {:?}", description, duration);
+        println!("✓ Hyphen stress case: {description} in {duration:?}");
     }
 }
 
@@ -250,7 +241,7 @@ fn test_cross_platform_line_endings() {
         let result = rule.check(&ctx);
 
         // Should handle all line ending types consistently
-        assert!(result.is_ok(), "Line ending test failed: {}", description);
+        assert!(result.is_ok(), "Line ending test failed: {description}");
 
         let warnings = result.unwrap();
 
@@ -263,7 +254,7 @@ fn test_cross_platform_line_endings() {
             warnings.len()
         );
 
-        println!("✓ Cross-platform test: {}", description);
+        println!("✓ Cross-platform test: {description}");
     }
 }
 
@@ -284,14 +275,14 @@ fn test_malformed_markdown_edge_cases() {
     ];
 
     for (heading, description) in malformed_cases {
-        let content = format!("{}\n\n[Link](#test)", heading);
+        let content = format!("{heading}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         // Should handle malformed markdown gracefully
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "Malformed markdown caused panic: {}", description);
+        assert!(result.is_ok(), "Malformed markdown caused panic: {description}");
 
-        println!("✓ Malformed markdown handled: {}", description);
+        println!("✓ Malformed markdown handled: {description}");
     }
 }
 
@@ -301,7 +292,7 @@ fn test_algorithm_correctness_under_stress() {
     let rule = MD051LinkFragments::new();
 
     // Test that basic correctness is maintained even under stress
-    let stress_cases = vec![
+    let stress_cases = [
         // Should still generate correct fragments despite complexity
         (
             format!("Complex: {}& More!!!", "(Pattern) ".repeat(100)),
@@ -318,7 +309,7 @@ fn test_algorithm_correctness_under_stress() {
     ];
 
     for (heading, expected_fragment_part) in stress_cases.iter() {
-        let content = format!("# {}\n\n[Link](#{})", heading, expected_fragment_part);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment_part})");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
@@ -346,14 +337,14 @@ fn test_performance_bounds_comprehensive() {
 
     for (size, description) in performance_tests {
         let heading = "word ".repeat(size);
-        let content = format!("# {}\n\n[Link](#test)", heading);
+        let content = format!("# {heading}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
         let duration = start.elapsed();
 
-        assert!(result.is_ok(), "Performance test failed: {}", description);
+        assert!(result.is_ok(), "Performance test failed: {description}");
 
         // Should scale roughly linearly (allow 10x growth for 10x input)
         let scaling_factor = duration.as_nanos() as f64 / previous_duration.as_nanos() as f64;
@@ -361,15 +352,12 @@ fn test_performance_bounds_comprehensive() {
             // Skip first iteration
             assert!(
                 scaling_factor < 50.0, // Allow generous scaling factor for CI variability
-                "Poor performance scaling: {} - {:?} (factor: {:.2})",
-                description,
-                duration,
-                scaling_factor
+                "Poor performance scaling: {description} - {duration:?} (factor: {scaling_factor:.2})"
             );
         }
 
         previous_duration = duration;
-        println!("✓ Performance test: {} in {:?}", description, duration);
+        println!("✓ Performance test: {description} in {duration:?}");
     }
 }
 
@@ -420,8 +408,7 @@ fn test_combined_edge_cases() {
     assert!(result.is_ok(), "Combined edge case test failed");
     assert!(
         duration < Duration::from_secs(5),
-        "Combined edge cases took too long: {:?}",
-        duration
+        "Combined edge cases took too long: {duration:?}"
     );
 
     let warnings = result.unwrap();
@@ -433,5 +420,5 @@ fn test_combined_edge_cases() {
         "Should warn about the nonexistent section"
     );
 
-    println!("✓ Combined edge cases handled in {:?}", duration);
+    println!("✓ Combined edge cases handled in {duration:?}");
 }

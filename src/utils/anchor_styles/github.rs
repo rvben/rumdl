@@ -118,7 +118,18 @@ fn heading_to_fragment_internal(heading: &str) -> String {
 
     // Step 3: Handle emoji sequences BEFORE sanitizing ZWJ
     // This preserves multi-component emojis and keycaps
-    let emoji_processed = process_emoji_sequences(&normalized);
+    // Quick optimization: skip if clearly no emojis (common case)
+    let emoji_processed = if normalized.chars().any(|c| {
+        let code = c as u32;
+        // Quick check for common emoji ranges
+        (0x1F300..=0x1F9FF).contains(&code) || // Most emojis
+        (0x2600..=0x26FF).contains(&code) ||   // Misc symbols
+        (0x1F1E6..=0x1F1FF).contains(&code) // Regional indicators
+    }) {
+        process_emoji_sequences(&normalized)
+    } else {
+        normalized.clone()
+    };
 
     // Security Step 4: Filter dangerous Unicode characters
     let sanitized = sanitize_unicode(&emoji_processed);
@@ -222,44 +233,52 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     // - Single emoji between words: "--"
     // - Multiple emojis with spaces: n+1 hyphens
 
-    // First, handle sequences of multiple emojis (longest first)
-    let mut final_result = result.clone();
-    for count in (2..=10).rev() {
-        let marker_seq = "§emoji§".repeat(count);
-        let replacement = "-".repeat(count + 1);
-        final_result = final_result.replace(&marker_seq, &replacement);
+    // Quick check: if no emoji markers, skip processing entirely
+    if !result.contains("§emoji§") {
+        return result;
     }
 
-    // Now handle single emoji markers based on context
-    // We need to be careful about position
-    while final_result.contains("§emoji§") {
-        if let Some(pos) = final_result.find("§emoji§") {
-            let before = if pos > 0 {
-                final_result.chars().nth(pos - 1)
-            } else {
-                None
-            };
+    // Simple two-step approach for better performance
+    let mut final_result = result;
 
-            let after_pos = pos + "§emoji§".len();
-            let after = if after_pos < final_result.len() {
-                final_result.chars().nth(after_pos)
-            } else {
-                None
-            };
-
-            // Determine replacement based on context
-            let replacement = if before.is_none() || after.is_none() {
-                // At start or end of string
-                "-"
-            } else {
-                // In the middle
-                "--"
-            };
-
-            final_result.replace_range(pos..pos + "§emoji§".len(), replacement);
-        } else {
-            break;
+    // First, handle multiple consecutive markers (n markers → n+1 hyphens)
+    // Process from longest to shortest to avoid partial replacements
+    for count in (2..=10).rev() {
+        if final_result.contains("§emoji§") {
+            let marker_seq = "§emoji§".repeat(count);
+            if final_result.contains(&marker_seq) {
+                let replacement = "-".repeat(count + 1);
+                final_result = final_result.replace(&marker_seq, &replacement);
+            }
         }
+    }
+
+    // Then handle single markers based on position
+    if final_result.contains("§emoji§") {
+        let bytes = final_result.as_bytes();
+        let marker = "§emoji§".as_bytes();
+        let mut result_bytes = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if i + marker.len() <= bytes.len() && &bytes[i..i + marker.len()] == marker {
+                // Found a marker - check position
+                let at_start = i == 0;
+                let at_end = i + marker.len() >= bytes.len();
+
+                if at_start || at_end {
+                    result_bytes.push(b'-');
+                } else {
+                    result_bytes.extend_from_slice(b"--");
+                }
+                i += marker.len();
+            } else {
+                result_bytes.push(bytes[i]);
+                i += 1;
+            }
+        }
+
+        final_result = String::from_utf8(result_bytes).unwrap_or(final_result);
     }
 
     final_result

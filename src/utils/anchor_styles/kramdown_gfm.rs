@@ -147,7 +147,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     #[cfg(test)]
     if heading.contains('_') {
         eprintln!("DEBUG: Before character filtering:");
-        eprintln!("  text: '{}'", text);
+        eprintln!("  text: '{text}'");
         eprintln!("  contains underscores: {}", text.chars().any(|c| c == '_'));
     }
 
@@ -175,7 +175,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // DEBUG: Check filtered
     #[cfg(test)]
     if heading.contains("==>") {
-        eprintln!("DEBUG: Processing '{}', after filtering: '{}'", heading, filtered);
+        eprintln!("DEBUG: Processing '{heading}', after filtering: '{filtered}'");
     }
 
     // Step 6: Jekyll/GFM doesn't trim to first letter when there are leading digits
@@ -210,13 +210,13 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // DEBUG: Check if underscores are present
     #[cfg(test)]
     if trimmed.contains('_') {
-        eprintln!("DEBUG: After trimming, contains underscores: '{}'", trimmed);
+        eprintln!("DEBUG: After trimming, contains underscores: '{trimmed}'");
     }
 
     // DEBUG: Check trimmed BEFORE replacements
     #[cfg(test)]
     if heading.contains("==>") {
-        eprintln!("DEBUG: Before smart typography, trimmed: '{}'", trimmed);
+        eprintln!("DEBUG: Before smart typography, trimmed: '{trimmed}'");
     }
 
     // Step 7: Jekyll/kramdown GFM smart typography handling
@@ -237,7 +237,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // DEBUG: Check trimmed after replacements
     #[cfg(test)]
     if heading.contains("==>") {
-        eprintln!("DEBUG: After smart typography replacements, trimmed: '{}'", trimmed);
+        eprintln!("DEBUG: After smart typography replacements, trimmed: '{trimmed}'");
     }
 
     // Now handle special hyphen and equals patterns:
@@ -271,7 +271,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
         // DEBUG: Track what happens to underscores
         #[cfg(test)]
         if c == '_' {
-            eprintln!("DEBUG: Pushing underscore at position {}", i);
+            eprintln!("DEBUG: Pushing underscore at position {i}");
         }
 
         result.push(c);
@@ -283,8 +283,8 @@ pub fn heading_to_fragment(heading: &str) -> String {
     #[cfg(test)]
     if heading.contains('_') && !trimmed.contains('_') {
         eprintln!("DEBUG: Underscores lost in smart typography loop!");
-        eprintln!("  Original: '{}'", heading);
-        eprintln!("  After loop: '{}'", trimmed);
+        eprintln!("  Original: '{heading}'");
+        eprintln!("  After loop: '{trimmed}'");
     }
 
     // Step 8: Convert spaces to hyphens, lowercase letters
@@ -294,7 +294,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // DEBUG
     #[cfg(test)]
     if heading.contains("==>") {
-        eprintln!("DEBUG: Starting processing of: '{}'", trimmed);
+        eprintln!("DEBUG: Starting processing of: '{trimmed}'");
     }
 
     // Simple state machine for processing
@@ -355,7 +355,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // DEBUG
     #[cfg(test)]
     if heading.contains("==>") {
-        eprintln!("DEBUG: After processing, result: '{}'", result);
+        eprintln!("DEBUG: After processing, result: '{result}'");
     }
 
     // Step 9: Apply kramdown GFM hyphen consolidation ONLY to natural hyphens

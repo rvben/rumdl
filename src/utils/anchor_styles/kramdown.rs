@@ -86,7 +86,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
         while truncate_pos > 0 && !heading.is_char_boundary(truncate_pos) {
             truncate_pos -= 1;
         }
-        
+
         if truncate_pos == 0 {
             // Fallback: use char_indices to find a valid boundary
             truncate_pos = heading
@@ -96,7 +96,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
                 .map(|(i, c)| i + c.len_utf8())
                 .unwrap_or(0);
         }
-        
+
         return heading_to_fragment(&heading[..truncate_pos]);
     }
 
@@ -530,7 +530,7 @@ mod tests {
         }
         max_consecutive = max_consecutive.max(consecutive_count);
 
-        assert!(max_consecutive <= 50, "Too many consecutive chars: {}", max_consecutive);
+        assert!(max_consecutive <= 50, "Too many consecutive chars: {max_consecutive}");
 
         // Memory allocation stress
         let mixed_stress = "word🎉-中文".repeat(100);
@@ -593,7 +593,7 @@ mod security_tests {
         for (input, description) in dangerous_cases {
             let result = heading_to_fragment(input);
             // Should not panic and should filter dangerous chars
-            assert!(!result.is_empty(), "Failed to handle: {}", description);
+            assert!(!result.is_empty(), "Failed to handle: {description}");
             // Dangerous characters should be removed
             assert!(!result.contains('\u{202E}'), "RTL override not filtered");
             assert!(!result.contains('\u{200B}'), "Zero-width space not filtered");
@@ -613,7 +613,7 @@ mod security_tests {
             let result = heading_to_fragment(&input);
 
             // Should complete in reasonable time and not contain excessive repeats
-            assert!(!result.is_empty(), "Failed to handle: {}", description);
+            assert!(!result.is_empty(), "Failed to handle: {description}");
 
             // Check that no single character repeats more than 50 times
             let mut consecutive_count = 1;
@@ -633,9 +633,7 @@ mod security_tests {
 
             assert!(
                 max_consecutive <= 50,
-                "Consecutive character limit exceeded for {}: {} consecutive chars",
-                description,
-                max_consecutive
+                "Consecutive character limit exceeded for {description}: {max_consecutive} consecutive chars"
             );
         }
     }

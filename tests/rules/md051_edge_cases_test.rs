@@ -27,7 +27,7 @@ mod tests {
     /// Helper to assert fragment generation works correctly
     fn assert_fragment_generation(style: &AnchorStyle, heading: &str, expected: &str, test_name: &str) {
         let rule = create_rule(style);
-        let content = format!("# {}\n\n[Link](#{})", heading, expected);
+        let content = format!("# {heading}\n\n[Link](#{expected})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
@@ -46,21 +46,17 @@ mod tests {
     /// Helper to verify no panic occurs and performance is reasonable
     fn assert_safe_and_fast(style: &AnchorStyle, heading: &str, max_duration: Duration, test_name: &str) {
         let rule = create_rule(style);
-        let content = format!("# {}\n\n[Link](#test)", heading);
+        let content = format!("# {heading}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
         let duration = start.elapsed();
 
-        assert!(result.is_ok(), "{} caused panic for style {:?}", test_name, style);
+        assert!(result.is_ok(), "{test_name} caused panic for style {style:?}");
         assert!(
             duration < max_duration,
-            "{} took too long for style {:?}: {:?} > {:?}",
-            test_name,
-            style,
-            duration,
-            max_duration
+            "{test_name} took too long for style {style:?}: {duration:?} > {max_duration:?}"
         );
     }
 
@@ -89,7 +85,7 @@ mod tests {
                     style,
                     input,
                     Duration::from_secs(1),
-                    &format!("Zero-width injection: {}", description),
+                    &format!("Zero-width injection: {description}"),
                 );
             }
         }
@@ -117,7 +113,7 @@ mod tests {
                     style,
                     input,
                     Duration::from_secs(1),
-                    &format!("RTL injection: {}", description),
+                    &format!("RTL injection: {description}"),
                 );
             }
         }
@@ -148,7 +144,7 @@ mod tests {
                     style,
                     input,
                     Duration::from_secs(1),
-                    &format!("Control character: {}", description),
+                    &format!("Control character: {description}"),
                 );
             }
         }
@@ -179,7 +175,7 @@ mod tests {
                     style,
                     pattern,
                     Duration::from_secs(2), // Allow more time for complex patterns
-                    &format!("ReDoS prevention: {}", description),
+                    &format!("ReDoS prevention: {description}"),
                 );
             }
 
@@ -188,7 +184,7 @@ mod tests {
                     style,
                     pattern,
                     Duration::from_secs(2),
-                    &format!("ReDoS prevention: {}", description),
+                    &format!("ReDoS prevention: {description}"),
                 );
             }
         }
@@ -225,7 +221,7 @@ mod tests {
                     style,
                     pattern,
                     Duration::from_secs(3),
-                    &format!("Memory exhaustion: {}", description),
+                    &format!("Memory exhaustion: {description}"),
                 );
             }
         }
@@ -245,7 +241,7 @@ mod tests {
                     style,
                     &heading,
                     Duration::from_secs(5),
-                    &format!("Large input: {} chars", size),
+                    &format!("Large input: {size} chars"),
                 );
             }
         }
@@ -276,7 +272,7 @@ mod tests {
         ];
 
         for (heading, style, expected) in test_cases {
-            assert_fragment_generation(&style, heading, expected, &format!("Arrow pattern: {}", heading));
+            assert_fragment_generation(&style, heading, expected, &format!("Arrow pattern: {heading}"));
         }
     }
 
@@ -299,7 +295,7 @@ mod tests {
         ];
 
         for (heading, style, expected) in test_cases {
-            assert_fragment_generation(&style, heading, expected, &format!("Hyphen consolidation: {}", heading));
+            assert_fragment_generation(&style, heading, expected, &format!("Hyphen consolidation: {heading}"));
         }
     }
 
@@ -332,7 +328,7 @@ mod tests {
                     style,
                     heading,
                     Duration::from_millis(500),
-                    &format!("Emoji detection: {}", description),
+                    &format!("Emoji detection: {description}"),
                 );
             }
         }
@@ -357,7 +353,7 @@ mod tests {
             ("![Image](url) caption", "image-caption"),
             // Code spans
             ("`simple code`", "simple-code"),
-            ("``code with ` backtick``", "code-with--backtick"),  // Backtick becomes hyphen
+            ("``code with ` backtick``", "code-with--backtick"), // Backtick becomes hyphen
             ("`code` and `more code`", "code-and-more-code"),
             // Edge cases
             ("***", ""),
@@ -393,13 +389,18 @@ mod tests {
         // Test GitHub and KramdownGfm with URL stripping
         for style in &[AnchorStyle::GitHub, AnchorStyle::KramdownGfm] {
             for (heading, expected) in &markdown_cases_strip_urls {
-                assert_fragment_generation(style, heading, expected, &format!("Markdown stripping: {}", heading));
+                assert_fragment_generation(style, heading, expected, &format!("Markdown stripping: {heading}"));
             }
         }
 
         // Test Kramdown with URL preservation
         for (heading, expected) in &kramdown_cases {
-            assert_fragment_generation(&AnchorStyle::Kramdown, heading, expected, &format!("Markdown stripping (Kramdown): {}", heading));
+            assert_fragment_generation(
+                &AnchorStyle::Kramdown,
+                heading,
+                expected,
+                &format!("Markdown stripping (Kramdown): {heading}"),
+            );
         }
     }
 
@@ -469,14 +470,14 @@ Edge cases:
         let styles = [AnchorStyle::GitHub, AnchorStyle::KramdownGfm, AnchorStyle::Kramdown];
 
         // Test that processing time scales linearly, not exponentially
-        let sizes = vec![100, 500, 1000, 5000];
+        let sizes = [100, 500, 1000, 5000];
 
         for style in &styles {
             let mut previous_time = Duration::from_nanos(1);
 
             for size in sizes.iter() {
                 let heading = "word ".repeat(*size);
-                let content = format!("# {}\n\n[Link](#test)", heading);
+                let content = format!("# {heading}\n\n[Link](#test)");
                 let ctx = LintContext::new(&content);
                 let rule = create_rule(style);
 
@@ -484,17 +485,14 @@ Edge cases:
                 let result = rule.check(&ctx);
                 let duration = start.elapsed();
 
-                assert!(result.is_ok(), "Scaling test failed at size {} for {:?}", size, style);
+                assert!(result.is_ok(), "Scaling test failed at size {size} for {style:?}");
 
                 // Time should scale roughly linearly (allow generous factor for CI variance)
                 if previous_time > Duration::from_millis(1) {
                     let time_ratio = duration.as_nanos() as f64 / previous_time.as_nanos() as f64;
                     assert!(
                         time_ratio < 20.0, // Very generous to account for CI variance
-                        "Poor scaling for {:?} at size {}: ratio {:.2}",
-                        style,
-                        size,
-                        time_ratio
+                        "Poor scaling for {style:?} at size {size}: ratio {time_ratio:.2}"
                     );
                 }
 
@@ -536,7 +534,7 @@ Edge cases:
                     style,
                     pattern,
                     Duration::from_secs(2),
-                    &format!("Pathological: {}", description),
+                    &format!("Pathological: {description}"),
                 );
             }
         }
@@ -571,7 +569,7 @@ Edge cases:
                     style,
                     pattern,
                     Duration::from_secs(2),
-                    &format!("Character bomb: {}", description),
+                    &format!("Character bomb: {description}"),
                 );
             }
         }
@@ -608,7 +606,7 @@ Edge cases:
                     style,
                     pattern,
                     Duration::from_secs(3),
-                    &format!("Consecutive limit: {}", description),
+                    &format!("Consecutive limit: {description}"),
                 );
             }
         }
@@ -666,12 +664,24 @@ Edge cases:
         ];
 
         for (heading, github_expected, gfm_expected, kramdown_expected) in test_cases {
-            assert_fragment_generation(&AnchorStyle::GitHub, heading, github_expected, 
-                &format!("Numbers only (GitHub): {}", heading));
-            assert_fragment_generation(&AnchorStyle::KramdownGfm, heading, gfm_expected, 
-                &format!("Numbers only (KramdownGfm): {}", heading));
-            assert_fragment_generation(&AnchorStyle::Kramdown, heading, kramdown_expected, 
-                &format!("Numbers only (Kramdown): {}", heading));
+            assert_fragment_generation(
+                &AnchorStyle::GitHub,
+                heading,
+                github_expected,
+                &format!("Numbers only (GitHub): {heading}"),
+            );
+            assert_fragment_generation(
+                &AnchorStyle::KramdownGfm,
+                heading,
+                gfm_expected,
+                &format!("Numbers only (KramdownGfm): {heading}"),
+            );
+            assert_fragment_generation(
+                &AnchorStyle::Kramdown,
+                heading,
+                kramdown_expected,
+                &format!("Numbers only (Kramdown): {heading}"),
+            );
         }
     }
 
@@ -694,14 +704,14 @@ Edge cases:
 
         for style in &styles {
             for (heading, expected) in &punctuation_cases {
-                let test_name = format!("Punctuation only: {}", heading);
+                let test_name = format!("Punctuation only: {heading}");
 
                 // For Kramdown, punctuation-only headings might generate "section"
                 if style == &AnchorStyle::Kramdown && expected.is_empty() {
                     // Test both possibilities
                     let rule = create_rule(style);
-                    let content1 = format!("# {}\n\n[Link](#{})", heading, expected);
-                    let content2 = format!("# {}\n\n[Link](#section)", heading);
+                    let content1 = format!("# {heading}\n\n[Link](#{expected})");
+                    let content2 = format!("# {heading}\n\n[Link](#section)");
 
                     let ctx1 = LintContext::new(&content1);
                     let ctx2 = LintContext::new(&content2);
@@ -711,8 +721,7 @@ Edge cases:
 
                     assert!(
                         result1.is_empty() || result2.is_empty(),
-                        "{} failed: neither empty fragment nor 'section' worked for kramdown",
-                        test_name
+                        "{test_name} failed: neither empty fragment nor 'section' worked for kramdown"
                     );
                 } else {
                     assert_fragment_generation(style, heading, expected, &test_name);
@@ -724,17 +733,17 @@ Edge cases:
     #[test]
     fn test_unicode_only() {
         let unicode_cases = vec![
-            ("中文", "中文", "中文", "section"),         // Chinese
-            ("العربية", "العربية", "العربية", "section"),   // Arabic
-            ("Русский", "русский", "русский", "section"),   // Russian (Cyrillic only -> section)
-            ("한국어", "한국어", "한국어", "section"),       // Korean
-            ("עברית", "עברית", "עברית", "section"),       // Hebrew
-            ("ελληνικά", "ελληνικά", "ελληνικά", "section"), // Greek
-            ("日本語", "日本語", "日本語", "section"),       // Japanese
+            ("中文", "中文", "中文", "section"),                 // Chinese
+            ("العربية", "العربية", "العربية", "section"),        // Arabic
+            ("Русский", "русский", "русский", "section"),        // Russian (Cyrillic only -> section)
+            ("한국어", "한국어", "한국어", "section"),           // Korean
+            ("עברית", "עברית", "עברית", "section"),              // Hebrew
+            ("ελληνικά", "ελληνικά", "ελληνικά", "section"),     // Greek
+            ("日本語", "日本語", "日本語", "section"),           // Japanese
             ("Português", "português", "português", "portugus"), // Portuguese (ASCII P, kramdown strips non-ASCII)
-            ("Español", "español", "español", "espaol"),    // Spanish (ASCII E, kramdown strips ñ)
-            ("Français", "français", "français", "franais"), // French (ASCII F, kramdown strips ç)
-            ("Deutsch", "deutsch", "deutsch", "deutsch"),    // German (all ASCII)
+            ("Español", "español", "español", "espaol"),         // Spanish (ASCII E, kramdown strips ñ)
+            ("Français", "français", "français", "franais"),     // French (ASCII F, kramdown strips ç)
+            ("Deutsch", "deutsch", "deutsch", "deutsch"),        // German (all ASCII)
         ];
 
         for (heading, github_expected, gfm_expected, kramdown_expected) in unicode_cases {
@@ -742,19 +751,19 @@ Edge cases:
                 &AnchorStyle::GitHub,
                 heading,
                 github_expected,
-                &format!("Unicode only (GitHub): {}", heading),
+                &format!("Unicode only (GitHub): {heading}"),
             );
             assert_fragment_generation(
                 &AnchorStyle::KramdownGfm,
                 heading,
                 gfm_expected,
-                &format!("Unicode only (KramdownGfm): {}", heading),
+                &format!("Unicode only (KramdownGfm): {heading}"),
             );
             assert_fragment_generation(
                 &AnchorStyle::Kramdown,
                 heading,
                 kramdown_expected,
-                &format!("Unicode only (Kramdown): {}", heading),
+                &format!("Unicode only (Kramdown): {heading}"),
             );
         }
     }
@@ -826,7 +835,7 @@ Edge cases:
                 [
                     (AnchorStyle::GitHub, "café-menu"),
                     (AnchorStyle::KramdownGfm, "café-menu"),
-                    (AnchorStyle::Kramdown, "caf-menu"),  // Kramdown removes accents
+                    (AnchorStyle::Kramdown, "caf-menu"), // Kramdown removes accents
                 ],
             ),
             // Complex punctuation: different arrow handling
@@ -834,8 +843,8 @@ Edge cases:
                 "A -> B",
                 [
                     (AnchorStyle::GitHub, "a---b"),
-                    (AnchorStyle::KramdownGfm, "a---b"),  // GFM preserves arrow as 3 hyphens
-                    (AnchorStyle::Kramdown, "a---b"),  // Kramdown also preserves arrow as 3 hyphens
+                    (AnchorStyle::KramdownGfm, "a---b"), // GFM preserves arrow as 3 hyphens
+                    (AnchorStyle::Kramdown, "a---b"),    // Kramdown also preserves arrow as 3 hyphens
                 ],
             ),
             // Multiple hyphens: consolidation differences
@@ -843,8 +852,8 @@ Edge cases:
                 "test---hyphens",
                 [
                     (AnchorStyle::GitHub, "test---hyphens"),
-                    (AnchorStyle::KramdownGfm, "testhyphens"),  // GFM consolidates
-                    (AnchorStyle::Kramdown, "test---hyphens"),  // Kramdown preserves
+                    (AnchorStyle::KramdownGfm, "testhyphens"), // GFM consolidates
+                    (AnchorStyle::Kramdown, "test---hyphens"), // Kramdown preserves
                 ],
             ),
         ];
@@ -855,7 +864,7 @@ Edge cases:
                     &style,
                     heading,
                     expected,
-                    &format!("Cross-style: {} for {:?}", heading, style),
+                    &format!("Cross-style: {heading} for {style:?}"),
                 );
             }
         }
@@ -878,15 +887,15 @@ Edge cases:
                 &AnchorStyle::GitHub,
                 heading,
                 expected,
-                &format!("GitHub-specific: {}", heading),
+                &format!("GitHub-specific: {heading}"),
             );
         }
 
         // Jekyll-specific: simpler punctuation handling
         let jekyll_specific = vec![
-            ("cbrown --> sbrown", "cbrown--sbrown"),  // Smart typography preserves --
-            ("A & B", "a--b"),                        // Ampersand becomes double hyphen
-            ("test---hyphens", "testhyphens"),        // Hyphen consolidation (3 hyphens removed)
+            ("cbrown --> sbrown", "cbrown--sbrown"), // Smart typography preserves --
+            ("A & B", "a--b"),                       // Ampersand becomes double hyphen
+            ("test---hyphens", "testhyphens"),       // Hyphen consolidation (3 hyphens removed)
         ];
 
         for (heading, expected) in jekyll_specific {
@@ -894,7 +903,7 @@ Edge cases:
                 &AnchorStyle::KramdownGfm,
                 heading,
                 expected,
-                &format!("Jekyll-specific: {}", heading),
+                &format!("Jekyll-specific: {heading}"),
             );
         }
 
@@ -910,7 +919,7 @@ Edge cases:
                 &AnchorStyle::Kramdown,
                 heading,
                 expected,
-                &format!("Kramdown-specific: {}", heading),
+                &format!("Kramdown-specific: {heading}"),
             );
         }
     }
@@ -936,7 +945,7 @@ Edge cases:
         for style in &styles {
             for heading in &common_headings {
                 let rule = create_rule(style);
-                let content = format!("# {}\n\n", heading);
+                let content = format!("# {heading}\n\n");
                 let ctx = LintContext::new(&content);
 
                 // Just verify no panic and reasonable performance
@@ -944,13 +953,10 @@ Edge cases:
                 let result = rule.check(&ctx);
                 let duration = start.elapsed();
 
-                assert!(result.is_ok(), "Compatibility test failed for {:?}: {}", style, heading);
+                assert!(result.is_ok(), "Compatibility test failed for {style:?}: {heading}");
                 assert!(
                     duration < Duration::from_millis(100),
-                    "Compatibility test too slow for {:?}: {} took {:?}",
-                    style,
-                    heading,
-                    duration
+                    "Compatibility test too slow for {style:?}: {heading} took {duration:?}"
                 );
             }
         }
@@ -982,7 +988,7 @@ Edge cases:
                     style,
                     test_case,
                     Duration::from_millis(100),
-                    &format!("Cross-style consistency: {} for {:?}", test_case, style),
+                    &format!("Cross-style consistency: {test_case} for {style:?}"),
                 );
             }
         }
@@ -1008,11 +1014,11 @@ Edge cases:
 
 ### Testing!!! Multiple??? Symbols & More
 
-#### Very Long Heading: {}
+#### Very Long Heading: {word_pattern}
 
-##### Hyphen Stress Test: {}
+##### Hyphen Stress Test: {hyphen_pattern}
 
-###### Unicode Bomb: {}
+###### Unicode Bomb: {emoji_pattern}
 
 ####### Empty After Strip: !!!
 
@@ -1021,14 +1027,13 @@ Edge cases:
 [Valid 1](#main-title-with-unicode-café-中文)
 [Valid 2](#section-1-arrows-punctuation-complex)
 [Valid 3](#testing-multiple-symbols-more)
-[Valid 4](#very-long-heading-{})
-[Valid 5](#hyphen-stress-test-{})
+[Valid 4](#very-long-heading-{word_fragment})
+[Valid 5](#hyphen-stress-test-{hyphen_fragment})
 [Valid 6](#unicode-bomb-unicode-bomb)
 [Valid 7](#empty-after-strip)
 [Valid 8](#numbers-only-123456)
 [Invalid](#nonexistent-section)
-"#,
-            word_pattern, hyphen_pattern, emoji_pattern, word_fragment, hyphen_fragment
+"#
         );
 
         let styles = [AnchorStyle::GitHub, AnchorStyle::KramdownGfm, AnchorStyle::Kramdown];
@@ -1041,12 +1046,10 @@ Edge cases:
             let result = rule.check(&ctx);
             let duration = start.elapsed();
 
-            assert!(result.is_ok(), "Integration test failed for {:?}", style);
+            assert!(result.is_ok(), "Integration test failed for {style:?}");
             assert!(
                 duration < Duration::from_secs(5),
-                "Integration test too slow for {:?}: {:?}",
-                style,
-                duration
+                "Integration test too slow for {style:?}: {duration:?}"
             );
 
             let warnings = result.unwrap();
@@ -1054,8 +1057,7 @@ Edge cases:
             // Should flag the invalid link, possibly some others depending on exact implementation
             assert!(
                 !warnings.is_empty(),
-                "Should flag at least the invalid link for {:?}",
-                style
+                "Should flag at least the invalid link for {style:?}"
             );
             assert!(
                 warnings.len() <= 10, // Allow more variation in implementation
@@ -1067,11 +1069,10 @@ Edge cases:
             // At least one warning should be about the nonexistent section
             assert!(
                 warnings.iter().any(|w| w.message.contains("nonexistent")),
-                "Should warn about nonexistent section for {:?}",
-                style
+                "Should warn about nonexistent section for {style:?}"
             );
 
-            println!("✓ Integration test passed for {:?} in {:?}", style, duration);
+            println!("✓ Integration test passed for {style:?} in {duration:?}");
         }
     }
 
@@ -1114,7 +1115,7 @@ Edge cases:
                     style,
                     pattern,
                     Duration::from_secs(3),
-                    &format!("Final stress test: {:?}", style),
+                    &format!("Final stress test: {style:?}"),
                 );
             }
         }

@@ -29,8 +29,8 @@ fn property_deterministic_fragment_generation() {
 
     for input in test_inputs {
         // Test with actual heading_to_fragment_github method via rule behavior
-        let content1 = format!("# {}\n\n", input);
-        let content2 = format!("# {}\n\n", input);
+        let content1 = format!("# {input}\n\n");
+        let content2 = format!("# {input}\n\n");
 
         let ctx1 = LintContext::new(&content1);
         let ctx2 = LintContext::new(&content2);
@@ -41,8 +41,7 @@ fn property_deterministic_fragment_generation() {
 
         assert_eq!(
             headings1, headings2,
-            "Fragment generation is not deterministic for input: '{}'",
-            input
+            "Fragment generation is not deterministic for input: '{input}'"
         );
     }
 }
@@ -66,7 +65,7 @@ fn property_valid_fragment_characters() {
     ];
 
     for input in test_inputs {
-        let content = format!("# {}\n\n", input);
+        let content = format!("# {input}\n\n");
         let ctx = LintContext::new(&content);
         let headings = extract_generated_headings(&rule, &ctx);
 
@@ -82,8 +81,7 @@ fn property_valid_fragment_characters() {
 
             assert!(
                 is_valid,
-                "Generated fragment '{}' contains invalid characters for input: '{}'",
-                heading, input
+                "Generated fragment '{heading}' contains invalid characters for input: '{input}'"
             );
         }
     }
@@ -107,7 +105,7 @@ fn property_reasonable_fragment_length() {
     ];
 
     for input in test_inputs {
-        let content = format!("# {}\n\n", input);
+        let content = format!("# {input}\n\n");
         let ctx = LintContext::new(&content);
         let headings = extract_generated_headings(&rule, &ctx);
 
@@ -125,9 +123,7 @@ fn property_reasonable_fragment_length() {
             // Fragment should not have excessive consecutive hyphens
             assert!(
                 !heading.contains("----"), // More than 3 consecutive hyphens is suspicious
-                "Generated fragment '{}' has excessive consecutive hyphens for input: '{}'",
-                heading,
-                input
+                "Generated fragment '{heading}' has excessive consecutive hyphens for input: '{input}'"
             );
         }
     }
@@ -149,8 +145,8 @@ fn property_similarity_preservation() {
     ];
 
     for (input1, input2) in similar_pairs {
-        let content1 = format!("# {}\n\n", input1);
-        let content2 = format!("# {}\n\n", input2);
+        let content1 = format!("# {input1}\n\n");
+        let content2 = format!("# {input2}\n\n");
 
         let ctx1 = LintContext::new(&content1);
         let ctx2 = LintContext::new(&content2);
@@ -164,12 +160,7 @@ fn property_similarity_preservation() {
             let similarity = calculate_similarity(h1, h2);
             assert!(
                 similarity > 0.5, // At least 50% similar
-                "Similar inputs '{}' and '{}' produced dissimilar fragments '{}' and '{}' (similarity: {:.2})",
-                input1,
-                input2,
-                h1,
-                h2,
-                similarity
+                "Similar inputs '{input1}' and '{input2}' produced dissimilar fragments '{h1}' and '{h2}' (similarity: {similarity:.2})"
             );
         }
     }
@@ -198,21 +189,20 @@ fn property_robustness_no_panics() {
     ];
 
     for input in edge_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         // This should not panic
         let result = std::panic::catch_unwind(|| rule.check(&ctx));
 
-        assert!(result.is_ok(), "Rule panicked on input: '{:?}'", input);
+        assert!(result.is_ok(), "Rule panicked on input: '{input:?}'");
 
         // If no panic, the result should be valid
         if let Ok(Ok(warnings)) = result {
             // Warnings list should be valid (can be empty or non-empty)
             assert!(
                 warnings.len() <= 100,
-                "Suspiciously many warnings for input: '{:?}'",
-                input
+                "Suspiciously many warnings for input: '{input:?}'"
             );
         }
     }
@@ -237,15 +227,15 @@ fn property_mode_consistency() {
     ];
 
     for input in test_inputs {
-        let content = format!("# {}\n\n", input);
+        let content = format!("# {input}\n\n");
         let ctx = LintContext::new(&content);
 
         // Both modes should produce valid results (no panics)
         let github_result = github_rule.check(&ctx);
         let kramdown_result = kramdown_rule.check(&ctx);
 
-        assert!(github_result.is_ok(), "GitHub mode failed for: '{}'", input);
-        assert!(kramdown_result.is_ok(), "Kramdown mode failed for: '{}'", input);
+        assert!(github_result.is_ok(), "GitHub mode failed for: '{input}'");
+        assert!(kramdown_result.is_ok(), "Kramdown mode failed for: '{input}'");
 
         // For empty input, both should behave similarly
         if input.trim().is_empty() {
@@ -283,7 +273,7 @@ fn property_performance_bounds() {
             base_input.chars().take(expected_size).collect()
         };
 
-        let content = format!("# {}\n\n", input);
+        let content = format!("# {input}\n\n");
         let ctx = LintContext::new(&content);
 
         let start = std::time::Instant::now();
@@ -391,7 +381,7 @@ fn property_fuzz_like_testing() {
         "!@#".repeat(50),
         " - ".repeat(30),
         // Edge case lengths
-        "a".repeat(1),
+        "a".to_string(),
         "ab".repeat(1000),
     ];
 
@@ -399,14 +389,14 @@ fn property_fuzz_like_testing() {
         // Test various prefixes and suffixes
         for prefix in &["", " ", "  ", "!"] {
             for suffix in &["", " ", "  ", "!"] {
-                let test_input = format!("{}{}{}", prefix, input, suffix);
+                let test_input = format!("{prefix}{input}{suffix}");
 
-                let content = format!("# {}\n\n", test_input);
+                let content = format!("# {test_input}\n\n");
                 let ctx = LintContext::new(&content);
 
                 // Should not panic
                 let result = rule.check(&ctx);
-                assert!(result.is_ok(), "Failed on fuzz input: '{:?}'", test_input);
+                assert!(result.is_ok(), "Failed on fuzz input: '{test_input:?}'");
             }
         }
     }

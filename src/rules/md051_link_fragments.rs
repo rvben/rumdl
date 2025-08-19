@@ -650,7 +650,7 @@ impl Rule for MD051LinkFragments {
                 match style_str.to_lowercase().as_str() {
                     "kramdown" => AnchorStyle::Kramdown,
                     "kramdown-gfm" => AnchorStyle::KramdownGfm,
-                    "jekyll" => AnchorStyle::KramdownGfm,  // Backward compatibility alias
+                    "jekyll" => AnchorStyle::KramdownGfm, // Backward compatibility alias
                     _ => AnchorStyle::GitHub,
                 }
             } else {

@@ -32,7 +32,7 @@ fn test_regex_catastrophic_backtracking_prevention() {
     ];
 
     for pattern in catastrophic_patterns {
-        let content = format!("# {}\n\n[Link](#test)", pattern);
+        let content = format!("# {pattern}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
@@ -87,7 +87,7 @@ fn test_memory_allocation_under_stress() {
     ];
 
     for (pattern, description) in memory_stress_patterns {
-        let content = format!("# {}\n\n[Link](#test)", pattern);
+        let content = format!("# {pattern}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         // Monitor timing and assume memory usage correlates
@@ -95,17 +95,15 @@ fn test_memory_allocation_under_stress() {
         let result = rule.check(&ctx);
         let duration = start.elapsed();
 
-        assert!(result.is_ok(), "Memory stress pattern failed: {}", description);
+        assert!(result.is_ok(), "Memory stress pattern failed: {description}");
 
         // Should not take excessive time (indicating memory thrashing)
         assert!(
             duration < Duration::from_secs(5),
-            "Memory stress pattern too slow: {} took {:?}",
-            description,
-            duration
+            "Memory stress pattern too slow: {description} took {duration:?}"
         );
 
-        println!("✓ Memory stress pattern: {} in {:?}", description, duration);
+        println!("✓ Memory stress pattern: {description} in {duration:?}");
     }
 }
 
@@ -120,14 +118,14 @@ fn test_algorithmic_complexity_scaling() {
 
     for size in sizes {
         let heading = "word ".repeat(size);
-        let content = format!("# {}\n\n[Link](#test)", heading);
+        let content = format!("# {heading}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
         let duration = start.elapsed();
 
-        assert!(result.is_ok(), "Scaling test failed at size {}", size);
+        assert!(result.is_ok(), "Scaling test failed at size {size}");
 
         // Check that time doesn't grow exponentially
         if previous_time > Duration::from_millis(1) {
@@ -141,15 +139,12 @@ fn test_algorithmic_complexity_scaling() {
             // Time growth should be roughly linear (allow 2x overhead for complexity)
             assert!(
                 time_ratio < size_ratio * 2.0,
-                "Algorithm may have poor complexity: size {} took {:?}, ratio {:.2}",
-                size,
-                duration,
-                time_ratio
+                "Algorithm may have poor complexity: size {size} took {duration:?}, ratio {time_ratio:.2}"
             );
         }
 
         previous_time = duration;
-        println!("✓ Size {} processed in {:?}", size, duration);
+        println!("✓ Size {size} processed in {duration:?}");
     }
 }
 
@@ -191,15 +186,13 @@ fn test_concurrent_processing() {
     for (i, handle) in handles.into_iter().enumerate() {
         let (success, duration) = handle.join().expect("Thread panicked");
 
-        assert!(success, "Concurrent test {} failed", i);
+        assert!(success, "Concurrent test {i} failed");
         assert!(
             duration < Duration::from_secs(1),
-            "Concurrent test {} took too long: {:?}",
-            i,
-            duration
+            "Concurrent test {i} took too long: {duration:?}"
         );
 
-        println!("✓ Concurrent test {} completed in {:?}", i, duration);
+        println!("✓ Concurrent test {i} completed in {duration:?}");
     }
 }
 
@@ -213,12 +206,12 @@ fn test_many_links_performance() {
 
     // Add many valid links
     for i in 0..1000 {
-        content.push_str(&format!("[Link {}](#main-heading)\n", i));
+        content.push_str(&format!("[Link {i}](#main-heading)\n"));
     }
 
     // Add some invalid links
     for i in 0..100 {
-        content.push_str(&format!("[Invalid {}](#missing-{})\n", i, i));
+        content.push_str(&format!("[Invalid {i}](#missing-{i})\n"));
     }
 
     let ctx = LintContext::new(&content);
@@ -237,11 +230,10 @@ fn test_many_links_performance() {
     // Should process efficiently
     assert!(
         duration < Duration::from_secs(3),
-        "Many links processing too slow: {:?}",
-        duration
+        "Many links processing too slow: {duration:?}"
     );
 
-    println!("✓ Many links test: 1100 links processed in {:?}", duration);
+    println!("✓ Many links test: 1100 links processed in {duration:?}");
 }
 
 /// Test performance with deeply nested markdown structures
@@ -275,7 +267,7 @@ fn test_deeply_nested_markdown_performance() {
         );
     }
 
-    let complex_heading = format!("# {}Deeply Nested{}", opening, closing);
+    let complex_heading = format!("# {opening}Deeply Nested{closing}");
     content.push_str(&complex_heading);
     content.push_str("\n\n[Link](#deeply-nested)\n");
 
@@ -290,14 +282,10 @@ fn test_deeply_nested_markdown_performance() {
     // Should handle complex nesting efficiently
     assert!(
         duration < Duration::from_secs(2),
-        "Deeply nested processing too slow: {:?}",
-        duration
+        "Deeply nested processing too slow: {duration:?}"
     );
 
-    println!(
-        "✓ Deeply nested test: depth {} processed in {:?}",
-        nested_depth, duration
-    );
+    println!("✓ Deeply nested test: depth {nested_depth} processed in {duration:?}");
 }
 
 /// Test performance with large documents containing many headings
@@ -311,8 +299,8 @@ fn test_large_document_performance() {
 
     // Add many headings
     for i in 0..heading_count {
-        content.push_str(&format!("# Heading {}\n\nSome content here.\n\n", i));
-        content.push_str(&format!("## Sub Heading {}\n\nMore content.\n\n", i));
+        content.push_str(&format!("# Heading {i}\n\nSome content here.\n\n"));
+        content.push_str(&format!("## Sub Heading {i}\n\nMore content.\n\n"));
     }
 
     // Add links to some headings
@@ -322,7 +310,7 @@ fn test_large_document_performance() {
 
     // Add some invalid links
     for i in 0..50 {
-        content.push_str(&format!("[Invalid {}](#missing-{})\n", i, i));
+        content.push_str(&format!("[Invalid {i}](#missing-{i})\n"));
     }
 
     let ctx = LintContext::new(&content);
@@ -376,24 +364,22 @@ fn test_performance_regression_prevention() {
     ];
 
     for (pattern, description) in regression_patterns {
-        let content = format!("# {}\n\n[Link](#test)", pattern);
+        let content = format!("# {pattern}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
         let duration = start.elapsed();
 
-        assert!(result.is_ok(), "Performance regression test failed: {}", description);
+        assert!(result.is_ok(), "Performance regression test failed: {description}");
 
         // Should complete in reasonable time
         assert!(
             duration < Duration::from_secs(3),
-            "Performance regression detected: {} took {:?}",
-            description,
-            duration
+            "Performance regression detected: {description} took {duration:?}"
         );
 
-        println!("✓ Performance regression test: {} in {:?}", description, duration);
+        println!("✓ Performance regression test: {description} in {duration:?}");
     }
 }
 
@@ -418,7 +404,7 @@ fn test_fragment_generation_performance() {
     ];
 
     for (heading, description) in fragment_test_cases.iter() {
-        let content = format!("# {}\n\n", heading);
+        let content = format!("# {heading}\n\n");
         let ctx = LintContext::new(&content);
 
         // Time the fragment generation (indirectly via rule check)
@@ -426,17 +412,15 @@ fn test_fragment_generation_performance() {
         let result = rule.check(&ctx);
         let duration = start.elapsed();
 
-        assert!(result.is_ok(), "Fragment generation test failed: {}", description);
+        assert!(result.is_ok(), "Fragment generation test failed: {description}");
 
         // Fragment generation should be fast
         assert!(
             duration < Duration::from_millis(100),
-            "Fragment generation too slow: {} took {:?}",
-            description,
-            duration
+            "Fragment generation too slow: {description} took {duration:?}"
         );
 
-        println!("✓ Fragment generation: {} in {:?}", description, duration);
+        println!("✓ Fragment generation: {description} in {duration:?}");
     }
 }
 
@@ -451,30 +435,25 @@ fn test_performance_under_memory_pressure() {
 
     for doc_num in 0..document_count {
         let heading = "Large Document ".to_string() + &"word ".repeat(document_size);
-        let content = format!("# {}\n\n[Link](#large-document)", heading);
+        let content = format!("# {heading}\n\n[Link](#large-document)");
         let ctx = LintContext::new(&content);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
         let duration = start.elapsed();
 
-        assert!(result.is_ok(), "Memory pressure test failed at document {}", doc_num);
+        assert!(result.is_ok(), "Memory pressure test failed at document {doc_num}");
 
         // Performance should remain consistent under memory pressure
         assert!(
             duration < Duration::from_secs(2),
-            "Performance degraded under memory pressure: doc {} took {:?}",
-            doc_num,
-            duration
+            "Performance degraded under memory pressure: doc {doc_num} took {duration:?}"
         );
 
         if doc_num % 3 == 0 {
-            println!(
-                "✓ Memory pressure test: document {} processed in {:?}",
-                doc_num, duration
-            );
+            println!("✓ Memory pressure test: document {doc_num} processed in {duration:?}");
         }
     }
 
-    println!("✓ All {} documents processed under memory pressure", document_count);
+    println!("✓ All {document_count} documents processed under memory pressure");
 }

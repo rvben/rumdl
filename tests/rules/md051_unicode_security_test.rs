@@ -28,8 +28,8 @@ fn test_unicode_normalization_spoofing_prevention() {
 
     for (version1, version2) in normalization_pairs {
         // Test that both versions generate same fragment (if they should)
-        let content1 = format!("# {}\n\n[Link](#test)", version1);
-        let content2 = format!("# {}\n\n[Link](#test)", version2);
+        let content1 = format!("# {version1}\n\n[Link](#test)");
+        let content2 = format!("# {version2}\n\n[Link](#test)");
 
         let ctx1 = LintContext::new(&content1);
         let ctx2 = LintContext::new(&content2);
@@ -39,14 +39,12 @@ fn test_unicode_normalization_spoofing_prevention() {
 
         assert!(
             result1.is_ok() && result2.is_ok(),
-            "Unicode normalization test failed for: '{}' vs '{}'",
-            version1,
-            version2
+            "Unicode normalization test failed for: '{version1}' vs '{version2}'"
         );
 
         // Note: Whether these should generate the same fragment depends on the
         // normalization strategy. This test documents the current behavior.
-        println!("✓ Unicode normalization tested: '{}' vs '{}'", version1, version2);
+        println!("✓ Unicode normalization tested: '{version1}' vs '{version2}'");
     }
 }
 
@@ -70,11 +68,11 @@ fn test_zero_width_character_injection() {
     ];
 
     for (input, description) in zero_width_cases {
-        let content = format!("# {}\n\n[Link](#wordbreak)", input);
+        let content = format!("# {input}\n\n[Link](#wordbreak)");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "Zero-width character test failed: {}", description);
+        assert!(result.is_ok(), "Zero-width character test failed: {description}");
 
         // The fragment should be generated correctly without invisible chars
         let warnings = result.unwrap();
@@ -87,7 +85,7 @@ fn test_zero_width_character_injection() {
             warnings.len()
         );
 
-        println!("✓ Zero-width character test: {}", description);
+        println!("✓ Zero-width character test: {description}");
     }
 }
 
@@ -116,13 +114,13 @@ fn test_bidirectional_text_injection() {
     ];
 
     for (input, description) in bidi_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "Bidirectional text test failed: {}", description);
+        assert!(result.is_ok(), "Bidirectional text test failed: {description}");
 
-        println!("✓ Bidirectional text test: {}", description);
+        println!("✓ Bidirectional text test: {description}");
     }
 }
 
@@ -155,14 +153,14 @@ fn test_control_character_injection() {
     ];
 
     for (input, description) in control_char_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "Control character test failed: {}", description);
+        assert!(result.is_ok(), "Control character test failed: {description}");
 
         // Control characters should be handled gracefully
-        println!("✓ Control character test: {}", description);
+        println!("✓ Control character test: {description}");
     }
 }
 
@@ -196,14 +194,14 @@ fn test_emoji_symbol_edge_cases() {
     ];
 
     for (input, description) in emoji_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "Emoji test failed: {}", description);
+        assert!(result.is_ok(), "Emoji test failed: {description}");
 
         // Emoji should be handled according to GitHub spec (likely stripped)
-        println!("✓ Emoji test: {}", description);
+        println!("✓ Emoji test: {description}");
     }
 }
 
@@ -228,13 +226,13 @@ fn test_private_use_area_handling() {
     ];
 
     for (input, description) in private_use_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "Private use area test failed: {}", description);
+        assert!(result.is_ok(), "Private use area test failed: {description}");
 
-        println!("✓ Private use area test: {}", description);
+        println!("✓ Private use area test: {description}");
     }
 }
 
@@ -258,13 +256,13 @@ fn test_surrogate_pair_handling() {
     ];
 
     for (input, description) in high_codepoint_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "High codepoint test failed: {}", description);
+        assert!(result.is_ok(), "High codepoint test failed: {description}");
 
-        println!("✓ High codepoint test: {}", description);
+        println!("✓ High codepoint test: {description}");
     }
 }
 
@@ -294,13 +292,13 @@ fn test_unicode_case_folding_edge_cases() {
     ];
 
     for (input, description) in case_folding_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "Case folding test failed: {}", description);
+        assert!(result.is_ok(), "Case folding test failed: {description}");
 
-        println!("✓ Case folding test: {}", description);
+        println!("✓ Case folding test: {description}");
     }
 }
 
@@ -329,13 +327,13 @@ fn test_combining_character_sequences() {
     ];
 
     for (input, description) in combining_cases {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let result = rule.check(&ctx);
-        assert!(result.is_ok(), "Combining character test failed: {}", description);
+        assert!(result.is_ok(), "Combining character test failed: {description}");
 
-        println!("✓ Combining character test: {}", description);
+        println!("✓ Combining character test: {description}");
     }
 }
 
@@ -364,7 +362,7 @@ fn test_complex_unicode_security_scenarios() {
     ];
 
     for (input, description) in complex_scenarios {
-        let content = format!("# {}\n\n[Link](#test)", input);
+        let content = format!("# {input}\n\n[Link](#test)");
         let ctx = LintContext::new(&content);
 
         let start = std::time::Instant::now();
@@ -372,14 +370,12 @@ fn test_complex_unicode_security_scenarios() {
         let duration = start.elapsed();
 
         // Should handle all attacks gracefully and quickly
-        assert!(result.is_ok(), "Unicode security scenario failed: {}", description);
+        assert!(result.is_ok(), "Unicode security scenario failed: {description}");
         assert!(
             duration < std::time::Duration::from_secs(1),
-            "Security scenario took too long: {} - {:?}",
-            description,
-            duration
+            "Security scenario took too long: {description} - {duration:?}"
         );
 
-        println!("✓ Security scenario handled: {} in {:?}", description, duration);
+        println!("✓ Security scenario handled: {description} in {duration:?}");
     }
 }

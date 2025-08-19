@@ -11,8 +11,8 @@
 //! verified against the official tools/platforms.
 
 pub mod github;
-pub mod kramdown_gfm;  // Renamed from jekyll for clarity
 pub mod kramdown;
+pub mod kramdown_gfm; // Renamed from jekyll for clarity
 
 use serde::{Deserialize, Serialize};
 
@@ -53,7 +53,10 @@ mod tests {
     fn test_anchor_style_serde() {
         // Test serialization (uses primary names)
         assert_eq!(serde_json::to_string(&AnchorStyle::GitHub).unwrap(), "\"github\"");
-        assert_eq!(serde_json::to_string(&AnchorStyle::KramdownGfm).unwrap(), "\"kramdown-gfm\"");
+        assert_eq!(
+            serde_json::to_string(&AnchorStyle::KramdownGfm).unwrap(),
+            "\"kramdown-gfm\""
+        );
         assert_eq!(serde_json::to_string(&AnchorStyle::Kramdown).unwrap(), "\"kramdown\"");
 
         // Test deserialization with primary names
@@ -69,7 +72,7 @@ mod tests {
             serde_json::from_str::<AnchorStyle>("\"kramdown\"").unwrap(),
             AnchorStyle::Kramdown
         );
-        
+
         // Test backward compatibility: "jekyll" alias still works
         assert_eq!(
             serde_json::from_str::<AnchorStyle>("\"jekyll\"").unwrap(),
@@ -92,9 +95,9 @@ mod tests {
             let kramdown = AnchorStyle::Kramdown.generate_fragment(case);
 
             // Each style should produce a valid non-empty result
-            assert!(!github.is_empty(), "GitHub style failed for: {}", case);
-            assert!(!kramdown_gfm.is_empty(), "KramdownGfm style failed for: {}", case);
-            assert!(!kramdown.is_empty(), "Kramdown style failed for: {}", case);
+            assert!(!github.is_empty(), "GitHub style failed for: {case}");
+            assert!(!kramdown_gfm.is_empty(), "KramdownGfm style failed for: {case}");
+            assert!(!kramdown.is_empty(), "Kramdown style failed for: {case}");
         }
     }
 }

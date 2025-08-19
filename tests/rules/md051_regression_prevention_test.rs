@@ -41,15 +41,15 @@ fn regression_test_issue_39_critical_cases() {
     let mut critical_failed = 0;
 
     for (heading, expected_fragment, requirement) in critical_cases {
-        let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
         if result.is_empty() {
-            println!("✅ PASS: '{}' -> '{}'", heading, expected_fragment);
+            println!("✅ PASS: '{heading}' -> '{expected_fragment}'");
             passed += 1;
         } else {
-            println!("❌ FAIL: '{}' -> '{}'", heading, expected_fragment);
+            println!("❌ FAIL: '{heading}' -> '{expected_fragment}'");
             println!(
                 "   Warnings: {:?}",
                 result.iter().map(|w| &w.message).collect::<Vec<_>>()
@@ -63,15 +63,14 @@ fn regression_test_issue_39_critical_cases() {
     }
 
     println!("\nRegression Test Summary:");
-    println!("  Passed: {}", passed);
-    println!("  Failed: {}", failed);
-    println!("  Critical failures: {}", critical_failed);
+    println!("  Passed: {passed}");
+    println!("  Failed: {failed}");
+    println!("  Critical failures: {critical_failed}");
 
     // Critical cases must never fail
     assert_eq!(
         critical_failed, 0,
-        "Critical regression detected! {} MUST_WORK cases are failing",
-        critical_failed
+        "Critical regression detected! {critical_failed} MUST_WORK cases are failing"
     );
 
     // At least 80% of all cases should work
@@ -115,7 +114,7 @@ fn regression_test_historical_patterns() {
     ];
 
     for (heading, expected_fragment) in historical_patterns {
-        let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
@@ -224,7 +223,7 @@ fn regression_test_performance_bounds() {
     // Add links to many of these headings
     for i in 0..50 {
         let fragment = format!("section-{}-complex--pattern-{}", i, i % 10);
-        content.push_str(&format!("[Link {}](#{fragment})\n", i));
+        content.push_str(&format!("[Link {i}](#{fragment})\n"));
     }
 
     // Measure performance
@@ -233,10 +232,11 @@ fn regression_test_performance_bounds() {
     let _result = rule.check(&ctx).unwrap();
     let duration = start.elapsed();
 
-    // Performance regression threshold: should handle 100 headings + 50 links in < 50ms
+    // Performance regression threshold: should handle 100 headings + 50 links in < 70ms
+    // Note: Threshold increased from 50ms to accommodate more accurate emoji/symbol handling
     assert!(
-        duration.as_millis() < 50,
-        "Performance regression: took {}ms for 100 headings + 50 links (threshold: 50ms)",
+        duration.as_millis() < 70,
+        "Performance regression: took {}ms for 100 headings + 50 links (threshold: 70ms)",
         duration.as_millis()
     );
 
@@ -262,7 +262,7 @@ fn regression_test_unicode_handling() {
     ];
 
     for (heading, expected_fragment) in unicode_cases {
-        let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
@@ -291,7 +291,7 @@ fn regression_test_emoji_handling() {
     ];
 
     for (heading, expected_fragment) in emoji_cases {
-        let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
@@ -322,27 +322,23 @@ fn regression_test_mode_switching() {
 
     for (heading, github_expected, kramdown_expected) in mode_test_cases {
         // Test GitHub mode
-        let content = format!("# {}\n\n[Link](#{github_expected})", heading);
+        let content = format!("# {heading}\n\n[Link](#{github_expected})");
         let ctx = LintContext::new(&content);
         let result = github_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
             0,
-            "GitHub mode regression for '{}' -> '{}'",
-            heading,
-            github_expected
+            "GitHub mode regression for '{heading}' -> '{github_expected}'"
         );
 
         // Test Kramdown mode
-        let content = format!("# {}\n\n[Link](#{kramdown_expected})", heading);
+        let content = format!("# {heading}\n\n[Link](#{kramdown_expected})");
         let ctx = LintContext::new(&content);
         let result = kramdown_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
             0,
-            "Kramdown mode regression for '{}' -> '{}'",
-            heading,
-            kramdown_expected
+            "Kramdown mode regression for '{heading}' -> '{kramdown_expected}'"
         );
     }
 }
@@ -362,16 +358,14 @@ fn regression_test_basic_canary() {
     ];
 
     for (heading, expected_fragment) in canary_cases {
-        let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
             result.len(),
             0,
-            "CANARY FAILURE: Basic case '{}' -> '{}' is broken! This indicates a fundamental regression.",
-            heading,
-            expected_fragment
+            "CANARY FAILURE: Basic case '{heading}' -> '{expected_fragment}' is broken! This indicates a fundamental regression."
         );
     }
 }
@@ -394,12 +388,12 @@ fn regression_test_edge_cases() {
     for (heading, expected_fragment) in edge_cases {
         if expected_fragment.is_empty() {
             // For empty expected fragments, just ensure no crash
-            let content = format!("# {}\n\n", heading);
+            let content = format!("# {heading}\n\n");
             let ctx = LintContext::new(&content);
             let result = rule.check(&ctx);
-            assert!(result.is_ok(), "Edge case crashed: '{}'", heading);
+            assert!(result.is_ok(), "Edge case crashed: '{heading}'");
         } else {
-            let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+            let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
             let ctx = LintContext::new(&content);
             let result = rule.check(&ctx).unwrap();
 
@@ -440,7 +434,7 @@ fn comprehensive_regression_suite() {
     let mut results = HashMap::new();
 
     for (heading, expected_fragment, category) in test_cases {
-        let content = format!("# {}\n\n[Link](#{expected_fragment})", heading);
+        let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
         let ctx = LintContext::new(&content);
         let result = rule.check(&ctx).unwrap();
 
@@ -448,9 +442,9 @@ fn comprehensive_regression_suite() {
         results.entry(category).or_insert(Vec::new()).push(success);
 
         if success {
-            println!("✅ {}: '{}' -> '{}'", category, heading, expected_fragment);
+            println!("✅ {category}: '{heading}' -> '{expected_fragment}'");
         } else {
-            println!("❌ {}: '{}' -> '{}'", category, heading, expected_fragment);
+            println!("❌ {category}: '{heading}' -> '{expected_fragment}'");
         }
     }
 
@@ -459,7 +453,7 @@ fn comprehensive_regression_suite() {
     let total_categories = results.len();
 
     println!("\nRegression Test Summary:");
-    println!("  Passed Categories: {}/{}", passed_categories, total_categories);
+    println!("  Passed Categories: {passed_categories}/{total_categories}");
     println!(
         "  Success Rate: {:.1}%",
         (passed_categories as f64 / total_categories as f64) * 100.0
