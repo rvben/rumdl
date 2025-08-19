@@ -139,10 +139,10 @@ fn test_mixed_script_edge_cases() {
 fn test_whitespace_punctuation_interaction() {
     // Test edge cases where punctuation is adjacent to various whitespace - fixed with GitHub behavior
     assert_fragments(&[
-        ("A  &  B", "a--b"),                      // Multiple spaces around ampersand: & becomes --
-        ("Trailing & ", "trailing--"),            // Trailing space after punctuation: & becomes --
-        (" & Leading", "--leading"),              // Leading space before punctuation: space+& becomes --
-        ("Multiple   Spaces", "multiple-spaces"), // Multiple spaces without punctuation (no change)
+        ("A  &  B", "a--b"),                        // Multiple spaces around ampersand: & becomes --
+        ("Trailing & ", "trailing-"),               // Trailing ampersand with space: becomes single -
+        (" & Leading", "--leading"),                // Leading space before punctuation: space+& becomes --
+        ("Multiple   Spaces", "multiple---spaces"), // Multiple spaces preserved as multiple hyphens
     ]);
 
     // These test cases with tabs/newlines need special handling since they create invalid headings
@@ -460,7 +460,7 @@ fn test_custom_header_id_edge_cases() {
 [Link 2](#with-hyphens-in-id)
 [Link 3](#colon-style)
 [Link 4](#spaced-colon)
-[Link 5](#normal-heading)  
+[Link 5](#normal-heading)
 [Invalid](#missing-id)
 "#;
 

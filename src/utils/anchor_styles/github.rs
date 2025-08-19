@@ -175,11 +175,32 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     // No further processing needed for emoji markers
 
     // Step 9: Special symbol replacements
-    // Use regex to handle multiple spaces/tabs around ampersand
-    text = AMPERSAND_WITH_SPACES.replace_all(&text, "--").to_string(); // Ampersand with whitespace becomes --
-    text = COPYRIGHT_WITH_SPACES.replace_all(&text, "--").to_string(); // Copyright with whitespace becomes --
-    text = text.replace("&", ""); // Ampersand without spaces - just remove it
-    text = text.replace("©", ""); // Copyright without spaces - just remove it
+    // Handle ampersand based on position and surrounding spaces
+    // GitHub's behavior:
+    // - "& text" at start → "--text"
+    // - "text &" at end → "text-"
+    // - "text & text" in middle → "text--text"
+    // - "&text" (no space) → "text"
+
+    // First handle ampersand at start with space
+    if text.starts_with("& ") {
+        text = text.replacen("& ", "--", 1);
+    }
+    // Then handle ampersand at end with space
+    else if text.ends_with(" &") {
+        text = text[..text.len() - 2].to_string() + "-";
+    }
+    // Then handle ampersand with spaces on both sides
+    else {
+        text = AMPERSAND_WITH_SPACES.replace_all(&text, "--").to_string();
+    }
+
+    // Handle copyright similarly
+    text = COPYRIGHT_WITH_SPACES.replace_all(&text, "--").to_string();
+
+    // Remove ampersand and copyright without spaces
+    text = text.replace("&", "");
+    text = text.replace("©", "");
 
     // Step 10: Character-by-character processing
     let mut result = String::with_capacity(text.len()); // Pre-allocate for efficiency
