@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.123] - 2025-08-21
 
+## [0.0.123] - 2025-08-21
+
 ### Added
 - **MD013**: Comprehensive markdown pattern preservation during text reflow
   - Preserves reference links, footnotes, math formulas, wiki links, and more
@@ -394,7 +396,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.122...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.123...HEAD
+[0.0.123]: https://github.com/rvben/rumdl/compare/v0.0.122...v0.0.123
 [0.0.122]: https://github.com/rvben/rumdl/compare/v0.0.121...v0.0.122
 [0.0.121]: https://github.com/rvben/rumdl/compare/v0.0.120...v0.0.121
 [0.0.120]: https://github.com/rvben/rumdl/compare/v0.0.119...v0.0.120
