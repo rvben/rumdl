@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.123] - 2025-08-21
+
+### Added
+- **MD013**: Comprehensive markdown pattern preservation during text reflow
+  - Preserves reference links, footnotes, math formulas, wiki links, and more
+  - Centralized regex patterns for better maintainability
+
+### Fixed
+- **CLI**: Correct unfixable rules status display and fix counts (closes #56)
+  - Rules marked as unfixable now show `[unfixable]` in yellow instead of `[fixed]`
+  - Fix count now correctly excludes unfixable rules (e.g., "3 of 6" instead of "6 of 6")
+  - Added FixCapability enum to Rule trait for compile-time safety
+- **MD013**: Preserve reference links during text reflow
+  - Reference-style links are now properly preserved when reflowing text
+  - Fixed indicator display to correctly show `[fixed]` when issues are resolved
+- **Tests**: Mark kramdown definition list doctest as text to fix test failures
+
+### Changed
+- **Internal**: Centralized markdown pattern regexes and extended reflow support
+  - Improved code organization and reduced duplication
+  - Better performance through shared regex compilation
+
 ## [0.0.122] - 2025-08-19
 
 ## [0.0.121] - 2025-08-19
