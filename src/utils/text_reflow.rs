@@ -3,6 +3,23 @@
 /// This module implements text wrapping/reflow functionality that preserves
 /// Markdown elements like links, emphasis, code spans, etc.
 ///
+
+use fancy_regex::Regex as FancyRegex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    /// Pattern for reference links: [text][reference]
+    /// Uses fancy regex to handle escaped brackets and nested content
+    static ref REF_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
+    
+    /// Pattern for shortcut reference links: [reference]
+    /// Must not be preceded by ] or ) (to avoid matching second part of [text][ref] or reversed links (url)[text])
+    /// Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
+    static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
+    
+    /// Pattern for inline links: [text](url) - to detect and skip them before reference links
+    static ref INLINE_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();
+}
 /// Options for reflowing text
 #[derive(Clone)]
 pub struct ReflowOptions {
@@ -43,8 +60,14 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
 enum Element {
     /// Plain text that can be wrapped
     Text(String),
-    /// A complete markdown link [text](url)
+    /// A complete markdown inline link [text](url)
     Link { text: String, url: String },
+    /// A complete markdown reference link [text][ref]
+    ReferenceLink { text: String, reference: String },
+    /// A complete markdown empty reference link [text][]
+    EmptyReferenceLink { text: String },
+    /// A complete markdown shortcut reference link [ref]
+    ShortcutReference { reference: String },
     /// Inline code `code`
     Code(String),
     /// Bold text **text**
@@ -58,6 +81,9 @@ impl std::fmt::Display for Element {
         match self {
             Element::Text(s) => write!(f, "{s}"),
             Element::Link { text, url } => write!(f, "[{text}]({url})"),
+            Element::ReferenceLink { text, reference } => write!(f, "[{text}][{reference}]"),
+            Element::EmptyReferenceLink { text } => write!(f, "[{text}][]"),
+            Element::ShortcutReference { reference } => write!(f, "[{reference}]"),
             Element::Code(s) => write!(f, "`{s}`"),
             Element::Bold(s) => write!(f, "**{s}**"),
             Element::Italic(s) => write!(f, "*{s}*"),
@@ -70,6 +96,9 @@ impl Element {
         match self {
             Element::Text(s) => s.chars().count(),
             Element::Link { text, url } => text.chars().count() + url.chars().count() + 4, // [text](url)
+            Element::ReferenceLink { text, reference } => text.chars().count() + reference.chars().count() + 4, // [text][ref]
+            Element::EmptyReferenceLink { text } => text.chars().count() + 4, // [text][]
+            Element::ShortcutReference { reference } => reference.chars().count() + 2, // [ref]
             Element::Code(s) => s.chars().count() + 2,                                     // `code`
             Element::Bold(s) => s.chars().count() + 4,                                     // **text**
             Element::Italic(s) => s.chars().count() + 2,                                   // *text*
@@ -78,16 +107,47 @@ impl Element {
 }
 
 /// Parse markdown elements from text preserving the raw syntax
+/// 
+/// Detection order is critical:
+/// 1. Inline links [text](url) - must be detected first to avoid conflicts
+/// 2. Reference links [text][ref] - detected before shortcut references
+/// 3. Empty reference links [text][] - a special case of reference links
+/// 4. Shortcut reference links [ref] - detected last to avoid false positives
+/// 5. Other elements (code, bold, italic) - processed normally
 fn parse_markdown_elements(text: &str) -> Vec<Element> {
     let mut elements = Vec::new();
     let mut remaining = text;
 
     while !remaining.is_empty() {
-        // Find the next special character
+        // Find the earliest occurrence of any markdown pattern
+        let mut earliest_match: Option<(usize, &str, fancy_regex::Match)> = None;
+        
+        // Check for inline links first - [text](url)
+        if let Ok(Some(m)) = INLINE_LINK_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "inline_link", m));
+            }
+        }
+        
+        // Check for reference links - [text][ref]
+        if let Ok(Some(m)) = REF_LINK_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "ref_link", m));
+            }
+        }
+        
+        // Check for shortcut reference links - [ref]
+        // Only check if we haven't found an earlier pattern that would conflict
+        if let Ok(Some(m)) = SHORTCUT_REF_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "shortcut_ref", m));
+            }
+        }
+
+        // Find earliest non-link special characters
         let mut next_special = remaining.len();
         let mut special_type = "";
 
-        // Find earliest special marker
         if let Some(pos) = remaining.find('`')
             && pos < next_special
         {
@@ -107,86 +167,134 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
             next_special = pos;
             special_type = "italic";
         }
-        if let Some(pos) = remaining.find('[')
-            && pos < next_special
-        {
-            next_special = pos;
-            special_type = "link";
-        }
 
-        // Add any text before the special character
-        if next_special > 0 && next_special < remaining.len() {
-            elements.push(Element::Text(remaining[..next_special].to_string()));
-            remaining = &remaining[next_special..];
-        }
+        // Determine which pattern to process first
+        let should_process_markdown_link = if let Some((pos, _, _)) = earliest_match {
+            pos < next_special
+        } else {
+            false
+        };
 
-        // Process the special element
-        match special_type {
-            "code" => {
-                // Find end of code
-                if let Some(code_end) = remaining[1..].find('`') {
-                    let code = &remaining[1..1 + code_end];
-                    elements.push(Element::Code(code.to_string()));
-                    remaining = &remaining[1 + code_end + 1..];
-                } else {
-                    // No closing backtick, treat as text
-                    elements.push(Element::Text(remaining.to_string()));
-                    break;
-                }
+        if should_process_markdown_link {
+            let (pos, pattern_type, match_obj) = earliest_match.unwrap();
+            
+            // Add any text before the match
+            if pos > 0 {
+                elements.push(Element::Text(remaining[..pos].to_string()));
             }
-            "bold" => {
-                // Check for bold text
-                if let Some(bold_end) = remaining[2..].find("**") {
-                    let bold_text = &remaining[2..2 + bold_end];
-                    elements.push(Element::Bold(bold_text.to_string()));
-                    remaining = &remaining[2 + bold_end + 2..];
-                } else {
-                    // No closing **, treat as text
-                    elements.push(Element::Text("**".to_string()));
-                    remaining = &remaining[2..];
-                }
-            }
-            "italic" => {
-                // Check for italic text
-                if let Some(italic_end) = remaining[1..].find('*') {
-                    let italic_text = &remaining[1..1 + italic_end];
-                    elements.push(Element::Italic(italic_text.to_string()));
-                    remaining = &remaining[1 + italic_end + 1..];
-                } else {
-                    // No closing *, treat as text
-                    elements.push(Element::Text("*".to_string()));
-                    remaining = &remaining[1..];
-                }
-            }
-            "link" => {
-                // Check for markdown link pattern
-                if let Some(link_text_end) = remaining.find("](") {
-                    let link_url_start = link_text_end + 2;
-                    if let Some(link_url_end) = remaining[link_url_start..].find(')') {
-                        // Add link as atomic element
-                        let link_text = &remaining[1..link_text_end];
-                        let link_url = &remaining[link_url_start..link_url_start + link_url_end];
+            
+            // Process the matched pattern
+            match pattern_type {
+                "inline_link" => {
+                    if let Ok(Some(caps)) = INLINE_LINK_REGEX.captures(remaining) {
+                        let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
                         elements.push(Element::Link {
-                            text: link_text.to_string(),
-                            url: link_url.to_string(),
+                            text: text.to_string(),
+                            url: url.to_string(),
                         });
-
-                        remaining = &remaining[link_url_start + link_url_end + 1..];
+                        remaining = &remaining[match_obj.end()..];
                     } else {
-                        // No closing paren, add as text
+                        // Fallback - shouldn't happen
                         elements.push(Element::Text("[".to_string()));
                         remaining = &remaining[1..];
                     }
-                } else {
-                    // No ]( pattern, add as text
+                }
+                "ref_link" => {
+                    if let Ok(Some(caps)) = REF_LINK_REGEX.captures(remaining) {
+                        let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let reference = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        
+                        if reference.is_empty() {
+                            // Empty reference link [text][]
+                            elements.push(Element::EmptyReferenceLink {
+                                text: text.to_string(),
+                            });
+                        } else {
+                            // Regular reference link [text][ref]
+                            elements.push(Element::ReferenceLink {
+                                text: text.to_string(),
+                                reference: reference.to_string(),
+                            });
+                        }
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        // Fallback - shouldn't happen
+                        elements.push(Element::Text("[".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                "shortcut_ref" => {
+                    if let Ok(Some(caps)) = SHORTCUT_REF_REGEX.captures(remaining) {
+                        let reference = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::ShortcutReference {
+                            reference: reference.to_string(),
+                        });
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        // Fallback - shouldn't happen
+                        elements.push(Element::Text("[".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                _ => {
+                    // Unknown pattern, treat as text
                     elements.push(Element::Text("[".to_string()));
                     remaining = &remaining[1..];
                 }
             }
-            _ => {
-                // No special elements found, add all as text
-                elements.push(Element::Text(remaining.to_string()));
-                break;
+        } else {
+            // Process non-link special characters
+            
+            // Add any text before the special character
+            if next_special > 0 && next_special < remaining.len() {
+                elements.push(Element::Text(remaining[..next_special].to_string()));
+                remaining = &remaining[next_special..];
+            }
+
+            // Process the special element
+            match special_type {
+                "code" => {
+                    // Find end of code
+                    if let Some(code_end) = remaining[1..].find('`') {
+                        let code = &remaining[1..1 + code_end];
+                        elements.push(Element::Code(code.to_string()));
+                        remaining = &remaining[1 + code_end + 1..];
+                    } else {
+                        // No closing backtick, treat as text
+                        elements.push(Element::Text(remaining.to_string()));
+                        break;
+                    }
+                }
+                "bold" => {
+                    // Check for bold text
+                    if let Some(bold_end) = remaining[2..].find("**") {
+                        let bold_text = &remaining[2..2 + bold_end];
+                        elements.push(Element::Bold(bold_text.to_string()));
+                        remaining = &remaining[2 + bold_end + 2..];
+                    } else {
+                        // No closing **, treat as text
+                        elements.push(Element::Text("**".to_string()));
+                        remaining = &remaining[2..];
+                    }
+                }
+                "italic" => {
+                    // Check for italic text
+                    if let Some(italic_end) = remaining[1..].find('*') {
+                        let italic_text = &remaining[1..1 + italic_end];
+                        elements.push(Element::Italic(italic_text.to_string()));
+                        remaining = &remaining[1 + italic_end + 1..];
+                    } else {
+                        // No closing *, treat as text
+                        elements.push(Element::Text("*".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                _ => {
+                    // No special elements found, add all remaining text
+                    elements.push(Element::Text(remaining.to_string()));
+                    break;
+                }
             }
         }
     }
@@ -227,7 +335,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                 }
             }
         } else {
-            // For non-text elements (code, links), check if they fit
+            // For non-text elements (code, links, references), treat as atomic units
+            // These should never be broken across lines
             if current_length > 0 && current_length + 1 + element_len > options.line_length {
                 // Start a new line
                 lines.push(current_line.trim().to_string());
@@ -501,6 +610,103 @@ mod tests {
         // Verify link is preserved intact
         let joined = result.join(" ");
         assert!(joined.contains("[this link](https://example.com/very/long/url)"));
+    }
+
+    #[test]
+    fn test_reference_link_patterns_fixed() {
+        let options = ReflowOptions {
+            line_length: 30,
+            break_on_sentences: true,
+            preserve_breaks: false,
+        };
+
+        // Test cases that verify reference links are preserved as atomic units
+        let test_cases = vec![
+            // Reference link: [text][ref] - should be preserved intact
+            ("Check out [text][ref] for details", vec!["[text][ref]"]),
+            
+            // Empty reference: [text][] - should be preserved intact
+            ("See [text][] for info", vec!["[text][]"]),
+            
+            // Shortcut reference: [homepage] - should be preserved intact
+            ("Visit [homepage] today", vec!["[homepage]"]),
+            
+            // Multiple reference links in one line
+            ("Links: [first][ref1] and [second][ref2] here", vec!["[first][ref1]", "[second][ref2]"]),
+            
+            // Mixed inline and reference links
+            ("See [inline](url) and [reference][ref] links", vec!["[inline](url)", "[reference][ref]"]),
+        ];
+
+        for (input, expected_patterns) in test_cases {
+            println!("\nTesting: {}", input);
+            let result = reflow_line(input, &options);
+            let joined = result.join(" ");
+            println!("Result:  {}", joined);
+            
+            // Verify all expected patterns are preserved
+            for expected_pattern in expected_patterns {
+                assert!(
+                    joined.contains(&expected_pattern),
+                    "Expected '{}' to be preserved in '{}', but got '{}'",
+                    expected_pattern,
+                    input,
+                    joined
+                );
+            }
+            
+            // Verify no broken patterns exist (spaces inside brackets)
+            assert!(
+                !joined.contains("[ ") || !joined.contains("] ["),
+                "Detected broken reference link pattern with spaces inside brackets in '{}'",
+                joined
+            );
+        }
+    }
+
+    #[test]
+    fn test_reference_link_edge_cases() {
+        let options = ReflowOptions {
+            line_length: 40,
+            break_on_sentences: true,
+            preserve_breaks: false,
+        };
+
+        // Test cases for edge cases and potential conflicts
+        let test_cases = vec![
+            // Escaped brackets should be treated as regular text
+            ("Text with \\[escaped\\] brackets", vec!["\\[escaped\\]"]),
+            
+            // Nested brackets in reference links
+            ("Link [text with [nested] content][ref]", vec!["[text with [nested] content][ref]"]),
+            
+            // Reference link followed by inline link
+            ("First [ref][link] then [inline](url)", vec!["[ref][link]", "[inline](url)"]),
+            
+            // Shortcut reference that might conflict with other patterns
+            ("Array [0] and reference [link] here", vec!["[0]", "[link]"]),
+            
+            // Empty reference with complex text
+            ("Complex [text with *emphasis*][] reference", vec!["[text with *emphasis*][]"]),
+        ];
+
+        for (input, expected_patterns) in test_cases {
+            println!("\nTesting edge case: {}", input);
+            let result = reflow_line(input, &options);
+            let joined = result.join(" ");
+            println!("Result: {}", joined);
+            
+            // Verify all expected patterns are preserved
+            for expected_pattern in expected_patterns {
+                assert!(
+                    joined.contains(&expected_pattern),
+                    "Expected '{}' to be preserved in '{}', but got '{}'",
+                    expected_pattern,
+                    input,
+                    joined
+                );
+            }
+        }
     }
 
     #[test]
