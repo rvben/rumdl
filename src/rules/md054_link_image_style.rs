@@ -283,6 +283,10 @@ impl Rule for MD054LinkImageStyle {
         ))
     }
 
+    fn fix_capability(&self) -> crate::rule::FixCapability {
+        crate::rule::FixCapability::Unfixable
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

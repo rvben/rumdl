@@ -425,6 +425,10 @@ impl Rule for MD033NoInlineHtml {
         Ok(ctx.content.to_string())
     }
 
+    fn fix_capability(&self) -> crate::rule::FixCapability {
+        crate::rule::FixCapability::Unfixable
+    }
+
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Html

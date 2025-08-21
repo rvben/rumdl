@@ -81,6 +81,17 @@ pub enum RuleCategory {
     Other,
 }
 
+/// Capability of a rule to fix issues
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixCapability {
+    /// Rule can automatically fix all violations it detects
+    FullyFixable,
+    /// Rule can fix some violations based on context
+    ConditionallyFixable,
+    /// Rule cannot fix violations (by design)
+    Unfixable,
+}
+
 /// Remove marker /// TRAIT_MARKER_V1
 pub trait Rule: DynClone + Send + Sync {
     fn name(&self) -> &'static str;
@@ -146,6 +157,11 @@ pub trait Rule: DynClone + Send + Sync {
     /// not just the inherent impl.
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         None
+    }
+
+    /// Declares the fix capability of this rule
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::FullyFixable // Safe default for backward compatibility
     }
 
     /// Factory: create a rule from config (if present), or use defaults.

@@ -2355,6 +2355,26 @@ fn print_statistics(warnings: &[rumdl::rule::LintWarning]) {
     );
 }
 
+// Helper function to check if a rule is actually fixable based on configuration
+fn is_rule_actually_fixable(config: &rumdl_config::Config, rule_name: &str) -> bool {
+    // Check unfixable list
+    if config
+        .global
+        .unfixable
+        .iter()
+        .any(|r| r.eq_ignore_ascii_case(rule_name))
+    {
+        return false;
+    }
+
+    // Check fixable list if specified
+    if !config.global.fixable.is_empty() {
+        return config.global.fixable.iter().any(|r| r.eq_ignore_ascii_case(rule_name));
+    }
+
+    true
+}
+
 // Process file with output formatter
 #[allow(clippy::too_many_arguments)]
 fn process_file_with_formatter(
@@ -2371,7 +2391,7 @@ fn process_file_with_formatter(
 
     // Call the original process_file_inner to get warnings
     let (all_warnings, mut content, total_warnings, fixable_warnings) =
-        process_file_inner(file_path, rules, verbose, quiet);
+        process_file_inner(file_path, rules, verbose, quiet, config);
 
     if total_warnings == 0 {
         return (false, 0, 0, 0, Vec::new());
@@ -2408,14 +2428,25 @@ fn process_file_with_formatter(
             // Create a custom formatter that shows [fixed] instead of [*]
             let mut output = String::new();
             for warning in &all_warnings {
+                let rule_name = warning.rule_name.unwrap_or("unknown");
+
+                // Check if the rule is actually fixable based on configuration
+                let is_fixable = is_rule_actually_fixable(config, rule_name);
+
                 let was_fixed = warning.fix.is_some()
+                    && is_fixable
                     && !remaining_warnings.iter().any(|w| {
                         w.line == warning.line && w.column == warning.column && w.rule_name == warning.rule_name
                     });
 
-                let rule_name = warning.rule_name.unwrap_or("unknown");
-                let fix_indicator = if was_fixed {
-                    " [fixed]".green().to_string()
+                let fix_indicator = if warning.fix.is_some() {
+                    if !is_fixable {
+                        " [unfixable]".yellow().to_string()
+                    } else if was_fixed {
+                        " [fixed]".green().to_string()
+                    } else {
+                        String::new()
+                    }
                 } else {
                     String::new()
                 };
@@ -2454,6 +2485,7 @@ fn process_file_inner(
     rules: &[Box<dyn Rule>],
     verbose: bool,
     quiet: bool,
+    config: &rumdl_config::Config,
 ) -> (Vec<rumdl::rule::LintWarning>, String, usize, usize) {
     use std::time::Instant;
 
@@ -2507,8 +2539,11 @@ fn process_file_inner(
 
     let total_warnings = all_warnings.len();
 
-    // Count fixable issues
-    let fixable_warnings = all_warnings.iter().filter(|w| w.fix.is_some()).count();
+    // Count fixable issues (excluding unfixable rules)
+    let fixable_warnings = all_warnings
+        .iter()
+        .filter(|w| w.fix.is_some() && w.rule_name.is_some_and(|name| is_rule_actually_fixable(config, name)))
+        .count();
 
     let lint_end_time = Instant::now();
     let lint_time = lint_end_time.duration_since(lint_start);
