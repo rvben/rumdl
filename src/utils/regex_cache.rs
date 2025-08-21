@@ -269,6 +269,25 @@ lazy_static! {
     
     // Footnote reference: [^note]
     pub static ref FOOTNOTE_REF_REGEX: FancyRegex = FancyRegex::new(r"\[\^([^\]]+)\]").unwrap();
+    
+    // Strikethrough with fancy regex: ~~text~~
+    pub static ref STRIKETHROUGH_FANCY_REGEX: FancyRegex = FancyRegex::new(r"~~([^~]+)~~").unwrap();
+    
+    // Wiki-style links: [[wiki]] or [[wiki|display text]]
+    pub static ref WIKI_LINK_REGEX: FancyRegex = FancyRegex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    
+    // Math formulas: $inline$ or $$display$$
+    pub static ref INLINE_MATH_REGEX: FancyRegex = FancyRegex::new(r"(?<!\$)\$(?!\$)([^\$]+)\$(?!\$)").unwrap();
+    pub static ref DISPLAY_MATH_REGEX: FancyRegex = FancyRegex::new(r"\$\$([^\$]+)\$\$").unwrap();
+    
+    // Emoji shortcodes: :emoji:
+    pub static ref EMOJI_SHORTCODE_REGEX: FancyRegex = FancyRegex::new(r":([a-zA-Z0-9_+-]+):").unwrap();
+    
+    // HTML tags (opening, closing, self-closing)
+    pub static ref HTML_TAG_PATTERN: FancyRegex = FancyRegex::new(r"</?[a-zA-Z][^>]*>|<[a-zA-Z][^>]*/\s*>").unwrap();
+    
+    // HTML entities: &nbsp; &mdash; etc
+    pub static ref HTML_ENTITY_REGEX: FancyRegex = FancyRegex::new(r"&[a-zA-Z][a-zA-Z0-9]*;|&#\d+;|&#x[0-9a-fA-F]+;").unwrap();
 }
 
 // Fourth lazy_static block for additional patterns

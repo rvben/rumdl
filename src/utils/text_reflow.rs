@@ -5,8 +5,9 @@
 ///
 
 use crate::utils::regex_cache::{
-    FOOTNOTE_REF_REGEX, INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, REF_IMAGE_REGEX, REF_LINK_REGEX,
-    SHORTCUT_REF_REGEX,
+    DISPLAY_MATH_REGEX, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
+    INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX, REF_IMAGE_REGEX, REF_LINK_REGEX,
+    SHORTCUT_REF_REGEX, STRIKETHROUGH_FANCY_REGEX, WIKI_LINK_REGEX,
 };
 /// Options for reflowing text
 #[derive(Clone)]
@@ -64,6 +65,20 @@ enum Element {
     EmptyReferenceImage { alt: String },
     /// Footnote reference [^note]
     FootnoteReference { note: String },
+    /// Strikethrough text ~~text~~
+    Strikethrough(String),
+    /// Wiki-style link [[wiki]] or [[wiki|text]]
+    WikiLink(String),
+    /// Inline math $math$
+    InlineMath(String),
+    /// Display math $$math$$
+    DisplayMath(String),
+    /// Emoji shortcode :emoji:
+    EmojiShortcode(String),
+    /// HTML tag <tag> or </tag> or <tag/>
+    HtmlTag(String),
+    /// HTML entity &nbsp; or &#123;
+    HtmlEntity(String),
     /// Inline code `code`
     Code(String),
     /// Bold text **text**
@@ -84,6 +99,13 @@ impl std::fmt::Display for Element {
             Element::ReferenceImage { alt, reference } => write!(f, "![{alt}][{reference}]"),
             Element::EmptyReferenceImage { alt } => write!(f, "![{alt}][]"),
             Element::FootnoteReference { note } => write!(f, "[^{note}]"),
+            Element::Strikethrough(s) => write!(f, "~~{s}~~"),
+            Element::WikiLink(s) => write!(f, "[[{s}]]"),
+            Element::InlineMath(s) => write!(f, "${s}$"),
+            Element::DisplayMath(s) => write!(f, "$${s}$$"),
+            Element::EmojiShortcode(s) => write!(f, ":{s}:"),
+            Element::HtmlTag(s) => write!(f, "{s}"),
+            Element::HtmlEntity(s) => write!(f, "{s}"),
             Element::Code(s) => write!(f, "`{s}`"),
             Element::Bold(s) => write!(f, "**{s}**"),
             Element::Italic(s) => write!(f, "*{s}*"),
@@ -103,6 +125,13 @@ impl Element {
             Element::ReferenceImage { alt, reference } => alt.chars().count() + reference.chars().count() + 5, // ![alt][ref]
             Element::EmptyReferenceImage { alt } => alt.chars().count() + 5, // ![alt][]
             Element::FootnoteReference { note } => note.chars().count() + 3, // [^note]
+            Element::Strikethrough(s) => s.chars().count() + 4, // ~~text~~
+            Element::WikiLink(s) => s.chars().count() + 4, // [[wiki]]
+            Element::InlineMath(s) => s.chars().count() + 2, // $math$
+            Element::DisplayMath(s) => s.chars().count() + 4, // $$math$$
+            Element::EmojiShortcode(s) => s.chars().count() + 2, // :emoji:
+            Element::HtmlTag(s) => s.chars().count(), // <tag> - already includes brackets
+            Element::HtmlEntity(s) => s.chars().count(), // &nbsp; - already complete
             Element::Code(s) => s.chars().count() + 2,                                     // `code`
             Element::Bold(s) => s.chars().count() + 4,                                     // **text**
             Element::Italic(s) => s.chars().count() + 2,                                   // *text*
@@ -167,6 +196,55 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
         if let Ok(Some(m)) = SHORTCUT_REF_REGEX.find(remaining) {
             if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
                 earliest_match = Some((m.start(), "shortcut_ref", m));
+            }
+        }
+        
+        // Check for wiki-style links - [[wiki]]
+        if let Ok(Some(m)) = WIKI_LINK_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "wiki_link", m));
+            }
+        }
+        
+        // Check for display math first (before inline) - $$math$$
+        if let Ok(Some(m)) = DISPLAY_MATH_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "display_math", m));
+            }
+        }
+        
+        // Check for inline math - $math$
+        if let Ok(Some(m)) = INLINE_MATH_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "inline_math", m));
+            }
+        }
+        
+        // Check for strikethrough - ~~text~~
+        if let Ok(Some(m)) = STRIKETHROUGH_FANCY_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "strikethrough", m));
+            }
+        }
+        
+        // Check for emoji shortcodes - :emoji:
+        if let Ok(Some(m)) = EMOJI_SHORTCODE_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "emoji", m));
+            }
+        }
+        
+        // Check for HTML entities - &nbsp; etc
+        if let Ok(Some(m)) = HTML_ENTITY_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "html_entity", m));
+            }
+        }
+        
+        // Check for HTML tags - <tag> </tag> <tag/>
+        if let Ok(Some(m)) = HTML_TAG_PATTERN.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "html_tag", m));
             }
         }
 
@@ -309,6 +387,66 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                         elements.push(Element::Text("[".to_string()));
                         remaining = &remaining[1..];
                     }
+                }
+                "wiki_link" => {
+                    if let Ok(Some(caps)) = WIKI_LINK_REGEX.captures(remaining) {
+                        let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::WikiLink(content.to_string()));
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("[[".to_string()));
+                        remaining = &remaining[2..];
+                    }
+                }
+                "display_math" => {
+                    if let Ok(Some(caps)) = DISPLAY_MATH_REGEX.captures(remaining) {
+                        let math = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::DisplayMath(math.to_string()));
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("$$".to_string()));
+                        remaining = &remaining[2..];
+                    }
+                }
+                "inline_math" => {
+                    if let Ok(Some(caps)) = INLINE_MATH_REGEX.captures(remaining) {
+                        let math = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::InlineMath(math.to_string()));
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("$".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                "strikethrough" => {
+                    if let Ok(Some(caps)) = STRIKETHROUGH_FANCY_REGEX.captures(remaining) {
+                        let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::Strikethrough(text.to_string()));
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("~~".to_string()));
+                        remaining = &remaining[2..];
+                    }
+                }
+                "emoji" => {
+                    if let Ok(Some(caps)) = EMOJI_SHORTCODE_REGEX.captures(remaining) {
+                        let emoji = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::EmojiShortcode(emoji.to_string()));
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text(":".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                "html_entity" => {
+                    // HTML entities are captured whole
+                    elements.push(Element::HtmlEntity(remaining[..match_obj.end()].to_string()));
+                    remaining = &remaining[match_obj.end()..];
+                }
+                "html_tag" => {
+                    // HTML tags are captured whole
+                    elements.push(Element::HtmlTag(remaining[..match_obj.end()].to_string()));
+                    remaining = &remaining[match_obj.end()..];
                 }
                 _ => {
                     // Unknown pattern, treat as text
@@ -832,6 +970,67 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_extended_markdown_patterns() {
+        let options = ReflowOptions {
+            line_length: 40,
+            ..Default::default()
+        };
+
+        let test_cases = vec![
+            // Strikethrough
+            ("Text with ~~strikethrough~~ preserved", vec!["~~strikethrough~~"]),
+            // Wiki links
+            ("Check [[wiki link]] and [[page|display]]", vec!["[[wiki link]]", "[[page|display]]"]),
+            // Math
+            ("Inline $x^2 + y^2$ and display $$\\int f(x) dx$$", vec!["$x^2 + y^2$", "$$\\int f(x) dx$$"]),
+            // Emoji
+            ("Use :smile: and :heart: emojis", vec![":smile:", ":heart:"]),
+            // HTML tags
+            ("Text with <span>tag</span> and <br/>", vec!["<span>", "</span>", "<br/>"]),
+            // HTML entities
+            ("Non-breaking&nbsp;space and em&mdash;dash", vec!["&nbsp;", "&mdash;"]),
+        ];
+
+        for (input, expected_patterns) in test_cases {
+            let result = reflow_line(input, &options);
+            let joined = result.join(" ");
+            
+            for pattern in expected_patterns {
+                assert!(
+                    joined.contains(pattern),
+                    "Expected '{}' to be preserved in '{}', but got '{}'",
+                    pattern,
+                    input,
+                    joined
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_complex_mixed_patterns() {
+        let options = ReflowOptions {
+            line_length: 50,
+            ..Default::default()
+        };
+
+        // Test that multiple pattern types work together
+        let input = "Line with **bold**, `code`, [link](url), ![image](img), ~~strike~~, $math$, :emoji:, and <tag> all together";
+        let result = reflow_line(input, &options);
+        let joined = result.join(" ");
+        
+        // All patterns should be preserved
+        assert!(joined.contains("**bold**"));
+        assert!(joined.contains("`code`"));
+        assert!(joined.contains("[link](url)"));
+        assert!(joined.contains("![image](img)"));
+        assert!(joined.contains("~~strike~~"));
+        assert!(joined.contains("$math$"));
+        assert!(joined.contains(":emoji:"));
+        assert!(joined.contains("<tag>"));
     }
 
     #[test]
