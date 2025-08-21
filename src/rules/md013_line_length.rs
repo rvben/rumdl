@@ -209,8 +209,6 @@ impl Rule for MD013LineLength {
             content.lines().collect()
         };
 
-        // Pre-compute LineIndex for efficient byte range calculations
-        let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
 
         // Create a quick lookup set for heading lines
         let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
@@ -309,40 +307,19 @@ impl Rule for MD013LineLength {
                 }
             }
 
-            // Generate simplified fix (avoid expensive sentence splitting for now)
-            let fix = if !self.should_skip_line_for_fix(line, line_num, structure) {
-                // First try trimming trailing whitespace
-                let last_char = line.chars().last();
-                if last_char == Some(' ') || last_char == Some('\t') {
-                    let trimmed = line.trim_end();
-                    // Calculate trimmed length to avoid re-scanning
-                    let trimmed_len = self.calculate_effective_length(trimmed);
-                    if trimmed_len <= line_limit {
-                        let line_start = line_index.line_col_to_byte_range(line_number, 1).start;
-                        let line_end = if line_number < lines.len() {
-                            line_index.line_col_to_byte_range(line_number + 1, 1).start - 1
-                        } else {
-                            content.len()
-                        };
-                        Some(crate::rule::Fix {
-                            range: line_start..line_end,
-                            replacement: trimmed.to_string(),
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None // Skip expensive sentence splitting for performance
-                }
+            // Only provide a fix if reflow is enabled
+            let fix = if self.config.enable_reflow && !self.should_skip_line_for_fix(line, line_num, structure) {
+                // Provide a placeholder fix to indicate that reflow will happen
+                // The actual reflow is done in the fix() method
+                Some(crate::rule::Fix {
+                    range: 0..0,  // Placeholder range
+                    replacement: String::new(),  // Placeholder replacement
+                })
             } else {
                 None
             };
 
-            let message = if let Some(ref _fix_obj) = fix {
-                format!("Line length {effective_length} exceeds {line_limit} characters (can trim whitespace)")
-            } else {
-                format!("Line length {effective_length} exceeds {line_limit} characters")
-            };
+            let message = format!("Line length {effective_length} exceeds {line_limit} characters");
 
             // Calculate precise character range for the excess portion
             let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
@@ -362,7 +339,7 @@ impl Rule for MD013LineLength {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // If reflow is enabled, use the new text reflow functionality
+        // Only fix if reflow is enabled
         if self.config.enable_reflow {
             let reflow_options = crate::utils::text_reflow::ReflowOptions {
                 line_length: self.config.line_length,
@@ -373,50 +350,8 @@ impl Rule for MD013LineLength {
             return Ok(crate::utils::text_reflow::reflow_markdown(ctx.content, &reflow_options));
         }
 
-        // Otherwise, use the existing fix logic (trimming whitespace)
-        // Get all warnings with their fixes
-        let warnings = self.check(ctx)?;
-
-        // If no warnings, return original content without allocation
-        if warnings.is_empty() {
-            return Ok(ctx.content.to_string());
-        }
-
-        // Collect all fixes - check if any exist before allocating
-        let mut has_any_fix = false;
-        for w in &warnings {
-            if w.fix.is_some() {
-                has_any_fix = true;
-                break;
-            }
-        }
-
-        if !has_any_fix {
-            return Ok(ctx.content.to_string());
-        }
-
-        // Now collect fixes since we know there's at least one
-        let mut fixes: Vec<_> = warnings
-            .iter()
-            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
-            .collect();
-
-        // This should not happen given our check above, but just in case
-        if fixes.is_empty() {
-            return Ok(ctx.content.to_string());
-        }
-
-        fixes.sort_by(|a, b| b.0.cmp(&a.0));
-
-        // Apply fixes from end to beginning to preserve byte offsets
-        let mut result = ctx.content.to_string();
-        for (start, end, replacement) in fixes {
-            if start < result.len() && end <= result.len() && start <= end {
-                result.replace_range(start..end, replacement);
-            }
-        }
-
-        Ok(result)
+        // Without reflow, MD013 has no fixes available
+        Ok(ctx.content.to_string())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -753,20 +688,19 @@ mod tests {
     }
 
     #[test]
-    fn test_trailing_whitespace_fix() {
+    fn test_no_fix_without_reflow() {
         let rule = MD013LineLength::new(60, false, false, false, false);
         let content = "This line has trailing whitespace that makes it too long      ";
         let ctx = LintContext::new(content);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
-        // The line without spaces is 56 chars, within limit of 60
-        assert!(result[0].fix.is_some());
-        assert!(result[0].message.contains("can trim whitespace"));
+        // Without enable_reflow, no fix is provided
+        assert!(result[0].fix.is_none());
 
-        // Apply fix
+        // Fix method returns content unchanged
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed.trim(), "This line has trailing whitespace that makes it too long");
+        assert_eq!(fixed, content);
     }
 
     #[test]
@@ -841,15 +775,14 @@ Another long line that should trigger a warning."#;
     }
 
     #[test]
-    fn test_fix_preserves_content() {
+    fn test_fix_without_reflow_preserves_content() {
         let rule = MD013LineLength::new(50, false, false, false, false);
         let content = "Line 1\nThis line has trailing spaces and is too long      \nLine 3";
         let ctx = LintContext::new(content);
 
+        // Without enable_reflow, content is unchanged
         let fixed = rule.fix(&ctx).unwrap();
-        assert!(fixed.contains("Line 1"));
-        assert!(fixed.contains("Line 3"));
-        assert!(!fixed.contains("      \n")); // Trailing spaces removed
+        assert_eq!(fixed, content);
     }
 
     #[test]
@@ -1104,5 +1037,166 @@ And a bullet list:
         // Without reflow enabled, it should only trim whitespace (if any)
         // Since there's no trailing whitespace, content should be unchanged
         assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_reflow_with_hard_line_breaks() {
+        // Test that lines with exactly 2 trailing spaces are preserved as hard breaks
+        let config = MD013Config {
+            line_length: 40,
+            enable_reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        // Test with exactly 2 spaces (hard line break)
+        let content = "This line has a hard break at the end  \nAnd this continues on the next line that is also quite long and needs wrapping";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Should preserve the hard line break (2 spaces)
+        assert!(fixed.contains("  \n"), "Hard line break with exactly 2 spaces should be preserved");
+    }
+
+    #[test]
+    fn test_reflow_preserves_reference_links() {
+        let config = MD013Config {
+            line_length: 40,
+            enable_reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "This is a very long line with a [reference link][ref] that should not be broken apart when reflowing the text.
+
+[ref]: https://example.com";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Reference link should remain intact
+        assert!(fixed.contains("[reference link][ref]"));
+        assert!(!fixed.contains("[ reference link]"));
+        assert!(!fixed.contains("[ref ]"));
+    }
+
+    #[test]
+    fn test_reflow_with_nested_markdown_elements() {
+        let config = MD013Config {
+            line_length: 35,
+            enable_reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "This text has **bold with `code` inside** and should handle it properly when wrapping";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Nested elements should be preserved
+        assert!(fixed.contains("**bold with `code` inside**"));
+    }
+
+    #[test]
+    fn test_reflow_with_unbalanced_markdown() {
+        // Test edge case with unbalanced markdown
+        let config = MD013Config {
+            line_length: 30,
+            enable_reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "This has **unbalanced bold that goes on for a very long time without closing";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Should handle gracefully without panic
+        // The text reflow handles unbalanced markdown by treating it as a bold element
+        // Check that the content is properly reflowed without panic
+        assert!(!fixed.is_empty());
+        // Verify the content is wrapped to 30 chars
+        for line in fixed.lines() {
+            assert!(line.len() <= 30 || line.starts_with("**"), 
+                "Line exceeds limit: {}", line);
+        }
+    }
+
+    #[test]
+    fn test_reflow_fix_indicator() {
+        // Test that enable_reflow provides fix indicators
+        let config = MD013Config {
+            line_length: 30,
+            enable_reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "This is a very long line that definitely exceeds the thirty character limit";
+        let ctx = LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        
+        // Should have a fix indicator when enable_reflow is true
+        assert!(!warnings.is_empty());
+        assert!(warnings[0].fix.is_some(), "Should provide fix indicator when enable_reflow is true");
+    }
+
+    #[test]
+    fn test_no_fix_indicator_without_reflow() {
+        // Test that without enable_reflow, no fix is provided
+        let config = MD013Config {
+            line_length: 30,
+            enable_reflow: false,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "This is a very long line that definitely exceeds the thirty character limit";
+        let ctx = LintContext::new(content);
+        let warnings = rule.check(&ctx).unwrap();
+        
+        // Should NOT have a fix indicator when enable_reflow is false
+        assert!(!warnings.is_empty());
+        assert!(warnings[0].fix.is_none(), "Should not provide fix when enable_reflow is false");
+    }
+
+    #[test]
+    fn test_reflow_preserves_all_reference_link_types() {
+        let config = MD013Config {
+            line_length: 40,
+            enable_reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "Test [full reference][ref] and [collapsed][] and [shortcut] reference links in a very long line.
+
+[ref]: https://example.com
+[collapsed]: https://example.com
+[shortcut]: https://example.com";
+        
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // All reference link types should be preserved
+        assert!(fixed.contains("[full reference][ref]"));
+        assert!(fixed.contains("[collapsed][]"));
+        assert!(fixed.contains("[shortcut]"));
+    }
+
+    #[test]
+    fn test_reflow_handles_images_correctly() {
+        let config = MD013Config {
+            line_length: 40,
+            enable_reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        
+        let content = "This line has an ![image alt text](https://example.com/image.png) that should not be broken when reflowing.";
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        
+        // Image should remain intact
+        assert!(fixed.contains("![image alt text](https://example.com/image.png)"));
     }
 }

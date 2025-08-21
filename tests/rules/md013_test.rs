@@ -409,48 +409,28 @@ fn test_strict_mode_vs_non_strict_mode() {
 // Fix method tests
 
 #[test]
-fn test_fix_trailing_whitespace() {
-    let rule = MD013LineLength::new(57, true, true, true, false);
-    let content = "This line has trailing whitespace that makes it too long     \nThis line is OK";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "This line has trailing whitespace that makes it too long\nThis line is OK"
-    );
-}
-
-#[test]
-fn test_fix_multiple_lines_with_whitespace() {
-    let rule = MD013LineLength::new(18, true, true, true, false);
-    let content = "First line spaces     \nSecond line space    \nThird line is fine\nFourth line space     ";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "First line spaces\nSecond line space\nThird line is fine\nFourth line space"
-    );
-}
-
-#[test]
-fn test_fix_preserves_intentional_trailing_spaces() {
-    let rule = MD013LineLength::new(62, true, true, true, false);
-    let content = "This line has two trailing spaces for hard break  \nThis line has excessive trailing spaces that should be trimmed     ";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "This line has two trailing spaces for hard break  \nThis line has excessive trailing spaces that should be trimmed"
-    );
-}
-
-#[test]
-fn test_fix_empty_lines_with_spaces() {
-    let rule = MD013LineLength::new(3, true, true, true, false);
-    let content = "ABC\n    \nXYZ";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "ABC\n\nXYZ");
+fn test_no_fix_without_enable_reflow() {
+    // Comprehensive test to verify MD013 doesn't modify content when enable_reflow is false
+    let rule = MD013LineLength::new(30, true, true, true, false);
+    
+    // Test various cases - all should remain unchanged
+    let test_cases = vec![
+        "This line has trailing whitespace     ",
+        "This line is way too long even without any trailing whitespace at all",
+        "Short line",
+        "Line with  two  spaces  for  hard  break  ",
+        "First line spaces     \nSecond line space    ",
+        "ABC\n    \nXYZ",
+        "| Long table cell with many spaces     |\n12345678901234567890     ",
+        "```\nThis is a long line in code     \n```\nThis normal line is too long with spaces    ",
+        "https://example.com/very/long/url/that/exceeds/limit\nNormal line with trailing spaces    ",
+    ];
+    
+    for content in test_cases {
+        let ctx = LintContext::new(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Content should be unchanged without enable_reflow: {}", content);
+    }
 }
 
 #[test]
@@ -571,50 +551,6 @@ More regular text exceeding 40 characters"#;
     assert_eq!(result[1].line, 11);
 }
 
-#[test]
-fn test_fix_code_blocks_not_modified() {
-    let rule = MD013LineLength::new(41, true, true, true, false);
-    let content = "```\nThis is a long line in code     \n```\nThis normal line is too long with spaces    ";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "```\nThis is a long line in code     \n```\nThis normal line is too long with spaces"
-    );
-}
-
-#[test]
-fn test_fix_tables_not_modified() {
-    let rule = MD013LineLength::new(15, true, true, true, false);
-    let content = "| Long table cell with many spaces     |\n12345678901234567890     ";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    // Table line is not modified (tables are skipped when tables=true)
-    // Normal line has 20 chars + 5 spaces = 25 total, after trim would be 20 chars (still over 15)
-    // So no fix should happen
-    assert_eq!(fixed, content);
-}
-
-#[test]
-fn test_fix_no_changes_when_no_violations() {
-    let rule = MD013LineLength::new(80, true, true, true, false);
-    let content = "Short line\nAnother short line\nThird short line";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content);
-}
-
-#[test]
-fn test_fix_urls_not_modified() {
-    let rule = MD013LineLength::new(32, true, true, true, false);
-    let content = "https://example.com/very/long/url/that/exceeds/limit\nNormal line with trailing spaces    ";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "https://example.com/very/long/url/that/exceeds/limit\nNormal line with trailing spaces"
-    );
-}
 
 #[test]
 fn test_unicode_characters_counted_correctly() {
@@ -662,18 +598,6 @@ fn test_inline_code_with_long_strings() {
     assert_eq!(result.len(), 1); // Should still be flagged as the whole line is checked
 }
 
-#[test]
-fn test_fix_applies_from_end_to_beginning() {
-    let rule = MD013LineLength::new(23, true, true, true, false);
-    let content = "First line with spaces    \nSecond line with spaces    \nThird line with spaces    ";
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    // All lines should have trailing spaces removed
-    assert_eq!(
-        fixed,
-        "First line with spaces\nSecond line with spaces\nThird line with spaces"
-    );
-}
 
 #[test]
 fn test_column_positions_for_excess_characters() {
@@ -687,32 +611,6 @@ fn test_column_positions_for_excess_characters() {
     assert_eq!(result[0].end_column, 17); // End of line + 1
 }
 
-#[test]
-fn test_fix_only_when_trimming_helps() {
-    let rule = MD013LineLength::new(50, true, true, true, false);
-    // This line is too long even after trimming
-    let content1 = "This line is way too long even without any trailing whitespace at all     ";
-    let ctx1 = LintContext::new(content1);
-    let fixed1 = rule.fix(&ctx1).unwrap();
-    assert_eq!(fixed1, content1); // No fix because trimming doesn't help
-
-    // This line becomes OK after trimming
-    let content2 = "This line becomes OK after trimming the spaces     ";
-    let ctx2 = LintContext::new(content2);
-    let fixed2 = rule.fix(&ctx2).unwrap();
-    assert_eq!(fixed2, "This line becomes OK after trimming the spaces");
-}
-
-#[test]
-fn test_fix_with_exact_whitespace_removal() {
-    let rule = MD013LineLength::new(40, true, true, true, false);
-    // Line is 45 chars with spaces, 40 without - exactly at limit after trim
-    let content = "1234567890123456789012345678901234567890     ";
-    assert_eq!(content.trim_end().len(), 40);
-    let ctx = LintContext::new(content);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "1234567890123456789012345678901234567890");
-}
 
 #[test]
 fn test_no_fix_for_lines_without_trailing_whitespace() {
