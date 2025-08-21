@@ -247,7 +247,31 @@ lazy_static! {
     pub static ref EMAIL_PATTERN: Regex = Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap();
 }
 
-// Second lazy_static block for additional patterns
+// Third lazy_static block for link and image patterns used by MD052 and text_reflow
+lazy_static! {
+    // Reference link patterns (shared by MD052 and text_reflow)
+    // Pattern to match reference links: [text][reference] or [text][]
+    pub static ref REF_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
+    
+    // Pattern for shortcut reference links: [reference]
+    // Must not be preceded by ] or ) (to avoid matching second part of [text][ref])
+    // Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
+    pub static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
+    
+    // Inline link with fancy regex for better escaping handling (used by text_reflow)
+    pub static ref INLINE_LINK_FANCY_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();
+    
+    // Inline image with fancy regex (used by MD052 and text_reflow)
+    pub static ref INLINE_IMAGE_FANCY_REGEX: FancyRegex = FancyRegex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
+    
+    // Reference image: ![alt][ref] or ![alt][]
+    pub static ref REF_IMAGE_REGEX: FancyRegex = FancyRegex::new(r"!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
+    
+    // Footnote reference: [^note]
+    pub static ref FOOTNOTE_REF_REGEX: FancyRegex = FancyRegex::new(r"\[\^([^\]]+)\]").unwrap();
+}
+
+// Fourth lazy_static block for additional patterns
 lazy_static! {
     // HTML comment patterns
     pub static ref HTML_COMMENT_START: Regex = Regex::new(r"<!--").unwrap();

@@ -1,8 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
-use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
+use crate::utils::regex_cache::{HTML_COMMENT_PATTERN, SHORTCUT_REF_REGEX};
 use crate::utils::skip_context::{is_in_front_matter, is_in_math_context, is_in_table_cell};
-use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -11,21 +10,6 @@ lazy_static! {
     // Pattern to match reference definitions [ref]: url (standard regex is fine)
     // Note: \S* instead of \S+ to allow empty definitions like [ref]:
     static ref REF_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*.*").unwrap();
-
-    // Pattern to match reference links and images ONLY: [text][reference] or ![text][reference]
-    // These need lookbehind for escaped brackets
-    // Use a more sophisticated pattern that handles nested brackets
-    static ref REF_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
-    static ref REF_IMAGE_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
-
-    // Pattern for shortcut reference links [reference]
-    // Must not be preceded by ] or ) (to avoid matching second part of [text][ref] or reversed links (url)[text])
-    // Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
-    static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
-
-    // Pattern to match inline links and images (to exclude them)
-    static ref INLINE_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();
-    static ref INLINE_IMAGE_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)!\[([^\]]+)\]\(([^)]+)\)").unwrap();
 
     // Pattern for list items to exclude from reference checks (standard regex is fine)
     static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^\s*[-*+]\s+(?:\[[xX\s]\]\s+)?").unwrap();

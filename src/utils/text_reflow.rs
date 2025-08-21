@@ -4,22 +4,10 @@
 /// Markdown elements like links, emphasis, code spans, etc.
 ///
 
-use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
-
-lazy_static! {
-    /// Pattern for reference links: [text][reference]
-    /// Uses fancy regex to handle escaped brackets and nested content
-    static ref REF_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
-    
-    /// Pattern for shortcut reference links: [reference]
-    /// Must not be preceded by ] or ) (to avoid matching second part of [text][ref] or reversed links (url)[text])
-    /// Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
-    static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
-    
-    /// Pattern for inline links: [text](url) - to detect and skip them before reference links
-    static ref INLINE_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();
-}
+use crate::utils::regex_cache::{
+    FOOTNOTE_REF_REGEX, INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, REF_IMAGE_REGEX, REF_LINK_REGEX,
+    SHORTCUT_REF_REGEX,
+};
 /// Options for reflowing text
 #[derive(Clone)]
 pub struct ReflowOptions {
@@ -68,6 +56,14 @@ enum Element {
     EmptyReferenceLink { text: String },
     /// A complete markdown shortcut reference link [ref]
     ShortcutReference { reference: String },
+    /// A complete markdown inline image ![alt](url)
+    InlineImage { alt: String, url: String },
+    /// A complete markdown reference image ![alt][ref]
+    ReferenceImage { alt: String, reference: String },
+    /// A complete markdown empty reference image ![alt][]
+    EmptyReferenceImage { alt: String },
+    /// Footnote reference [^note]
+    FootnoteReference { note: String },
     /// Inline code `code`
     Code(String),
     /// Bold text **text**
@@ -84,6 +80,10 @@ impl std::fmt::Display for Element {
             Element::ReferenceLink { text, reference } => write!(f, "[{text}][{reference}]"),
             Element::EmptyReferenceLink { text } => write!(f, "[{text}][]"),
             Element::ShortcutReference { reference } => write!(f, "[{reference}]"),
+            Element::InlineImage { alt, url } => write!(f, "![{alt}]({url})"),
+            Element::ReferenceImage { alt, reference } => write!(f, "![{alt}][{reference}]"),
+            Element::EmptyReferenceImage { alt } => write!(f, "![{alt}][]"),
+            Element::FootnoteReference { note } => write!(f, "[^{note}]"),
             Element::Code(s) => write!(f, "`{s}`"),
             Element::Bold(s) => write!(f, "**{s}**"),
             Element::Italic(s) => write!(f, "*{s}*"),
@@ -99,6 +99,10 @@ impl Element {
             Element::ReferenceLink { text, reference } => text.chars().count() + reference.chars().count() + 4, // [text][ref]
             Element::EmptyReferenceLink { text } => text.chars().count() + 4, // [text][]
             Element::ShortcutReference { reference } => reference.chars().count() + 2, // [ref]
+            Element::InlineImage { alt, url } => alt.chars().count() + url.chars().count() + 5, // ![alt](url)
+            Element::ReferenceImage { alt, reference } => alt.chars().count() + reference.chars().count() + 5, // ![alt][ref]
+            Element::EmptyReferenceImage { alt } => alt.chars().count() + 5, // ![alt][]
+            Element::FootnoteReference { note } => note.chars().count() + 3, // [^note]
             Element::Code(s) => s.chars().count() + 2,                                     // `code`
             Element::Bold(s) => s.chars().count() + 4,                                     // **text**
             Element::Italic(s) => s.chars().count() + 2,                                   // *text*
@@ -122,8 +126,30 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
         // Find the earliest occurrence of any markdown pattern
         let mut earliest_match: Option<(usize, &str, fancy_regex::Match)> = None;
         
-        // Check for inline links first - [text](url)
-        if let Ok(Some(m)) = INLINE_LINK_REGEX.find(remaining) {
+        // Check for images first (they start with ! so should be detected before links)
+        // Inline images - ![alt](url)
+        if let Ok(Some(m)) = INLINE_IMAGE_FANCY_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "inline_image", m));
+            }
+        }
+        
+        // Reference images - ![alt][ref]
+        if let Ok(Some(m)) = REF_IMAGE_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "ref_image", m));
+            }
+        }
+        
+        // Check for footnote references - [^note]
+        if let Ok(Some(m)) = FOOTNOTE_REF_REGEX.find(remaining) {
+            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
+                earliest_match = Some((m.start(), "footnote_ref", m));
+            }
+        }
+        
+        // Check for inline links - [text](url)
+        if let Ok(Some(m)) = INLINE_LINK_FANCY_REGEX.find(remaining) {
             if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
                 earliest_match = Some((m.start(), "inline_link", m));
             }
@@ -185,8 +211,55 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
             
             // Process the matched pattern
             match pattern_type {
+                "inline_image" => {
+                    if let Ok(Some(caps)) = INLINE_IMAGE_FANCY_REGEX.captures(remaining) {
+                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::InlineImage {
+                            alt: alt.to_string(),
+                            url: url.to_string(),
+                        });
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("!".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                "ref_image" => {
+                    if let Ok(Some(caps)) = REF_IMAGE_REGEX.captures(remaining) {
+                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let reference = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        
+                        if reference.is_empty() {
+                            elements.push(Element::EmptyReferenceImage {
+                                alt: alt.to_string(),
+                            });
+                        } else {
+                            elements.push(Element::ReferenceImage {
+                                alt: alt.to_string(),
+                                reference: reference.to_string(),
+                            });
+                        }
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("!".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                "footnote_ref" => {
+                    if let Ok(Some(caps)) = FOOTNOTE_REF_REGEX.captures(remaining) {
+                        let note = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::FootnoteReference {
+                            note: note.to_string(),
+                        });
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("[".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
                 "inline_link" => {
-                    if let Ok(Some(caps)) = INLINE_LINK_REGEX.captures(remaining) {
+                    if let Ok(Some(caps)) = INLINE_LINK_FANCY_REGEX.captures(remaining) {
                         let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
                         elements.push(Element::Link {
@@ -722,5 +795,74 @@ mod tests {
         let joined = result.join(" ");
         assert!(joined.contains("*emphasized*"));
         assert!(joined.contains("**strong**"));
+    }
+
+    #[test]
+    fn test_image_patterns_preserved() {
+        let options = ReflowOptions {
+            line_length: 30,
+            ..Default::default()
+        };
+
+        // Test cases for image patterns
+        let test_cases = vec![
+            // Inline image
+            ("Check out ![alt text](image.png) for details", vec!["![alt text](image.png)"]),
+            // Reference image
+            ("See ![image][ref] for info", vec!["![image][ref]"]),
+            // Empty reference image
+            ("Visit ![homepage][] today", vec!["![homepage][]"]),
+            // Multiple images
+            ("Images: ![first](a.png) and ![second][ref2]", vec!["![first](a.png)", "![second][ref2]"]),
+        ];
+
+        for (input, expected_patterns) in test_cases {
+            println!("\nTesting: {}", input);
+            let result = reflow_line(input, &options);
+            let joined = result.join(" ");
+            println!("Result:  {}", joined);
+            
+            for expected_pattern in expected_patterns {
+                assert!(
+                    joined.contains(&expected_pattern),
+                    "Expected '{}' to be preserved in '{}', but got '{}'",
+                    expected_pattern,
+                    input,
+                    joined
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_footnote_patterns_preserved() {
+        let options = ReflowOptions {
+            line_length: 40,
+            ..Default::default()
+        };
+
+        let test_cases = vec![
+            // Single footnote
+            ("This has a footnote[^1] reference", vec!["[^1]"]),
+            // Multiple footnotes
+            ("Text with [^first] and [^second] notes", vec!["[^first]", "[^second]"]),
+            // Long footnote name
+            ("Reference to [^long-footnote-name] here", vec!["[^long-footnote-name]"]),
+        ];
+
+        for (input, expected_patterns) in test_cases {
+            let result = reflow_line(input, &options);
+            let joined = result.join(" ");
+            
+            for expected_pattern in expected_patterns {
+                assert!(
+                    joined.contains(&expected_pattern),
+                    "Expected '{}' to be preserved in '{}', but got '{}'",
+                    expected_pattern,
+                    input,
+                    joined
+                );
+            }
+        }
     }
 }
