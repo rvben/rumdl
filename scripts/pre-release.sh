@@ -134,6 +134,26 @@ fi
 echo "12. Testing cargo publish (dry run)..."
 run_check "Cargo publish dry-run" "cargo publish --dry-run --locked"
 
+# 13. Check mise version in GitHub Actions workflow
+echo "13. Checking mise version in CI workflow..."
+MISE_VERSION=$(grep -A2 "mise-action@v2" .github/workflows/release.yml | grep "version:" | sed 's/.*version: *//' | tr -d ' ')
+if [ -n "$MISE_VERSION" ]; then
+    echo -n "Verifying mise version $MISE_VERSION exists... "
+    # Check if the release exists on GitHub
+    if curl -s -f "https://api.github.com/repos/jdx/mise/releases/tags/v${MISE_VERSION}" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} mise version $MISE_VERSION exists"
+    else
+        echo -e "${RED}✗${NC}"
+        echo -e "${RED}mise version $MISE_VERSION does not exist on GitHub!${NC}"
+        echo "Check available versions at: https://github.com/jdx/mise/releases"
+        LATEST_MISE=$(curl -s https://api.github.com/repos/jdx/mise/releases/latest | grep '"tag_name"' | cut -d'"' -f4 | sed 's/^v//')
+        echo "Latest available version: $LATEST_MISE"
+        FAILED=1
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} No explicit mise version found in workflow (will use latest)"
+fi
+
 echo ""
 echo "====================================="
 if [ $FAILED -eq 0 ]; then
