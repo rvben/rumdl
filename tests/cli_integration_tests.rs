@@ -1256,6 +1256,38 @@ fn test_stdin_check_without_fix() {
 }
 
 #[test]
+fn test_stdin_formatting_no_issues() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test that formatting mode outputs the original content when there are no issues
+    // This was a bug where it would output "No issues found in stdin" instead
+    let input = "# Clean Markdown\n\nThis markdown has no issues.\n";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("fmt").arg("-").arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should output the original content unchanged
+    assert_eq!(stdout, input, "fmt should output original content when no issues found");
+    // No errors should be on stderr in quiet mode
+    assert_eq!(stderr, "");
+    assert!(output.status.success());
+}
+
+#[test]
 fn test_stdin_dash_syntax() {
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 

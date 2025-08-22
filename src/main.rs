@@ -1854,37 +1854,42 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     let has_issues = !all_warnings.is_empty();
 
     // Apply fixes if requested
-    if args._fix && has_issues {
-        let mut fixed_content = content.clone();
-        let warnings_fixed = apply_fixes_stdin(rules, &all_warnings, &mut fixed_content, quiet, config);
+    if args._fix {
+        if has_issues {
+            let mut fixed_content = content.clone();
+            let warnings_fixed = apply_fixes_stdin(rules, &all_warnings, &mut fixed_content, quiet, config);
 
-        // Output the fixed content to stdout
-        print!("{fixed_content}");
+            // Output the fixed content to stdout
+            print!("{fixed_content}");
 
-        // Re-check the fixed content to see if any issues remain
-        let fixed_ctx = LintContext::new(&fixed_content);
-        let mut remaining_warnings = Vec::new();
-        for rule in rules {
-            if let Ok(warnings) = rule.check(&fixed_ctx) {
-                remaining_warnings.extend(warnings);
+            // Re-check the fixed content to see if any issues remain
+            let fixed_ctx = LintContext::new(&fixed_content);
+            let mut remaining_warnings = Vec::new();
+            for rule in rules {
+                if let Ok(warnings) = rule.check(&fixed_ctx) {
+                    remaining_warnings.extend(warnings);
+                }
             }
-        }
 
-        // Only show diagnostics to stderr if not in quiet mode
-        if !quiet && !remaining_warnings.is_empty() {
-            let formatter = output_format.create_formatter();
-            let formatted = formatter.format_warnings(&remaining_warnings, "<stdin>");
-            eprintln!("{formatted}");
-            eprintln!(
-                "\n{} issue(s) fixed, {} issue(s) remaining",
-                warnings_fixed,
-                remaining_warnings.len()
-            );
-        }
+            // Only show diagnostics to stderr if not in quiet mode
+            if !quiet && !remaining_warnings.is_empty() {
+                let formatter = output_format.create_formatter();
+                let formatted = formatter.format_warnings(&remaining_warnings, "<stdin>");
+                eprintln!("{formatted}");
+                eprintln!(
+                    "\n{} issue(s) fixed, {} issue(s) remaining",
+                    warnings_fixed,
+                    remaining_warnings.len()
+                );
+            }
 
-        // Exit with success if all issues were fixed, error if issues remain
-        if !remaining_warnings.is_empty() {
-            exit::violations_found();
+            // Exit with success if all issues were fixed, error if issues remain
+            if !remaining_warnings.is_empty() {
+                exit::violations_found();
+            }
+        } else {
+            // No issues found, output the original content unchanged
+            print!("{content}");
         }
         return;
     }
