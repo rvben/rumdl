@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.125] - 2025-08-22
 
+### Added
+- **CLI**: Added `--stdin-filename` flag for better stdin processing
+  - Specify filename when reading from stdin for better error messages
+  - Enables MD057 (relative link checking) to work correctly with stdin
+  - Provides proper filename context in all output formats
+  - Improves editor integration capabilities
+
+### Fixed
+- **CLI**: Fixed `rumdl fmt -` to output original content when no issues found
+  - Previously incorrectly output "No issues found in stdin" message
+  - Now correctly outputs the original content unchanged
+- **MD029**: Corrected list continuity detection and fix functionality
+  - Improved handling of sublists and indented content
+  - Better markdownlint compatibility
+
+### Changed
+- **Build**: Added mise version validation to pre-release checks
+  - Prevents CI failures from non-existent mise versions
+
 ## [0.0.124] - 2025-08-22
 
 ### Added
