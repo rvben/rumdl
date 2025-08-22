@@ -10,7 +10,6 @@ use toml;
 mod md029_config;
 pub use md029_config::{ListStyle, MD029Config};
 
-
 #[derive(Debug, Clone, Default)]
 pub struct MD029OrderedListPrefix {
     config: MD029Config,
@@ -26,7 +25,6 @@ impl MD029OrderedListPrefix {
     pub fn from_config_struct(config: MD029Config) -> Self {
         Self { config }
     }
-
 
     #[inline]
     fn parse_marker_number(marker: &str) -> Option<usize> {
@@ -48,7 +46,6 @@ impl MD029OrderedListPrefix {
             ListStyle::Ordered0 => index,
         }
     }
-
 }
 
 impl Rule for MD029OrderedListPrefix {
@@ -88,7 +85,6 @@ impl Rule for MD029OrderedListPrefix {
                 })
             })
             .collect();
-
 
         if blocks_with_ordered.is_empty() {
             return Ok(Vec::new());
@@ -133,7 +129,6 @@ impl Rule for MD029OrderedListPrefix {
         }
         block_groups.push(current_group);
 
-
         // Process each group of blocks as a continuous list
         for group in block_groups {
             self.check_ordered_list_group(ctx, &group, &mut warnings);
@@ -145,12 +140,12 @@ impl Rule for MD029OrderedListPrefix {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // Use the same logic as check() - just apply the fixes from warnings
         let warnings = self.check(ctx)?;
-        
+
         if warnings.is_empty() {
             // No changes needed
             return Ok(ctx.content.to_string());
         }
-        
+
         // Collect fixes and sort by position
         // Only apply MD029 fixes (numbering), not MD029-style fixes (indentation)
         let mut fixes: Vec<&Fix> = Vec::new();
@@ -164,34 +159,32 @@ impl Rule for MD029OrderedListPrefix {
             }
         }
         fixes.sort_by_key(|f| f.range.start);
-        
+
         let mut result = String::new();
         let mut last_pos = 0;
         let content_bytes = ctx.content.as_bytes();
-        
+
         for fix in fixes {
             // Add content before the fix
             if last_pos < fix.range.start {
                 let chunk = &content_bytes[last_pos..fix.range.start];
                 result.push_str(
-                    std::str::from_utf8(chunk)
-                        .map_err(|_| LintError::InvalidInput("Invalid UTF-8".to_string()))?
+                    std::str::from_utf8(chunk).map_err(|_| LintError::InvalidInput("Invalid UTF-8".to_string()))?,
                 );
             }
             // Add the replacement
             result.push_str(&fix.replacement);
             last_pos = fix.range.end;
         }
-        
+
         // Add remaining content
         if last_pos < content_bytes.len() {
             let chunk = &content_bytes[last_pos..];
             result.push_str(
-                std::str::from_utf8(chunk)
-                    .map_err(|_| LintError::InvalidInput("Invalid UTF-8".to_string()))?
+                std::str::from_utf8(chunk).map_err(|_| LintError::InvalidInput("Invalid UTF-8".to_string()))?,
             );
         }
-        
+
         Ok(result)
     }
 
@@ -592,11 +585,11 @@ impl MD029OrderedListPrefix {
                         let marker_start = line_info.byte_offset + list_item.marker_column;
                         // Use the actual marker length (e.g., "05" is 2 chars, not 1)
                         let number_len = if let Some(dot_pos) = list_item.marker.find('.') {
-                            dot_pos  // Length up to the dot
+                            dot_pos // Length up to the dot
                         } else if let Some(paren_pos) = list_item.marker.find(')') {
-                            paren_pos  // Length up to the paren
+                            paren_pos // Length up to the paren
                         } else {
-                            list_item.marker.len()  // Fallback to full marker length
+                            list_item.marker.len() // Fallback to full marker length
                         };
 
                         warnings.push(LintWarning {

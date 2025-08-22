@@ -1352,7 +1352,6 @@ impl<'a> LintContext<'a> {
         for (line_idx, line_info) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
-
             // Enhanced code block handling using Design #3's context analysis
             if line_info.in_code_block {
                 if let Some(ref mut block) = current_block {

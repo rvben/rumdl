@@ -1,6 +1,6 @@
 use rumdl::lint_context::LintContext;
-use rumdl::rules::MD029OrderedListPrefix;
 use rumdl::rule::Rule;
+use rumdl::rules::MD029OrderedListPrefix;
 
 #[test]
 fn test_md029_fix_with_2_space_code_blocks() {
@@ -62,7 +62,7 @@ fn test_md029_fix_with_2_space_code_blocks() {
 
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    
+
     assert_eq!(
         fixed, expected,
         "MD029 fix should correctly handle 2-space indented code blocks"
@@ -95,7 +95,7 @@ fn test_md029_fix_with_4_space_code_blocks() {
 
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    
+
     assert_eq!(
         fixed, expected,
         "MD029 fix should not change numbering when code blocks are properly indented"
@@ -116,25 +116,25 @@ fn test_md029_fix_matches_check() {
 3. Third item"#;
 
     let ctx = LintContext::new(content);
-    
+
     // Get warnings from check
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 2, "Should detect 2 MD029 issues");
-    
+
     // Apply fix
     let fixed = rule.fix(&ctx).unwrap();
-    
+
     // Check the fixed content - should have no warnings
     let fixed_ctx = LintContext::new(&fixed);
     let fixed_warnings = rule.check(&fixed_ctx).unwrap();
-    
-    assert_eq!(
-        fixed_warnings.len(), 0,
-        "Fixed content should have no MD029 warnings"
-    );
-    
+
+    assert_eq!(fixed_warnings.len(), 0, "Fixed content should have no MD029 warnings");
+
     // Verify the fix
-    assert!(fixed.contains("1. Second item"), "Second item should be renumbered to 1");
+    assert!(
+        fixed.contains("1. Second item"),
+        "Second item should be renumbered to 1"
+    );
     assert!(fixed.contains("2. Third item"), "Third item should be renumbered to 2");
 }
 
@@ -154,14 +154,16 @@ fn test_md029_fix_preserves_content() {
 
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
-    
+
     // Check that content is preserved
     assert!(fixed.contains("First item with some text"));
     assert!(fixed.contains("Second item with more text"));
     assert!(fixed.contains("Third item with even more text"));
-    assert!(fixed.contains(r#"def hello():
-      print("world")"#));
-    
+    assert!(fixed.contains(
+        r#"def hello():
+      print("world")"#
+    ));
+
     // Check that numbering is fixed
     assert!(fixed.contains("1. Second item"));
     assert!(fixed.contains("2. Third item"));

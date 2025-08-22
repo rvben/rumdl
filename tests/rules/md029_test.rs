@@ -736,7 +736,7 @@ lazy line
     assert!(fixed.contains("\nlazy line"));
     // The list item numbering is fixed
     assert!(fixed.contains("1. First item"));
-    assert!(fixed.contains("2. Second item"));  // Second item becomes "2." not "1."
+    assert!(fixed.contains("2. Second item")); // Second item becomes "2." not "1."
     // Two-space indent line remains unchanged (MD029 doesn't fix indentation)
     assert!(fixed.contains("  two space indent"));
 }

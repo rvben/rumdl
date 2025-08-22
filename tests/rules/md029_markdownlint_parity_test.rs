@@ -1,6 +1,6 @@
 use rumdl::lint_context::LintContext;
-use rumdl::rules::MD029OrderedListPrefix;
 use rumdl::rule::Rule;
+use rumdl::rules::MD029OrderedListPrefix;
 
 #[test]
 fn test_md029_2_space_code_blocks_break_lists() {
@@ -36,24 +36,24 @@ fn test_md029_2_space_code_blocks_break_lists() {
 
     let ctx = LintContext::new(content);
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should report 4 MD029 errors matching markdownlint
     assert_eq!(
         warnings.len(),
         4,
         "Should report 4 MD029 errors for list items after 2-space indented code blocks"
     );
-    
+
     // Check specific errors
     assert_eq!(warnings[0].line, 9); // Line 9: "2. Test 2" should be "1."
     assert!(warnings[0].message.contains("expected 1"));
-    
+
     assert_eq!(warnings[1].line, 10); // Line 10: "3. Test 3" should be "2."
     assert!(warnings[1].message.contains("expected 2"));
-    
+
     assert_eq!(warnings[2].line, 16); // Line 16: "4. Test 4" should be "1."
     assert!(warnings[2].message.contains("expected 1"));
-    
+
     assert_eq!(warnings[3].line, 22); // Line 22: "5. Test 5" should be "1."
     assert!(warnings[3].message.contains("expected 1"));
 }
@@ -81,7 +81,7 @@ fn test_md029_4_space_code_blocks_continue_lists() {
 
     let ctx = LintContext::new(content);
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should not report any MD029 errors for properly indented code blocks
     assert_eq!(
         warnings.len(),
@@ -114,7 +114,7 @@ fn test_md029_3_space_code_blocks_continue_lists() {
 
     let ctx = LintContext::new(content);
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should not report any MD029 errors for 3-space indented code blocks
     assert_eq!(
         warnings.len(),
@@ -146,14 +146,14 @@ cargo install ...
 
     let ctx = LintContext::new(content);
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should report MD029 errors for all items after unindented code blocks
     assert_eq!(
         warnings.len(),
         3,
         "Should report MD029 errors for list items after unindented code blocks"
     );
-    
+
     assert_eq!(warnings[0].line, 9); // "2. Test 2" should be "1."
     assert_eq!(warnings[1].line, 10); // "3. Test 3" should be "2."
     assert_eq!(warnings[2].line, 16); // "4. Test 4" should be "1."
@@ -180,17 +180,17 @@ fn test_md029_detection_with_2_space_code_blocks() {
 
     let ctx = LintContext::new(content);
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // Should detect 3 MD029 issues
     assert_eq!(warnings.len(), 3, "Should detect MD029 issues for items 2, 3, and 4");
-    
+
     // Verify specific issues
     assert_eq!(warnings[0].line, 7); // Line 7: "2. Test 2" should be "1."
     assert!(warnings[0].message.contains("expected 1"));
-    
+
     assert_eq!(warnings[1].line, 8); // Line 8: "3. Test 3" should be "2."
     assert!(warnings[1].message.contains("expected 2"));
-    
+
     assert_eq!(warnings[2].line, 14); // Line 14: "4. Test 4" should be "1."
     assert!(warnings[2].message.contains("expected 1"));
 }
@@ -210,7 +210,7 @@ fn test_md029_wider_markers() {
 
     let ctx = LintContext::new(content);
     let warnings = rule.check(&ctx).unwrap();
-    
+
     // With "10. " (3 chars + 1 space = 4), need 4 spaces for continuation
     // 3 spaces is insufficient, so the list should break
     assert_eq!(
@@ -218,11 +218,11 @@ fn test_md029_wider_markers() {
         2,
         "Should report MD029 errors: one for wrong initial numbering, one for break after code block"
     );
-    
+
     // First error: "10." should be "2." (continues from "1.")
     assert_eq!(warnings[0].line, 2);
     assert!(warnings[0].message.contains("expected 2"));
-    
+
     // Second error: "11." should be "1." (new list after insufficiently indented code block)
     assert_eq!(warnings[1].line, 8);
     assert!(warnings[1].message.contains("expected 1"));
