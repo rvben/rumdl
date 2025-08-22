@@ -55,7 +55,7 @@ fi
 # 2. Run clippy with exact CI flags
 echo "2. Running Clippy (all targets, all features)..."
 echo "   This may take 1-2 minutes..."
-run_check "Clippy" "cargo clippy --all-targets --all-features -- -D warnings" "false"
+run_check "Clippy" "cargo clippy --all-targets --all-features -- -D warnings -D clippy::uninlined_format_args" "false"
 
 # 3. Check formatting
 echo "3. Checking code formatting..."

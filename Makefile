@@ -334,7 +334,7 @@ update-rust-version:
 		cargo check || (echo "Warning: cargo check failed. You may need to fix compatibility issues."; exit 1); \
 	fi
 
-pre-release:
+prepare-release:
 	@echo "Preparing for release..."
 	@echo "===================="
 	@$(MAKE) update-rust-version
@@ -354,6 +354,6 @@ pre-release:
 	@echo "Please review changes and commit if satisfied."
 
 # Full release targets that include pre-release preparation
-release-major-full: pre-release version-major version-push
-release-minor-full: pre-release version-minor version-push
-release-patch-full: pre-release version-patch version-push
+release-major-full: prepare-release version-major version-push
+release-minor-full: prepare-release version-minor version-push
+release-patch-full: prepare-release version-patch version-push
