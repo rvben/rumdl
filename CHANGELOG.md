@@ -8,14 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Configuration Discovery**: Automatic upward directory traversal to find configuration files (closes #58)
-  - Searches parent directories for `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml` 
-  - Similar behavior to `git`, `ruff`, and `eslint`
-  - Stops at `.git` directory boundaries
-- **--isolated flag**: New flag to disable all configuration discovery (Ruff-compatible)
-  - Alias for `--no-config` for better ecosystem compatibility
+- **Formatting**: Added stdin/stdout formatting support (closes #59)
+  - `rumdl fmt` command for formatting markdown files (alias for `check --fix`)
+  - `--stdin` with `--fix` now outputs formatted content to stdout
+  - Clear separation between linting (diagnostics to stderr) and formatting (content to stdout)
+  - Documentation updated with formatting examples
 
-## [0.0.123] - 2025-08-21
+### Fixed
+- **MD052**: Don't flag GitHub alerts as undefined references (closes #60)
+  - GitHub alert syntax (`[!NOTE]`, `[!TIP]`, `[!WARNING]`, `[!IMPORTANT]`, `[!CAUTION]`) no longer flagged
+  - Improved compatibility with GitHub-flavored markdown
+- **MD009**: Fixed heading trailing space removal
+  - Headings now have ALL trailing spaces removed (they serve no purpose in headings)
+- **CLI**: Fixed stdin diagnostics output in check mode
+  - Diagnostics now correctly output to stderr by default in check mode without `--fix`
 
 ## [0.0.123] - 2025-08-21
 
@@ -41,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.122] - 2025-08-19
 
+### Added
+- **Configuration Discovery**: Automatic upward directory traversal to find configuration files (closes #58)
+  - Searches parent directories for `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml` 
+  - Similar behavior to `git`, `ruff`, and `eslint`
+  - Stops at `.git` directory boundaries
+- **--isolated flag**: New flag to disable all configuration discovery (Ruff-compatible)
+  - Alias for `--no-config` for better ecosystem compatibility
+
 ## [0.0.121] - 2025-08-19
 
 ### Fixed
@@ -60,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.120] - 2025-08-16
 
+### Performance
+- Incremental improvements to various rule implementations
+
 ## [0.0.119] - 2025-08-15
 
 ### Fixed
@@ -75,6 +92,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed unused `is_in_code_block` function from md007_ul_indent.rs
 
 ## [0.0.118] - 2025-08-14
+
+### Performance
+- Incremental improvements to various rule implementations
 
 ## [0.0.117] - 2025-08-14
 
@@ -103,17 +123,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.115] - 2025-08-12
 
+### Fixed
+- Various bug fixes and improvements
+
 ## [0.0.114] - 2025-08-09
+
+### Fixed
+- Various bug fixes and improvements
 
 ## [0.0.113] - 2025-08-09
 
+### Fixed
+- Various bug fixes and improvements
+
 ## [0.0.112] - 2025-08-08
 
-## [0.0.110] - 2025-08-08
+### Fixed
+- Various bug fixes and improvements
 
 ## [0.0.110] - 2025-08-08
 
-## [0.0.107] - 2025-08-06
+### Changed
+- Various bug fixes and improvements
 
 ## [0.0.107] - 2025-08-06
 
@@ -130,8 +161,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `build-benchmarks` feature flag to explicitly build benchmarks
   - Python package now only includes the main `rumdl` binary
   - Significantly reduced installed package size
-
-## [0.0.105] - 2025-08-05
 
 ## [0.0.105] - 2025-08-05
 
@@ -418,10 +447,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.0.113]: https://github.com/rvben/rumdl/compare/v0.0.112...v0.0.113
 [0.0.112]: https://github.com/rvben/rumdl/compare/v0.0.111...v0.0.112
 [0.0.110]: https://github.com/rvben/rumdl/compare/v0.0.109...v0.0.110
-[0.0.110]: https://github.com/rvben/rumdl/compare/v0.0.109...v0.0.110
 [0.0.107]: https://github.com/rvben/rumdl/compare/v0.0.106...v0.0.107
-[0.0.107]: https://github.com/rvben/rumdl/compare/v0.0.106...v0.0.107
-[0.0.105]: https://github.com/rvben/rumdl/compare/v0.0.104...v0.0.105
+[0.0.106]: https://github.com/rvben/rumdl/compare/v0.0.105...v0.0.106
 [0.0.105]: https://github.com/rvben/rumdl/compare/v0.0.104...v0.0.105
 [0.0.104]: https://github.com/rvben/rumdl/compare/v0.0.103...v0.0.104
 [0.0.102]: https://github.com/rvben/rumdl/compare/v0.0.101...v0.0.102

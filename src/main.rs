@@ -1786,8 +1786,15 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     // If silent mode is enabled, also enable quiet mode
     let quiet = args.quiet || args.silent;
 
-    // Create output writer for linting results (stderr for diagnostics)
-    let output_writer = OutputWriter::new(args.stderr, quiet, args.silent);
+    // In check mode without --fix, diagnostics should go to stderr by default
+    // In fix mode, fixed content goes to stdout, so diagnostics also go to stdout unless --stderr is specified
+    let use_stderr = if args._fix {
+        args.stderr
+    } else {
+        true // Check mode: diagnostics to stderr by default
+    };
+    // Create output writer for linting results
+    let output_writer = OutputWriter::new(use_stderr, quiet, args.silent);
 
     // Determine output format
     let output_format_str = args
