@@ -92,7 +92,8 @@ jobs:
       # Toolchain setup (mise installs rust, python, maturin, etc.)
       - uses: jdx/mise-action@v2
         with:
-          experimental: true
+          version: 2025.8.18
+          experimental: false  # Use stable releases only
           install: true
 
       # Ensure all mise tools are installed (including zig for Linux)

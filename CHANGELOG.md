@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.124] - 2025-08-22
+
 ### Added
 - **Formatting**: Added stdin/stdout formatting support (closes #59)
   - `rumdl fmt` command for formatting markdown files (alias for `check --fix`)
@@ -434,7 +436,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.123...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.124...HEAD
+[0.0.124]: https://github.com/rvben/rumdl/compare/v0.0.123...v0.0.124
 [0.0.123]: https://github.com/rvben/rumdl/compare/v0.0.122...v0.0.123
 [0.0.122]: https://github.com/rvben/rumdl/compare/v0.0.121...v0.0.122
 [0.0.121]: https://github.com/rvben/rumdl/compare/v0.0.120...v0.0.121
