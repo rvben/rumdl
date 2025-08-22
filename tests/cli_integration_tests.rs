@@ -1256,6 +1256,67 @@ fn test_stdin_check_without_fix() {
 }
 
 #[test]
+fn test_stdin_dash_syntax() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test that '-' works as stdin indicator
+    let input = "# Test   \n\nTest   ";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("-");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should not output content to stdout in check mode
+    assert_eq!(stdout, "");
+    // Should report issues on stderr
+    assert!(stderr.contains("MD009"));
+    assert!(stderr.contains("trailing spaces"));
+    assert!(stderr.contains("Found 3 issue(s)"));
+}
+
+#[test]
+fn test_fmt_dash_syntax() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test that 'fmt -' works for formatting
+    let input = "# Test   \n\nTest   ";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("fmt").arg("-");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should output formatted content
+    assert_eq!(stdout, "# Test\n\nTest\n");
+    // Should exit successfully
+    assert!(output.status.success());
+}
+
+#[test]
 fn test_fmt_command() {
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 

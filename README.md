@@ -226,14 +226,15 @@ rumdl supports formatting via stdin/stdout, making it ideal for editor integrati
 
 ```bash
 # Format content from stdin and output to stdout
-cat README.md | rumdl fmt --stdin > README_formatted.md
+cat README.md | rumdl fmt - > README_formatted.md
+# Alternative: cat README.md | rumdl fmt --stdin > README_formatted.md
 
 # Use in a pipeline
-echo "# Title   " | rumdl fmt --stdin
+echo "# Title   " | rumdl fmt -
 # Output: # Title
 
 # Format clipboard content (macOS example)
-pbpaste | rumdl fmt --stdin | pbcopy
+pbpaste | rumdl fmt - | pbcopy
 ```
 
 ### Editor Integration
@@ -242,10 +243,10 @@ For editor integration, use stdin/stdout mode with the `--quiet` flag to suppres
 
 ```bash
 # Format selection in editor (example for vim)
-:'<,'>!rumdl fmt --stdin --quiet
+:'<,'>!rumdl fmt - --quiet
 
 # Format entire buffer
-:%!rumdl fmt --stdin --quiet
+:%!rumdl fmt - --quiet
 ```
 
 ## Pre-commit Integration
@@ -366,8 +367,9 @@ rumdl fmt
 # Format specific file
 rumdl fmt README.md
 
-# Format from stdin
-cat README.md | rumdl fmt --stdin > formatted.md
+# Format from stdin (using dash syntax)
+cat README.md | rumdl fmt - > formatted.md
+# Alternative: cat README.md | rumdl fmt --stdin > formatted.md
 ```
 
 #### `init [OPTIONS]`

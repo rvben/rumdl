@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Formatting**: Added stdin/stdout formatting support (closes #59)
   - `rumdl fmt` command for formatting markdown files (alias for `check --fix`)
   - `--stdin` with `--fix` now outputs formatted content to stdout
+  - Support for `-` as stdin indicator (Unix convention: `rumdl fmt -`)
   - Clear separation between linting (diagnostics to stderr) and formatting (content to stdout)
   - Documentation updated with formatting examples
 

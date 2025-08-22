@@ -205,7 +205,7 @@ enum ConfigSubcommand {
 
 #[derive(Args, Debug)]
 struct CheckArgs {
-    /// Files or directories to lint
+    /// Files or directories to lint (use '-' for stdin)
     #[arg(required = false)]
     paths: Vec<String>,
 
@@ -1998,8 +1998,8 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     // Initialize rules with configuration
     let enabled_rules = get_enabled_rules_from_checkargs(args, &config);
 
-    // Handle stdin input
-    if args.stdin {
+    // Handle stdin input - either explicit --stdin flag or "-" as file argument
+    if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
         process_stdin(&enabled_rules, args, &config);
         return;
     }
