@@ -26,8 +26,8 @@ cargo install rumdl
 # Lint Markdown files in the current directory
 rumdl check .
 
-# Automatically fix issues
-rumdl check --fix .
+# Format files (automatically fix issues)
+rumdl fmt .
 
 # Create a default configuration file
 rumdl init
@@ -75,6 +75,7 @@ It offers:
   - [Command-line Interface](#command-line-interface)
     - [Commands](#commands)
       - [`check [PATHS...]`](#check-paths)
+      - [`fmt [PATHS...]`](#fmt-paths)
       - [`init [OPTIONS]`](#init-options)
       - [`import <FILE> [OPTIONS]`](#import-file-options)
       - [`rule [<rule>]`](#rule-rule)
@@ -186,8 +187,8 @@ rumdl check README.md
 # Lint all Markdown files in current directory and subdirectories
 rumdl check .
 
-# Automatically fix issues
-rumdl check --fix README.md
+# Format a specific file
+rumdl fmt README.md
 
 # Create a default configuration file
 rumdl init
@@ -224,14 +225,14 @@ rumdl supports formatting via stdin/stdout, making it ideal for editor integrati
 
 ```bash
 # Format content from stdin and output to stdout
-cat README.md | rumdl check --stdin --fix > README_formatted.md
+cat README.md | rumdl fmt --stdin > README_formatted.md
 
 # Use in a pipeline
-echo "# Title   " | rumdl check --stdin --fix
+echo "# Title   " | rumdl fmt --stdin
 # Output: # Title
 
 # Format clipboard content (macOS example)
-pbpaste | rumdl check --stdin --fix | pbcopy
+pbpaste | rumdl fmt --stdin | pbcopy
 ```
 
 ### Editor Integration
@@ -240,10 +241,10 @@ For editor integration, use stdin/stdout mode with the `--quiet` flag to suppres
 
 ```bash
 # Format selection in editor (example for vim)
-:'<,'>!rumdl check --stdin --fix --quiet
+:'<,'>!rumdl fmt --stdin --quiet
 
 # Format entire buffer
-:%!rumdl check --stdin --fix --quiet
+:%!rumdl fmt --stdin --quiet
 ```
 
 ## Pre-commit Integration
@@ -338,6 +339,36 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `-o, --output <format>`: Output format: `text` (default) or `json`
 - `--stdin`: Read from stdin instead of files
 
+#### `fmt [PATHS...]`
+
+Format Markdown files (alias for `check --fix`)
+
+**Arguments:**
+
+- `[PATHS...]`: Files or directories to format. If provided, these paths take precedence over include patterns
+
+**Options:**
+
+All the same options as `check` are available (except `--fix` which is always enabled), including:
+- `--stdin`: Format content from stdin and output to stdout
+- `-d, --disable <rules>`: Disable specific rules during formatting
+- `-e, --enable <rules>`: Format using only specific rules
+- `--exclude/--include`: Control which files to format
+- `-q, --quiet`: Suppress diagnostic output
+
+**Examples:**
+
+```bash
+# Format all Markdown files in current directory
+rumdl fmt
+
+# Format specific file
+rumdl fmt README.md
+
+# Format from stdin
+cat README.md | rumdl fmt --stdin > formatted.md
+```
+
 #### `init [OPTIONS]`
 
 Create a default configuration file in the current directory
@@ -429,8 +460,8 @@ This allows scripts and CI/CD systems to distinguish between "the tool found pro
 # Lint all Markdown files in the current directory
 rumdl check .
 
-# Automatically fix issues
-rumdl check --fix .
+# Format files (automatically fix issues)
+rumdl fmt .
 
 # Create a default configuration file
 rumdl init

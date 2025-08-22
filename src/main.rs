@@ -125,6 +125,8 @@ struct Cli {
 enum Commands {
     /// Lint Markdown files and print warnings/errors
     Check(CheckArgs),
+    /// Format Markdown files (alias for check --fix)
+    Fmt(CheckArgs),
     /// Initialize a new configuration file
     Init {
         /// Generate configuration for pyproject.toml instead of .rumdl.toml
@@ -1122,6 +1124,16 @@ build-backend = \"setuptools.build_meta\"
                 }
             }
             Commands::Check(args) => {
+                // If --no-config or --isolated is set, skip config loading
+                if cli.no_config || cli.isolated {
+                    run_check(&args, None, cli.no_config || cli.isolated);
+                } else {
+                    run_check(&args, cli.config.as_deref(), cli.no_config || cli.isolated);
+                }
+            }
+            Commands::Fmt(mut args) => {
+                // fmt is an alias for check --fix
+                args._fix = true;
                 // If --no-config or --isolated is set, skip config loading
                 if cli.no_config || cli.isolated {
                     run_check(&args, None, cli.no_config || cli.isolated);

@@ -1254,3 +1254,34 @@ fn test_stdin_check_without_fix() {
     // Should exit with error due to issues
     assert!(!output.status.success());
 }
+
+#[test]
+fn test_fmt_command() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test that fmt command works as an alias for check --fix
+    let input = "# Test   \n\nTest paragraph   ";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("fmt").arg("--stdin").arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should output formatted content to stdout (same as check --fix)
+    assert_eq!(stdout, "# Test\n\nTest paragraph\n");
+    // No errors in quiet mode
+    assert_eq!(stderr, "");
+    assert!(output.status.success());
+}
