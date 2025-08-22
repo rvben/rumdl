@@ -455,10 +455,32 @@ rumdl version
 
 rumdl can be configured in several ways:
 
-1. Using a `.rumdl.toml` file in your project directory
+1. Using a `.rumdl.toml` file in your project directory or parent directories
 2. Using the `[tool.rumdl]` section in your project's `pyproject.toml` file (for Python projects)
 3. Using command-line arguments
 4. **Automatic markdownlint compatibility**: rumdl automatically discovers and loads existing markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.)
+
+### Configuration Discovery
+
+rumdl automatically searches for configuration files by traversing up the directory tree from the current
+working directory, similar to tools like `git`, `ruff`, and `eslint`. This means you can run rumdl from any
+subdirectory of your project and it will find the configuration file at the project root.
+
+The search follows these rules:
+- Searches upward for `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml` (with `[tool.rumdl]` section)
+- Stops at the first configuration file found
+- Stops searching when it encounters a `.git` directory (project boundary)
+- Maximum traversal depth of 100 directories
+
+To disable all configuration discovery and use only built-in defaults, use the `--isolated` flag:
+
+```bash
+# Use discovered configuration (default behavior)
+rumdl check .
+
+# Ignore all configuration files
+rumdl check --isolated .
+```
 
 ### Markdownlint Migration
 

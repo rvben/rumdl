@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Configuration Discovery**: Automatic upward directory traversal to find configuration files (closes #58)
+  - Searches parent directories for `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml` 
+  - Similar behavior to `git`, `ruff`, and `eslint`
+  - Stops at `.git` directory boundaries
+- **--isolated flag**: New flag to disable all configuration discovery (Ruff-compatible)
+  - Alias for `--no-config` for better ecosystem compatibility
+
 ## [0.0.123] - 2025-08-21
 
 ## [0.0.123] - 2025-08-21

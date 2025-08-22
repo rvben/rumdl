@@ -48,13 +48,13 @@ fn read_file_efficiently(path: &Path) -> Result<String, Box<dyn Error>> {
 
 /// Utility function to load configuration with standard CLI error handling.
 /// This eliminates duplication between different CLI commands that load configuration.
-fn load_config_with_cli_error_handling(config_path: Option<&str>, no_config: bool) -> rumdl_config::SourcedConfig {
-    load_config_with_cli_error_handling_with_dir(config_path, no_config, None)
+fn load_config_with_cli_error_handling(config_path: Option<&str>, isolated: bool) -> rumdl_config::SourcedConfig {
+    load_config_with_cli_error_handling_with_dir(config_path, isolated, None)
 }
 
 fn load_config_with_cli_error_handling_with_dir(
     config_path: Option<&str>,
-    no_config: bool,
+    isolated: bool,
     discovery_dir: Option<&std::path::Path>,
 ) -> rumdl_config::SourcedConfig {
     let result = if let Some(dir) = discovery_dir {
@@ -68,7 +68,7 @@ fn load_config_with_cli_error_handling_with_dir(
             let _ = std::env::set_current_dir(parent);
         }
 
-        let config_result = rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config);
+        let config_result = rumdl_config::SourcedConfig::load_with_discovery(config_path, None, isolated);
 
         // Restore original directory
         if let Some(orig) = original_dir {
@@ -77,7 +77,7 @@ fn load_config_with_cli_error_handling_with_dir(
 
         config_result
     } else {
-        rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config)
+        rumdl_config::SourcedConfig::load_with_discovery(config_path, None, isolated)
     };
 
     match result {
@@ -110,6 +110,15 @@ struct Cli {
         help = "Ignore all configuration files and use built-in defaults"
     )]
     no_config: bool,
+
+    /// Ignore all configuration files (alias for --no-config, Ruff-compatible)
+    #[arg(
+        long,
+        global = true,
+        help = "Ignore all configuration files (alias for --no-config)",
+        conflicts_with = "no_config"
+    )]
+    isolated: bool,
 }
 
 #[derive(Subcommand)]
@@ -1113,11 +1122,11 @@ build-backend = \"setuptools.build_meta\"
                 }
             }
             Commands::Check(args) => {
-                // If --no-config is set, skip config loading
-                if cli.no_config {
-                    run_check(&args, None, cli.no_config);
+                // If --no-config or --isolated is set, skip config loading
+                if cli.no_config || cli.isolated {
+                    run_check(&args, None, cli.no_config || cli.isolated);
                 } else {
-                    run_check(&args, cli.config.as_deref(), cli.no_config);
+                    run_check(&args, cli.config.as_deref(), cli.no_config || cli.isolated);
                 }
             }
             Commands::Rule { rule } => {
@@ -1358,11 +1367,12 @@ build-backend = \"setuptools.build_meta\"
                 }
                 // Handle 'config file' subcommand for showing config file path
                 else if let Some(ConfigSubcommand::File) = subcmd {
-                    let sourced = load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config);
+                    let sourced =
+                        load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config || cli.isolated);
 
                     if sourced.loaded_files.is_empty() {
-                        if cli.no_config {
-                            println!("No configuration file loaded (--no-config specified)");
+                        if cli.no_config || cli.isolated {
+                            println!("No configuration file loaded (--no-config/--isolated specified)");
                         } else {
                             println!("No configuration file found (using defaults)");
                         }
@@ -1411,7 +1421,7 @@ build-backend = \"setuptools.build_meta\"
 
                         default_sourced
                     } else {
-                        load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config)
+                        load_config_with_cli_error_handling(cli.config.as_deref(), cli.no_config || cli.isolated)
                     };
                     let validation_warnings = rumdl_config::validate_config_sourced(&sourced_reg, &registry_reg);
                     if !validation_warnings.is_empty() {
@@ -1869,7 +1879,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     }
 }
 
-fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool) {
+fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool) {
     use rumdl::output::{OutputFormat, OutputWriter};
 
     // If silent mode is enabled, also enable quiet mode
@@ -1891,7 +1901,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, no_config: bool
     };
 
     // 2. Load sourced config (for provenance and validation)
-    let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, no_config, discovery_dir);
+    let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
 
     // 3. Validate configuration
     let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
