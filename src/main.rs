@@ -709,7 +709,7 @@ fn print_results_from_checkargs(params: PrintResultsArgs) {
 
             if !args._fix && total_fixable_issues > 0 {
                 // Display the exact count of fixable issues
-                println!("Run with `--fix` to automatically fix {total_fixable_issues} of the {total_issues} issues");
+                println!("Run `rumdl fmt` to automatically fix {total_fixable_issues} of the {total_issues} issues");
             }
         }
     } else {

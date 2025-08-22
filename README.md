@@ -28,6 +28,7 @@ rumdl check .
 
 # Format files (automatically fix issues)
 rumdl fmt .
+# Alternative: rumdl check --fix .
 
 # Create a default configuration file
 rumdl init
@@ -462,6 +463,7 @@ rumdl check .
 
 # Format files (automatically fix issues)
 rumdl fmt .
+# Alternative: rumdl check --fix .
 
 # Create a default configuration file
 rumdl init
@@ -714,7 +716,7 @@ README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
 README.md:42:3: [MD010] Hard tabs found, use spaces instead [*]
 
 Found 3 issues in 1 file (2 files checked)
-Run with `--fix` to automatically fix issues
+Run `rumdl fmt` to automatically fix issues
 ```
 
 ### Output Format
