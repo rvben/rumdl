@@ -1320,6 +1320,81 @@ fn test_stdin_dash_syntax() {
 }
 
 #[test]
+fn test_stdin_filename_flag() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test that --stdin-filename changes the displayed filename in error messages
+    let input = "# Test   \n\nTest paragraph   ";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("-").arg("--stdin-filename").arg("test-file.md");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should not output content to stdout in check mode
+    assert_eq!(stdout, "");
+    // Should show the custom filename in error messages
+    assert!(
+        stderr.contains("test-file.md:1:"),
+        "Error message should contain custom filename"
+    );
+    assert!(
+        stderr.contains("test-file.md:3:"),
+        "Error message should contain custom filename for line 3"
+    );
+    assert!(stderr.contains("in test-file.md"), "Summary should use custom filename");
+    // Should still detect the issues
+    assert!(stderr.contains("MD009"));
+}
+
+#[test]
+fn test_stdin_filename_in_fmt_mode() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test that --stdin-filename also works in fmt mode
+    let input = "# Clean Markdown\n\nNo issues here.\n";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("fmt")
+        .arg("-")
+        .arg("--stdin-filename")
+        .arg("custom-file.md")
+        .arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // In fmt mode with no issues, should output the original content
+    assert_eq!(stdout, input, "Should output original content");
+    // No errors should be on stderr in quiet mode
+    assert_eq!(stderr, "");
+    assert!(output.status.success());
+}
+
+#[test]
 fn test_fmt_dash_syntax() {
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 

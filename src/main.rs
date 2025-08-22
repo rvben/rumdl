@@ -279,6 +279,10 @@ struct CheckArgs {
     #[arg(long, help = "Read from stdin instead of files")]
     stdin: bool,
 
+    /// Filename to use for stdin input (for context and error messages)
+    #[arg(long, help = "Filename to use when reading from stdin (e.g., README.md)")]
+    stdin_filename: Option<String>,
+
     /// Output linting results to stderr instead of stdout
     #[arg(long, help = "Output diagnostics to stderr instead of stdout")]
     stderr: bool,
@@ -1824,6 +1828,17 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         exit::violations_found();
     }
 
+    // Determine the filename to use for display and context
+    let display_filename = args.stdin_filename.as_deref().unwrap_or("<stdin>");
+
+    // Set RUMDL_FILE_PATH if stdin-filename is provided
+    // This allows rules like MD057 to know the file location for relative path checking
+    if let Some(ref filename) = args.stdin_filename {
+        unsafe {
+            std::env::set_var("RUMDL_FILE_PATH", filename);
+        }
+    }
+
     // Create a lint context for the stdin content
     let ctx = LintContext::new(&content);
     let mut all_warnings = Vec::new();
@@ -1874,7 +1889,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
             // Only show diagnostics to stderr if not in quiet mode
             if !quiet && !remaining_warnings.is_empty() {
                 let formatter = output_format.create_formatter();
-                let formatted = formatter.format_warnings(&remaining_warnings, "<stdin>");
+                let formatted = formatter.format_warnings(&remaining_warnings, display_filename);
                 eprintln!("{formatted}");
                 eprintln!(
                     "\n{} issue(s) fixed, {} issue(s) remaining",
@@ -1891,6 +1906,13 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
             // No issues found, output the original content unchanged
             print!("{content}");
         }
+
+        // Clean up environment variable
+        if args.stdin_filename.is_some() {
+            unsafe {
+                std::env::remove_var("RUMDL_FILE_PATH");
+            }
+        }
         return;
     }
 
@@ -1900,7 +1922,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         output_format,
         OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit
     ) {
-        let file_warnings = vec![("<stdin>".to_string(), all_warnings)];
+        let file_warnings = vec![(display_filename.to_string(), all_warnings)];
         let output = match output_format {
             OutputFormat::Json => rumdl::output::formatters::json::format_all_warnings_as_json(&file_warnings),
             OutputFormat::GitLab => rumdl::output::formatters::gitlab::format_gitlab_report(&file_warnings),
@@ -1916,7 +1938,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         // Use formatter for line-by-line output
         let formatter = output_format.create_formatter();
         if !all_warnings.is_empty() {
-            let formatted = formatter.format_warnings(&all_warnings, "<stdin>");
+            let formatted = formatter.format_warnings(&all_warnings, display_filename);
             output_writer.writeln(&formatted).unwrap_or_else(|e| {
                 eprintln!("Error writing output: {e}");
             });
@@ -1926,11 +1948,24 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         if !quiet {
             if has_issues {
                 output_writer
-                    .writeln(&format!("\nFound {} issue(s) in stdin", all_warnings.len()))
+                    .writeln(&format!(
+                        "\nFound {} issue(s) in {}",
+                        all_warnings.len(),
+                        display_filename
+                    ))
                     .ok();
             } else {
-                output_writer.writeln("No issues found in stdin").ok();
+                output_writer
+                    .writeln(&format!("No issues found in {display_filename}"))
+                    .ok();
             }
+        }
+    }
+
+    // Clean up environment variable
+    if args.stdin_filename.is_some() {
+        unsafe {
+            std::env::remove_var("RUMDL_FILE_PATH");
         }
     }
 

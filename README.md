@@ -235,6 +235,9 @@ echo "# Title   " | rumdl fmt -
 
 # Format clipboard content (macOS example)
 pbpaste | rumdl fmt - | pbcopy
+
+# Provide filename context for better error messages (useful for editor integrations)
+cat README.md | rumdl check - --stdin-filename README.md
 ```
 
 ### Editor Integration
