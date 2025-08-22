@@ -1,8 +1,7 @@
-/// Text reflow utilities for MD013
-///
-/// This module implements text wrapping/reflow functionality that preserves
-/// Markdown elements like links, emphasis, code spans, etc.
-///
+//! Text reflow utilities for MD013
+//!
+//! This module implements text wrapping/reflow functionality that preserves
+//! Markdown elements like links, emphasis, code spans, etc.
 
 use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
@@ -125,22 +124,22 @@ impl Element {
             Element::ReferenceImage { alt, reference } => alt.chars().count() + reference.chars().count() + 5, // ![alt][ref]
             Element::EmptyReferenceImage { alt } => alt.chars().count() + 5, // ![alt][]
             Element::FootnoteReference { note } => note.chars().count() + 3, // [^note]
-            Element::Strikethrough(s) => s.chars().count() + 4, // ~~text~~
-            Element::WikiLink(s) => s.chars().count() + 4, // [[wiki]]
-            Element::InlineMath(s) => s.chars().count() + 2, // $math$
-            Element::DisplayMath(s) => s.chars().count() + 4, // $$math$$
-            Element::EmojiShortcode(s) => s.chars().count() + 2, // :emoji:
-            Element::HtmlTag(s) => s.chars().count(), // <tag> - already includes brackets
-            Element::HtmlEntity(s) => s.chars().count(), // &nbsp; - already complete
-            Element::Code(s) => s.chars().count() + 2,                                     // `code`
-            Element::Bold(s) => s.chars().count() + 4,                                     // **text**
-            Element::Italic(s) => s.chars().count() + 2,                                   // *text*
+            Element::Strikethrough(s) => s.chars().count() + 4,              // ~~text~~
+            Element::WikiLink(s) => s.chars().count() + 4,                   // [[wiki]]
+            Element::InlineMath(s) => s.chars().count() + 2,                 // $math$
+            Element::DisplayMath(s) => s.chars().count() + 4,                // $$math$$
+            Element::EmojiShortcode(s) => s.chars().count() + 2,             // :emoji:
+            Element::HtmlTag(s) => s.chars().count(),                        // <tag> - already includes brackets
+            Element::HtmlEntity(s) => s.chars().count(),                     // &nbsp; - already complete
+            Element::Code(s) => s.chars().count() + 2,                       // `code`
+            Element::Bold(s) => s.chars().count() + 4,                       // **text**
+            Element::Italic(s) => s.chars().count() + 2,                     // *text*
         }
     }
 }
 
 /// Parse markdown elements from text preserving the raw syntax
-/// 
+///
 /// Detection order is critical:
 /// 1. Inline links [text](url) - must be detected first to avoid conflicts
 /// 2. Reference links [text][ref] - detected before shortcut references
@@ -154,98 +153,98 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
     while !remaining.is_empty() {
         // Find the earliest occurrence of any markdown pattern
         let mut earliest_match: Option<(usize, &str, fancy_regex::Match)> = None;
-        
+
         // Check for images first (they start with ! so should be detected before links)
         // Inline images - ![alt](url)
-        if let Ok(Some(m)) = INLINE_IMAGE_FANCY_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "inline_image", m));
-            }
+        if let Ok(Some(m)) = INLINE_IMAGE_FANCY_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "inline_image", m));
         }
-        
+
         // Reference images - ![alt][ref]
-        if let Ok(Some(m)) = REF_IMAGE_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "ref_image", m));
-            }
+        if let Ok(Some(m)) = REF_IMAGE_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "ref_image", m));
         }
-        
+
         // Check for footnote references - [^note]
-        if let Ok(Some(m)) = FOOTNOTE_REF_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "footnote_ref", m));
-            }
+        if let Ok(Some(m)) = FOOTNOTE_REF_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "footnote_ref", m));
         }
-        
+
         // Check for inline links - [text](url)
-        if let Ok(Some(m)) = INLINE_LINK_FANCY_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "inline_link", m));
-            }
+        if let Ok(Some(m)) = INLINE_LINK_FANCY_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "inline_link", m));
         }
-        
+
         // Check for reference links - [text][ref]
-        if let Ok(Some(m)) = REF_LINK_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "ref_link", m));
-            }
+        if let Ok(Some(m)) = REF_LINK_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "ref_link", m));
         }
-        
+
         // Check for shortcut reference links - [ref]
         // Only check if we haven't found an earlier pattern that would conflict
-        if let Ok(Some(m)) = SHORTCUT_REF_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "shortcut_ref", m));
-            }
+        if let Ok(Some(m)) = SHORTCUT_REF_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "shortcut_ref", m));
         }
-        
+
         // Check for wiki-style links - [[wiki]]
-        if let Ok(Some(m)) = WIKI_LINK_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "wiki_link", m));
-            }
+        if let Ok(Some(m)) = WIKI_LINK_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "wiki_link", m));
         }
-        
+
         // Check for display math first (before inline) - $$math$$
-        if let Ok(Some(m)) = DISPLAY_MATH_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "display_math", m));
-            }
+        if let Ok(Some(m)) = DISPLAY_MATH_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "display_math", m));
         }
-        
+
         // Check for inline math - $math$
-        if let Ok(Some(m)) = INLINE_MATH_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "inline_math", m));
-            }
+        if let Ok(Some(m)) = INLINE_MATH_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "inline_math", m));
         }
-        
+
         // Check for strikethrough - ~~text~~
-        if let Ok(Some(m)) = STRIKETHROUGH_FANCY_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "strikethrough", m));
-            }
+        if let Ok(Some(m)) = STRIKETHROUGH_FANCY_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "strikethrough", m));
         }
-        
+
         // Check for emoji shortcodes - :emoji:
-        if let Ok(Some(m)) = EMOJI_SHORTCODE_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "emoji", m));
-            }
+        if let Ok(Some(m)) = EMOJI_SHORTCODE_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "emoji", m));
         }
-        
+
         // Check for HTML entities - &nbsp; etc
-        if let Ok(Some(m)) = HTML_ENTITY_REGEX.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "html_entity", m));
-            }
+        if let Ok(Some(m)) = HTML_ENTITY_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "html_entity", m));
         }
-        
+
         // Check for HTML tags - <tag> </tag> <tag/>
-        if let Ok(Some(m)) = HTML_TAG_PATTERN.find(remaining) {
-            if earliest_match.is_none() || m.start() < earliest_match.as_ref().unwrap().0 {
-                earliest_match = Some((m.start(), "html_tag", m));
-            }
+        if let Ok(Some(m)) = HTML_TAG_PATTERN.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "html_tag", m));
         }
 
         // Find earliest non-link special characters
@@ -281,12 +280,12 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
 
         if should_process_markdown_link {
             let (pos, pattern_type, match_obj) = earliest_match.unwrap();
-            
+
             // Add any text before the match
             if pos > 0 {
                 elements.push(Element::Text(remaining[..pos].to_string()));
             }
-            
+
             // Process the matched pattern
             match pattern_type {
                 "inline_image" => {
@@ -307,11 +306,9 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                     if let Ok(Some(caps)) = REF_IMAGE_REGEX.captures(remaining) {
                         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let reference = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                        
+
                         if reference.is_empty() {
-                            elements.push(Element::EmptyReferenceImage {
-                                alt: alt.to_string(),
-                            });
+                            elements.push(Element::EmptyReferenceImage { alt: alt.to_string() });
                         } else {
                             elements.push(Element::ReferenceImage {
                                 alt: alt.to_string(),
@@ -327,9 +324,7 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                 "footnote_ref" => {
                     if let Ok(Some(caps)) = FOOTNOTE_REF_REGEX.captures(remaining) {
                         let note = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        elements.push(Element::FootnoteReference {
-                            note: note.to_string(),
-                        });
+                        elements.push(Element::FootnoteReference { note: note.to_string() });
                         remaining = &remaining[match_obj.end()..];
                     } else {
                         elements.push(Element::Text("[".to_string()));
@@ -355,12 +350,10 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                     if let Ok(Some(caps)) = REF_LINK_REGEX.captures(remaining) {
                         let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let reference = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                        
+
                         if reference.is_empty() {
                             // Empty reference link [text][]
-                            elements.push(Element::EmptyReferenceLink {
-                                text: text.to_string(),
-                            });
+                            elements.push(Element::EmptyReferenceLink { text: text.to_string() });
                         } else {
                             // Regular reference link [text][ref]
                             elements.push(Element::ReferenceLink {
@@ -456,7 +449,7 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
             }
         } else {
             // Process non-link special characters
-            
+
             // Add any text before the special character
             if next_special > 0 && next_special < remaining.len() {
                 elements.push(Element::Text(remaining[..next_special].to_string()));
@@ -835,42 +828,40 @@ mod tests {
         let test_cases = vec![
             // Reference link: [text][ref] - should be preserved intact
             ("Check out [text][ref] for details", vec!["[text][ref]"]),
-            
             // Empty reference: [text][] - should be preserved intact
             ("See [text][] for info", vec!["[text][]"]),
-            
             // Shortcut reference: [homepage] - should be preserved intact
             ("Visit [homepage] today", vec!["[homepage]"]),
-            
             // Multiple reference links in one line
-            ("Links: [first][ref1] and [second][ref2] here", vec!["[first][ref1]", "[second][ref2]"]),
-            
+            (
+                "Links: [first][ref1] and [second][ref2] here",
+                vec!["[first][ref1]", "[second][ref2]"],
+            ),
             // Mixed inline and reference links
-            ("See [inline](url) and [reference][ref] links", vec!["[inline](url)", "[reference][ref]"]),
+            (
+                "See [inline](url) and [reference][ref] links",
+                vec!["[inline](url)", "[reference][ref]"],
+            ),
         ];
 
         for (input, expected_patterns) in test_cases {
-            println!("\nTesting: {}", input);
+            println!("\nTesting: {input}");
             let result = reflow_line(input, &options);
             let joined = result.join(" ");
-            println!("Result:  {}", joined);
-            
+            println!("Result:  {joined}");
+
             // Verify all expected patterns are preserved
             for expected_pattern in expected_patterns {
                 assert!(
-                    joined.contains(&expected_pattern),
-                    "Expected '{}' to be preserved in '{}', but got '{}'",
-                    expected_pattern,
-                    input,
-                    joined
+                    joined.contains(expected_pattern),
+                    "Expected '{expected_pattern}' to be preserved in '{input}', but got '{joined}'"
                 );
             }
-            
+
             // Verify no broken patterns exist (spaces inside brackets)
             assert!(
                 !joined.contains("[ ") || !joined.contains("] ["),
-                "Detected broken reference link pattern with spaces inside brackets in '{}'",
-                joined
+                "Detected broken reference link pattern with spaces inside brackets in '{joined}'"
             );
         }
     }
@@ -887,34 +878,36 @@ mod tests {
         let test_cases = vec![
             // Escaped brackets should be treated as regular text
             ("Text with \\[escaped\\] brackets", vec!["\\[escaped\\]"]),
-            
             // Nested brackets in reference links
-            ("Link [text with [nested] content][ref]", vec!["[text with [nested] content][ref]"]),
-            
+            (
+                "Link [text with [nested] content][ref]",
+                vec!["[text with [nested] content][ref]"],
+            ),
             // Reference link followed by inline link
-            ("First [ref][link] then [inline](url)", vec!["[ref][link]", "[inline](url)"]),
-            
+            (
+                "First [ref][link] then [inline](url)",
+                vec!["[ref][link]", "[inline](url)"],
+            ),
             // Shortcut reference that might conflict with other patterns
             ("Array [0] and reference [link] here", vec!["[0]", "[link]"]),
-            
             // Empty reference with complex text
-            ("Complex [text with *emphasis*][] reference", vec!["[text with *emphasis*][]"]),
+            (
+                "Complex [text with *emphasis*][] reference",
+                vec!["[text with *emphasis*][]"],
+            ),
         ];
 
         for (input, expected_patterns) in test_cases {
-            println!("\nTesting edge case: {}", input);
+            println!("\nTesting edge case: {input}");
             let result = reflow_line(input, &options);
             let joined = result.join(" ");
-            println!("Result: {}", joined);
-            
+            println!("Result: {joined}");
+
             // Verify all expected patterns are preserved
             for expected_pattern in expected_patterns {
                 assert!(
-                    joined.contains(&expected_pattern),
-                    "Expected '{}' to be preserved in '{}', but got '{}'",
-                    expected_pattern,
-                    input,
-                    joined
+                    joined.contains(expected_pattern),
+                    "Expected '{expected_pattern}' to be preserved in '{input}', but got '{joined}'"
                 );
             }
         }
@@ -945,28 +938,31 @@ mod tests {
         // Test cases for image patterns
         let test_cases = vec![
             // Inline image
-            ("Check out ![alt text](image.png) for details", vec!["![alt text](image.png)"]),
+            (
+                "Check out ![alt text](image.png) for details",
+                vec!["![alt text](image.png)"],
+            ),
             // Reference image
             ("See ![image][ref] for info", vec!["![image][ref]"]),
             // Empty reference image
             ("Visit ![homepage][] today", vec!["![homepage][]"]),
             // Multiple images
-            ("Images: ![first](a.png) and ![second][ref2]", vec!["![first](a.png)", "![second][ref2]"]),
+            (
+                "Images: ![first](a.png) and ![second][ref2]",
+                vec!["![first](a.png)", "![second][ref2]"],
+            ),
         ];
 
         for (input, expected_patterns) in test_cases {
-            println!("\nTesting: {}", input);
+            println!("\nTesting: {input}");
             let result = reflow_line(input, &options);
             let joined = result.join(" ");
-            println!("Result:  {}", joined);
-            
+            println!("Result:  {joined}");
+
             for expected_pattern in expected_patterns {
                 assert!(
-                    joined.contains(&expected_pattern),
-                    "Expected '{}' to be preserved in '{}', but got '{}'",
-                    expected_pattern,
-                    input,
-                    joined
+                    joined.contains(expected_pattern),
+                    "Expected '{expected_pattern}' to be preserved in '{input}', but got '{joined}'"
                 );
             }
         }
@@ -983,13 +979,22 @@ mod tests {
             // Strikethrough
             ("Text with ~~strikethrough~~ preserved", vec!["~~strikethrough~~"]),
             // Wiki links
-            ("Check [[wiki link]] and [[page|display]]", vec!["[[wiki link]]", "[[page|display]]"]),
+            (
+                "Check [[wiki link]] and [[page|display]]",
+                vec!["[[wiki link]]", "[[page|display]]"],
+            ),
             // Math
-            ("Inline $x^2 + y^2$ and display $$\\int f(x) dx$$", vec!["$x^2 + y^2$", "$$\\int f(x) dx$$"]),
+            (
+                "Inline $x^2 + y^2$ and display $$\\int f(x) dx$$",
+                vec!["$x^2 + y^2$", "$$\\int f(x) dx$$"],
+            ),
             // Emoji
             ("Use :smile: and :heart: emojis", vec![":smile:", ":heart:"]),
             // HTML tags
-            ("Text with <span>tag</span> and <br/>", vec!["<span>", "</span>", "<br/>"]),
+            (
+                "Text with <span>tag</span> and <br/>",
+                vec!["<span>", "</span>", "<br/>"],
+            ),
             // HTML entities
             ("Non-breaking&nbsp;space and em&mdash;dash", vec!["&nbsp;", "&mdash;"]),
         ];
@@ -997,14 +1002,11 @@ mod tests {
         for (input, expected_patterns) in test_cases {
             let result = reflow_line(input, &options);
             let joined = result.join(" ");
-            
+
             for pattern in expected_patterns {
                 assert!(
                     joined.contains(pattern),
-                    "Expected '{}' to be preserved in '{}', but got '{}'",
-                    pattern,
-                    input,
-                    joined
+                    "Expected '{pattern}' to be preserved in '{input}', but got '{joined}'"
                 );
             }
         }
@@ -1021,7 +1023,7 @@ mod tests {
         let input = "Line with **bold**, `code`, [link](url), ![image](img), ~~strike~~, $math$, :emoji:, and <tag> all together";
         let result = reflow_line(input, &options);
         let joined = result.join(" ");
-        
+
         // All patterns should be preserved
         assert!(joined.contains("**bold**"));
         assert!(joined.contains("`code`"));
@@ -1052,14 +1054,11 @@ mod tests {
         for (input, expected_patterns) in test_cases {
             let result = reflow_line(input, &options);
             let joined = result.join(" ");
-            
+
             for expected_pattern in expected_patterns {
                 assert!(
-                    joined.contains(&expected_pattern),
-                    "Expected '{}' to be preserved in '{}', but got '{}'",
-                    expected_pattern,
-                    input,
-                    joined
+                    joined.contains(expected_pattern),
+                    "Expected '{expected_pattern}' to be preserved in '{input}', but got '{joined}'"
                 );
             }
         }

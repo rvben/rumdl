@@ -412,7 +412,7 @@ fn test_strict_mode_vs_non_strict_mode() {
 fn test_no_fix_without_enable_reflow() {
     // Comprehensive test to verify MD013 doesn't modify content when enable_reflow is false
     let rule = MD013LineLength::new(30, true, true, true, false);
-    
+
     // Test various cases - all should remain unchanged
     let test_cases = vec![
         "This line has trailing whitespace     ",
@@ -425,11 +425,14 @@ fn test_no_fix_without_enable_reflow() {
         "```\nThis is a long line in code     \n```\nThis normal line is too long with spaces    ",
         "https://example.com/very/long/url/that/exceeds/limit\nNormal line with trailing spaces    ",
     ];
-    
+
     for content in test_cases {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, content, "Content should be unchanged without enable_reflow: {}", content);
+        assert_eq!(
+            fixed, content,
+            "Content should be unchanged without enable_reflow: {content}"
+        );
     }
 }
 
@@ -551,7 +554,6 @@ More regular text exceeding 40 characters"#;
     assert_eq!(result[1].line, 11);
 }
 
-
 #[test]
 fn test_unicode_characters_counted_correctly() {
     let rule = MD013LineLength::new(20, true, true, true, false);
@@ -598,7 +600,6 @@ fn test_inline_code_with_long_strings() {
     assert_eq!(result.len(), 1); // Should still be flagged as the whole line is checked
 }
 
-
 #[test]
 fn test_column_positions_for_excess_characters() {
     let rule = MD013LineLength::new(10, true, true, true, false);
@@ -610,7 +611,6 @@ fn test_column_positions_for_excess_characters() {
     assert_eq!(result[0].column, 11); // Start of excess
     assert_eq!(result[0].end_column, 17); // End of line + 1
 }
-
 
 #[test]
 fn test_no_fix_for_lines_without_trailing_whitespace() {

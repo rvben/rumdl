@@ -209,7 +209,6 @@ impl Rule for MD013LineLength {
             content.lines().collect()
         };
 
-
         // Create a quick lookup set for heading lines
         let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
 
@@ -312,8 +311,8 @@ impl Rule for MD013LineLength {
                 // Provide a placeholder fix to indicate that reflow will happen
                 // The actual reflow is done in the fix() method
                 Some(crate::rule::Fix {
-                    range: 0..0,  // Placeholder range
-                    replacement: String::new(),  // Placeholder replacement
+                    range: 0..0,                // Placeholder range
+                    replacement: String::new(), // Placeholder replacement
                 })
             } else {
                 None
@@ -1048,14 +1047,17 @@ And a bullet list:
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         // Test with exactly 2 spaces (hard line break)
         let content = "This line has a hard break at the end  \nAnd this continues on the next line that is also quite long and needs wrapping";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Should preserve the hard line break (2 spaces)
-        assert!(fixed.contains("  \n"), "Hard line break with exactly 2 spaces should be preserved");
+        assert!(
+            fixed.contains("  \n"),
+            "Hard line break with exactly 2 spaces should be preserved"
+        );
     }
 
     #[test]
@@ -1066,13 +1068,13 @@ And a bullet list:
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "This is a very long line with a [reference link][ref] that should not be broken apart when reflowing the text.
 
 [ref]: https://example.com";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Reference link should remain intact
         assert!(fixed.contains("[reference link][ref]"));
         assert!(!fixed.contains("[ reference link]"));
@@ -1087,11 +1089,11 @@ And a bullet list:
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "This text has **bold with `code` inside** and should handle it properly when wrapping";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Nested elements should be preserved
         assert!(fixed.contains("**bold with `code` inside**"));
     }
@@ -1105,19 +1107,18 @@ And a bullet list:
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "This has **unbalanced bold that goes on for a very long time without closing";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Should handle gracefully without panic
         // The text reflow handles unbalanced markdown by treating it as a bold element
         // Check that the content is properly reflowed without panic
         assert!(!fixed.is_empty());
         // Verify the content is wrapped to 30 chars
         for line in fixed.lines() {
-            assert!(line.len() <= 30 || line.starts_with("**"), 
-                "Line exceeds limit: {}", line);
+            assert!(line.len() <= 30 || line.starts_with("**"), "Line exceeds limit: {line}");
         }
     }
 
@@ -1130,14 +1131,17 @@ And a bullet list:
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "This is a very long line that definitely exceeds the thirty character limit";
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
-        
+
         // Should have a fix indicator when enable_reflow is true
         assert!(!warnings.is_empty());
-        assert!(warnings[0].fix.is_some(), "Should provide fix indicator when enable_reflow is true");
+        assert!(
+            warnings[0].fix.is_some(),
+            "Should provide fix indicator when enable_reflow is true"
+        );
     }
 
     #[test]
@@ -1149,14 +1153,17 @@ And a bullet list:
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "This is a very long line that definitely exceeds the thirty character limit";
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
-        
+
         // Should NOT have a fix indicator when enable_reflow is false
         assert!(!warnings.is_empty());
-        assert!(warnings[0].fix.is_none(), "Should not provide fix when enable_reflow is false");
+        assert!(
+            warnings[0].fix.is_none(),
+            "Should not provide fix when enable_reflow is false"
+        );
     }
 
     #[test]
@@ -1167,16 +1174,16 @@ And a bullet list:
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "Test [full reference][ref] and [collapsed][] and [shortcut] reference links in a very long line.
 
 [ref]: https://example.com
 [collapsed]: https://example.com
 [shortcut]: https://example.com";
-        
+
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // All reference link types should be preserved
         assert!(fixed.contains("[full reference][ref]"));
         assert!(fixed.contains("[collapsed][]"));
@@ -1191,11 +1198,11 @@ And a bullet list:
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
-        
+
         let content = "This line has an ![image alt text](https://example.com/image.png) that should not be broken when reflowing.";
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        
+
         // Image should remain intact
         assert!(fixed.contains("![image alt text](https://example.com/image.png)"));
     }

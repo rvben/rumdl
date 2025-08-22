@@ -252,40 +252,40 @@ lazy_static! {
     // Reference link patterns (shared by MD052 and text_reflow)
     // Pattern to match reference links: [text][reference] or [text][]
     pub static ref REF_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
-    
+
     // Pattern for shortcut reference links: [reference]
     // Must not be preceded by ] or ) (to avoid matching second part of [text][ref])
     // Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
     pub static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
-    
+
     // Inline link with fancy regex for better escaping handling (used by text_reflow)
     pub static ref INLINE_LINK_FANCY_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();
-    
+
     // Inline image with fancy regex (used by MD052 and text_reflow)
     pub static ref INLINE_IMAGE_FANCY_REGEX: FancyRegex = FancyRegex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
-    
+
     // Reference image: ![alt][ref] or ![alt][]
     pub static ref REF_IMAGE_REGEX: FancyRegex = FancyRegex::new(r"!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
-    
+
     // Footnote reference: [^note]
     pub static ref FOOTNOTE_REF_REGEX: FancyRegex = FancyRegex::new(r"\[\^([^\]]+)\]").unwrap();
-    
+
     // Strikethrough with fancy regex: ~~text~~
     pub static ref STRIKETHROUGH_FANCY_REGEX: FancyRegex = FancyRegex::new(r"~~([^~]+)~~").unwrap();
-    
+
     // Wiki-style links: [[wiki]] or [[wiki|display text]]
     pub static ref WIKI_LINK_REGEX: FancyRegex = FancyRegex::new(r"\[\[([^\]]+)\]\]").unwrap();
-    
+
     // Math formulas: $inline$ or $$display$$
     pub static ref INLINE_MATH_REGEX: FancyRegex = FancyRegex::new(r"(?<!\$)\$(?!\$)([^\$]+)\$(?!\$)").unwrap();
     pub static ref DISPLAY_MATH_REGEX: FancyRegex = FancyRegex::new(r"\$\$([^\$]+)\$\$").unwrap();
-    
+
     // Emoji shortcodes: :emoji:
     pub static ref EMOJI_SHORTCODE_REGEX: FancyRegex = FancyRegex::new(r":([a-zA-Z0-9_+-]+):").unwrap();
-    
+
     // HTML tags (opening, closing, self-closing)
     pub static ref HTML_TAG_PATTERN: FancyRegex = FancyRegex::new(r"</?[a-zA-Z][^>]*>|<[a-zA-Z][^>]*/\s*>").unwrap();
-    
+
     // HTML entities: &nbsp; &mdash; etc
     pub static ref HTML_ENTITY_REGEX: FancyRegex = FancyRegex::new(r"&[a-zA-Z][a-zA-Z0-9]*;|&#\d+;|&#x[0-9a-fA-F]+;").unwrap();
 }
