@@ -223,8 +223,8 @@ fn test_zero_padded_numbers() {
     assert!(!result.is_empty(), "Should detect wrong zero-padded number");
 
     let fixed = rule.fix(&ctx).unwrap();
-    // The fix should correct the sequence
-    assert!(fixed.contains("3. Wrong number") || fixed.contains("03. Wrong number"));
+    // The fix should correct the sequence (removes leading zeros and fixes numbering)
+    assert!(fixed.contains("3. Wrong number with padding"));
 }
 
 #[test]
@@ -688,7 +688,8 @@ fn test_md029_large_digit_insufficient_indent() {
 fn test_md029_lazy_continuation_fix() {
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
 
-    // Test fixing lazy continuation
+    // Test that MD029 fixes numbering (not indentation)
+    // Note: lazy continuation breaks the list, so "1. Second item" starts a new list
     let content = r#"1. First item
 lazy continuation
 1. Second item
@@ -697,12 +698,15 @@ another lazy line"#;
     let ctx = LintContext::new(content);
     let fixed = rule.fix(&ctx).unwrap();
 
+    // MD029 only fixes numbering, not indentation
+    // The lazy continuation doesn't actually break the list in our implementation,
+    // so "1. Second item" should become "2. Second item"
     let expected = r#"1. First item
-   lazy continuation
+lazy continuation
 2. Second item
-   another lazy line"#;
+another lazy line"#;
 
-    assert_eq!(fixed, expected, "Should fix both numbering and indentation");
+    assert_eq!(fixed, expected, "MD029 should only fix list numbering");
 }
 
 #[test]
@@ -726,17 +730,15 @@ lazy line
     // considered part of the list block and thus not checked for lazy continuation.
     assert_eq!(lazy_warnings, 1, "Should detect 0-space line as lazy continuation");
 
-    // Fix should normalize indentations
+    // MD029 fix only fixes list numbering, not indentation
     let fixed = rule.fix(&ctx).unwrap();
-    // First lazy line should be indented
-    assert!(fixed.contains("   lazy line"));
-    assert!(!fixed.contains("\nlazy line"));
-
-    // The "two space indent" line is also fixed because the fix logic
-    // treats any line with 0-2 spaces after a list item as a lazy continuation
-    // and adds proper indentation (3 spaces)
-    assert!(fixed.contains("   two space indent"));
-    assert!(!fixed.contains("\n  two space indent"));
+    // Lazy lines remain unchanged
+    assert!(fixed.contains("\nlazy line"));
+    // The list item numbering is fixed
+    assert!(fixed.contains("1. First item"));
+    assert!(fixed.contains("2. Second item"));  // Second item becomes "2." not "1."
+    // Two-space indent line remains unchanged (MD029 doesn't fix indentation)
+    assert!(fixed.contains("  two space indent"));
 }
 
 #[test]

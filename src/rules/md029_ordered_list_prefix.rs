@@ -5,16 +5,11 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
-use lazy_static::lazy_static;
-use regex::Regex;
 use toml;
 
 mod md029_config;
 pub use md029_config::{ListStyle, MD029Config};
 
-lazy_static! {
-    static ref FIX_LINE_REGEX: Regex = Regex::new(r"^(\s*)\d+(\.\s.*)$").unwrap();
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct MD029OrderedListPrefix {
@@ -32,12 +27,6 @@ impl MD029OrderedListPrefix {
         Self { config }
     }
 
-    #[inline]
-    fn get_list_number(line: &str) -> Option<usize> {
-        ORDERED_LIST_MARKER_REGEX
-            .captures(line)
-            .and_then(|cap| cap[2].parse::<usize>().ok())
-    }
 
     #[inline]
     fn parse_marker_number(marker: &str) -> Option<usize> {
@@ -60,12 +49,6 @@ impl MD029OrderedListPrefix {
         }
     }
 
-    #[inline]
-    fn fix_line(&self, line: &str, expected_num: usize) -> String {
-        FIX_LINE_REGEX
-            .replace(line, format!("${{1}}{}{}", expected_num, "$2"))
-            .to_string()
-    }
 }
 
 impl Rule for MD029OrderedListPrefix {
@@ -105,6 +88,7 @@ impl Rule for MD029OrderedListPrefix {
                 })
             })
             .collect();
+
 
         if blocks_with_ordered.is_empty() {
             return Ok(Vec::new());
@@ -149,6 +133,7 @@ impl Rule for MD029OrderedListPrefix {
         }
         block_groups.push(current_group);
 
+
         // Process each group of blocks as a continuous list
         for group in block_groups {
             self.check_ordered_list_group(ctx, &group, &mut warnings);
@@ -158,121 +143,55 @@ impl Rule for MD029OrderedListPrefix {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
+        // Use the same logic as check() - just apply the fixes from warnings
+        let warnings = self.check(ctx)?;
+        
+        if warnings.is_empty() {
+            // No changes needed
+            return Ok(ctx.content.to_string());
+        }
+        
+        // Collect fixes and sort by position
+        // Only apply MD029 fixes (numbering), not MD029-style fixes (indentation)
+        let mut fixes: Vec<&Fix> = Vec::new();
+        for warning in &warnings {
+            // Skip MD029-style warnings (lazy continuation indentation)
+            if warning.rule_name == Some("MD029-style") {
+                continue;
+            }
+            if let Some(ref fix) = warning.fix {
+                fixes.push(fix);
+            }
+        }
+        fixes.sort_by_key(|f| f.range.start);
+        
         let mut result = String::new();
-        let mut indent_stack: Vec<(usize, usize)> = Vec::new(); // (indent, index)
-        let lines: Vec<&str> = content.lines().collect();
-        let mut in_code_fence = false;
-
-        for line in lines.iter() {
-            let trimmed = line.trim();
-
-            // Track code fences
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                in_code_fence = !in_code_fence;
-                result.push_str(line);
-                result.push('\n');
-                continue;
+        let mut last_pos = 0;
+        let content_bytes = ctx.content.as_bytes();
+        
+        for fix in fixes {
+            // Add content before the fix
+            if last_pos < fix.range.start {
+                let chunk = &content_bytes[last_pos..fix.range.start];
+                result.push_str(
+                    std::str::from_utf8(chunk)
+                        .map_err(|_| LintError::InvalidInput("Invalid UTF-8".to_string()))?
+                );
             }
-
-            // Skip if in code fence
-            if in_code_fence {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-            if let Some(_current_num) = Self::get_list_number(line) {
-                let indent = line.chars().take_while(|c| c.is_whitespace()).count();
-                // Pop stack if current indent is less than stack top
-                while let Some(&(top_indent, _)) = indent_stack.last() {
-                    if indent < top_indent {
-                        indent_stack.pop();
-                    } else {
-                        break;
-                    }
-                }
-                // If indent matches stack top, increment index
-                if let Some(&mut (top_indent, ref mut idx)) = indent_stack.last_mut()
-                    && indent == top_indent
-                {
-                    let expected_num = self.get_expected_number(*idx);
-                    let fixed_line = self.fix_line(line, expected_num);
-                    result.push_str(&fixed_line);
-                    result.push('\n');
-                    *idx += 1;
-                    continue;
-                }
-                // New deeper indent or first item
-                indent_stack.push((indent, 0));
-                let expected_num = self.get_expected_number(0);
-                let fixed_line = self.fix_line(line, expected_num);
-                result.push_str(&fixed_line);
-                result.push('\n');
-                // Increment the new top
-                if let Some(&mut (_, ref mut idx)) = indent_stack.last_mut() {
-                    *idx += 1;
-                }
-            } else if !line.trim().is_empty() {
-                // Check if the line is indented enough to be part of a list item
-                let line_indent = line.chars().take_while(|c| c.is_whitespace()).count();
-                let is_continuation = indent_stack
-                    .last()
-                    .map(|&(list_indent, _)| {
-                        // Allow lazy continuation (0-2 spaces) or proper continuation (3+ spaces)
-                        line_indent <= 2 || line_indent >= list_indent + 3
-                    })
-                    .unwrap_or(false);
-
-                if is_continuation {
-                    if line_indent <= 2 && !indent_stack.is_empty() {
-                        // Check if this line is itself a list item or heading
-                        let trimmed = line.trim();
-                        let is_list_item = trimmed.starts_with("* ")
-                            || trimmed.starts_with("- ")
-                            || trimmed.starts_with("+ ")
-                            || (trimmed.len() > 2
-                                && trimmed.chars().next().unwrap().is_ascii_digit()
-                                && trimmed.contains(". "));
-
-                        // Check if this is a heading (ATX style)
-                        let is_heading = trimmed.starts_with('#')
-                            && trimmed.len() > 1
-                            && (trimmed.chars().nth(1) == Some(' ') || trimmed.chars().nth(1) == Some('#'));
-
-                        if !is_list_item && !is_heading {
-                            // This is a lazy continuation - fix it by adding proper indentation
-                            let (list_indent, _) = indent_stack.last().unwrap();
-                            let proper_indent = " ".repeat(list_indent + 3);
-                            result.push_str(&proper_indent);
-                            result.push_str(line.trim_start());
-                            result.push('\n');
-                        } else {
-                            // This is a list item or heading, not a continuation - it breaks the list
-                            indent_stack.clear();
-                            result.push_str(line);
-                            result.push('\n');
-                        }
-                    } else {
-                        // This line is properly indented
-                        result.push_str(line);
-                        result.push('\n');
-                    }
-                } else {
-                    // Non-list, non-blank line breaks the list
-                    indent_stack.clear();
-                    result.push_str(line);
-                    result.push('\n');
-                }
-            } else {
-                // Blank line - don't clear the stack, as lists can have blank lines within them
-                result.push_str(line);
-                result.push('\n');
-            }
+            // Add the replacement
+            result.push_str(&fix.replacement);
+            last_pos = fix.range.end;
         }
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
+        
+        // Add remaining content
+        if last_pos < content_bytes.len() {
+            let chunk = &content_bytes[last_pos..];
+            result.push_str(
+                std::str::from_utf8(chunk)
+                    .map_err(|_| LintError::InvalidInput("Invalid UTF-8".to_string()))?
+            );
         }
+        
         Ok(result)
     }
 
@@ -671,7 +590,14 @@ impl MD029OrderedListPrefix {
                     if actual_num != expected_num {
                         // Calculate byte position for the fix
                         let marker_start = line_info.byte_offset + list_item.marker_column;
-                        let number_len = actual_num.to_string().len();
+                        // Use the actual marker length (e.g., "05" is 2 chars, not 1)
+                        let number_len = if let Some(dot_pos) = list_item.marker.find('.') {
+                            dot_pos  // Length up to the dot
+                        } else if let Some(paren_pos) = list_item.marker.find(')') {
+                            paren_pos  // Length up to the paren
+                        } else {
+                            list_item.marker.len()  // Fallback to full marker length
+                        };
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),

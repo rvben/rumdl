@@ -1352,6 +1352,7 @@ impl<'a> LintContext<'a> {
         for (line_idx, line_info) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
+
             // Enhanced code block handling using Design #3's context analysis
             if line_info.in_code_block {
                 if let Some(ref mut block) = current_block {
@@ -2300,7 +2301,7 @@ fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: 
 
                 // Check if this code block is properly indented as list continuation
                 let min_continuation_indent = if current.is_ordered {
-                    current.nesting_level + current.max_marker_width
+                    current.nesting_level + current.max_marker_width + 1 // +1 for space after marker
                 } else {
                     current.nesting_level + 2
                 };
