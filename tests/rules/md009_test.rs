@@ -317,9 +317,10 @@ fn test_md009_fix_complex_document() {
         "# Title   \n\nParagraph  \n\n- List   \n  - Nested  \n\n```\ncode   \n```\n\n> Quote   \n>    \n\nEnd  ";
     let ctx = LintContext::new(content);
     let result = rule.fix(&ctx).unwrap();
+    // Headings should have all trailing spaces removed, regular text preserves 2 spaces for line breaks
     assert_eq!(
         result,
-        "# Title  \n\nParagraph  \n\n- List  \n  - Nested  \n\n```\ncode   \n```\n\n> Quote  \n> \n\nEnd"
+        "# Title\n\nParagraph  \n\n- List  \n  - Nested  \n\n```\ncode   \n```\n\n> Quote  \n> \n\nEnd"
     );
 }
 

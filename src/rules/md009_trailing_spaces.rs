@@ -250,8 +250,17 @@ impl Rule for MD009TrailingSpaces {
 
             result.push_str(trimmed);
 
+            // Check if this line is a heading - headings should never have trailing spaces
+            let is_heading = if let Some(line_info) = ctx.line_info(i + 1) {
+                line_info.heading.is_some()
+            } else {
+                // Fallback: check if line starts with #
+                trimmed.starts_with('#')
+            };
+
             // In non-strict mode, preserve line breaks by normalizing to br_spaces
-            if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 {
+            // BUT: Never preserve trailing spaces in headings as they serve no purpose
+            if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 && !is_heading {
                 // Optimize for common case of 2 spaces
                 match self.config.br_spaces {
                     0 => {}

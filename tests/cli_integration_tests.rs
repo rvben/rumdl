@@ -1149,3 +1149,108 @@ exclude = ["docs/temp"]
         "Provenance annotation [from default] should be colored dim/gray (found: {stdout:?})"
     );
 }
+
+#[test]
+fn test_stdin_formatting() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test case 1: Format markdown with trailing spaces
+    let input = "# Test   \n\nTest paragraph   ";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("--stdin").arg("--fix").arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Fixed content should be on stdout
+    // Note: MD009 removes all trailing spaces from headings, but preserves 2 spaces
+    // for line breaks in regular text (br_spaces: 2)
+    // Note: Output will have a trailing newline even if input doesn't
+    assert_eq!(stdout, "# Test\n\nTest paragraph\n");
+    // No errors should be on stderr in quiet mode
+    assert_eq!(stderr, "");
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_stdin_formatting_with_remaining_issues() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test case with fixable issues (trailing spaces) and unfixable issues (duplicate heading)
+    let input = "# Test   \n## Test\n# Test";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("--stdin").arg("--fix");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Fixed content should be on stdout
+    // Note: MD009 removes all trailing spaces from headings
+    // MD001 and MD003 add blank lines around headings
+    // Note: Output will have a trailing newline even if input doesn't
+    assert_eq!(stdout, "# Test\n\n## Test\n\n## Test\n");
+    // Should report remaining issues on stderr
+    assert!(stderr.contains("MD024"));
+    assert!(stderr.contains("remaining"));
+    // Should exit with error due to remaining issues
+    assert!(!output.status.success());
+}
+
+#[test]
+fn test_stdin_check_without_fix() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test that check mode without --fix reports issues but doesn't output fixed content
+    let input = "# Test   \n\nTest   ";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("--stdin");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    // Write input to stdin
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should not output content to stdout in check mode
+    assert_eq!(stdout, "");
+    // Should report issues on stderr
+    assert!(stderr.contains("MD009"));
+    assert!(stderr.contains("trailing spaces"));
+    // MD047 is also triggered since input doesn't end with newline
+    assert!(stderr.contains("Found 3 issue(s)"));
+    // Should exit with error due to issues
+    assert!(!output.status.success());
+}

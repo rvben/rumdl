@@ -35,7 +35,7 @@ rumdl init
 
 ## Overview
 
-rumdl is a high-performance Markdown linter and fixer that helps ensure consistency and best practices
+rumdl is a high-performance Markdown linter and formatter that helps ensure consistency and best practices
 in your Markdown files. Inspired by [ruff](https://github.com/astral-sh/ruff)'s approach to Python linting,
 rumdl brings similar speed and developer experience improvements to the Markdown ecosystem.
 
@@ -43,7 +43,7 @@ It offers:
 
 - ⚡️ **Built for speed** with Rust - significantly faster than alternatives
 - 🔍 **54 lint rules** covering common Markdown issues
-- 🛠️ **Automatic fixing** with `--fix` for most rules
+- 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
 - 🌐 **Multiple installation options** - Rust, Python, standalone binaries
@@ -66,6 +66,8 @@ It offers:
     - [Download binary](#download-binary)
     - [VS Code Extension](#vs-code-extension)
   - [Usage](#usage)
+    - [Stdin/Stdout Formatting](#stdinstdout-formatting)
+    - [Editor Integration](#editor-integration)
   - [Pre-commit Integration](#pre-commit-integration)
   - [CI/CD Integration](#cicd-integration)
     - [GitHub Actions](#github-actions)
@@ -214,6 +216,34 @@ rumdl check --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 
 # Don't respect gitignore files (note: --respect-gitignore defaults to true)
 rumdl check --respect-gitignore=false .
+```
+
+### Stdin/Stdout Formatting
+
+rumdl supports formatting via stdin/stdout, making it ideal for editor integrations and CI pipelines:
+
+```bash
+# Format content from stdin and output to stdout
+cat README.md | rumdl check --stdin --fix > README_formatted.md
+
+# Use in a pipeline
+echo "# Title   " | rumdl check --stdin --fix
+# Output: # Title
+
+# Format clipboard content (macOS example)
+pbpaste | rumdl check --stdin --fix | pbcopy
+```
+
+### Editor Integration
+
+For editor integration, use stdin/stdout mode with the `--quiet` flag to suppress diagnostic messages:
+
+```bash
+# Format selection in editor (example for vim)
+:'<,'>!rumdl check --stdin --fix --quiet
+
+# Format entire buffer
+:%!rumdl check --stdin --fix --quiet
 ```
 
 ## Pre-commit Integration

@@ -1774,7 +1774,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     // If silent mode is enabled, also enable quiet mode
     let quiet = args.quiet || args.silent;
 
-    // Create output writer for linting results
+    // Create output writer for linting results (stderr for diagnostics)
     let output_writer = OutputWriter::new(args.stderr, quiet, args.silent);
 
     // Determine output format
@@ -1834,6 +1834,43 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
 
     let has_issues = !all_warnings.is_empty();
 
+    // Apply fixes if requested
+    if args._fix && has_issues {
+        let mut fixed_content = content.clone();
+        let warnings_fixed = apply_fixes_stdin(rules, &all_warnings, &mut fixed_content, quiet, config);
+
+        // Output the fixed content to stdout
+        print!("{fixed_content}");
+
+        // Re-check the fixed content to see if any issues remain
+        let fixed_ctx = LintContext::new(&fixed_content);
+        let mut remaining_warnings = Vec::new();
+        for rule in rules {
+            if let Ok(warnings) = rule.check(&fixed_ctx) {
+                remaining_warnings.extend(warnings);
+            }
+        }
+
+        // Only show diagnostics to stderr if not in quiet mode
+        if !quiet && !remaining_warnings.is_empty() {
+            let formatter = output_format.create_formatter();
+            let formatted = formatter.format_warnings(&remaining_warnings, "<stdin>");
+            eprintln!("{formatted}");
+            eprintln!(
+                "\n{} issue(s) fixed, {} issue(s) remaining",
+                warnings_fixed,
+                remaining_warnings.len()
+            );
+        }
+
+        // Exit with success if all issues were fixed, error if issues remain
+        if !remaining_warnings.is_empty() {
+            exit::violations_found();
+        }
+        return;
+    }
+
+    // Normal check mode (no fix) - output diagnostics
     // For formats that need collection
     if matches!(
         output_format,
@@ -2654,6 +2691,81 @@ fn apply_fixes(
             file_path,
             err
         );
+    }
+
+    warnings_fixed
+}
+
+/// Apply fixes to stdin content (similar to apply_fixes but without file writing)
+fn apply_fixes_stdin(
+    rules: &[Box<dyn Rule>],
+    all_warnings: &[rumdl::rule::LintWarning],
+    content: &mut String,
+    quiet: bool,
+    config: &rumdl_config::Config,
+) -> usize {
+    let mut warnings_fixed = 0;
+
+    // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
+    for rule in rules {
+        let rule_warnings: Vec<_> = all_warnings
+            .iter()
+            .filter(|w| w.rule_name == Some(rule.name()))
+            .collect();
+
+        if !rule_warnings.is_empty() {
+            // Check if any warnings for this rule are in non-disabled regions
+            let has_non_disabled_warnings = rule_warnings.iter().any(|w| {
+                !rumdl::rule::is_rule_disabled_at_line(
+                    content,
+                    rule.name(),
+                    w.line.saturating_sub(1), // Convert to 0-based line index
+                )
+            });
+
+            if has_non_disabled_warnings {
+                // Check fixable/unfixable configuration
+                let rule_name = rule.name();
+
+                // If unfixable list contains this rule, skip fixing
+                if config
+                    .global
+                    .unfixable
+                    .iter()
+                    .any(|r| r.eq_ignore_ascii_case(rule_name))
+                {
+                    continue;
+                }
+
+                // If fixable list is specified and doesn't contain this rule, skip fixing
+                if !config.global.fixable.is_empty()
+                    && !config.global.fixable.iter().any(|r| r.eq_ignore_ascii_case(rule_name))
+                {
+                    continue;
+                }
+
+                let ctx = LintContext::new(content);
+                match rule.fix(&ctx) {
+                    Ok(fixed_content) => {
+                        if fixed_content != *content {
+                            *content = fixed_content;
+                            // Apply fixes for this rule - we consider all warnings for the rule fixed
+                            warnings_fixed += rule_warnings.len();
+                        }
+                    }
+                    Err(err) => {
+                        if !quiet {
+                            eprintln!(
+                                "{} Failed to apply fix for rule {}: {}",
+                                "Warning:".yellow(),
+                                rule.name(),
+                                err
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     warnings_fixed
