@@ -1,4 +1,4 @@
-use rumdl::lint_context::LintContext;
+use rumdl_lib::lint_context::LintContext;
 use std::time::Instant;
 
 fn main() {

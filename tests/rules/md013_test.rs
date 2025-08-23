@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD013LineLength;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD013LineLength;
 
 #[test]
 fn test_valid_line_length() {
@@ -438,7 +438,7 @@ fn test_no_fix_without_enable_reflow() {
 
 #[test]
 fn test_heading_line_length_config() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     // Create a config with different limits for headings
     let config = MD013Config {
@@ -465,7 +465,7 @@ fn test_heading_line_length_config() {
 
 #[test]
 fn test_code_block_line_length_config() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     // Create a config with different limits for code blocks
     let config = MD013Config {
@@ -492,7 +492,7 @@ fn test_code_block_line_length_config() {
 
 #[test]
 fn test_stern_mode() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     // Create a config with stern mode enabled
     let config = MD013Config {
@@ -518,7 +518,7 @@ fn test_stern_mode() {
 
 #[test]
 fn test_combined_heading_and_code_block_limits() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 40,
@@ -630,7 +630,7 @@ fn test_no_fix_for_lines_without_trailing_whitespace() {
 
 #[test]
 fn test_reflow_simple_paragraph() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 40,
@@ -657,7 +657,7 @@ fn test_reflow_simple_paragraph() {
 
 #[test]
 fn test_reflow_preserves_markdown_elements() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 30,
@@ -685,7 +685,7 @@ fn test_reflow_preserves_markdown_elements() {
 
 #[test]
 fn test_reflow_multiple_paragraphs() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 50,
@@ -717,7 +717,7 @@ Short paragraph.";
 
 #[test]
 fn test_reflow_list_items() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 40,
@@ -750,7 +750,7 @@ fn test_reflow_list_items() {
 
 #[test]
 fn test_reflow_numbered_lists() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 35,
@@ -793,7 +793,7 @@ fn test_reflow_numbered_lists() {
 
 #[test]
 fn test_reflow_blockquotes() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 40,
@@ -825,7 +825,7 @@ fn test_reflow_blockquotes() {
 
 #[test]
 fn test_reflow_preserves_code_blocks() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 30,
@@ -868,7 +868,7 @@ This is a paragraph after code that is also very long and should be wrapped."#;
 
 #[test]
 fn test_reflow_preserves_headings() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 30,
@@ -903,7 +903,7 @@ Regular paragraph that is very long and should be wrapped to fit.
 
 #[test]
 fn test_reflow_preserves_tables() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 30,
@@ -939,7 +939,7 @@ Another paragraph to wrap.";
 
 #[test]
 fn test_reflow_edge_cases() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 20,
@@ -980,7 +980,7 @@ fn test_reflow_edge_cases() {
 
 #[test]
 fn test_reflow_complex_document() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 50,
@@ -1054,7 +1054,7 @@ For more information, visit [our documentation site](https://example.com/very/lo
 
 #[test]
 fn test_reflow_with_hard_line_breaks() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 40,
@@ -1081,7 +1081,7 @@ fn test_reflow_with_hard_line_breaks() {
 
 #[test]
 fn test_reflow_unicode_handling() {
-    use rumdl::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
         line_length: 30,

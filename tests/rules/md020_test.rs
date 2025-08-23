@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD020NoMissingSpaceClosedAtx;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD020NoMissingSpaceClosedAtx;
 
 #[test]
 fn test_valid_closed_atx_headings() {

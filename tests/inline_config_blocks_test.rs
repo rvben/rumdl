@@ -1,6 +1,6 @@
-use rumdl::config::Config;
-use rumdl::lint;
-use rumdl::rules::all_rules;
+use rumdl_lib::config::Config;
+use rumdl_lib::lint;
+use rumdl_lib::rules::all_rules;
 
 #[test]
 fn test_inline_disable_enable_blocks() {

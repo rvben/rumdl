@@ -74,7 +74,7 @@ lazy_static! {
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::anchor_styles::github;
+/// use rumdl_lib::utils::anchor_styles::github;
 ///
 /// assert_eq!(github::heading_to_fragment("Hello World"), "hello-world");
 /// assert_eq!(github::heading_to_fragment("cbrown --> sbrown: --unsafe-paths"), "cbrown----sbrown---unsafe-paths");

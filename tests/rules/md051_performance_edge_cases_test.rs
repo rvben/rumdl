@@ -1,9 +1,9 @@
 // Performance edge case tests for MD051 rule
 // These tests ensure the algorithm performs well under extreme conditions
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD051LinkFragments;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD051LinkFragments;
 use std::time::{Duration, Instant};
 
 /// Test regex performance with patterns that could cause catastrophic backtracking

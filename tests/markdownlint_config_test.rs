@@ -1,5 +1,5 @@
-use rumdl::config::{ConfigSource, normalize_key};
-use rumdl::markdownlint_config::MarkdownlintConfig;
+use rumdl_lib::config::{ConfigSource, normalize_key};
+use rumdl_lib::markdownlint_config::MarkdownlintConfig;
 
 #[test]
 fn test_markdownlint_config_mapping() {
@@ -39,7 +39,7 @@ fn test_markdownlint_config_mapping() {
     // Parse as MarkdownlintConfig
     let ml_config: MarkdownlintConfig = serde_json::from_str(config_str).expect("Failed to parse markdownlint config");
     let sourced = ml_config.map_to_sourced_rumdl_config(Some("test_markdownlint.json"));
-    let rumdl_config: rumdl::config::Config = sourced.into();
+    let rumdl_config: rumdl_lib::config::Config = sourced.into();
 
     // Check that all expected rules are mapped
     let expected_rules = vec![
@@ -200,6 +200,6 @@ fn test_markdownlint_config_provenance_debug_output() {
 }
 
 // Helper to parse from string for test
-fn load_markdownlint_config_from_str(s: &str) -> Result<rumdl::markdownlint_config::MarkdownlintConfig, String> {
+fn load_markdownlint_config_from_str(s: &str) -> Result<rumdl_lib::markdownlint_config::MarkdownlintConfig, String> {
     serde_json::from_str(s).map_err(|e| format!("Failed to parse JSON: {e}"))
 }

@@ -1,11 +1,11 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::{ListStyle, MD029OrderedListPrefix};
-use rumdl::utils::range_utils::LineIndex;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::{ListStyle, MD029OrderedListPrefix};
+use rumdl_lib::utils::range_utils::LineIndex;
 
 #[test]
 fn test_md029_valid() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::OneOne);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::OneOne);
 
     let content = r#"1. Item 1
 1. Item 2
@@ -18,7 +18,7 @@ fn test_md029_valid() {
 
 #[test]
 fn test_md029_ordered_any_valid() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::Ordered);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered);
 
     let content = r#"1. Item 1
 2. Item 2
@@ -31,7 +31,7 @@ fn test_md029_ordered_any_valid() {
 
 #[test]
 fn test_md029_ordered_any_invalid() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::Ordered);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered);
 
     let content = r#"1. Item 1
 1. Item 2
@@ -48,7 +48,7 @@ fn test_md029_ordered_any_invalid() {
 
 #[test]
 fn test_md029_nested() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::OneOne);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::OneOne);
     let content = r#"1. First item
    1. Nested first
    1. Nested second
@@ -60,7 +60,7 @@ fn test_md029_nested() {
 
 #[test]
 fn test_md029_fix() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::Ordered);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered);
     let content = r#"1. First item
 3. Second item
 5. Third item"#;
@@ -83,7 +83,7 @@ fn test_line_index() {
 
 #[test]
 fn test_md029_with_code_blocks() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::Ordered);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered);
 
     let content = r#"1. First step
 ```bash
@@ -115,7 +115,7 @@ final code
 
 #[test]
 fn test_md029_nested_with_code_blocks() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::Ordered);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered);
 
     let content = r#"1. First step
    ```bash
@@ -150,7 +150,7 @@ fn test_md029_nested_with_code_blocks() {
 
 #[test]
 fn test_md029_code_blocks_in_nested_lists() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::One);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::One);
 
     let content = r#"1. First item
 
@@ -181,7 +181,7 @@ fn test_md029_code_blocks_in_nested_lists() {
 
 #[test]
 fn test_md029_fenced_vs_indented_in_list() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::Ordered);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered);
 
     let content = r#"1. Item with fenced code:
    ```js

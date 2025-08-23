@@ -1,4 +1,4 @@
-use rumdl::rules::front_matter_utils::{FrontMatterType, FrontMatterUtils};
+use rumdl_lib::rules::front_matter_utils::{FrontMatterType, FrontMatterUtils};
 
 #[test]
 fn test_detect_front_matter_type() {

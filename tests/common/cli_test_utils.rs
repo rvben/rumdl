@@ -1,8 +1,8 @@
 /// CLI testing utilities to reduce subprocess execution overhead
-use rumdl::config::Config;
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules;
+use rumdl_lib::config::Config;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
@@ -181,7 +181,7 @@ impl Default for MockCli {
 #[derive(Debug, Clone)]
 pub struct MockCliResult {
     pub success: bool,
-    pub warnings: Vec<rumdl::rule::LintWarning>,
+    pub warnings: Vec<rumdl_lib::rule::LintWarning>,
     pub processed_files: Vec<PathBuf>,
     pub stdout: String,
     pub stderr: String,

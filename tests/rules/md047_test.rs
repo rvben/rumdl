@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD047SingleTrailingNewline;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD047SingleTrailingNewline;
 
 #[test]
 fn test_valid_file_end_newline() {

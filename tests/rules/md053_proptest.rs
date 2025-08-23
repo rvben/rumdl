@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use rumdl::rules::MD053LinkImageReferenceDefinitions;
+use rumdl_lib::rules::MD053LinkImageReferenceDefinitions;
 
 proptest! {
     #[test]

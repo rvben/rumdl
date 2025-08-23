@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::{MD004UnorderedListStyle, MD005ListIndent, MD007ULIndent, MD029OrderedListPrefix};
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::{MD004UnorderedListStyle, MD005ListIndent, MD007ULIndent, MD029OrderedListPrefix};
 
 /// Cross-rule integration tests for list rules (MD004, MD005, MD007, MD029)
 ///

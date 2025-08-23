@@ -1,4 +1,4 @@
-use rumdl::utils::anchor_styles::kramdown_gfm;
+use rumdl_lib::utils::anchor_styles::kramdown_gfm;
 
 #[test]
 fn test_jekyll_underscore_edge_cases() {

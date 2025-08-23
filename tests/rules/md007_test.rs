@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD007ULIndent;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD007ULIndent;
 
 #[test]
 fn test_valid_list_indent() {
@@ -128,9 +128,9 @@ fn test_blockquote_list_with_code_block() {
 
 // Additional comprehensive tests for MD007
 mod comprehensive_tests {
-    use rumdl::lint_context::LintContext;
-    use rumdl::rule::Rule;
-    use rumdl::rules::MD007ULIndent;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD007ULIndent;
 
     // 1. Properly indented lists (should pass)
     #[test]
@@ -535,9 +535,9 @@ tags:
 }
 
 mod parity_with_markdownlint {
-    use rumdl::lint_context::LintContext;
-    use rumdl::rule::Rule;
-    use rumdl::rules::MD007ULIndent;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD007ULIndent;
 
     #[test]
     fn parity_flat_list_default_indent() {

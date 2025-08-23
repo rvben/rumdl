@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD036NoEmphasisAsHeading;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD036NoEmphasisAsHeading;
 
 #[test]
 fn test_md036_for_emphasis_only_lines() {

@@ -44,7 +44,7 @@ lazy_static! {
 /// # Examples
 ///
 /// ```
-/// use rumdl::utils::kramdown_utils::is_kramdown_block_attribute;
+/// use rumdl_lib::utils::kramdown_utils::is_kramdown_block_attribute;
 ///
 /// assert!(is_kramdown_block_attribute("{:.wrap}"));
 /// assert!(is_kramdown_block_attribute("{:#my-id}"));
@@ -73,7 +73,7 @@ pub fn is_kramdown_block_attribute(line: &str) -> bool {
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::kramdown_utils::has_span_ial;
+/// use rumdl_lib::utils::kramdown_utils::has_span_ial;
 ///
 /// assert!(has_span_ial("*emphasized*{:.highlight}"));
 /// assert!(has_span_ial("[link](url){:target=\"_blank\"}"));

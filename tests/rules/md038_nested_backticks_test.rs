@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD038NoSpaceInCode;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD038NoSpaceInCode;
 
 #[test]
 fn test_md038_nested_backticks_not_flagged() {

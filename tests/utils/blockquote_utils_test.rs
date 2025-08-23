@@ -1,4 +1,4 @@
-use rumdl::rules::blockquote_utils::BlockquoteUtils;
+use rumdl_lib::rules::blockquote_utils::BlockquoteUtils;
 
 #[test]
 fn test_is_blockquote_detection() {

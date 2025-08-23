@@ -1,7 +1,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::*;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
 
 /// Generate test content with common markdown issues
 fn generate_test_content() -> String {

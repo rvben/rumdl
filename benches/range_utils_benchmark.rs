@@ -1,7 +1,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rand::Rng;
 use rand::rng;
-use rumdl::utils::range_utils::LineIndex;
+use rumdl_lib::utils::range_utils::LineIndex;
 
 // Naive implementation that doesn't use the optimized function
 fn naive_line_col_to_byte_range(content: &str, line: usize, column: usize) -> std::ops::Range<usize> {

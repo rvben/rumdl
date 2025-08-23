@@ -1,5 +1,5 @@
-use rumdl::rule::Rule;
-use rumdl::rules::MD033NoInlineHtml;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD033NoInlineHtml;
 
 #[test]
 fn test_complex_html_detection() {

@@ -1,6 +1,6 @@
-use rumdl::config::{Config, GlobalConfig, RuleConfig, normalize_key};
-use rumdl::rule::Rule;
-use rumdl::rules::*;
+use rumdl_lib::config::{Config, GlobalConfig, RuleConfig, normalize_key};
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
 use std::collections::BTreeMap;
 use std::fs;
 
@@ -37,14 +37,15 @@ fn apply_rule_configs(rules_in: &Vec<Box<dyn Rule>>, config: &Config) -> Vec<Box
 
         // Apply MD013 configuration
         if rule_name == "MD013" {
-            let line_length = rumdl::config::get_rule_config_value::<u64>(config, "MD013", "line_length")
+            let line_length = rumdl_lib::config::get_rule_config_value::<u64>(config, "MD013", "line_length")
                 .map(|v| v as usize)
                 .unwrap_or(80);
             let code_blocks =
-                rumdl::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
-            let tables = rumdl::config::get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);
-            let headings = rumdl::config::get_rule_config_value::<bool>(config, "MD013", "headings").unwrap_or(true);
-            let strict = rumdl::config::get_rule_config_value::<bool>(config, "MD013", "strict").unwrap_or(false);
+                rumdl_lib::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
+            let tables = rumdl_lib::config::get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);
+            let headings =
+                rumdl_lib::config::get_rule_config_value::<bool>(config, "MD013", "headings").unwrap_or(true);
+            let strict = rumdl_lib::config::get_rule_config_value::<bool>(config, "MD013", "strict").unwrap_or(false);
 
             // Push the NEW configured instance
             rules_out.push(Box::new(MD013LineLength::new(
@@ -59,13 +60,13 @@ fn apply_rule_configs(rules_in: &Vec<Box<dyn Rule>>, config: &Config) -> Vec<Box
 
         // Apply MD004 configuration
         if rule_name == "MD004" {
-            let style = rumdl::config::get_rule_config_value::<String>(config, "MD004", "style")
+            let style = rumdl_lib::config::get_rule_config_value::<String>(config, "MD004", "style")
                 .unwrap_or_else(|| "consistent".to_string());
             let ul_style = match style.as_str() {
-                "asterisk" => rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Asterisk,
-                "plus" => rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Plus,
-                "dash" => rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Dash,
-                _ => rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Consistent,
+                "asterisk" => rumdl_lib::rules::md004_unordered_list_style::UnorderedListStyle::Asterisk,
+                "plus" => rumdl_lib::rules::md004_unordered_list_style::UnorderedListStyle::Plus,
+                "dash" => rumdl_lib::rules::md004_unordered_list_style::UnorderedListStyle::Dash,
+                _ => rumdl_lib::rules::md004_unordered_list_style::UnorderedListStyle::Consistent,
             };
             // Push the NEW configured instance
             rules_out.push(Box::new(MD004UnorderedListStyle::new(ul_style)));
@@ -81,7 +82,7 @@ fn apply_rule_configs(rules_in: &Vec<Box<dyn Rule>>, config: &Config) -> Vec<Box
 #[test]
 fn test_apply_rule_configs() {
     // Create test rules using all_rules()
-    let initial_rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let initial_rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
 
     // Create a test config
     let config = create_test_config();
@@ -100,7 +101,7 @@ This is a line that exceeds the default 80 characters but is less than the confi
 "#;
 
     // Run the linter with the NEW configured rules vector
-    let warnings = rumdl::lint(test_content, &configured_rules, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(test_content, &configured_rules, false).expect("Linting should succeed");
 
     // Check MD013 behavior - should not trigger on >80 but <120 chars
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -128,7 +129,7 @@ fn test_config_priority() {
     // Test that rule-specific configs override defaults
 
     // Create test rules with defaults using all_rules()
-    let initial_rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let initial_rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
 
     // Create config with different line_length
     let mut config = create_test_config(); // line_length: 120
@@ -144,7 +145,7 @@ fn test_config_priority() {
         + &"A".repeat(98); // 98 A's + 2 chars for "# " = 100 chars
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl::lint(&line_100_chars, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(&line_100_chars, &configured_rules_1, false).expect("Linting should succeed");
 
     // Should not trigger MD013 because config value is 120
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -164,7 +165,7 @@ fn test_config_priority() {
     let configured_rules_2 = apply_rule_configs(&initial_rules, &config);
 
     // Should now trigger MD013
-    let warnings = rumdl::lint(&line_100_chars, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(&line_100_chars, &configured_rules_2, false).expect("Linting should succeed");
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
     assert_eq!(md013_warnings, 1, "MD013 should trigger with configured line_length 50");
 }
@@ -174,7 +175,7 @@ fn test_partial_rule_config() {
     // Test that partial configurations only override specified fields
 
     // Create rules using all_rules()
-    let initial_rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let initial_rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
 
     // Create config with only line_length specified
     let mut rules_map = BTreeMap::new();
@@ -198,7 +199,7 @@ fn test_partial_rule_config() {
         "This is a regular line that is longer than 80 characters but shorter than 100 characters in length.";
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
 
     // Should NOT trigger MD013 because line_length is set to 100
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -221,7 +222,7 @@ fn test_partial_rule_config() {
     let configured_rules_2 = apply_rule_configs(&initial_rules, &config);
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
 
     // Now should trigger MD013 because line_length is less than the line length
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -249,7 +250,7 @@ line_length = 20
 
     let config_path_str = config_path.to_str().expect("Path is valid UTF-8");
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
-    let sourced_config_1 = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+    let sourced_config_1 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config 1");
     let config_1: Config = sourced_config_1.into(); // Convert
 
@@ -261,11 +262,11 @@ This line exceeds 20 characters.
 "#;
 
     // Get all rules and apply the config using the LOCAL helper
-    let initial_rules_1 = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let initial_rules_1 = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
     let configured_rules_1 = apply_rule_configs(&initial_rules_1, &config_1);
 
     // Run linting (MD001 should still run here as we haven't filtered)
-    let warnings_1 = rumdl::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings_1 = rumdl_lib::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
 
     // Verify MD001 WAS triggered (as filtering is not tested here)
     let md001_warnings_1 = warnings_1.iter().filter(|w| w.rule_name == Some("MD001")).count();
@@ -289,16 +290,16 @@ line_length = 20 # Set a low limit to trigger it
     fs::write(&config_path, config_content_2).expect("Failed to write config 2");
 
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
-    let sourced_config_2 = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+    let sourced_config_2 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config 2");
     let config_2: Config = sourced_config_2.into(); // Convert
 
     // Get all rules and apply config
-    let initial_rules_2 = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let initial_rules_2 = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
     let configured_rules_2 = apply_rule_configs(&initial_rules_2, &config_2);
 
     // Run linting
-    let warnings_2 = rumdl::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings_2 = rumdl_lib::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
 
     // Verify MD013 triggers with configured length
     let md013_warnings_2 = warnings_2.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -344,12 +345,12 @@ headings = false
 
     let config_path_str = config_path.to_str().expect("Path is valid UTF-8");
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+    let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config");
     let config: Config = sourced_config.into(); // Convert
 
     // Get all rules and apply config
-    let initial_rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let initial_rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
     let configured_rules = apply_rule_configs(&initial_rules, &config);
 
     // Test with content that would normally trigger multiple rules
@@ -361,7 +362,7 @@ This line > 10.
 "#;
 
     // Run linting with the configured (but not filtered) ruleset
-    let warnings = rumdl::lint(test_content, &configured_rules, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(test_content, &configured_rules, false).expect("Linting should succeed");
 
     // Verify MD013 triggered with its configured value (10)
     let md013_warnings = warnings

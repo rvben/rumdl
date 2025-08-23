@@ -1,5 +1,5 @@
-use rumdl::config::{Config, SourcedConfig};
-use rumdl::lint_context::LintContext;
+use rumdl_lib::config::{Config, SourcedConfig};
+use rumdl_lib::lint_context::LintContext;
 use std::fs;
 use tempfile::tempdir;
 
@@ -34,8 +34,8 @@ lines_below = 1
     assert!(config.global.disable.contains(&"MD025".to_string()));
 
     // Test rule-specific configuration
-    let lines_above = rumdl::config::get_rule_config_value::<i32>(&config, "MD022", "lines_above");
-    let lines_below = rumdl::config::get_rule_config_value::<i32>(&config, "MD022", "lines_below");
+    let lines_above = rumdl_lib::config::get_rule_config_value::<i32>(&config, "MD022", "lines_above");
+    let lines_below = rumdl_lib::config::get_rule_config_value::<i32>(&config, "MD022", "lines_below");
 
     assert_eq!(lines_above, Some(2));
     assert_eq!(lines_below, Some(1));
@@ -133,23 +133,23 @@ punctuation = "!?"
             .into();
 
     // Test MD013 parameters
-    let line_length = rumdl::config::get_rule_config_value::<i32>(&config, "MD013", "line_length");
-    let code_blocks = rumdl::config::get_rule_config_value::<bool>(&config, "MD013", "code_blocks");
-    let tables = rumdl::config::get_rule_config_value::<bool>(&config, "MD013", "tables");
+    let line_length = rumdl_lib::config::get_rule_config_value::<i32>(&config, "MD013", "line_length");
+    let code_blocks = rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "code_blocks");
+    let tables = rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "tables");
 
     assert_eq!(line_length, Some(120));
     assert_eq!(code_blocks, Some(false));
     assert_eq!(tables, Some(true));
 
     // Test MD022 parameters
-    let lines_above = rumdl::config::get_rule_config_value::<i32>(&config, "MD022", "lines_above");
-    let lines_below = rumdl::config::get_rule_config_value::<i32>(&config, "MD022", "lines_below");
+    let lines_above = rumdl_lib::config::get_rule_config_value::<i32>(&config, "MD022", "lines_above");
+    let lines_below = rumdl_lib::config::get_rule_config_value::<i32>(&config, "MD022", "lines_below");
 
     assert_eq!(lines_above, Some(3));
     assert_eq!(lines_below, Some(2));
 
     // Test MD026 parameters
-    let punctuation = rumdl::config::get_rule_config_value::<String>(&config, "MD026", "punctuation");
+    let punctuation = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD026", "punctuation");
     assert_eq!(punctuation, Some("!?".to_string()));
 
     println!("✅ Rule parameter configuration working correctly");
@@ -274,10 +274,10 @@ disable = ["MD025"]
             .into();
 
     // Get all available rules
-    let all_rules = rumdl::rules::all_rules(&config);
+    let all_rules = rumdl_lib::rules::all_rules(&config);
 
     // Filter rules based on configuration
-    let filtered_rules = rumdl::rules::filter_rules(&all_rules, &config.global);
+    let filtered_rules = rumdl_lib::rules::filter_rules(&all_rules, &config.global);
 
     println!("Total rules available: {}", all_rules.len());
     println!("Filtered rules count: {}", filtered_rules.len());

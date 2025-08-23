@@ -1,9 +1,9 @@
 // Regression prevention test suite for MD051 rule
 // These tests ensure that specific bugs like issue 39 never reoccur
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD051LinkFragments;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD051LinkFragments;
 use std::collections::HashMap;
 
 /// Critical regression test for issue 39 specific patterns
@@ -309,7 +309,7 @@ fn regression_test_emoji_handling() {
 /// Test mode switching continues to work
 #[test]
 fn regression_test_mode_switching() {
-    use rumdl::utils::anchor_styles::AnchorStyle;
+    use rumdl_lib::utils::anchor_styles::AnchorStyle;
 
     let github_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::GitHub);
     let kramdown_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::Kramdown);

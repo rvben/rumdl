@@ -1,9 +1,9 @@
 // Unicode security and normalization edge case tests for MD051
 // These tests specifically target Unicode-related security vulnerabilities
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD051LinkFragments;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD051LinkFragments;
 
 /// Test Unicode normalization consistency to prevent spoofing attacks
 #[test]

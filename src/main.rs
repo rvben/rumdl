@@ -13,13 +13,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use rumdl::config as rumdl_config;
-use rumdl::exit_codes::exit;
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::code_block_utils::CodeBlockStyle;
-use rumdl::rules::code_fence_utils::CodeFenceStyle;
-use rumdl::rules::strong_style::StrongStyle;
+use rumdl_lib::config as rumdl_config;
+use rumdl_lib::exit_codes::exit;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::code_block_utils::CodeBlockStyle;
+use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
+use rumdl_lib::rules::strong_style::StrongStyle;
 
 use rumdl_config::ConfigSource;
 use rumdl_config::normalize_key;
@@ -295,7 +295,7 @@ struct CheckArgs {
 // Get a complete set of enabled rules based on CLI options and config
 fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
     // 1. Initialize all available rules using from_config only
-    let all_rules: Vec<Box<dyn Rule>> = rumdl::rules::all_rules(config);
+    let all_rules: Vec<Box<dyn Rule>> = rumdl_lib::rules::all_rules(config);
 
     // 2. Determine the final list of enabled rules based on precedence
     let final_rules: Vec<Box<dyn Rule>>;
@@ -365,7 +365,7 @@ fn get_enabled_rules_from_checkargs(args: &CheckArgs, config: &rumdl_config::Con
                 }
 
                 // Re-filter with extended set
-                current_rules = rumdl::rules::all_rules(config)
+                current_rules = rumdl_lib::rules::all_rules(config)
                     .into_iter()
                     .filter(|rule| {
                         let normalized_rule_name = normalize_key(rule.name());
@@ -739,8 +739,8 @@ fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
 
 fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
     use colored::*;
-    use rumdl::rule::Rule;
-    use rumdl::rules::*;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::*;
     let g = &sourced.global;
     let mut all_lines = Vec::new();
     // [global] section
@@ -914,7 +914,7 @@ fn format_toml_value(val: &toml::Value) -> String {
 
 /// Offer to install the VS Code extension during init
 fn offer_vscode_extension_install() {
-    use rumdl::vscode::VsCodeExtension;
+    use rumdl_lib::vscode::VsCodeExtension;
 
     // Check if we're in an integrated terminal
     if let Some((cmd, editor_name)) = VsCodeExtension::current_editor_from_env() {
@@ -1146,7 +1146,7 @@ build-backend = \"setuptools.build_meta\"
                 }
             }
             Commands::Rule { rule } => {
-                use rumdl::rules::*;
+                use rumdl_lib::rules::*;
                 let all_rules: Vec<Box<dyn Rule>> = vec![
                     Box::new(MD001HeadingIncrement),
                     Box::new(MD002FirstHeadingH1::default()),
@@ -1362,7 +1362,7 @@ build-backend = \"setuptools.build_meta\"
                                 );
                                 // Successfully handled 'get', exit the command processing
                             } else {
-                                let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
+                                let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
                                 if let Some(rule) = all_rules.iter().find(|r| r.name() == section_part)
                                     && let Some((_, toml::Value::Table(table))) = rule.default_config_section()
                                     && let Some(v) = table.get(&normalized_field)
@@ -1412,7 +1412,7 @@ build-backend = \"setuptools.build_meta\"
                 // This code now runs ONLY if `subcmd` is None
                 else {
                     // --- CONFIG VALIDATION --- (Duplicated from original position, needs to run for display)
-                    let all_rules_reg = rumdl::rules::all_rules(&rumdl_config::Config::default()); // Rename to avoid conflict
+                    let all_rules_reg = rumdl_lib::rules::all_rules(&rumdl_config::Config::default()); // Rename to avoid conflict
                     let registry_reg = rumdl_config::RuleRegistry::from_rules(&all_rules_reg);
                     let sourced_reg = if defaults {
                         // For defaults, create a SourcedConfig that includes all rule defaults
@@ -1509,7 +1509,7 @@ build-backend = \"setuptools.build_meta\"
                 runtime.block_on(async {
                     if let Some(port) = port {
                         // TCP mode for debugging
-                        if let Err(e) = rumdl::lsp::start_tcp_server(port).await {
+                        if let Err(e) = rumdl_lib::lsp::start_tcp_server(port).await {
                             eprintln!("Failed to start LSP server on port {port}: {e}");
                             exit::tool_error();
                         }
@@ -1517,7 +1517,7 @@ build-backend = \"setuptools.build_meta\"
                         // Standard LSP mode over stdio (default behavior)
                         // Note: stdio flag is for explicit documentation, behavior is the same
                         let _ = stdio; // Suppress unused variable warning
-                        if let Err(e) = rumdl::lsp::start_server().await {
+                        if let Err(e) = rumdl_lib::lsp::start_server().await {
                             eprintln!("Failed to start LSP server: {e}");
                             exit::tool_error();
                         }
@@ -1530,7 +1530,7 @@ build-backend = \"setuptools.build_meta\"
                 format,
                 dry_run,
             } => {
-                use rumdl::markdownlint_config;
+                use rumdl_lib::markdownlint_config;
 
                 // Load the markdownlint config file
                 let ml_config = match markdownlint_config::load_markdownlint_config(&file) {
@@ -1761,7 +1761,7 @@ build-backend = \"setuptools.build_meta\"
             }
             Commands::Vscode { force, update, status } => {
                 // Handle VS Code extension installation
-                match rumdl::vscode::handle_vscode_command(force, update, status) {
+                match rumdl_lib::vscode::handle_vscode_command(force, update, status) {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("{}: {}", "Error".red().bold(), e);
@@ -1785,7 +1785,7 @@ build-backend = \"setuptools.build_meta\"
 
 /// Process markdown content from stdin
 fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_config::Config) {
-    use rumdl::output::{OutputFormat, OutputWriter};
+    use rumdl_lib::output::{OutputFormat, OutputWriter};
 
     // If silent mode is enabled, also enable quiet mode
     let quiet = args.quiet || args.silent;
@@ -1924,10 +1924,10 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     ) {
         let file_warnings = vec![(display_filename.to_string(), all_warnings)];
         let output = match output_format {
-            OutputFormat::Json => rumdl::output::formatters::json::format_all_warnings_as_json(&file_warnings),
-            OutputFormat::GitLab => rumdl::output::formatters::gitlab::format_gitlab_report(&file_warnings),
-            OutputFormat::Sarif => rumdl::output::formatters::sarif::format_sarif_report(&file_warnings),
-            OutputFormat::Junit => rumdl::output::formatters::junit::format_junit_report(&file_warnings, 0),
+            OutputFormat::Json => rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings),
+            OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings),
+            OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings),
+            OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0),
             _ => unreachable!(),
         };
 
@@ -1976,7 +1976,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
 }
 
 fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool) {
-    use rumdl::output::{OutputFormat, OutputWriter};
+    use rumdl_lib::output::{OutputFormat, OutputWriter};
 
     // If silent mode is enabled, also enable quiet mode
     let quiet = args.quiet || args.silent;
@@ -2000,7 +2000,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
 
     // 3. Validate configuration
-    let all_rules = rumdl::rules::all_rules(&rumdl_config::Config::default());
+    let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
     let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
     let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
     if !validation_warnings.is_empty() && !args.silent {
@@ -2095,11 +2095,11 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
 
         // Format output based on type
         let output = match output_format {
-            OutputFormat::Json => rumdl::output::formatters::json::format_all_warnings_as_json(&all_file_warnings),
-            OutputFormat::GitLab => rumdl::output::formatters::gitlab::format_gitlab_report(&all_file_warnings),
-            OutputFormat::Sarif => rumdl::output::formatters::sarif::format_sarif_report(&all_file_warnings),
+            OutputFormat::Json => rumdl_lib::output::formatters::json::format_all_warnings_as_json(&all_file_warnings),
+            OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&all_file_warnings),
+            OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&all_file_warnings),
             OutputFormat::Junit => {
-                rumdl::output::formatters::junit::format_junit_report(&all_file_warnings, duration_ms)
+                rumdl_lib::output::formatters::junit::format_junit_report(&all_file_warnings, duration_ms)
             }
             _ => unreachable!(),
         };
@@ -2257,7 +2257,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
 
     // Print profiling information if enabled and not in quiet mode
     if args.profile && !quiet {
-        match std::panic::catch_unwind(rumdl::profiling::get_report) {
+        match std::panic::catch_unwind(rumdl_lib::profiling::get_report) {
             Ok(report) => {
                 output_writer.writeln(&format!("\n{report}")).ok();
             }
@@ -2275,7 +2275,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
 
 // Handle explain command
 fn handle_explain_command(rule_query: &str) {
-    use rumdl::rules::*;
+    use rumdl_lib::rules::*;
 
     // Get all rules
     let all_rules: Vec<Box<dyn Rule>> = vec![
@@ -2409,7 +2409,7 @@ fn handle_explain_command(rule_query: &str) {
 }
 
 // Print statistics summary
-fn print_statistics(warnings: &[rumdl::rule::LintWarning]) {
+fn print_statistics(warnings: &[rumdl_lib::rule::LintWarning]) {
     use std::collections::HashMap;
 
     // Group warnings by rule name
@@ -2489,10 +2489,10 @@ fn process_file_with_formatter(
     _fix: bool,
     verbose: bool,
     quiet: bool,
-    output_format: &rumdl::output::OutputFormat,
-    output_writer: &rumdl::output::OutputWriter,
+    output_format: &rumdl_lib::output::OutputFormat,
+    output_writer: &rumdl_lib::output::OutputWriter,
     config: &rumdl_config::Config,
-) -> (bool, usize, usize, usize, Vec<rumdl::rule::LintWarning>) {
+) -> (bool, usize, usize, usize, Vec<rumdl_lib::rule::LintWarning>) {
     let formatter = output_format.create_formatter();
 
     // Call the original process_file_inner to get warnings
@@ -2592,7 +2592,7 @@ fn process_file_inner(
     verbose: bool,
     quiet: bool,
     config: &rumdl_config::Config,
-) -> (Vec<rumdl::rule::LintWarning>, String, usize, usize) {
+) -> (Vec<rumdl_lib::rule::LintWarning>, String, usize, usize) {
     use std::time::Instant;
 
     let start_time = Instant::now();
@@ -2624,7 +2624,7 @@ fn process_file_inner(
     }
 
     // Use the standard lint function
-    let warnings_result = rumdl::lint(&content, rules, verbose);
+    let warnings_result = rumdl_lib::lint(&content, rules, verbose);
 
     // Clear the environment variable after processing
     unsafe {
@@ -2669,7 +2669,7 @@ fn process_file_inner(
 // Apply fixes to content based on warnings
 fn apply_fixes(
     rules: &[Box<dyn Rule>],
-    all_warnings: &[rumdl::rule::LintWarning],
+    all_warnings: &[rumdl_lib::rule::LintWarning],
     content: &mut String,
     file_path: &str,
     quiet: bool,
@@ -2687,7 +2687,7 @@ fn apply_fixes(
         if !rule_warnings.is_empty() {
             // Check if any warnings for this rule are in non-disabled regions
             let has_non_disabled_warnings = rule_warnings.iter().any(|w| {
-                !rumdl::rule::is_rule_disabled_at_line(
+                !rumdl_lib::rule::is_rule_disabled_at_line(
                     content,
                     rule.name(),
                     w.line.saturating_sub(1), // Convert to 0-based line index
@@ -2758,7 +2758,7 @@ fn apply_fixes(
 /// Apply fixes to stdin content (similar to apply_fixes but without file writing)
 fn apply_fixes_stdin(
     rules: &[Box<dyn Rule>],
-    all_warnings: &[rumdl::rule::LintWarning],
+    all_warnings: &[rumdl_lib::rule::LintWarning],
     content: &mut String,
     quiet: bool,
     config: &rumdl_config::Config,
@@ -2775,7 +2775,7 @@ fn apply_fixes_stdin(
         if !rule_warnings.is_empty() {
             // Check if any warnings for this rule are in non-disabled regions
             let has_non_disabled_warnings = rule_warnings.iter().any(|w| {
-                !rumdl::rule::is_rule_disabled_at_line(
+                !rumdl_lib::rule::is_rule_disabled_at_line(
                     content,
                     rule.name(),
                     w.line.saturating_sub(1), // Convert to 0-based line index
@@ -2836,7 +2836,7 @@ fn process_file_collect_warnings(
     _fix: bool,
     verbose: bool,
     quiet: bool,
-) -> Vec<rumdl::rule::LintWarning> {
+) -> Vec<rumdl_lib::rule::LintWarning> {
     if verbose && !quiet {
         println!("Processing file: {file_path}");
     }
@@ -2855,7 +2855,7 @@ fn process_file_collect_warnings(
     unsafe {
         std::env::set_var("RUMDL_FILE_PATH", file_path);
     }
-    let warnings_result = rumdl::lint(&content, rules, verbose);
+    let warnings_result = rumdl_lib::lint(&content, rules, verbose);
     unsafe {
         std::env::remove_var("RUMDL_FILE_PATH");
     }

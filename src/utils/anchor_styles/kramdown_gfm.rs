@@ -92,7 +92,7 @@ fn is_emoji_or_symbol(c: char) -> bool {
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::anchor_styles::kramdown_gfm;
+/// use rumdl_lib::utils::anchor_styles::kramdown_gfm;
 ///
 /// assert_eq!(kramdown_gfm::heading_to_fragment("Hello World"), "hello-world");
 /// assert_eq!(kramdown_gfm::heading_to_fragment("cbrown --> sbrown: --unsafe-paths"), "cbrown--sbrown-unsafe-paths");

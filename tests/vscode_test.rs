@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod vscode_tests {
-    use rumdl::vscode::VsCodeExtension;
+    use rumdl_lib::vscode::VsCodeExtension;
 
     #[test]
     fn test_extension_constants() {
         // Test that the extension ID is correct
-        assert_eq!(rumdl::vscode::EXTENSION_ID, "rvben.rumdl");
-        assert_eq!(rumdl::vscode::EXTENSION_NAME, "rumdl - Markdown Linter");
+        assert_eq!(rumdl_lib::vscode::EXTENSION_ID, "rvben.rumdl");
+        assert_eq!(rumdl_lib::vscode::EXTENSION_NAME, "rumdl - Markdown Linter");
     }
 
     #[test]
@@ -26,7 +26,7 @@ mod vscode_tests {
     #[test]
     fn test_handle_vscode_command_status() {
         // Test status command - should not fail even if VS Code is not installed
-        match rumdl::vscode::handle_vscode_command(false, false, true) {
+        match rumdl_lib::vscode::handle_vscode_command(false, false, true) {
             Ok(_) => {}
             Err(e) => {
                 // Only acceptable error is VS Code not found

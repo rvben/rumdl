@@ -1,10 +1,10 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::*;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
 /// Basic regression tests for CLI/LSP consistency
 ///
 /// Simple tests to ensure core functionality works and prevents regressions.
-use rumdl::utils::fix_utils::{apply_warning_fixes, validate_fix_range};
+use rumdl_lib::utils::fix_utils::{apply_warning_fixes, validate_fix_range};
 
 /// Test that basic rules don't produce empty fix ranges
 #[test]

@@ -1,7 +1,7 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD051LinkFragments;
-use rumdl::utils::anchor_styles::AnchorStyle;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD051LinkFragments;
+use rumdl_lib::utils::anchor_styles::AnchorStyle;
 
 #[test]
 fn test_valid_link_fragment() {

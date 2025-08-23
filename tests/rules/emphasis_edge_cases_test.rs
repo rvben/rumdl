@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::{
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::{
     MD036NoEmphasisAsHeading, MD037NoSpaceInEmphasis, MD049EmphasisStyle, MD050StrongStyle,
     emphasis_style::EmphasisStyle, strong_style::StrongStyle,
 };

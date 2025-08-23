@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD029OrderedListPrefix;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD029OrderedListPrefix;
 
 #[test]
 fn test_unicode_ordered_list_valid() {
@@ -108,7 +108,7 @@ fn test_unicode_fix_functionality() {
 
 #[test]
 fn test_unicode_one_style() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::One);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::One);
     let content = "\
 1. First item with Unicode café
 2. Should be 1 with emoji 🔥
@@ -221,7 +221,7 @@ fn test_unicode_rtl_content() {
 
 #[test]
 fn test_unicode_ordered0_style() {
-    let rule = MD029OrderedListPrefix::new(rumdl::rules::ListStyle::Ordered0);
+    let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered0);
     let content = "\
 0. First item (zero-based) with Unicode café
 1. Second item with emoji 🔥

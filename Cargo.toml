@@ -17,7 +17,7 @@ autobins = false  # Prevent automatic binary discovery in src/bin/
 default-run = "rumdl"  # Default binary for cargo run
 
 [lib]
-name = "rumdl"
+name = "rumdl_lib"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]

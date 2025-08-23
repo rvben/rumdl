@@ -1,4 +1,4 @@
-use rumdl::vscode::{EXTENSION_ID, VsCodeExtension, handle_vscode_command};
+use rumdl_lib::vscode::{EXTENSION_ID, VsCodeExtension, handle_vscode_command};
 
 /// Mock implementation for testing VsCodeExtension methods that use Command
 /// This allows us to test the logic without requiring actual VS Code installation

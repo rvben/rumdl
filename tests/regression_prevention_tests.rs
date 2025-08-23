@@ -1,12 +1,12 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::*;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
 /// Regression prevention test suite for CLI/LSP consistency patterns
 ///
 /// This test suite guards against reintroducing the exact patterns that were
 /// systematically fixed to achieve 100% CLI/LSP parity. Each test validates
 /// that fixes continue to work correctly and consistently across both methods.
-use rumdl::utils::fix_utils::{apply_warning_fixes, validate_fix_range, warning_fix_to_edit};
+use rumdl_lib::utils::fix_utils::{apply_warning_fixes, validate_fix_range, warning_fix_to_edit};
 
 /// Test Pattern 1: Empty byte ranges (most common regression)
 ///
@@ -48,7 +48,7 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
         (
             "```\ncode\n~~~",
             Box::new(MD048CodeFenceStyle::new(
-                rumdl::rules::code_fence_utils::CodeFenceStyle::Backtick,
+                rumdl_lib::rules::code_fence_utils::CodeFenceStyle::Backtick,
             )) as Box<dyn Rule>,
         ),
     ];
@@ -235,7 +235,7 @@ fn test_byte_range_boundaries() {
         Box::new(MD045NoAltText::new()),
         Box::new(MD047SingleTrailingNewline),
         Box::new(MD048CodeFenceStyle::new(
-            rumdl::rules::code_fence_utils::CodeFenceStyle::Backtick,
+            rumdl_lib::rules::code_fence_utils::CodeFenceStyle::Backtick,
         )),
         Box::new(MD053LinkImageReferenceDefinitions::default()),
         Box::new(MD055TablePipeStyle::new("consistent".to_string())),

@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::{ListStyle, MD029OrderedListPrefix};
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::{ListStyle, MD029OrderedListPrefix};
 
 #[test]
 fn test_issue_42_lists_separated_by_heading() {

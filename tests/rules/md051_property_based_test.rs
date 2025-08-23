@@ -1,9 +1,9 @@
 // Property-based testing for MD051 rule using proptest
 // This ensures that anchor generation is robust across all possible inputs
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD051LinkFragments;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD051LinkFragments;
 use std::collections::HashSet;
 
 // Note: This requires adding proptest to Cargo.toml dev-dependencies

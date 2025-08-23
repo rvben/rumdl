@@ -1,5 +1,5 @@
-use rumdl::config::{Config, GlobalConfig};
-use rumdl::rules::{all_rules, filter_rules};
+use rumdl_lib::config::{Config, GlobalConfig};
+use rumdl_lib::rules::{all_rules, filter_rules};
 use std::collections::HashSet;
 
 #[test]

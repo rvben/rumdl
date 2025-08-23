@@ -1,6 +1,6 @@
-use rumdl::config::Config; // Ensure Config is imported
-use rumdl::config::RuleRegistry;
-use rumdl::rules::*;
+use rumdl_lib::config::Config; // Ensure Config is imported
+use rumdl_lib::config::RuleRegistry;
+use rumdl_lib::rules::*;
 use std::fs;
 use tempfile::tempdir; // For temporary directory // Add back env import // Ensure SourcedConfig is imported
 
@@ -28,7 +28,7 @@ tables = true
 
     // Test loading the config using the full path
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
+    let sourced_result = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(
         sourced_result.is_ok(),
         "SourcedConfig loading should succeed. Error: {:?}",
@@ -45,13 +45,13 @@ tables = true
     assert!(config.global.respect_gitignore);
 
     // Verify rule-specific settings
-    let line_length = rumdl::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
+    let line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
     assert_eq!(line_length, Some(120));
 
-    let code_blocks = rumdl::config::get_rule_config_value::<bool>(&config, "MD013", "code_blocks");
+    let code_blocks = rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "code_blocks");
     assert_eq!(code_blocks, Some(false));
 
-    let tables = rumdl::config::get_rule_config_value::<bool>(&config, "MD013", "tables");
+    let tables = rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "tables");
     assert_eq!(tables, Some(true));
 
     // No explicit cleanup needed, tempdir is dropped at end of scope
@@ -60,7 +60,8 @@ tables = true
 #[test]
 fn test_load_nonexistent_config() {
     // Test loading a nonexistent config file using SourcedConfig::load
-    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some("nonexistent_config.toml"), None, true);
+    let sourced_result =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some("nonexistent_config.toml"), None, true);
     assert!(sourced_result.is_err(), "Loading nonexistent config should fail");
 
     if let Err(err) = sourced_result {
@@ -105,7 +106,7 @@ fn test_create_default_config() {
 
     // Create the default config using the full path
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let result = rumdl::config::create_default_config(config_path_str);
+    let result = rumdl_lib::config::create_default_config(config_path_str);
     assert!(
         result.is_ok(),
         "Creating default config should succeed: {:?}",
@@ -116,7 +117,7 @@ fn test_create_default_config() {
     assert!(config_path.exists(), "Default config file should exist in temp dir");
 
     // Load the created config using SourcedConfig::load
-    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
+    let sourced_result = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(
         sourced_result.is_ok(),
         "Loading created config should succeed: {:?}",
@@ -146,13 +147,13 @@ style = "asterisk"
 
     // Load the config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+    let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config");
     // Convert to Config for rule application logic
     let config: Config = sourced_config.into();
 
     // Create a test rule with the loaded config
-    let mut rules: Vec<Box<dyn rumdl::rule::Rule>> = vec![
+    let mut rules: Vec<Box<dyn rumdl_lib::rule::Rule>> = vec![
         Box::new(MD013LineLength::default()),
         Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
     ];
@@ -160,11 +161,13 @@ style = "asterisk"
     // Apply configuration to rules (similar to apply_rule_configs)
     // For MD013
     if let Some(pos) = rules.iter().position(|r| r.name() == "MD013") {
-        let line_length = rumdl::config::get_rule_config_value::<usize>(&config, "MD013", "line_length").unwrap_or(80);
-        let code_blocks = rumdl::config::get_rule_config_value::<bool>(&config, "MD013", "code_blocks").unwrap_or(true);
-        let tables = rumdl::config::get_rule_config_value::<bool>(&config, "MD013", "tables").unwrap_or(false);
-        let headings = rumdl::config::get_rule_config_value::<bool>(&config, "MD013", "headings").unwrap_or(true);
-        let strict = rumdl::config::get_rule_config_value::<bool>(&config, "MD013", "strict").unwrap_or(false);
+        let line_length =
+            rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line_length").unwrap_or(80);
+        let code_blocks =
+            rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "code_blocks").unwrap_or(true);
+        let tables = rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "tables").unwrap_or(false);
+        let headings = rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "headings").unwrap_or(true);
+        let strict = rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "strict").unwrap_or(false);
         rules[pos] = Box::new(MD013LineLength::new(line_length, code_blocks, tables, headings, strict));
     }
 
@@ -172,7 +175,7 @@ style = "asterisk"
     let test_content = "# Test\n\nThis is a line that exceeds 80 characters but not 150 characters. It's specifically designed for our test case.";
 
     // Run the linter with our configured rules
-    let warnings = rumdl::lint(test_content, &rules, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(test_content, &rules, false).expect("Linting should succeed");
 
     // Verify no MD013 warnings because line_length is set to 150
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -210,19 +213,19 @@ style = "backtick"
 
     // Load the config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+    let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config");
     // Convert to Config for rule verification
     let config: Config = sourced_config.into();
 
     // Verify multiple rule configs
-    let md013_line_length = rumdl::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
+    let md013_line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
     assert_eq!(md013_line_length, Some(100));
 
-    let md046_style = rumdl::config::get_rule_config_value::<String>(&config, "MD046", "style");
+    let md046_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD046", "style");
     assert_eq!(md046_style, Some("fenced".to_string()));
 
-    let md048_style = rumdl::config::get_rule_config_value::<String>(&config, "MD048", "style");
+    let md048_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD048", "style");
     assert_eq!(md048_style, Some("backtick".to_string()));
 
     // No explicit cleanup needed.
@@ -243,7 +246,7 @@ disable = ["MD013" # Missing closing bracket
 
     // Attempt to load the invalid config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_result = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
+    let sourced_result = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true);
     assert!(sourced_result.is_err(), "Loading invalid config should fail");
 
     if let Err(err) = sourced_result {
@@ -273,23 +276,24 @@ style = "dash"
 
     // Load config using SourcedConfig::load
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+    let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load integration config");
     let config: Config = sourced_config.into(); // Convert for use
 
     // Test MD013 behavior with line_length = 60
-    let mut rules_md013: Vec<Box<dyn rumdl::rule::Rule>> = vec![Box::new(MD013LineLength::default())];
+    let mut rules_md013: Vec<Box<dyn rumdl_lib::rule::Rule>> = vec![Box::new(MD013LineLength::default())];
     // Apply config specifically for MD013 test
     if let Some(pos) = rules_md013.iter().position(|r| r.name() == "MD013") {
-        let line_length = rumdl::config::get_rule_config_value::<usize>(&config, "MD013", "line_length").unwrap_or(80);
+        let line_length =
+            rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line_length").unwrap_or(80);
         rules_md013[pos] = Box::new(MD013LineLength::new(line_length, true, false, true, false));
     }
 
     let short_content = "# Test\nThis line is short.";
     let long_content = "# Test\nThis line is definitely longer than the sixty characters limit we set.";
 
-    let warnings_short = rumdl::lint(short_content, &rules_md013, false).unwrap();
-    let warnings_long = rumdl::lint(long_content, &rules_md013, false).unwrap();
+    let warnings_short = rumdl_lib::lint(short_content, &rules_md013, false).unwrap();
+    let warnings_long = rumdl_lib::lint(long_content, &rules_md013, false).unwrap();
 
     assert!(
         warnings_short.iter().all(|w| w.rule_name != Some("MD013")),
@@ -312,11 +316,12 @@ fn test_config_validation_unknown_rule() {
     let config_path = temp_dir.path().join("unknown_rule.toml");
     let config_content = r#"[UNKNOWN_RULE]"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-        .expect("config should load successfully"); // Use load
-    let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("config should load successfully"); // Use load
+    let rules = rumdl_lib::all_rules(&rumdl_lib::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
-    let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
     assert_eq!(warnings.len(), 0);
 }
 
@@ -327,11 +332,12 @@ fn test_config_validation_unknown_option() {
     let config_content = r#"[MD013]
 unknown_opt = true"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-        .expect("config should load successfully"); // Use load
-    let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("config should load successfully"); // Use load
+    let rules = rumdl_lib::all_rules(&rumdl_lib::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
-    let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].message.contains("Unknown option"));
 }
@@ -343,11 +349,12 @@ fn test_config_validation_type_mismatch() {
     let config_content = r#"[MD013]
 line_length = "not a number""#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-        .expect("config should load successfully"); // Use load
-    let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("config should load successfully"); // Use load
+    let rules = rumdl_lib::all_rules(&rumdl_lib::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
-    let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].message.contains("Type mismatch"));
 }
@@ -359,11 +366,12 @@ fn test_config_validation_unknown_global_option() {
     let config_content = r#"[global]
 unknown_global = true"#;
     fs::write(&config_path, config_content).unwrap();
-    let sourced = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-        .expect("config should load successfully"); // Use load
-    let rules = rumdl::all_rules(&rumdl::config::Config::default()); // Use all_rules instead of get_rules
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("config should load successfully"); // Use load
+    let rules = rumdl_lib::all_rules(&rumdl_lib::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
-    let warnings = rumdl::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
     // It seems unknown global keys are not yet tracked properly. Adjust test or implementation.
     // For now, let's expect 0 warnings related to global keys until tracking is implemented/fixed.
     let global_warnings = warnings.iter().filter(|w| w.rule.is_none()).count();
@@ -400,7 +408,7 @@ indent = 2
 
     // Load the config using the explicit path to the temp file
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
-    let sourced_config = rumdl::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+    let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config from explicit path");
 
     let config: Config = sourced_config.into(); // Convert to plain config for assertions
@@ -413,11 +421,11 @@ indent = 2
     assert!(config.global.respect_gitignore);
 
     // Verify rule-specific settings for MD013 (implicit via line-length)
-    let line_length = rumdl::config::get_rule_config_value::<usize>(&config, "MD013", "line-length");
+    let line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line-length");
     assert_eq!(line_length, Some(120));
 
     // Verify rule-specific settings for MD007 (explicit)
-    let indent = rumdl::config::get_rule_config_value::<usize>(&config, "MD007", "indent");
+    let indent = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD007", "indent");
     assert_eq!(indent, Some(2));
 
     // No explicit cleanup needed, tempdir handles it.
@@ -426,7 +434,7 @@ indent = 2
 #[cfg(test)]
 mod config_file_parsing_tests {
 
-    use rumdl::config::SourcedConfig;
+    use rumdl_lib::config::SourcedConfig;
     use std::fs;
     use tempfile::tempdir;
 
@@ -445,8 +453,8 @@ mod config_file_parsing_tests {
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid JSON config should load successfully");
 
-        let config: rumdl::config::Config = result.unwrap().into();
-        let md004_style = rumdl::config::get_rule_config_value::<String>(&config, "MD004", "style");
+        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("dash".to_string()));
     }
 
@@ -490,8 +498,8 @@ MD013:
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid YAML config should load successfully");
 
-        let config: rumdl::config::Config = result.unwrap().into();
-        let md004_style = rumdl::config::get_rule_config_value::<String>(&config, "MD004", "style");
+        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("dash".to_string()));
     }
 
@@ -536,8 +544,8 @@ line_length = 100
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid TOML config should load successfully");
 
-        let config: rumdl::config::Config = result.unwrap().into();
-        let md004_style = rumdl::config::get_rule_config_value::<String>(&config, "MD004", "style");
+        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("dash".to_string()));
     }
 
@@ -583,8 +591,8 @@ invalid_key =
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid markdownlint JSON should load successfully");
 
-        let config: rumdl::config::Config = result.unwrap().into();
-        let md004_style = rumdl::config::get_rule_config_value::<String>(&config, "MD004", "style");
+        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("asterisk".to_string()));
     }
 
@@ -605,8 +613,8 @@ line-length:
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid markdownlint YAML should load successfully");
 
-        let config: rumdl::config::Config = result.unwrap().into();
-        let md004_style = rumdl::config::get_rule_config_value::<String>(&config, "MD004", "style");
+        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("plus".to_string()));
     }
 
@@ -833,8 +841,8 @@ line-length:
         let auto_result = SourcedConfig::load_with_discovery(None, None, false);
         assert!(auto_result.is_ok(), "Auto-discovery should find .markdownlint.json");
 
-        let auto_config: rumdl::config::Config = auto_result.unwrap().into();
-        let auto_style = rumdl::config::get_rule_config_value::<String>(&auto_config, "MD004", "style");
+        let auto_config: rumdl_lib::config::Config = auto_result.unwrap().into();
+        let auto_style = rumdl_lib::config::get_rule_config_value::<String>(&auto_config, "MD004", "style");
         assert_eq!(auto_style, Some("asterisk".to_string()));
 
         // Create explicit config with different value
@@ -846,16 +854,16 @@ line-length:
         let explicit_result = SourcedConfig::load_with_discovery(Some(explicit_path.to_str().unwrap()), None, false);
         assert!(explicit_result.is_ok(), "Explicit config should load successfully");
 
-        let explicit_config: rumdl::config::Config = explicit_result.unwrap().into();
-        let explicit_style = rumdl::config::get_rule_config_value::<String>(&explicit_config, "MD004", "style");
+        let explicit_config: rumdl_lib::config::Config = explicit_result.unwrap().into();
+        let explicit_style = rumdl_lib::config::get_rule_config_value::<String>(&explicit_config, "MD004", "style");
         assert_eq!(explicit_style, Some("dash".to_string()));
 
         // Test skip auto-discovery (should not find .markdownlint.json)
         let skip_result = SourcedConfig::load_with_discovery(None, None, true);
         assert!(skip_result.is_ok(), "Skip auto-discovery should succeed");
 
-        let skip_config: rumdl::config::Config = skip_result.unwrap().into();
-        let skip_style = rumdl::config::get_rule_config_value::<String>(&skip_config, "MD004", "style");
+        let skip_config: rumdl_lib::config::Config = skip_result.unwrap().into();
+        let skip_style = rumdl_lib::config::get_rule_config_value::<String>(&skip_config, "MD004", "style");
         assert_eq!(skip_style, None, "Skip auto-discovery should not load any config");
 
         // Restore original directory

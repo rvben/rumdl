@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD039NoSpaceInLinks;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD039NoSpaceInLinks;
 
 #[test]
 fn test_valid_links() {
@@ -89,9 +89,9 @@ fn test_link_with_punctuation() {
 }
 
 mod parity_with_markdownlint {
-    use rumdl::lint_context::LintContext;
-    use rumdl::rule::Rule;
-    use rumdl::rules::MD039NoSpaceInLinks;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD039NoSpaceInLinks;
 
     #[test]
     fn parity_leading_trailing_space() {

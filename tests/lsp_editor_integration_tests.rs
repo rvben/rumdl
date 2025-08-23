@@ -1,7 +1,7 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::*;
-use rumdl::utils::fix_utils::apply_warning_fixes;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
+use rumdl_lib::utils::fix_utils::apply_warning_fixes;
 use std::time::Instant;
 
 /// Test scenarios that simulate how LSP behaves in real editor environments
@@ -101,7 +101,7 @@ Final paragraph."#;
         Box::new(MD018NoMissingSpaceAtx),
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD004UnorderedListStyle::new(
-            rumdl::rules::md004_unordered_list_style::UnorderedListStyle::Consistent,
+            rumdl_lib::rules::md004_unordered_list_style::UnorderedListStyle::Consistent,
         )),
         Box::new(MD040FencedCodeLanguage),
     ];

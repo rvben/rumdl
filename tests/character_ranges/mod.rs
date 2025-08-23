@@ -10,11 +10,11 @@ pub mod comprehensive_tests;
 pub mod extended_tests;
 pub mod unicode_utils;
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::{LintWarning, Rule};
-use rumdl::rules::heading_utils::HeadingStyle;
-use rumdl::rules::md004_unordered_list_style::UnorderedListStyle;
-use rumdl::rules::*;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::{LintWarning, Rule};
+use rumdl_lib::rules::heading_utils::HeadingStyle;
+use rumdl_lib::rules::md004_unordered_list_style::UnorderedListStyle;
+use rumdl_lib::rules::*;
 
 /// Represents a single character range test case
 #[derive(Debug, Clone)]
@@ -273,7 +273,7 @@ mod tests {
             end_line: 1,
             end_column: 8,
             message: "test".to_string(),
-            severity: rumdl::rule::Severity::Warning,
+            severity: rumdl_lib::rule::Severity::Warning,
             fix: None,
         };
 
@@ -291,7 +291,7 @@ mod tests {
             end_line: 2,
             end_column: 5,
             message: "test".to_string(),
-            severity: rumdl::rule::Severity::Warning,
+            severity: rumdl_lib::rule::Severity::Warning,
             fix: None,
         };
 

@@ -1,9 +1,9 @@
 // Regression test for Issue #39 - remaining edge cases
 // Tests cross-file link detection and Liquid template handling
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD051LinkFragments;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD051LinkFragments;
 
 #[test]
 fn test_issue_39_cross_file_links() {
@@ -88,7 +88,7 @@ Valid internal links:
 #[test]
 fn test_issue_39_underscore_edge_cases_jekyll() {
     // Test underscore handling with Jekyll/kramdown GFM anchor style
-    use rumdl::utils::anchor_styles::AnchorStyle;
+    use rumdl_lib::utils::anchor_styles::AnchorStyle;
 
     let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::KramdownGfm);
 

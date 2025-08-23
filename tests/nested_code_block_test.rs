@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::{MD031BlanksAroundFences, MD040FencedCodeLanguage};
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::{MD031BlanksAroundFences, MD040FencedCodeLanguage};
 
 #[test]
 fn test_md031_should_not_modify_nested_code_blocks() {

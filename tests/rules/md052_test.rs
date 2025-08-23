@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD052ReferenceLinkImages;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD052ReferenceLinkImages;
 
 // Test 1: Valid reference links with definitions (should pass)
 #[test]

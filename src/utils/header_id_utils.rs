@@ -54,7 +54,7 @@ lazy_static! {
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::header_id_utils::extract_header_id;
+/// use rumdl_lib::utils::header_id_utils::extract_header_id;
 ///
 /// // Kramdown format
 /// let (text, id) = extract_header_id("# Header {#custom-id}");
@@ -121,7 +121,7 @@ pub fn extract_header_id(line: &str) -> (String, Option<String>) {
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::header_id_utils::is_standalone_attr_list;
+/// use rumdl_lib::utils::header_id_utils::is_standalone_attr_list;
 ///
 /// assert!(is_standalone_attr_list("{#custom-id}"));
 /// assert!(is_standalone_attr_list("{: #spaced .class }"));
@@ -138,7 +138,7 @@ pub fn is_standalone_attr_list(line: &str) -> bool {
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::header_id_utils::extract_standalone_attr_list_id;
+/// use rumdl_lib::utils::header_id_utils::extract_standalone_attr_list_id;
 ///
 /// assert_eq!(extract_standalone_attr_list_id("{#custom-id}"), Some("custom-id".to_string()));
 /// assert_eq!(extract_standalone_attr_list_id("{: #spaced .class }"), Some("spaced".to_string()));

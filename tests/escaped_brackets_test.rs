@@ -1,5 +1,5 @@
-use rumdl::lint_context::LintContext;
-use rumdl::utils::document_structure::DocumentStructure;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::utils::document_structure::DocumentStructure;
 
 #[test]
 fn test_escaped_brackets_in_document_structure() {

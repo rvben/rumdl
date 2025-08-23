@@ -1,10 +1,10 @@
-use rumdl::config::Config;
+use rumdl_lib::config::Config;
 /// Performance benchmark binary for rumdl
 ///
 /// This binary runs comprehensive performance tests to establish baseline metrics
 /// and measure the impact of optimizations like parallel rule execution.
-use rumdl::performance::{ContentGenerator, PerformanceBenchmark};
-use rumdl::rules::all_rules;
+use rumdl_lib::performance::{ContentGenerator, PerformanceBenchmark};
+use rumdl_lib::rules::all_rules;
 use std::env;
 
 fn main() {
@@ -77,7 +77,7 @@ fn main() {
     println!("✅ Benchmark completed!");
 }
 
-fn print_single_result(size_name: &str, result: &rumdl::performance::AggregatePerformanceResult) {
+fn print_single_result(size_name: &str, result: &rumdl_lib::performance::AggregatePerformanceResult) {
     println!("\n📊 {} Content Performance:", size_name.to_uppercase());
     println!(
         "   Content size: {} bytes ({} lines)",
@@ -113,7 +113,9 @@ fn print_single_result(size_name: &str, result: &rumdl::performance::AggregatePe
     println!();
 }
 
-fn save_baseline_results(results: &std::collections::HashMap<String, rumdl::performance::AggregatePerformanceResult>) {
+fn save_baseline_results(
+    results: &std::collections::HashMap<String, rumdl_lib::performance::AggregatePerformanceResult>,
+) {
     use std::fs;
 
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");

@@ -1,7 +1,7 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::*;
-use rumdl::utils::fix_utils::apply_warning_fixes;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
+use rumdl_lib::utils::fix_utils::apply_warning_fixes;
 use std::time::Instant;
 
 #[test]

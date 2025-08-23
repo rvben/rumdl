@@ -119,7 +119,7 @@ pub fn get_cache_stats() -> HashMap<String, u64> {
 /// Use this for ad-hoc regexes that are not already defined in this module.
 /// Example:
 /// ```
-/// use rumdl::regex_lazy;
+/// use rumdl_lib::regex_lazy;
 /// let my_re = regex_lazy!(r"^foo.*bar$");
 /// assert!(my_re.is_match("foobar"));
 /// ```

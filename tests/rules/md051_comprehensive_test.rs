@@ -2,9 +2,9 @@
 // This test suite covers all the edge cases and missing scenarios that would have
 // caught the bugs before they were released.
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD051LinkFragments;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD051LinkFragments;
 
 /// Helper function to assert that fragments are generated correctly
 fn assert_fragments(test_cases: &[(&str, &str)]) {
@@ -164,7 +164,7 @@ fn test_edge_case_heading_structures() {
 
 #[test]
 fn test_kramdown_vs_github_differences() {
-    use rumdl::utils::anchor_styles::AnchorStyle;
+    use rumdl_lib::utils::anchor_styles::AnchorStyle;
 
     // Test cases where Kramdown and GitHub modes should differ
     let github_rule = MD051LinkFragments::with_anchor_style(AnchorStyle::GitHub);

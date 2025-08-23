@@ -1,9 +1,9 @@
 // Critical edge case tests for MD051 rule
 // These tests address the most severe security and robustness gaps identified in the analysis
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD051LinkFragments;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD051LinkFragments;
 use std::time::{Duration, Instant};
 
 /// Test extremely long headings to prevent memory exhaustion

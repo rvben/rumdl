@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD014CommandsShowOutput;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD014CommandsShowOutput;
 
 #[test]
 fn test_valid_command() {
@@ -251,8 +251,8 @@ fn test_only_commands_no_output() {
 
 #[test]
 fn test_config_from_toml() {
-    let mut config = rumdl::config::Config::default();
-    let mut rule_config = rumdl::config::RuleConfig::default();
+    let mut config = rumdl_lib::config::Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
     rule_config
         .values
         .insert("show-output".to_string(), toml::Value::Boolean(false)); // kebab-case

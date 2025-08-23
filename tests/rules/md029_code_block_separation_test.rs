@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::{ListStyle, MD029OrderedListPrefix};
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::{ListStyle, MD029OrderedListPrefix};
 
 /// Tests for code block separation behavior in MD029
 /// Based on CommonMark specification and markdownlint compatibility testing

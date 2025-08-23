@@ -1,7 +1,7 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD003HeadingStyle;
-use rumdl::rules::heading_utils::HeadingStyle;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD003HeadingStyle;
+use rumdl_lib::rules::heading_utils::HeadingStyle;
 
 #[test]
 fn test_consistent_atx() {

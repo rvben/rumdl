@@ -3,11 +3,11 @@
 //! This test suite validates that both CLI batch fixes (using rule.fix()) and
 //! LSP individual fixes (using warning.fix) produce the same final content.
 
-use rumdl::config::Config;
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::*;
-use rumdl::utils::fix_utils;
+use rumdl_lib::config::Config;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
+use rumdl_lib::utils::fix_utils;
 
 /// Test helper to compare CLI and LSP fix results for a given rule and content
 fn test_cli_lsp_consistency(rule: &dyn Rule, content: &str, test_name: &str) {
@@ -373,7 +373,7 @@ fn test_all_53_rules_systematic_coverage() {
 
     // Get all rules using the official all_rules function
     let config = Config::default();
-    let all_rules = rumdl::rules::all_rules(&config);
+    let all_rules = rumdl_lib::rules::all_rules(&config);
 
     let mut total_tested = 0;
     let mut consistent_fixes = 0;

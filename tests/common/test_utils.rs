@@ -1,6 +1,6 @@
 /// Test utilities to reduce I/O operations and improve test performance
-use rumdl::config::Config;
-use rumdl::lint_context::LintContext;
+use rumdl_lib::config::Config;
+use rumdl_lib::lint_context::LintContext;
 use std::collections::HashMap;
 
 /// In-memory test runner that avoids file system I/O
@@ -28,7 +28,7 @@ impl InMemoryTestRunner {
     }
 
     /// Run linting on a file without disk I/O
-    pub fn lint_file(&self, path: &str) -> Result<Vec<rumdl::rule::LintWarning>, Box<dyn std::error::Error>> {
+    pub fn lint_file(&self, path: &str) -> Result<Vec<rumdl_lib::rule::LintWarning>, Box<dyn std::error::Error>> {
         let content = self.files.get(path)
             .ok_or_else(|| format!("File not found: {}", path))?;
 
@@ -38,8 +38,8 @@ impl InMemoryTestRunner {
         let mut warnings = Vec::new();
 
         // Add a few common rules for basic validation
-        use rumdl::rule::Rule;
-        use rumdl::rules::{
+        use rumdl_lib::rule::Rule;
+        use rumdl_lib::rules::{
             MD001HeadingIncrement,
             MD013LineLength,
             MD022BlanksAroundHeadings,

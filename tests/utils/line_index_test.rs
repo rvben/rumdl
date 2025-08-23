@@ -1,4 +1,4 @@
-use rumdl::utils::range_utils::LineIndex;
+use rumdl_lib::utils::range_utils::LineIndex;
 
 #[test]
 fn test_backtick_code_fence_detection() {

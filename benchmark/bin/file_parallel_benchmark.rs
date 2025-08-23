@@ -1,11 +1,11 @@
-use rumdl::config::Config;
-use rumdl::parallel::{FileParallelProcessor, ParallelConfig, ParallelPerformanceComparison};
+use rumdl_lib::config::Config;
+use rumdl_lib::parallel::{FileParallelProcessor, ParallelConfig, ParallelPerformanceComparison};
 /// File-Level Parallel Processing Benchmark for rumdl
 ///
 /// This binary tests file-level parallelization, which should be much more
 /// effective than rule-level parallelization for markdown linting.
-use rumdl::performance::ContentGenerator;
-use rumdl::rules::all_rules;
+use rumdl_lib::performance::ContentGenerator;
+use rumdl_lib::rules::all_rules;
 use std::env;
 use std::time::Instant;
 
@@ -82,7 +82,7 @@ fn generate_test_files(count: usize, size_type: &str) -> Vec<(String, String)> {
 
 fn run_file_parallel_comparison(
     files: &[(String, String)],
-    rules: &[Box<dyn rumdl::rule::Rule>],
+    rules: &[Box<dyn rumdl_lib::rule::Rule>],
     file_processor: &FileParallelProcessor,
 ) {
     println!("🔄 Testing File-Level Parallel Processing:");
@@ -179,12 +179,12 @@ fn run_file_parallel_comparison(
 
 fn process_files_sequential(
     files: &[(String, String)],
-    rules: &[Box<dyn rumdl::rule::Rule>],
-) -> Vec<(String, rumdl::rule::LintResult)> {
+    rules: &[Box<dyn rumdl_lib::rule::Rule>],
+) -> Vec<(String, rumdl_lib::rule::LintResult)> {
     files
         .iter()
         .map(|(path, content)| {
-            let result = rumdl::lint(content, rules, false);
+            let result = rumdl_lib::lint(content, rules, false);
             (path.clone(), result)
         })
         .collect()

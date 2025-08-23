@@ -1,4 +1,4 @@
-use rumdl::config::{ConfigError, create_default_config};
+use rumdl_lib::config::{ConfigError, create_default_config};
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;

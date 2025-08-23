@@ -2,9 +2,9 @@
 ///
 /// These tests verify that the rules properly skip various markdown contexts
 /// including HTML comments, math blocks, inline math, tables, and front matter.
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::{MD011NoReversedLinks, MD037NoSpaceInEmphasis, MD052ReferenceLinkImages};
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::{MD011NoReversedLinks, MD037NoSpaceInEmphasis, MD052ReferenceLinkImages};
 
 #[test]
 fn test_md037_skips_html_comments() {

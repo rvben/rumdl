@@ -2,7 +2,7 @@
 mod init_command_tests {
     use assert_cmd::prelude::*;
 
-    use rumdl::config;
+    use rumdl_lib::config;
     use std::fs;
     use std::process::Command;
     use tempfile::tempdir;

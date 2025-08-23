@@ -1,7 +1,7 @@
-use rumdl::config::Config;
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::all_rules;
+use rumdl_lib::config::Config;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::all_rules;
 use std::env;
 use std::time::Instant;
 

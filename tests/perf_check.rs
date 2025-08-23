@@ -1,5 +1,5 @@
-use rumdl::lint_context::LintContext;
-use rumdl::{MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions, rule::Rule};
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::{MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD053LinkImageReferenceDefinitions, rule::Rule};
 use std::time::Instant;
 
 #[test]

@@ -90,7 +90,7 @@ impl CodeBlockUtils {
     ///
     /// # Examples
     /// ```
-    /// use rumdl::rules::code_block_utils::CodeBlockUtils;
+    /// use rumdl_lib::rules::code_block_utils::CodeBlockUtils;
     ///
     /// let specifier = CodeBlockUtils::get_language_specifier("```rust");
     /// assert_eq!(specifier, Some("rust".to_string()));
@@ -134,7 +134,7 @@ impl CodeBlockUtils {
     ///
     /// # Examples
     /// ```
-    /// use rumdl::rules::code_block_utils::CodeBlockUtils;
+    /// use rumdl_lib::rules::code_block_utils::CodeBlockUtils;
     ///
     /// let content = "Some text\n```rust\nlet x = 1;\n```\nMore text";
     /// let in_code_block = CodeBlockUtils::identify_code_block_lines(content);

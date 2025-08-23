@@ -224,7 +224,7 @@ mod comprehensive_windows_tests {
     /// Integration test that verifies our fix handles the exact VS Code scenario
     #[test]
     fn test_vscode_integration_scenario() {
-        use rumdl::vscode::VsCodeExtension;
+        use rumdl_lib::vscode::VsCodeExtension;
 
         // Test the actual VsCodeExtension::new() behavior
         match VsCodeExtension::new() {

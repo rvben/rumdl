@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD029OrderedListPrefix;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD029OrderedListPrefix;
 
 #[test]
 fn test_md029_2_space_code_blocks_break_lists() {

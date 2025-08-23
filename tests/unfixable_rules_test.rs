@@ -1,10 +1,10 @@
 //! Tests for unfixable rules functionality (Issue #56)
 
-use rumdl::config::{Config, GlobalConfig};
-use rumdl::rule::{FixCapability, Rule};
-use rumdl::rules::MD018NoMissingSpaceAtx;
-use rumdl::rules::MD033NoInlineHtml;
-use rumdl::rules::MD054LinkImageStyle;
+use rumdl_lib::config::{Config, GlobalConfig};
+use rumdl_lib::rule::{FixCapability, Rule};
+use rumdl_lib::rules::MD018NoMissingSpaceAtx;
+use rumdl_lib::rules::MD033NoInlineHtml;
+use rumdl_lib::rules::MD054LinkImageStyle;
 
 #[test]
 fn test_inherently_unfixable_rules_declare_capability() {

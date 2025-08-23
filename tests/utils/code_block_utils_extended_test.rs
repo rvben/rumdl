@@ -1,4 +1,4 @@
-use rumdl::rules::code_block_utils::*;
+use rumdl_lib::rules::code_block_utils::*;
 
 #[test]
 fn test_is_code_block_start() {

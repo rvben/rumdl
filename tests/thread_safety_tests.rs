@@ -1,7 +1,7 @@
-use rumdl::config::Config;
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::*;
+use rumdl_lib::config::Config;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
 use std::sync::{Arc, Mutex};
 use std::thread;
 // Duration removed - no longer needed after optimizations
@@ -148,7 +148,7 @@ fn test_concurrent_configuration_access() {
 
         let handle = thread::spawn(move || {
             // Access configuration from multiple threads
-            let all_rules = rumdl::rules::all_rules(&config_clone);
+            let all_rules = rumdl_lib::rules::all_rules(&config_clone);
 
             let mut results = results_clone.lock().unwrap();
             results.push((i, all_rules.len()));
@@ -288,7 +288,7 @@ Text with *bad emphasis * here.
                 _ => {
                     // Configuration access
                     let config = Config::default();
-                    let all_rules = rumdl::rules::all_rules(&config);
+                    let all_rules = rumdl_lib::rules::all_rules(&config);
                     let mut results = results_clone.lock().unwrap();
                     results.push((i, "config".to_string(), all_rules.len()));
                 }

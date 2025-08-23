@@ -1,9 +1,9 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rand::Rng;
 use rand::rng;
-use rumdl::LintContext;
-use rumdl::MD053LinkImageReferenceDefinitions;
-use rumdl::rule::Rule;
+use rumdl_lib::LintContext;
+use rumdl_lib::MD053LinkImageReferenceDefinitions;
+use rumdl_lib::rule::Rule;
 
 fn create_test_content(size: usize, ratio: f64) -> String {
     let mut content = String::with_capacity(size);

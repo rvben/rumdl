@@ -1,7 +1,7 @@
-use rumdl::config::Config;
-use rumdl::inline_config::InlineConfig;
-use rumdl::lint;
-use rumdl::rules::all_rules;
+use rumdl_lib::config::Config;
+use rumdl_lib::inline_config::InlineConfig;
+use rumdl_lib::lint;
+use rumdl_lib::rules::all_rules;
 
 #[test]
 fn test_markdownlint_disable_enable() {

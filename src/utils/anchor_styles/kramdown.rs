@@ -52,7 +52,7 @@
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::anchor_styles::kramdown;
+/// use rumdl_lib::utils::anchor_styles::kramdown;
 ///
 /// // Basic cases
 /// assert_eq!(kramdown::heading_to_fragment("Hello World"), "hello-world");

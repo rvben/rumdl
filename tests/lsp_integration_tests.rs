@@ -3,7 +3,7 @@
 //! These tests verify the LSP server works correctly in scenarios that
 //! mirror how editors like VS Code, Neovim, etc. would interact with rumdl.
 
-use rumdl::lsp::types::{RumdlLspConfig, warning_to_diagnostic};
+use rumdl_lib::lsp::types::{RumdlLspConfig, warning_to_diagnostic};
 use std::time::Duration;
 
 /// Test the core LSP workflow without full server setup
@@ -37,8 +37,8 @@ Here's some `inline code` and a [link](https://example.com).
 "#;
 
     // Test that we can process this content with rumdl
-    let rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
-    let warnings = rumdl::lint(content, &rules, false).unwrap();
+    let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
+    let warnings = rumdl_lib::lint(content, &rules, false).unwrap();
 
     // Should find some issues in this content
     assert!(!warnings.is_empty(), "Expected to find linting issues in test content");
@@ -61,10 +61,10 @@ async fn test_multiple_file_scenarios() {
         ("CHANGELOG.md", "# Changelog\n\n## v1.0.0"),
     ];
 
-    let rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
 
     for (filename, content) in files {
-        let warnings = rumdl::lint(content, &rules, false).unwrap();
+        let warnings = rumdl_lib::lint(content, &rules, false).unwrap();
 
         // Each file should be processable
         for warning in &warnings {
@@ -112,8 +112,8 @@ async fn test_error_recovery() {
     let invalid_content = "This is not valid markdown in some way that might cause issues...";
 
     // Even with potentially problematic content, rumdl should handle gracefully
-    let rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
-    let result = rumdl::lint(invalid_content, &rules, false);
+    let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
+    let result = rumdl_lib::lint(invalid_content, &rules, false);
 
     // Should not panic or fail catastrophically
     assert!(result.is_ok(), "Linting should handle edge cases gracefully");
@@ -139,8 +139,8 @@ async fn test_performance_with_large_document() {
     }
 
     // Test that we can process large documents efficiently
-    let rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
-    let warnings = rumdl::lint(&large_content, &rules, false).unwrap();
+    let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
+    let warnings = rumdl_lib::lint(&large_content, &rules, false).unwrap();
 
     let elapsed = start.elapsed();
     println!(
@@ -160,14 +160,14 @@ async fn test_performance_with_large_document() {
 /// Test rapid editing simulation
 #[tokio::test]
 async fn test_rapid_editing_simulation() {
-    let rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
     let start = std::time::Instant::now();
 
     // Simulate rapid editing by processing many small changes
     for i in 1..=50 {
         let content = format!("# Document Version {}\n\n{}", i, "Content here. ".repeat(i));
 
-        let warnings = rumdl::lint(&content, &rules, false).unwrap();
+        let warnings = rumdl_lib::lint(&content, &rules, false).unwrap();
 
         // Convert to diagnostics (simulating LSP diagnostic updates)
         for warning in &warnings {
@@ -209,12 +209,12 @@ async fn test_workspace_scenarios() {
         ),
     ];
 
-    let rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
+    let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
     let mut total_warnings = 0;
     let file_count = workspace_files.len();
 
     for (filepath, content) in &workspace_files {
-        let warnings = rumdl::lint(content, &rules, false).unwrap();
+        let warnings = rumdl_lib::lint(content, &rules, false).unwrap();
         total_warnings += warnings.len();
 
         // Verify each file processes correctly
@@ -234,8 +234,8 @@ async fn test_workspace_scenarios() {
 #[tokio::test]
 async fn test_diagnostic_conversion_completeness() {
     let content = "#  Heading with extra space\n\nContent here.";
-    let rules = rumdl::rules::all_rules(&rumdl::config::Config::default());
-    let warnings = rumdl::lint(content, &rules, false).unwrap();
+    let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
+    let warnings = rumdl_lib::lint(content, &rules, false).unwrap();
 
     for warning in warnings {
         let diagnostic = warning_to_diagnostic(&warning);

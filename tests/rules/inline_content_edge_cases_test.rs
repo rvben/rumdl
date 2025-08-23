@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::{MD044ProperNames, MD045NoAltText, MD052ReferenceLinkImages};
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::{MD044ProperNames, MD045NoAltText, MD052ReferenceLinkImages};
 
 /// Comprehensive edge case tests for inline content rules (MD044, MD045, MD052)
 ///

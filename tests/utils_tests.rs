@@ -1,4 +1,4 @@
-use rumdl::utils::{ElementQuality, ElementType, MarkdownElements};
+use rumdl_lib::utils::{ElementQuality, ElementType, MarkdownElements};
 
 #[test]
 fn test_markdown_elements_detection() {

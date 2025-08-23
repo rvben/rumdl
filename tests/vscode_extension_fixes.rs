@@ -4,12 +4,12 @@
 //! the fix replacement text to the warning range (not the fix range).
 //! This helps catch bugs where warning ranges and fix ranges are mismatched.
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::code_block_utils::CodeBlockStyle;
-use rumdl::rules::code_fence_utils::CodeFenceStyle;
-use rumdl::rules::strong_style::StrongStyle;
-use rumdl::rules::*;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::code_block_utils::CodeBlockStyle;
+use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
+use rumdl_lib::rules::strong_style::StrongStyle;
+use rumdl_lib::rules::*;
 
 /// Simulates how VS Code extension applies a fix by:
 /// 1. Getting the warning range from the rule

@@ -84,7 +84,7 @@ fn is_emoji_or_symbol(c: char) -> bool {
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::anchor_styles::jekyll;
+/// use rumdl_lib::utils::anchor_styles::jekyll;
 ///
 /// assert_eq!(jekyll::heading_to_fragment("Hello World"), "hello-world");
 /// assert_eq!(jekyll::heading_to_fragment("cbrown --> sbrown: --unsafe-paths"), "cbrown--sbrown-unsafe-paths");

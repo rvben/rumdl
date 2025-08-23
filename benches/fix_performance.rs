@@ -1,7 +1,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::*;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::*;
 
 /// Generate test content with various markdown issues that need fixing
 fn generate_problematic_content(size: usize) -> String {
@@ -224,7 +224,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD004 - Unordered list style
     c.bench_function("MD004 fix", |b| {
-        let rule = MD004UnorderedListStyle::new(rumdl::rules::UnorderedListStyle::Consistent);
+        let rule = MD004UnorderedListStyle::new(rumdl_lib::rules::UnorderedListStyle::Consistent);
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -387,7 +387,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD050 - Strong style (skip - requires enum parameter)
     // c.bench_function("MD050 fix", |b| {
-    //     let rule = MD050StrongStyle::new(rumdl::rules::StrongStyle::Consistent);
+    //     let rule = MD050StrongStyle::new(rumdl_lib::rules::StrongStyle::Consistent);
     //     b.iter(|| rule.fix(black_box(&ctx)))
     // });
 

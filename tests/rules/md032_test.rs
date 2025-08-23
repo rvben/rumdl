@@ -1,6 +1,6 @@
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD032BlanksAroundLists;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD032BlanksAroundLists;
 
 #[test]
 fn test_valid_lists() {
@@ -254,7 +254,7 @@ fn test_list_with_content() {
     let ctx = LintContext::new(content);
 
     // --- Temporary Debugging ---
-    let temp_structure = rumdl::utils::document_structure::document_structure_from_str(ctx.content);
+    let temp_structure = rumdl_lib::utils::document_structure::document_structure_from_str(ctx.content);
     println!(
         "DEBUG MD032 - test_list_with_content - structure.list_lines: {:?}",
         temp_structure.list_lines

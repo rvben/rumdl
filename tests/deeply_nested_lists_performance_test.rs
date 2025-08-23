@@ -1,8 +1,8 @@
 //! Performance stress tests for deeply nested list structures
 
-use rumdl::lint_context::LintContext;
-use rumdl::rule::Rule;
-use rumdl::rules::MD032BlanksAroundLists;
+use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD032BlanksAroundLists;
 use std::time::Instant;
 
 /// Performance stress tests for deeply nested list structures

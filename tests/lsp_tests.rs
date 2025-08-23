@@ -9,9 +9,9 @@
 
 #![allow(deprecated)]
 
-use rumdl::lsp::RumdlLanguageServer;
-use rumdl::lsp::types::{RumdlLspConfig, warning_to_code_action, warning_to_diagnostic};
-use rumdl::rule::{Fix, LintWarning, Severity};
+use rumdl_lib::lsp::RumdlLanguageServer;
+use rumdl_lib::lsp::types::{RumdlLspConfig, warning_to_code_action, warning_to_diagnostic};
+use rumdl_lib::rule::{Fix, LintWarning, Severity};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};
 use url::Url;
