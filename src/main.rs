@@ -1,8 +1,10 @@
+use chrono::Local;
 use clap::{Args, Parser, Subcommand};
 use colored::*;
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use memmap2::Mmap;
+use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::error::Error;
@@ -11,7 +13,8 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::sync::mpsc::channel;
+use std::time::{Duration, Instant};
 
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
@@ -290,6 +293,10 @@ struct CheckArgs {
     /// Disable all output except linting results (implies --quiet)
     #[arg(short, long, help = "Disable all output except diagnostics")]
     silent: bool,
+
+    /// Run in watch mode by re-running whenever files change
+    #[arg(short, long, help = "Run in watch mode by re-running whenever files change")]
+    watch: bool,
 }
 
 // Get a complete set of enabled rules based on CLI options and config
@@ -1975,43 +1982,56 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     }
 }
 
-fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool) {
-    use rumdl_lib::output::{OutputFormat, OutputWriter};
+/// Represents a change type detected in watch mode
+#[derive(Debug, Clone, Copy)]
+enum ChangeKind {
+    Configuration,
+    SourceFile,
+}
 
-    // If silent mode is enabled, also enable quiet mode
-    let quiet = args.quiet || args.silent;
-
-    // 1. Determine the directory for config discovery
-    // Only use the path's directory for discovery if it's an absolute path
-    // This ensures we discover config from the project root when running relative commands
-    let discovery_dir = if !args.paths.is_empty() {
-        let path = std::path::Path::new(&args.paths[0]);
-        if path.is_absolute() {
-            if path.is_dir() { Some(path) } else { path.parent() }
-        } else {
-            // For relative paths, use current directory for discovery
-            None
-        }
-    } else {
-        None
-    };
-
-    // 2. Load sourced config (for provenance and validation)
-    let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
-
-    // 3. Validate configuration
-    let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
-    let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
-    let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
-    if !validation_warnings.is_empty() && !args.silent {
-        for warn in &validation_warnings {
-            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
-        }
-        // Do NOT exit; continue with valid config
+/// Detects what kind of change occurred based on the file extension
+fn change_detected(event: &Event) -> Option<ChangeKind> {
+    // Skip access and other non-modification events
+    if !matches!(
+        event.kind,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    ) {
+        return None;
     }
 
-    // 4. Convert to Config for the rest of the linter
-    let config: rumdl_config::Config = sourced.into();
+    let mut source_file = false;
+    for path in &event.paths {
+        if let Some(extension) = path.extension() {
+            match extension.to_str() {
+                Some("toml" | "json" | "yaml" | "yml") => {
+                    // Configuration file changed
+                    return Some(ChangeKind::Configuration);
+                }
+                Some("md" | "markdown" | "mdown" | "mkd" | "mdx") => {
+                    source_file = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if source_file {
+        Some(ChangeKind::SourceFile)
+    } else {
+        None
+    }
+}
+
+/// Clear the terminal screen
+fn clear_screen() {
+    // ANSI escape sequence to clear screen and move cursor to top-left
+    print!("\x1B[2J\x1B[1;1H");
+    let _ = io::stdout().flush();
+}
+
+/// Perform a single check run (extracted from run_check for reuse in watch mode)
+fn perform_check_run(args: &CheckArgs, config: &rumdl_config::Config, quiet: bool) -> bool {
+    use rumdl_lib::output::{OutputFormat, OutputWriter};
 
     // Create output writer for linting results
     let output_writer = OutputWriter::new(args.stderr, quiet, args.silent);
@@ -2031,34 +2051,34 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         Ok(fmt) => fmt,
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            exit::tool_error();
+            return true; // Has errors
         }
     };
 
     // Initialize rules with configuration
-    let enabled_rules = get_enabled_rules_from_checkargs(args, &config);
+    let enabled_rules = get_enabled_rules_from_checkargs(args, config);
 
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
-        process_stdin(&enabled_rules, args, &config);
-        return;
+        process_stdin(&enabled_rules, args, config);
+        return false; // stdin processing handles its own exit codes
     }
 
     // Find all markdown files to check
-    let file_paths = match find_markdown_files(&args.paths, args, &config) {
+    let file_paths = match find_markdown_files(&args.paths, args, config) {
         Ok(paths) => paths,
         Err(e) => {
             if !args.silent {
                 eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
             }
-            exit::tool_error();
+            return true; // Has errors
         }
     };
     if file_paths.is_empty() {
         if !quiet {
             println!("No markdown files found to check.");
         }
-        return;
+        return false;
     }
 
     // For formats that need to collect all warnings first
@@ -2108,11 +2128,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
             eprintln!("Error writing output: {e}");
         });
 
-        // Exit with appropriate code
-        if has_issues {
-            exit::violations_found();
-        }
-        return;
+        return has_issues;
     }
 
     let start_time = Instant::now();
@@ -2150,7 +2166,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
                         quiet,
                         &output_format,
                         &output_writer,
-                        &config,
+                        config,
                     )
                 })
                 .collect();
@@ -2205,7 +2221,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
                         quiet,
                         &output_format,
                         &output_writer,
-                        &config,
+                        config,
                     );
 
                 total_files_processed += 1;
@@ -2267,7 +2283,215 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         }
     }
 
-    // Exit with non-zero status if issues were found
+    has_issues
+}
+
+/// Run the linter in watch mode, re-running on file changes
+fn run_watch_mode(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool, quiet: bool) {
+    // Determine the directory for config discovery
+    let discovery_dir = if !args.paths.is_empty() {
+        let path = std::path::Path::new(&args.paths[0]);
+        if path.is_absolute() {
+            if path.is_dir() { Some(path) } else { path.parent() }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Load initial configuration
+    let mut sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
+
+    // Validate configuration
+    let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
+    let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
+    let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
+    if !validation_warnings.is_empty() && !args.silent {
+        for warn in &validation_warnings {
+            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+        }
+    }
+
+    let mut config: rumdl_config::Config = sourced.clone().into();
+
+    // Configure the file watcher
+    let (tx, rx) = channel();
+
+    let mut watcher = match RecommendedWatcher::new(
+        tx,
+        NotifyConfig::default().with_poll_interval(Duration::from_millis(500)),
+    ) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("{}: Failed to create file watcher: {}", "Error".red().bold(), e);
+            exit::tool_error();
+        }
+    };
+
+    // Watch directories for markdown and config files
+    let watch_paths = if args.paths.is_empty() {
+        vec![".".to_string()]
+    } else {
+        args.paths.clone()
+    };
+
+    for path_str in &watch_paths {
+        let path = Path::new(path_str);
+        if let Err(e) = watcher.watch(path, RecursiveMode::Recursive) {
+            eprintln!("{}: Failed to watch {}: {}", "Warning".yellow().bold(), path_str, e);
+        }
+    }
+
+    // Also watch configuration files
+    if let Some(config_path) = global_config_path
+        && let Err(e) = watcher.watch(Path::new(config_path), RecursiveMode::NonRecursive)
+    {
+        eprintln!("{}: Failed to watch config file: {}", "Warning".yellow().bold(), e);
+    }
+
+    // Perform initial run
+    clear_screen();
+    let timestamp = Local::now().format("%H:%M:%S");
+    println!("[{}] {}...", timestamp, "Starting linter in watch mode".green().bold());
+    println!("{}", "Press Ctrl-C to exit".cyan());
+    println!();
+
+    let _has_issues = perform_check_run(args, &config, quiet);
+    if !quiet {
+        println!("\n{}", "Watching for file changes...".cyan());
+    }
+
+    // Main watch loop with improved debouncing
+    let debounce_duration = Duration::from_millis(100); // 100ms debounce - responsive while catching most duplicate events
+
+    loop {
+        match rx.recv() {
+            Ok(event_result) => {
+                match event_result {
+                    Ok(first_event) => {
+                        // Check what kind of change occurred
+                        let Some(mut change_kind) = change_detected(&first_event) else {
+                            continue;
+                        };
+
+                        // Collect all events that occur within the debounce window
+                        let start = Instant::now();
+                        while start.elapsed() < debounce_duration {
+                            // Try to receive more events with a short timeout
+                            if let Ok(Ok(event)) = rx.recv_timeout(Duration::from_millis(10)) {
+                                // If we get a config change, that takes priority
+                                if let Some(kind) = change_detected(&event)
+                                    && matches!(kind, ChangeKind::Configuration)
+                                {
+                                    change_kind = ChangeKind::Configuration;
+                                }
+                            }
+                        }
+
+                        // Handle configuration changes if needed
+                        if matches!(change_kind, ChangeKind::Configuration) {
+                            // Reload configuration
+                            sourced = load_config_with_cli_error_handling_with_dir(
+                                global_config_path,
+                                isolated,
+                                discovery_dir,
+                            );
+
+                            // Re-validate configuration
+                            let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
+                            if !validation_warnings.is_empty() && !args.silent {
+                                for warn in &validation_warnings {
+                                    eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+                                }
+                            }
+
+                            config = sourced.clone().into();
+                        }
+
+                        // Build the header message before clearing
+                        let timestamp = chrono::Local::now().format("%H:%M:%S");
+                        let header = match change_kind {
+                            ChangeKind::Configuration => {
+                                format!(
+                                    "[{}] {}...\n\n",
+                                    timestamp,
+                                    "Configuration change detected".yellow().bold()
+                                )
+                            }
+                            ChangeKind::SourceFile => {
+                                format!("[{}] {}...\n\n", timestamp, "File change detected".cyan().bold())
+                            }
+                        };
+
+                        // Clear and immediately print header
+                        clear_screen();
+                        print!("{header}");
+                        let _ = io::stdout().flush();
+
+                        // Re-run the check
+                        let _has_issues = perform_check_run(args, &config, quiet);
+                        if !quiet {
+                            println!("\n{}", "Watching for file changes...".cyan());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}: Watch error: {}", "Error".red().bold(), e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{}: Failed to receive watch event: {}", "Error".red().bold(), e);
+                exit::tool_error();
+            }
+        }
+    }
+}
+
+fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool) {
+    // If silent mode is enabled, also enable quiet mode
+    let quiet = args.quiet || args.silent;
+
+    // Check for watch mode
+    if args.watch {
+        run_watch_mode(args, global_config_path, isolated, quiet);
+        return;
+    }
+
+    // 1. Determine the directory for config discovery
+    // Only use the path's directory for discovery if it's an absolute path
+    // This ensures we discover config from the project root when running relative commands
+    let discovery_dir = if !args.paths.is_empty() {
+        let path = std::path::Path::new(&args.paths[0]);
+        if path.is_absolute() {
+            if path.is_dir() { Some(path) } else { path.parent() }
+        } else {
+            // For relative paths, use current directory for discovery
+            None
+        }
+    } else {
+        None
+    };
+
+    // 2. Load sourced config (for provenance and validation)
+    let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
+
+    // 3. Validate configuration
+    let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
+    let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
+    let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
+    if !validation_warnings.is_empty() && !args.silent {
+        for warn in &validation_warnings {
+            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+        }
+        // Do NOT exit; continue with valid config
+    }
+
+    // 4. Convert to Config for the rest of the linter
+    let config: rumdl_config::Config = sourced.into();
+
+    // Perform the check and exit if issues were found
+    let has_issues = perform_check_run(args, &config, quiet);
     if has_issues {
         exit::violations_found();
     }

@@ -88,6 +88,7 @@ It offers:
     - [Exit Codes](#exit-codes)
     - [Usage Examples](#usage-examples)
   - [Configuration](#configuration)
+    - [Configuration Discovery](#configuration-discovery)
     - [Markdownlint Migration](#markdownlint-migration)
     - [Configuration File Example](#configuration-file-example)
     - [Initializing Configuration](#initializing-configuration)
@@ -213,6 +214,9 @@ rumdl check --exclude "node_modules,dist" .
 # Include only specific files/directories
 rumdl check --include "docs/*.md,README.md" .
 
+# Watch mode for continuous linting
+rumdl check --watch docs/
+
 # Combine include and exclude patterns
 rumdl check --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 
@@ -331,6 +335,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 **Options:**
 
 - `-f, --fix`: Automatically fix issues where possible
+- `-w, --watch`: Run in watch mode by re-running whenever files change
 - `-l, --list-rules`: List all available rules
 - `-d, --disable <rules>`: Disable specific rules (comma-separated)
 - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
