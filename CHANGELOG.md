@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Build**: Fixed output filename collision warning during `cargo install` (#61)
+
 ## [0.0.125] - 2025-08-22
 
 ### Added
