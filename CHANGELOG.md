@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.126] - 2025-08-23
+
 ### Fixed
 - **Build**: Fixed output filename collision warning during `cargo install` (#61)
 
@@ -460,7 +462,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.125...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.126...HEAD
+[0.0.126]: https://github.com/rvben/rumdl/compare/v0.0.125...v0.0.126
 [0.0.125]: https://github.com/rvben/rumdl/compare/v0.0.124...v0.0.125
 [0.0.124]: https://github.com/rvben/rumdl/compare/v0.0.123...v0.0.124
 [0.0.123]: https://github.com/rvben/rumdl/compare/v0.0.122...v0.0.123
