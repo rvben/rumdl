@@ -2,6 +2,7 @@ mod md001_test;
 mod md002_test;
 mod md003_test;
 mod md004_test;
+mod md005_dynamic_indent_test;
 mod md005_test;
 mod md006_test;
 mod md007_test;

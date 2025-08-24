@@ -15,6 +15,7 @@ line_length = 200
 code_blocks = true
 tables = false
 headings = true
+enable_reflow = true
 
 [MD029]
 style = "ordered"
