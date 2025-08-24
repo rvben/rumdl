@@ -215,7 +215,10 @@ struct CheckArgs {
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false")]
     _fix: bool,
-    /// Files or directories to lint
+
+    /// Show diff of what would be fixed instead of fixing files
+    #[arg(long, help = "Show diff of what would be fixed instead of fixing files")]
+    diff: bool,
 
     /// List all available rules
     #[arg(short, long, default_value = "false")]
@@ -2001,17 +2004,32 @@ fn change_detected(event: &Event) -> Option<ChangeKind> {
 
     let mut source_file = false;
     for path in &event.paths {
-        if let Some(extension) = path.extension() {
-            match extension.to_str() {
-                Some("toml" | "json" | "yaml" | "yml") => {
-                    // Configuration file changed
-                    return Some(ChangeKind::Configuration);
-                }
-                Some("md" | "markdown" | "mdown" | "mkd" | "mdx") => {
-                    source_file = true;
-                }
-                _ => {}
+        // Check if this is a configuration file
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            // Check for rumdl-specific config files
+            if matches!(
+                file_name,
+                ".rumdl.toml"
+                    | "rumdl.toml"
+                    | "pyproject.toml"
+                    | ".markdownlint.json"
+                    | ".markdownlint.jsonc"
+                    | ".markdownlint.yaml"
+                    | ".markdownlint.yml"
+                    | "markdownlint.json"
+                    | "markdownlint.jsonc"
+                    | "markdownlint.yaml"
+                    | "markdownlint.yml"
+            ) {
+                return Some(ChangeKind::Configuration);
             }
+        }
+
+        // Check for markdown files
+        if let Some(extension) = path.extension()
+            && matches!(extension.to_str(), Some("md" | "markdown" | "mdown" | "mkd" | "mdx"))
+        {
+            source_file = true;
         }
     }
 
@@ -2162,6 +2180,7 @@ fn perform_check_run(args: &CheckArgs, config: &rumdl_config::Config, quiet: boo
                         file_path,
                         &enabled_rules_arc,
                         args._fix,
+                        args.diff,
                         args.verbose && !args.silent,
                         quiet,
                         &output_format,
@@ -2217,6 +2236,7 @@ fn perform_check_run(args: &CheckArgs, config: &rumdl_config::Config, quiet: boo
                         file_path,
                         &enabled_rules,
                         args._fix,
+                        args.diff,
                         args.verbose && !args.silent,
                         quiet,
                         &output_format,
@@ -2451,6 +2471,13 @@ fn run_watch_mode(args: &CheckArgs, global_config_path: Option<&str>, isolated: 
 fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool) {
     // If silent mode is enabled, also enable quiet mode
     let quiet = args.quiet || args.silent;
+
+    // Validate mutually exclusive options
+    if args.diff && args._fix {
+        eprintln!("{}: --diff and --fix cannot be used together", "Error".red().bold());
+        eprintln!("Use --diff to preview changes, or --fix to apply them");
+        exit::tool_error();
+    }
 
     // Check for watch mode
     if args.watch {
@@ -2711,6 +2738,7 @@ fn process_file_with_formatter(
     file_path: &str,
     rules: &[Box<dyn Rule>],
     _fix: bool,
+    diff: bool,
     verbose: bool,
     quiet: bool,
     output_format: &rumdl_lib::output::OutputFormat,
@@ -2729,19 +2757,60 @@ fn process_file_with_formatter(
 
     // Format and output warnings
     if !quiet && !_fix {
-        // In check mode, show warnings with [*] for fixable issues
-        let formatted = formatter.format_warnings(&all_warnings, file_path);
-        if !formatted.is_empty() {
-            output_writer.writeln(&formatted).unwrap_or_else(|e| {
-                eprintln!("Error writing output: {e}");
-            });
+        if diff {
+            // In diff mode, only show warnings for unfixable issues
+            let unfixable_warnings: Vec<_> = all_warnings.iter().filter(|w| w.fix.is_none()).cloned().collect();
+
+            if !unfixable_warnings.is_empty() {
+                let formatted = formatter.format_warnings(&unfixable_warnings, file_path);
+                if !formatted.is_empty() {
+                    output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                        eprintln!("Error writing output: {e}");
+                    });
+                }
+            }
+        } else {
+            // In check mode, show all warnings with [*] for fixable issues
+            let formatted = formatter.format_warnings(&all_warnings, file_path);
+            if !formatted.is_empty() {
+                output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                    eprintln!("Error writing output: {e}");
+                });
+            }
         }
     }
 
-    // Fix issues if requested
+    // Handle diff mode or fix mode
     let mut warnings_fixed = 0;
-    if _fix {
-        warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, file_path, quiet, config);
+    if diff {
+        // In diff mode, apply fixes to a copy and show diff
+        let original_content = content.clone();
+        warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, true, config);
+
+        if warnings_fixed > 0 {
+            let diff_output = generate_diff(&original_content, &content, file_path);
+            output_writer.writeln(&diff_output).unwrap_or_else(|e| {
+                eprintln!("Error writing diff output: {e}");
+            });
+        }
+
+        // Don't actually write the file in diff mode
+        return (total_warnings > 0, total_warnings, 0, fixable_warnings, all_warnings);
+    } else if _fix {
+        warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, quiet, config);
+
+        // Write fixed content back to file
+        if warnings_fixed > 0
+            && let Err(err) = std::fs::write(file_path, &content)
+            && !quiet
+        {
+            eprintln!(
+                "{} Failed to write fixed content to file {}: {}",
+                "Error:".red().bold(),
+                file_path,
+                err
+            );
+        }
 
         // In fix mode, show warnings with [fixed] for issues that were fixed
         if !quiet {
@@ -2890,12 +2959,88 @@ fn process_file_inner(
     (all_warnings, content, total_warnings, fixable_warnings)
 }
 
+/// Generate a unified diff between two strings
+fn generate_diff(original: &str, modified: &str, file_path: &str) -> String {
+    let mut diff = String::new();
+
+    // Create diff header
+    diff.push_str(&format!("--- {file_path}\n"));
+    diff.push_str(&format!("+++ {file_path} (fixed)\n"));
+
+    let original_lines: Vec<&str> = original.lines().collect();
+    let modified_lines: Vec<&str> = modified.lines().collect();
+
+    // Simple line-by-line diff (could be improved with a proper diff algorithm)
+    let max_lines = original_lines.len().max(modified_lines.len());
+    let mut in_diff_block = false;
+    let mut diff_start = 0;
+    let mut changes = Vec::new();
+
+    for i in 0..max_lines {
+        let orig_line = original_lines.get(i).copied().unwrap_or("");
+        let mod_line = modified_lines.get(i).copied().unwrap_or("");
+
+        if orig_line != mod_line {
+            if !in_diff_block {
+                in_diff_block = true;
+                diff_start = i.saturating_sub(3); // Include 3 lines of context before
+            }
+        } else if in_diff_block {
+            // End of diff block, include 3 lines of context after
+            let diff_end = (i + 3).min(max_lines);
+            changes.push((diff_start, diff_end));
+            in_diff_block = false;
+        }
+    }
+
+    // Handle case where diff extends to the end of file
+    if in_diff_block {
+        changes.push((diff_start, max_lines));
+    }
+
+    // Generate unified diff format for each change block
+    if changes.is_empty() {
+        diff.push_str("No changes\n");
+    } else {
+        for (start, end) in changes {
+            diff.push_str(&format!(
+                "@@ -{},{} +{},{} @@\n",
+                start + 1,
+                end - start,
+                start + 1,
+                end - start
+            ));
+
+            for i in start..end {
+                let orig_line = original_lines.get(i).copied().unwrap_or("");
+                let mod_line = modified_lines.get(i).copied().unwrap_or("");
+
+                if i >= original_lines.len() {
+                    // Line only in modified
+                    diff.push_str(&format!("+{mod_line}\n"));
+                } else if i >= modified_lines.len() {
+                    // Line only in original
+                    diff.push_str(&format!("-{orig_line}\n"));
+                } else if orig_line == mod_line {
+                    // Context line
+                    diff.push_str(&format!(" {orig_line}\n"));
+                } else {
+                    // Changed line
+                    diff.push_str(&format!("-{orig_line}\n"));
+                    diff.push_str(&format!("+{mod_line}\n"));
+                }
+            }
+        }
+    }
+
+    diff
+}
+
 // Apply fixes to content based on warnings
 fn apply_fixes(
     rules: &[Box<dyn Rule>],
     all_warnings: &[rumdl_lib::rule::LintWarning],
     content: &mut String,
-    file_path: &str,
     quiet: bool,
     config: &rumdl_config::Config,
 ) -> usize {
@@ -2961,19 +3106,6 @@ fn apply_fixes(
                 }
             }
         }
-    }
-
-    // Write fixed content back to file
-    if warnings_fixed > 0
-        && let Err(err) = std::fs::write(file_path, content)
-        && !quiet
-    {
-        eprintln!(
-            "{} Failed to write fixed content to file {}: {}",
-            "Error:".red().bold(),
-            file_path,
-            err
-        );
     }
 
     warnings_fixed
