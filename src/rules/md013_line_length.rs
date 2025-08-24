@@ -30,7 +30,7 @@ impl MD013LineLength {
                 heading_line_length: None,
                 code_block_line_length: None,
                 stern: false,
-                enable_reflow: false,
+                reflow: false,
             },
         }
     }
@@ -307,7 +307,7 @@ impl Rule for MD013LineLength {
             }
 
             // Only provide a fix if reflow is enabled
-            let fix = if self.config.enable_reflow && !self.should_skip_line_for_fix(line, line_num, structure) {
+            let fix = if self.config.reflow && !self.should_skip_line_for_fix(line, line_num, structure) {
                 // Provide a placeholder fix to indicate that reflow will happen
                 // The actual reflow is done in the fix() method
                 Some(crate::rule::Fix {
@@ -339,7 +339,7 @@ impl Rule for MD013LineLength {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // Only fix if reflow is enabled
-        if self.config.enable_reflow {
+        if self.config.reflow {
             let reflow_options = crate::utils::text_reflow::ReflowOptions {
                 line_length: self.config.line_length,
                 break_on_sentences: true,
@@ -396,6 +396,12 @@ impl Rule for MD013LineLength {
         } else {
             None
         }
+    }
+
+    fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
+        let mut aliases = std::collections::HashMap::new();
+        aliases.insert("enable_reflow".to_string(), "reflow".to_string());
+        Some(aliases)
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
@@ -694,7 +700,7 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
-        // Without enable_reflow, no fix is provided
+        // Without reflow, no fix is provided
         assert!(result[0].fix.is_none());
 
         // Fix method returns content unchanged
@@ -779,7 +785,7 @@ Another long line that should trigger a warning."#;
         let content = "Line 1\nThis line has trailing spaces and is too long      \nLine 3";
         let ctx = LintContext::new(content);
 
-        // Without enable_reflow, content is unchanged
+        // Without reflow, content is unchanged
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content);
     }
@@ -887,7 +893,7 @@ Another long line that should trigger a warning."#;
     fn test_text_reflow_simple() {
         let config = MD013Config {
             line_length: 30,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -917,7 +923,7 @@ Another long line that should trigger a warning."#;
     fn test_text_reflow_preserves_markdown_elements() {
         let config = MD013Config {
             line_length: 40,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -945,7 +951,7 @@ Another long line that should trigger a warning."#;
     fn test_text_reflow_preserves_code_blocks() {
         let config = MD013Config {
             line_length: 30,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -972,7 +978,7 @@ More text after code block."#;
     fn test_text_reflow_preserves_lists() {
         let config = MD013Config {
             line_length: 30,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -1043,7 +1049,7 @@ And a bullet list:
         // Test that lines with exactly 2 trailing spaces are preserved as hard breaks
         let config = MD013Config {
             line_length: 40,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -1064,7 +1070,7 @@ And a bullet list:
     fn test_reflow_preserves_reference_links() {
         let config = MD013Config {
             line_length: 40,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -1085,7 +1091,7 @@ And a bullet list:
     fn test_reflow_with_nested_markdown_elements() {
         let config = MD013Config {
             line_length: 35,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -1103,7 +1109,7 @@ And a bullet list:
         // Test edge case with unbalanced markdown
         let config = MD013Config {
             line_length: 30,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -1124,10 +1130,10 @@ And a bullet list:
 
     #[test]
     fn test_reflow_fix_indicator() {
-        // Test that enable_reflow provides fix indicators
+        // Test that reflow provides fix indicators
         let config = MD013Config {
             line_length: 30,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -1136,20 +1142,20 @@ And a bullet list:
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
 
-        // Should have a fix indicator when enable_reflow is true
+        // Should have a fix indicator when reflow is true
         assert!(!warnings.is_empty());
         assert!(
             warnings[0].fix.is_some(),
-            "Should provide fix indicator when enable_reflow is true"
+            "Should provide fix indicator when reflow is true"
         );
     }
 
     #[test]
     fn test_no_fix_indicator_without_reflow() {
-        // Test that without enable_reflow, no fix is provided
+        // Test that without reflow, no fix is provided
         let config = MD013Config {
             line_length: 30,
-            enable_reflow: false,
+            reflow: false,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -1158,19 +1164,16 @@ And a bullet list:
         let ctx = LintContext::new(content);
         let warnings = rule.check(&ctx).unwrap();
 
-        // Should NOT have a fix indicator when enable_reflow is false
+        // Should NOT have a fix indicator when reflow is false
         assert!(!warnings.is_empty());
-        assert!(
-            warnings[0].fix.is_none(),
-            "Should not provide fix when enable_reflow is false"
-        );
+        assert!(warnings[0].fix.is_none(), "Should not provide fix when reflow is false");
     }
 
     #[test]
     fn test_reflow_preserves_all_reference_link_types() {
         let config = MD013Config {
             line_length: 40,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -1194,7 +1197,7 @@ And a bullet list:
     fn test_reflow_handles_images_correctly() {
         let config = MD013Config {
             line_length: 40,
-            enable_reflow: true,
+            reflow: true,
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);

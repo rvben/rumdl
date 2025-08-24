@@ -1416,22 +1416,37 @@ impl From<SourcedConfig> for Config {
 pub struct RuleRegistry {
     /// Map of rule name (e.g. "MD013") to set of valid config keys and their TOML value types
     pub rule_schemas: std::collections::BTreeMap<String, toml::map::Map<String, toml::Value>>,
+    /// Map of rule name to config key aliases
+    pub rule_aliases: std::collections::BTreeMap<String, std::collections::HashMap<String, String>>,
 }
 
 impl RuleRegistry {
     /// Build a registry from a list of rules
     pub fn from_rules(rules: &[Box<dyn Rule>]) -> Self {
         let mut rule_schemas = std::collections::BTreeMap::new();
+        let mut rule_aliases = std::collections::BTreeMap::new();
+
         for rule in rules {
-            if let Some((name, toml::Value::Table(table))) = rule.default_config_section() {
+            let norm_name = if let Some((name, toml::Value::Table(table))) = rule.default_config_section() {
                 let norm_name = normalize_key(&name); // Normalize the name from default_config_section
-                rule_schemas.insert(norm_name, table);
+                rule_schemas.insert(norm_name.clone(), table);
+                norm_name
             } else {
                 let norm_name = normalize_key(rule.name()); // Normalize the name from rule.name()
-                rule_schemas.insert(norm_name, toml::map::Map::new());
+                rule_schemas.insert(norm_name.clone(), toml::map::Map::new());
+                norm_name
+            };
+
+            // Store aliases if the rule provides them
+            if let Some(aliases) = rule.config_aliases() {
+                rule_aliases.insert(norm_name, aliases);
             }
         }
-        RuleRegistry { rule_schemas }
+
+        RuleRegistry {
+            rule_schemas,
+            rule_aliases,
+        }
     }
 
     /// Get all known rule names
@@ -1459,6 +1474,17 @@ impl RuleRegistry {
                 all_keys.insert(normalize_key(key));
             }
 
+            // Add any aliases defined by the rule
+            if let Some(aliases) = self.rule_aliases.get(rule) {
+                for alias_key in aliases.keys() {
+                    all_keys.insert(alias_key.clone());
+                    // Also add normalized variants of the alias
+                    all_keys.insert(alias_key.replace('_', "-"));
+                    all_keys.insert(alias_key.replace('-', "_"));
+                    all_keys.insert(normalize_key(alias_key));
+                }
+            }
+
             all_keys
         })
     }
@@ -1466,7 +1492,17 @@ impl RuleRegistry {
     /// Get the expected value type for a rule's configuration key, trying variants
     pub fn expected_value_for(&self, rule: &str, key: &str) -> Option<&toml::Value> {
         if let Some(schema) = self.rule_schemas.get(rule) {
-            // Try the original key first
+            // Check if this key is an alias
+            if let Some(aliases) = self.rule_aliases.get(rule)
+                && let Some(canonical_key) = aliases.get(key)
+            {
+                // Use the canonical key for schema lookup
+                if let Some(value) = schema.get(canonical_key) {
+                    return Some(value);
+                }
+            }
+
+            // Try the original key
             if let Some(value) = schema.get(key) {
                 return Some(value);
             }

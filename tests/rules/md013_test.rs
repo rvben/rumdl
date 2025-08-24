@@ -409,8 +409,8 @@ fn test_strict_mode_vs_non_strict_mode() {
 // Fix method tests
 
 #[test]
-fn test_no_fix_without_enable_reflow() {
-    // Comprehensive test to verify MD013 doesn't modify content when enable_reflow is false
+fn test_no_fix_without_reflow() {
+    // Comprehensive test to verify MD013 doesn't modify content when reflow is false
     let rule = MD013LineLength::new(30, true, true, true, false);
 
     // Test various cases - all should remain unchanged
@@ -429,10 +429,7 @@ fn test_no_fix_without_enable_reflow() {
     for content in test_cases {
         let ctx = LintContext::new(content);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(
-            fixed, content,
-            "Content should be unchanged without enable_reflow: {content}"
-        );
+        assert_eq!(fixed, content, "Content should be unchanged without reflow: {content}");
     }
 }
 
@@ -450,7 +447,7 @@ fn test_heading_line_length_config() {
         heading_line_length: Some(100), // Allow longer headings
         code_block_line_length: None,
         stern: false,
-        enable_reflow: false,
+        reflow: false,
     };
 
     let rule = MD013LineLength::from_config_struct(config);
@@ -477,7 +474,7 @@ fn test_code_block_line_length_config() {
         heading_line_length: None,
         code_block_line_length: Some(120), // Allow longer lines in code blocks
         stern: false,
-        enable_reflow: false,
+        reflow: false,
     };
 
     let rule = MD013LineLength::from_config_struct(config);
@@ -504,7 +501,7 @@ fn test_stern_mode() {
         heading_line_length: None,
         code_block_line_length: None,
         stern: true, // Stern mode: stricter checking
-        enable_reflow: false,
+        reflow: false,
     };
 
     let rule = MD013LineLength::from_config_struct(config);
@@ -529,7 +526,7 @@ fn test_combined_heading_and_code_block_limits() {
         heading_line_length: Some(80),
         code_block_line_length: Some(100),
         stern: false,
-        enable_reflow: false,
+        reflow: false,
     };
 
     let rule = MD013LineLength::from_config_struct(config);
@@ -634,7 +631,7 @@ fn test_reflow_simple_paragraph() {
 
     let config = MD013Config {
         line_length: 40,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -661,7 +658,7 @@ fn test_reflow_preserves_markdown_elements() {
 
     let config = MD013Config {
         line_length: 30,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -689,7 +686,7 @@ fn test_reflow_multiple_paragraphs() {
 
     let config = MD013Config {
         line_length: 50,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -721,7 +718,7 @@ fn test_reflow_list_items() {
 
     let config = MD013Config {
         line_length: 40,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -754,7 +751,7 @@ fn test_reflow_numbered_lists() {
 
     let config = MD013Config {
         line_length: 35,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -797,7 +794,7 @@ fn test_reflow_blockquotes() {
 
     let config = MD013Config {
         line_length: 40,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -829,7 +826,7 @@ fn test_reflow_preserves_code_blocks() {
 
     let config = MD013Config {
         line_length: 30,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -872,7 +869,7 @@ fn test_reflow_preserves_headings() {
 
     let config = MD013Config {
         line_length: 30,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -907,7 +904,7 @@ fn test_reflow_preserves_tables() {
 
     let config = MD013Config {
         line_length: 30,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -943,7 +940,7 @@ fn test_reflow_edge_cases() {
 
     let config = MD013Config {
         line_length: 20,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -984,7 +981,7 @@ fn test_reflow_complex_document() {
 
     let config = MD013Config {
         line_length: 50,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -1058,7 +1055,7 @@ fn test_reflow_with_hard_line_breaks() {
 
     let config = MD013Config {
         line_length: 40,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 
@@ -1085,7 +1082,7 @@ fn test_reflow_unicode_handling() {
 
     let config = MD013Config {
         line_length: 30,
-        enable_reflow: true,
+        reflow: true,
         ..Default::default()
     };
 

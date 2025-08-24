@@ -159,6 +159,12 @@ pub trait Rule: DynClone + Send + Sync {
         None
     }
 
+    /// Returns config key aliases for this rule
+    /// This allows rules to accept alternative config key names for backwards compatibility
+    fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
+        None
+    }
+
     /// Declares the fix capability of this rule
     fn fix_capability(&self) -> FixCapability {
         FixCapability::FullyFixable // Safe default for backward compatibility
