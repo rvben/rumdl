@@ -141,7 +141,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD039" => Some(("[link text ]( url )", Box::new(MD039NoSpaceInLinks))),
         "MD040" => Some(("```\ncode without language\n```", Box::new(MD040FencedCodeLanguage))),
         "MD041" => Some(("Not a heading", Box::new(MD041FirstLineHeading::default()))),
-        "MD042" => Some(("[]()", Box::new(MD042NoEmptyLinks))),
+        "MD042" => Some(("[]()", Box::new(MD042NoEmptyLinks::new()))),
         "MD043" => Some((
             "# Wrong heading",
             Box::new(MD043RequiredHeadings::new(vec!["Introduction".to_string()])),
@@ -166,7 +166,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             Box::new(MD050StrongStyle::new(StrongStyle::Underscore)),
         )),
         "MD051" => Some(("[link](#nonexistent)", Box::new(MD051LinkFragments::new()))),
-        "MD052" => Some(("[ref link][ref]", Box::new(MD052ReferenceLinkImages))),
+        "MD052" => Some(("[ref link][ref]", Box::new(MD052ReferenceLinkImages::new()))),
         "MD053" => Some((
             "[ref]: https://example.com",
             Box::new(MD053LinkImageReferenceDefinitions::default()),

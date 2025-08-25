@@ -776,8 +776,17 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
             format!("respect_gitignore = {}", g.respect_gitignore.value),
             format!("[from {}]", format_provenance(g.respect_gitignore.source)),
         ),
-        (String::new(), String::new()),
     ];
+
+    // Add flavor if it's set
+    let mut global_lines = global_lines;
+    if let Some(ref flavor) = g.flavor {
+        global_lines.push((
+            format!("flavor = {:?}", flavor.value),
+            format!("[from {}]", format_provenance(flavor.source)),
+        ));
+    }
+    global_lines.push((String::new(), String::new()));
     all_lines.extend(global_lines);
     // All rules, but only if they have config items
     let all_rules: Vec<Box<dyn Rule>> = vec![
@@ -1322,6 +1331,21 @@ build-backend = \"setuptools.build_meta\"
                                                 sourced
                                                     .global
                                                     .output_format
+                                                    .as_ref()
+                                                    .map(|v| v.source)
+                                                    .unwrap_or(ConfigSource::Default),
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    "flavor" => {
+                                        if let Some(ref flavor) = final_config.global.flavor {
+                                            Some((
+                                                toml::Value::String(flavor.clone()),
+                                                sourced
+                                                    .global
+                                                    .flavor
                                                     .as_ref()
                                                     .map(|v| v.source)
                                                     .unwrap_or(ConfigSource::Default),

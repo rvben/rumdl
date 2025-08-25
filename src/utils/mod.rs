@@ -13,6 +13,7 @@ pub mod fix_utils;
 pub mod header_id_utils;
 pub mod kramdown_utils;
 pub mod markdown_elements;
+pub mod mkdocs_patterns;
 pub mod range_utils;
 pub mod regex_cache;
 pub mod skip_context;

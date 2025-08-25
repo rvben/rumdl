@@ -1,4 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::{HTML_COMMENT_PATTERN, SHORTCUT_REF_REGEX};
 use crate::utils::skip_context::{is_in_front_matter, is_in_math_context, is_in_table_cell};
@@ -30,7 +31,10 @@ lazy_static! {
 ///
 /// This rule is triggered when a reference link or image uses a reference that isn't defined.
 #[derive(Clone)]
-pub struct MD052ReferenceLinkImages;
+pub struct MD052ReferenceLinkImages {
+    /// Whether MkDocs mode is enabled (from project-type config)
+    mkdocs_mode: bool,
+}
 
 impl Default for MD052ReferenceLinkImages {
     fn default() -> Self {
@@ -40,7 +44,11 @@ impl Default for MD052ReferenceLinkImages {
 
 impl MD052ReferenceLinkImages {
     pub fn new() -> Self {
-        Self
+        Self { mkdocs_mode: false }
+    }
+
+    pub fn with_mkdocs_mode(mkdocs_mode: bool) -> Self {
+        Self { mkdocs_mode }
     }
 
     /// Check if a position is inside any code span
@@ -157,6 +165,11 @@ impl MD052ReferenceLinkImages {
             if let Some(ref_id) = &link.reference_id {
                 let reference_lower = ref_id.to_lowercase();
 
+                // Skip MkDocs auto-references if in MkDocs mode
+                if self.mkdocs_mode && is_mkdocs_auto_reference(ref_id) {
+                    continue;
+                }
+
                 // Check if reference is defined
                 if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                     // Check if the line is in an example section or list item
@@ -216,6 +229,11 @@ impl MD052ReferenceLinkImages {
 
             if let Some(ref_id) = &image.reference_id {
                 let reference_lower = ref_id.to_lowercase();
+
+                // Skip MkDocs auto-references if in MkDocs mode
+                if self.mkdocs_mode && is_mkdocs_auto_reference(ref_id) {
+                    continue;
+                }
 
                 // Check if reference is defined
                 if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
@@ -325,6 +343,11 @@ impl MD052ReferenceLinkImages {
                         if let Some(alert_type) = reference.strip_prefix('!')
                             && matches!(alert_type, "NOTE" | "TIP" | "WARNING" | "IMPORTANT" | "CAUTION")
                         {
+                            continue;
+                        }
+
+                        // Skip MkDocs auto-references if in MkDocs mode
+                        if self.mkdocs_mode && is_mkdocs_auto_reference(reference) {
                             continue;
                         }
 
@@ -500,11 +523,13 @@ impl Rule for MD052ReferenceLinkImages {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD052ReferenceLinkImages::new())
+        // Check if project type is set to MkDocs
+        let mkdocs_mode = config.is_mkdocs_project();
+        Box::new(MD052ReferenceLinkImages::with_mkdocs_mode(mkdocs_mode))
     }
 }
 

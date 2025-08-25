@@ -256,7 +256,7 @@ fn test_memory_intensive_scenarios() {
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD040FencedCodeLanguage),
-        Box::new(MD042NoEmptyLinks),
+        Box::new(MD042NoEmptyLinks::new()),
     ];
 
     for (i, content) in scenarios.iter().enumerate() {

@@ -36,7 +36,7 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
             Box::new(MD041FirstLineHeading::new(1, false)) as Box<dyn Rule>,
         ),
         // MD042: Should calculate proper length for link replacement
-        ("[](empty-link)", Box::new(MD042NoEmptyLinks) as Box<dyn Rule>),
+        ("[](empty-link)", Box::new(MD042NoEmptyLinks::new()) as Box<dyn Rule>),
         // MD045: Should use regex capture group for URL
         ("![](no-alt-text.jpg)", Box::new(MD045NoAltText::new()) as Box<dyn Rule>),
         // MD047: Should handle trailing newline logic properly
@@ -231,7 +231,7 @@ fn test_byte_range_boundaries() {
         Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::strict()),
         Box::new(MD041FirstLineHeading::new(1, false)),
-        Box::new(MD042NoEmptyLinks),
+        Box::new(MD042NoEmptyLinks::new()),
         Box::new(MD045NoAltText::new()),
         Box::new(MD047SingleTrailingNewline),
         Box::new(MD048CodeFenceStyle::new(
@@ -306,7 +306,7 @@ fn test_fix_application_idempotency() {
         Box::new(MD021NoMultipleSpaceClosedAtx::new()),
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
-        Box::new(MD042NoEmptyLinks),
+        Box::new(MD042NoEmptyLinks::new()),
     ];
 
     let test_contents = vec![
@@ -353,7 +353,7 @@ fn test_warning_fix_quality() {
         Box::new(MD021NoMultipleSpaceClosedAtx::new()),
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
-        Box::new(MD042NoEmptyLinks),
+        Box::new(MD042NoEmptyLinks::new()),
         Box::new(MD047SingleTrailingNewline),
     ];
 

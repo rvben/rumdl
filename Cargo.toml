@@ -51,6 +51,7 @@ name = "measure_code_span_performance"
 path = "benchmark/bin/measure_code_span_performance.rs"
 required-features = ["build-benchmarks"]
 
+
 [[bench]]
 name = "rule_performance"
 harness = false

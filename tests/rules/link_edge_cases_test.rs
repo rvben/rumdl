@@ -364,7 +364,7 @@ fn test_md039_unicode_spaces() {
 
 #[test]
 fn test_md042_empty_text_variations() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 1: Various empty text scenarios
     let content = "\
@@ -387,7 +387,7 @@ fn test_md042_empty_text_variations() {
 
 #[test]
 fn test_md042_empty_url_variations() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 2: Various empty URL scenarios
     let content = "\
@@ -409,7 +409,7 @@ fn test_md042_empty_url_variations() {
 
 #[test]
 fn test_md042_both_empty() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 3: Both text and URL empty
     let content = "\
@@ -430,7 +430,7 @@ fn test_md042_both_empty() {
 
 #[test]
 fn test_md042_reference_links() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 4: Reference-style links
     let content = "\
@@ -450,7 +450,7 @@ fn test_md042_reference_links() {
 
 #[test]
 fn test_md042_formatting_without_text() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 5: Links with formatting but no actual text
     let content = "\
@@ -467,7 +467,7 @@ fn test_md042_formatting_without_text() {
 
 #[test]
 fn test_md042_images() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 6: Images should be ignored
     let content = "\
@@ -484,7 +484,7 @@ fn test_md042_images() {
 
 #[test]
 fn test_md042_escaped_brackets() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 7: Escaped brackets should be ignored
     let content = "\
@@ -504,7 +504,7 @@ Not a link \\[\\]()";
 
 #[test]
 fn test_md042_links_in_context() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 8: Empty links in various contexts
     let content = "\
@@ -526,7 +526,7 @@ fn test_md042_links_in_context() {
 
 #[test]
 fn test_md042_unicode_empty() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 9: Unicode whitespace as empty
     let content = "\
@@ -542,7 +542,7 @@ fn test_md042_unicode_empty() {
 
 #[test]
 fn test_md042_nested_links() {
-    let rule = MD042NoEmptyLinks;
+    let rule = MD042NoEmptyLinks::new();
 
     // Test 10: Nested link-like structures
     let content = "\
@@ -562,7 +562,7 @@ fn test_link_rules_interaction() {
     // Test all three rules together
     let md034 = MD034NoBareUrls;
     let md039 = MD039NoSpaceInLinks;
-    let md042 = MD042NoEmptyLinks;
+    let md042 = MD042NoEmptyLinks::new();
 
     let content = "\
 Visit https://example.com for info
@@ -603,7 +603,7 @@ fn test_link_rules_code_block_handling() {
     // Test that all link rules ignore code blocks
     let md034 = MD034NoBareUrls;
     let md039 = MD039NoSpaceInLinks;
-    let md042 = MD042NoEmptyLinks;
+    let md042 = MD042NoEmptyLinks::new();
 
     let content = "\
 ```
@@ -628,7 +628,7 @@ fn test_link_rules_html_handling() {
     // Test HTML context handling
     let md034 = MD034NoBareUrls;
     let md039 = MD039NoSpaceInLinks;
-    let md042 = MD042NoEmptyLinks;
+    let md042 = MD042NoEmptyLinks::new();
 
     let content = "\
 <a href=\"https://example.com\">Link</a>

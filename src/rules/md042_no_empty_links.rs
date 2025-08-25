@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::LineIndex;
 
 /// Rule MD042: No empty links
@@ -8,7 +9,9 @@ use crate::utils::range_utils::LineIndex;
 ///
 /// This rule is triggered when a link has no content (text) or destination (URL).
 #[derive(Clone)]
-pub struct MD042NoEmptyLinks;
+pub struct MD042NoEmptyLinks {
+    mkdocs_mode: bool,
+}
 
 impl Default for MD042NoEmptyLinks {
     fn default() -> Self {
@@ -18,7 +21,11 @@ impl Default for MD042NoEmptyLinks {
 
 impl MD042NoEmptyLinks {
     pub fn new() -> Self {
-        Self
+        Self { mkdocs_mode: false }
+    }
+
+    pub fn new_with_mkdocs(mkdocs_mode: bool) -> Self {
+        Self { mkdocs_mode }
     }
 }
 
@@ -46,6 +53,15 @@ impl Rule for MD042NoEmptyLinks {
             } else {
                 link.url.clone()
             };
+
+            // For MkDocs mode, check if this looks like an auto-reference
+            if self.mkdocs_mode
+                && link.is_reference
+                && let Some(ref_id) = &link.reference_id
+                && is_mkdocs_auto_reference(ref_id)
+            {
+                continue;
+            }
 
             // Check for empty links
             if link.text.trim().is_empty() || effective_url.trim().is_empty() {
@@ -176,11 +192,13 @@ impl Rule for MD042NoEmptyLinks {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD042NoEmptyLinks)
+        // Check if flavor is set to MkDocs
+        let mkdocs_mode = config.is_mkdocs_flavor();
+        Box::new(MD042NoEmptyLinks::new_with_mkdocs(mkdocs_mode))
     }
 }
 

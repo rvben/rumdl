@@ -59,6 +59,45 @@ pub struct Config {
     pub rules: BTreeMap<String, RuleConfig>,
 }
 
+impl Config {
+    /// Check if the Markdown flavor is set to MkDocs
+    pub fn is_mkdocs_flavor(&self) -> bool {
+        self.global
+            .flavor
+            .as_ref()
+            .map(|f| f.to_lowercase() == "mkdocs")
+            .unwrap_or(false)
+    }
+
+    /// Check if the Markdown flavor is set to GitHub Flavored Markdown
+    pub fn is_gfm_flavor(&self) -> bool {
+        self.global
+            .flavor
+            .as_ref()
+            .map(|f| f.to_lowercase() == "gfm")
+            .unwrap_or(false)
+    }
+
+    /// Check if the Markdown flavor is set to CommonMark
+    pub fn is_commonmark_flavor(&self) -> bool {
+        self.global
+            .flavor
+            .as_ref()
+            .map(|f| f.to_lowercase() == "commonmark")
+            .unwrap_or(false)
+    }
+
+    /// Get the configured Markdown flavor as a normalized string
+    pub fn markdown_flavor(&self) -> Option<String> {
+        self.global.flavor.as_ref().map(|f| f.to_lowercase())
+    }
+
+    /// Legacy method for backwards compatibility - redirects to is_mkdocs_flavor
+    pub fn is_mkdocs_project(&self) -> bool {
+        self.is_mkdocs_flavor()
+    }
+}
+
 /// Global configuration options
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -100,6 +139,11 @@ pub struct GlobalConfig {
     /// Takes precedence over fixable
     #[serde(default)]
     pub unfixable: Vec<String>,
+
+    /// Markdown flavor/dialect to use (mkdocs, gfm, commonmark, etc.)
+    /// When set, adjusts parsing and validation rules for that specific Markdown variant
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flavor: Option<String>,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -123,6 +167,7 @@ impl Default for GlobalConfig {
             output_format: None,
             fixable: Vec::new(),
             unfixable: Vec::new(),
+            flavor: None,
         }
     }
 }
@@ -180,6 +225,10 @@ exclude = [
 
 # Respect .gitignore files when scanning directories (default: true)
 respect_gitignore = true
+
+# Markdown flavor/dialect (uncomment to enable)
+# Options: mkdocs, gfm, commonmark
+# flavor = "mkdocs"
 
 # Rule-specific configurations (uncomment and modify as needed)
 
@@ -305,6 +354,28 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_flavor_loading() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[global]
+flavor = "mkdocs"
+disable = ["MD001"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        // Load the config
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // Check that flavor was loaded
+        assert_eq!(config.global.flavor, Some("mkdocs".to_string()));
+        assert!(config.is_mkdocs_flavor());
+        assert!(config.is_mkdocs_project()); // Test backwards compatibility
+        assert_eq!(config.global.disable, vec!["MD001".to_string()]);
+    }
 
     #[test]
     fn test_pyproject_toml_root_level_config() {
@@ -1013,6 +1084,7 @@ pub struct SourcedGlobalConfig {
     pub output_format: Option<SourcedValue<String>>,
     pub fixable: SourcedValue<Vec<String>>,
     pub unfixable: SourcedValue<Vec<String>>,
+    pub flavor: Option<SourcedValue<String>>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -1027,6 +1099,7 @@ impl Default for SourcedGlobalConfig {
             output_format: None,
             fixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             unfixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
+            flavor: None,
         }
     }
 }
@@ -1116,6 +1189,20 @@ impl SourcedConfig {
             fragment.global.unfixable.overrides.first().and_then(|o| o.file.clone()),
             fragment.global.unfixable.overrides.first().and_then(|o| o.line),
         );
+
+        // Merge flavor if present
+        if let Some(flavor_fragment) = fragment.global.flavor {
+            if let Some(ref mut flavor) = self.global.flavor {
+                flavor.merge_override(
+                    flavor_fragment.value,
+                    flavor_fragment.source,
+                    flavor_fragment.overrides.first().and_then(|o| o.file.clone()),
+                    flavor_fragment.overrides.first().and_then(|o| o.line),
+                );
+            } else {
+                self.global.flavor = Some(flavor_fragment);
+            }
+        }
 
         // Merge output_format if present
         if let Some(output_format_fragment) = fragment.global.output_format {
@@ -1407,6 +1494,7 @@ impl From<SourcedConfig> for Config {
             output_format: sourced.global.output_format.as_ref().map(|v| v.value.clone()),
             fixable: sourced.global.fixable.value,
             unfixable: sourced.global.unfixable.value,
+            flavor: sourced.global.flavor.as_ref().map(|v| v.value.clone()),
         };
         Config { global, rules }
     }
@@ -1711,6 +1799,20 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 .global
                 .unfixable
                 .push_override(normalized_values, source, file.clone(), None);
+        }
+        if let Some(flavor) = rumdl_table.get("flavor")
+            && let Ok(value) = String::deserialize(flavor.clone())
+        {
+            if fragment.global.flavor.is_none() {
+                fragment.global.flavor = Some(SourcedValue::new(value.clone(), source));
+            } else {
+                fragment
+                    .global
+                    .flavor
+                    .as_mut()
+                    .unwrap()
+                    .push_override(value, source, file.clone(), None);
+            }
         }
 
         // --- Re-introduce special line-length handling ---
@@ -2022,6 +2124,28 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                     } else {
                         log::warn!(
                             "[WARN] Expected array for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "flavor" => {
+                    if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
+                        let val = formatted_string.value().clone();
+                        if fragment.global.flavor.is_none() {
+                            fragment.global.flavor = Some(SourcedValue::new(val.clone(), source));
+                        } else {
+                            fragment
+                                .global
+                                .flavor
+                                .as_mut()
+                                .unwrap()
+                                .push_override(val, source, file.clone(), None);
+                        }
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected string for global key '{}' in {}, found {}",
                             key,
                             path,
                             value_item.type_name()
