@@ -238,9 +238,14 @@ impl MD005ListIndent {
 
                         // Use the chosen common pattern or fall back to most common indent
                         chosen_indent.unwrap_or_else(|| {
+                            // When counts are equal, prefer the smaller indentation
+                            // This handles cases where one item has correct indentation and another is wrong
                             indent_counts
                                 .iter()
-                                .max_by_key(|(_, count)| *count)
+                                .max_by(|(indent_a, count_a), (indent_b, count_b)| {
+                                    // First compare by count, then by preferring smaller indent
+                                    count_a.cmp(count_b).then(indent_b.cmp(indent_a))
+                                })
                                 .map(|(indent, _)| *indent)
                                 .unwrap()
                         })
