@@ -52,6 +52,6 @@ python -m rumdl --version
 
 ## Maintenance Notes
 
-- The version is now managed in both Cargo.toml and Python's __init__.py
+- The version is now managed in both Cargo.toml and Python's **init**.py
 - When releasing a new version, update both files to match
-- Maturin handles the packaging and distribution, including finding the Rust binary 
+- Maturin handles the packaging and distribution, including finding the Rust binary

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.127] - 2025-08-25
+
 ### Added
 - **MkDocs Support**: Added MkDocs markdown flavor (closes #63)
   - New `flavor = "mkdocs"` configuration option
@@ -477,7 +479,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.126...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.127...HEAD
+[0.0.127]: https://github.com/rvben/rumdl/compare/v0.0.126...v0.0.127
 [0.0.126]: https://github.com/rvben/rumdl/compare/v0.0.125...v0.0.126
 [0.0.125]: https://github.com/rvben/rumdl/compare/v0.0.124...v0.0.125
 [0.0.124]: https://github.com/rvben/rumdl/compare/v0.0.123...v0.0.124

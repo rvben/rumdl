@@ -15,7 +15,7 @@ Content immediately after heading
 * item 1
 + item 2
 - item 3
-This line has trailing spaces   
+This line has trailing spaces
 ### This is a very long heading that definitely exceeds the default line length limit of eighty characters
 "#;
 
