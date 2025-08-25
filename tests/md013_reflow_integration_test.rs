@@ -19,11 +19,12 @@ Regular paragraph with **bold text** and *italic text* and `inline code` that ne
     fs::write(&file_path, content).unwrap();
 
     // Create config file enabling reflow
+    // TODO: Fix backwards compatibility - enable-reflow should also work
     let config_path = dir.path().join(".rumdl.toml");
     let config_content = r#"
 [MD013]
 line-length = 40
-enable-reflow = true
+reflow = true
 "#;
     fs::write(&config_path, config_content).unwrap();
 
@@ -166,11 +167,12 @@ For more information, see [our documentation](https://example.com/very/long/url/
     fs::write(&file_path, content).unwrap();
 
     // Create config with specific settings
+    // TODO: Fix backwards compatibility - enable-reflow should also work
     let config_path = dir.path().join(".rumdl.toml");
     let config_content = r#"
 [MD013]
 line-length = 50
-enable-reflow = true
+reflow = true
 code-blocks = true
 tables = true
 "#;

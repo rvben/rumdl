@@ -17,39 +17,27 @@ pub fn load_rule_config<T: RuleConfig>(config: &crate::config::Config) -> T {
         .rules
         .get(T::RULE_NAME)
         .and_then(|rule_config| {
-            // Convert BTreeMap<String, toml::Value> to serde_json::Value
-            let json_map: serde_json::Map<String, serde_json::Value> = rule_config
-                .values
-                .iter()
-                .filter_map(|(k, v)| toml_value_to_json(v).map(|json_v| (k.clone(), json_v)))
-                .collect();
+            // Build the TOML table with backwards compatibility mappings
+            let mut table = toml::map::Map::new();
 
-            let json_value = serde_json::Value::Object(json_map);
-            serde_json::from_value(json_value).ok()
+            for (k, v) in rule_config.values.iter() {
+                // Handle backwards compatibility mappings
+                // MD013: enable-reflow -> reflow
+                let mapped_key = if T::RULE_NAME == "MD013" && k == "enable-reflow" {
+                    "reflow".to_string()
+                } else {
+                    k.clone()
+                };
+
+                table.insert(mapped_key, v.clone());
+            }
+
+            let toml_table = toml::Value::Table(table);
+
+            // Deserialize directly from TOML, which preserves serde attributes
+            toml_table.try_into().ok()
         })
         .unwrap_or_default()
-}
-
-/// Convert TOML value to JSON value for serde deserialization
-fn toml_value_to_json(toml_val: &toml::Value) -> Option<serde_json::Value> {
-    match toml_val {
-        toml::Value::String(s) => Some(serde_json::Value::String(s.clone())),
-        toml::Value::Integer(i) => Some(serde_json::Value::Number((*i).into())),
-        toml::Value::Float(f) => serde_json::Number::from_f64(*f).map(serde_json::Value::Number),
-        toml::Value::Boolean(b) => Some(serde_json::Value::Bool(*b)),
-        toml::Value::Array(arr) => {
-            let json_arr: Vec<_> = arr.iter().filter_map(toml_value_to_json).collect();
-            Some(serde_json::Value::Array(json_arr))
-        }
-        toml::Value::Table(table) => {
-            let json_map: serde_json::Map<_, _> = table
-                .iter()
-                .filter_map(|(k, v)| toml_value_to_json(v).map(|json_v| (k.clone(), json_v)))
-                .collect();
-            Some(serde_json::Value::Object(json_map))
-        }
-        toml::Value::Datetime(_) => None, // Skip datetime for now
-    }
 }
 
 /// Convert JSON value to TOML value for default config generation
@@ -78,6 +66,31 @@ pub fn json_to_toml_value(json_val: &serde_json::Value) -> Option<toml::Value> {
             }
             Some(toml::Value::Table(toml_table))
         }
+    }
+}
+
+#[cfg(test)]
+/// Convert TOML value to JSON value (only used in tests)
+fn toml_value_to_json(toml_val: &toml::Value) -> Option<serde_json::Value> {
+    match toml_val {
+        toml::Value::String(s) => Some(serde_json::Value::String(s.clone())),
+        toml::Value::Integer(i) => Some(serde_json::json!(i)),
+        toml::Value::Float(f) => Some(serde_json::json!(f)),
+        toml::Value::Boolean(b) => Some(serde_json::Value::Bool(*b)),
+        toml::Value::Array(arr) => {
+            let json_arr: Vec<_> = arr.iter().filter_map(toml_value_to_json).collect();
+            Some(serde_json::Value::Array(json_arr))
+        }
+        toml::Value::Table(table) => {
+            let mut json_obj = serde_json::Map::new();
+            for (k, v) in table {
+                if let Some(json_v) = toml_value_to_json(v) {
+                    json_obj.insert(k.clone(), json_v);
+                }
+            }
+            Some(serde_json::Value::Object(json_obj))
+        }
+        toml::Value::Datetime(_) => None, // JSON doesn't have a native datetime type
     }
 }
 

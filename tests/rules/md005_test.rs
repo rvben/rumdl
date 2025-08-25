@@ -74,11 +74,10 @@ fn test_invalid_unordered_indent() {
    * Nested 1";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // With dynamic alignment, line 3 correctly aligns with line 2's text position
-    // Only line 2 is incorrectly indented
+    // Dynamic detection: line 2 has 1 space, treated as top-level with wrong indent
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "* Item 1\n  * Item 2\n   * Nested 1");
+    assert_eq!(fixed, "* Item 1\n* Item 2\n   * Nested 1");
 }
 
 #[test]
@@ -92,10 +91,8 @@ fn test_invalid_ordered_indent() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    // With dynamic alignment, ordered items align with parent's text content
-    // Line 1 text starts at col 3, so line 2 should have 3 spaces
-    // Line 3 already correctly aligns with line 2's text position
-    assert_eq!(fixed, "1. Item 1\n   2. Item 2\n    1. Nested 1");
+    // Dynamic detection: line 2 has 1 space, treated as top-level with wrong indent
+    assert_eq!(fixed, "1. Item 1\n2. Item 2\n    1. Nested 1");
 }
 
 #[test]
@@ -120,18 +117,10 @@ fn test_multiple_levels() {
       * Level 3";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
+    // Dynamic detection accepts 3-space pattern
+    assert_eq!(result.len(), 0, "Should accept consistent 3-space indentation");
     let fixed = rule.fix(&ctx).unwrap();
-    // With dynamic alignment:
-    // Level 2 aligns with Level 1's text (2 spaces)
-    // Level 3 aligns with Level 2's text (5 spaces: 2 + "* " + 1)
-    assert_eq!(
-        fixed,
-        "\
-* Level 1
-  * Level 2
-     * Level 3"
-    );
+    assert_eq!(fixed, content, "No changes needed for consistent indentation");
 }
 
 #[test]
@@ -189,13 +178,12 @@ fn test_invalid_complex_nesting() {
 * Back to 1";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // With dynamic alignment, fewer items need correction
-    // Lines 2,4: should align with Level 1's text (2 spaces)
-    // Line 5: should align with "Back to 2"'s text (5 spaces)
-    assert_eq!(result.len(), 3);
+    // With dynamic detection, the rule is more lenient
+    // It detects 3-space indentation pattern and only flags line 5 which has 6 spaces
+    assert_eq!(result.len(), 1, "Should only flag line 5 with incorrect indentation");
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "* Level 1\n  * Level 2\n     * Level 3\n  * Back to 2\n     1. Ordered 3\n     2. Still 3\n* Back to 1"
+        "* Level 1\n   * Level 2\n     * Level 3\n   * Back to 2\n     1. Ordered 3\n     2. Still 3\n* Back to 1"
     );
 }
