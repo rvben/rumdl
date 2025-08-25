@@ -654,7 +654,7 @@ mod tests {
 [![(Runtime) Build and Test](https://github.com/facebook/react/actions/workflows/runtime_build_and_test.yml/badge.svg)](https://github.com/facebook/react/actions/workflows/runtime_build_and_test.yml) \
 [![(Compiler) TypeScript](https://github.com/facebook/react/actions/workflows/compiler_typescript.yml/badge.svg?branch=main)](https://github.com/facebook/react/actions/workflows/compiler_typescript.yml) \
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://legacy.reactjs.org/docs/how-to-contribute.html#your-first-pull-request)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         if !result.is_empty() {
             log::debug!("MD034 warnings: {result:#?}");
@@ -669,7 +669,7 @@ mod tests {
     fn test_bare_urls() {
         let rule = MD034NoBareUrls;
         let content = "This is a bare URL: https://example.com/foobar";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Bare URLs should be flagged");
         assert_eq!(result[0].line, 1);
@@ -714,7 +714,7 @@ mod tests {
         );
 
         let rule = MD034NoBareUrls;
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
 
         // Warm up
         let _ = rule.check(&ctx).unwrap();

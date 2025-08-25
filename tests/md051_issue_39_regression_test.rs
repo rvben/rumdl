@@ -28,7 +28,7 @@ Valid internal links:
 - [Invalid link](#missing-heading) - should fail
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should only flag the one invalid internal link
@@ -69,7 +69,7 @@ Valid internal links:
 - [Invalid link](#missing-heading) - should fail
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should only flag the one invalid internal link
@@ -110,7 +110,7 @@ Test links (using Jekyll/kramdown expected anchors):
 - [LDAP Monitor](#add-ldap_monitor-to-delegator)
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // All links should be valid with Jekyll anchor style

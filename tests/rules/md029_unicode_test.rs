@@ -11,7 +11,7 @@ fn test_unicode_ordered_list_valid() {
 3. Third item with 汉字
 4. Fourth item with こんにちは
 5. Fifth item with Arabic مرحبا";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -26,7 +26,7 @@ fn test_unicode_ordered_list_invalid() {
 1. First item with Unicode café
 3. Wrong number with emoji 🔥
 5. Another wrong number with 汉字";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -47,7 +47,7 @@ fn test_unicode_nested_ordered_lists() {
 2. Back to first level with ñáéíóú
    1. New nested section with русский
    2. Final nested with עברית";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -63,7 +63,7 @@ fn test_unicode_nested_ordered_lists_invalid() {
    2. Wrong nested number with مرحبا
    3. Another wrong with こんにちは
 3. Wrong first level with ñáéíóú";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -83,7 +83,7 @@ console.log('emoji 🔥');
 ```
 2. Item after code block with こんにちは
 3. Final item with مرحبا";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -98,7 +98,7 @@ fn test_unicode_fix_functionality() {
 1. First item with Unicode café
 3. Wrong number with emoji 🔥
 5. Another wrong with 汉字";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed, "1. First item with Unicode café\n2. Wrong number with emoji 🔥\n3. Another wrong with 汉字",
@@ -113,7 +113,7 @@ fn test_unicode_one_style() {
 1. First item with Unicode café
 2. Should be 1 with emoji 🔥
 3. Should also be 1 with 汉字";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -137,7 +137,7 @@ fn test_unicode_in_blockquotes() {
 > 2. Item with 汉字
 > 3. Item with 🔥
 > 4. Item with こんにちは";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -155,7 +155,7 @@ fn test_unicode_with_continuation_text() {
 2. Another item with こんにちは
    Continuation with مرحبا
 3. Final item with ñáéíóú";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -177,7 +177,7 @@ fn test_unicode_complex_mixed_content() {
 
 2. Second item after complex content with ñáéíóú
 3. Third item with Russian русский and Hebrew עברית";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -196,7 +196,7 @@ fn test_unicode_edge_cases() {
 3. Arabic with diacritics: مَرْحَبًا
 4. Unicode whitespace should not affect numbering";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -211,7 +211,7 @@ fn test_unicode_rtl_content() {
 1. Hebrew text: שלום עולם
 2. Arabic text: مرحبا بالعالم
 3. Mixed RTL and LTR: Hello שלום مرحبا World";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -226,7 +226,7 @@ fn test_unicode_ordered0_style() {
 0. First item (zero-based) with Unicode café
 1. Second item with emoji 🔥
 2. Third item with 汉字";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -237,7 +237,7 @@ fn test_unicode_ordered0_style() {
     let invalid_content = "\
 1. Wrong start with Unicode café
 2. Second item with emoji 🔥";
-    let ctx = LintContext::new(invalid_content);
+    let ctx = LintContext::new(invalid_content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),

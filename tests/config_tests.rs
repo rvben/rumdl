@@ -175,7 +175,8 @@ style = "asterisk"
     let test_content = "# Test\n\nThis is a line that exceeds 80 characters but not 150 characters. It's specifically designed for our test case.";
 
     // Run the linter with our configured rules
-    let warnings = rumdl_lib::lint(test_content, &rules, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(test_content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard)
+        .expect("Linting should succeed");
 
     // Verify no MD013 warnings because line_length is set to 150
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -292,8 +293,20 @@ style = "dash"
     let short_content = "# Test\nThis line is short.";
     let long_content = "# Test\nThis line is definitely longer than the sixty characters limit we set.";
 
-    let warnings_short = rumdl_lib::lint(short_content, &rules_md013, false).unwrap();
-    let warnings_long = rumdl_lib::lint(long_content, &rules_md013, false).unwrap();
+    let warnings_short = rumdl_lib::lint(
+        short_content,
+        &rules_md013,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .unwrap();
+    let warnings_long = rumdl_lib::lint(
+        long_content,
+        &rules_md013,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .unwrap();
 
     assert!(
         warnings_short.iter().all(|w| w.rule_name != Some("MD013")),

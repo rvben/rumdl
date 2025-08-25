@@ -628,14 +628,14 @@ mod tests {
         // Test with correctly ordered list
         let content = "1. First item\n2. Second item\n3. Third item";
         let structure = DocumentStructure::new(content);
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
 
         // Test with incorrectly ordered list
         let content = "1. First item\n3. Third item\n5. Fifth item";
         let structure = DocumentStructure::new(content);
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 5
 
@@ -643,7 +643,7 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOne);
         let content = "1. First item\n2. Second item\n3. Third item";
         let structure = DocumentStructure::new(content);
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 2 and 3
 
@@ -651,7 +651,7 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::Ordered0);
         let content = "0. First item\n1. Second item\n2. Third item";
         let structure = DocumentStructure::new(content);
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty());
     }
@@ -667,7 +667,7 @@ mod tests {
         // Test with mixed valid and edge case content
         let content = "1. First item\n3. Wrong number\n2. Another wrong number";
         let structure = DocumentStructure::new(content);
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         // This should not panic and should produce warnings for incorrect numbering
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
@@ -690,7 +690,7 @@ mod tests {
         }
 
         let structure = DocumentStructure::new(&content);
-        let ctx = crate::lint_context::LintContext::new(&content);
+        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
 
         // This should complete without issues and produce warnings for all items
         let result = rule.check_with_structure(&ctx, &structure).unwrap();

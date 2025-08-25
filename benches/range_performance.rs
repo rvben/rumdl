@@ -88,7 +88,7 @@ fn bench_md053_legacy(c: &mut Criterion) {
 
     c.bench_function("MD053 Legacy (line/col)", |b| {
         b.iter(|| {
-            let ctx = LintContext::new(black_box(&content));
+            let ctx = LintContext::new(black_box(&content), rumdl_lib::config::MarkdownFlavor::Standard);
             let warnings = rule.check(&ctx).unwrap();
             warnings.iter().for_each(|w| {
                 if let Some(fix) = &w.fix {
@@ -108,7 +108,7 @@ fn bench_md053_range_based(c: &mut Criterion) {
 
     c.bench_function("MD053 Byte Ranges", |b| {
         b.iter(|| {
-            let ctx = LintContext::new(black_box(&content));
+            let ctx = LintContext::new(black_box(&content), rumdl_lib::config::MarkdownFlavor::Standard);
             rule.check(&ctx).unwrap();
         })
     });
@@ -120,7 +120,7 @@ fn bench_md053_many_references(c: &mut Criterion) {
 
     c.bench_function("MD053 Many References", |b| {
         b.iter(|| {
-            let ctx = LintContext::new(&content);
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
             let _ = rule.check(&ctx);
         });
     });
@@ -132,7 +132,7 @@ fn bench_md053_fix_many_references(c: &mut Criterion) {
 
     c.bench_function("MD053 Fix Many References", |b| {
         b.iter(|| {
-            let ctx = LintContext::new(&content);
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
             let _ = rule.fix(&ctx);
         });
     });

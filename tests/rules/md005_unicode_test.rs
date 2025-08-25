@@ -11,7 +11,7 @@ fn test_unicode_list_items_valid() {
   * Nested item with 汉字
   * Nested item with こんにちは
 * Item with Arabic مرحبا";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -28,7 +28,7 @@ fn test_unicode_list_items_invalid() {
    * Nested item with 汉字 (wrong indent)
   * Another nested with こんにちは (wrong indent)
 * Item with Arabic مرحبا";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -62,7 +62,7 @@ fn test_unicode_mixed_list_types() {
 * Back to unordered with こんにちは
   - Dash item with مرحبا
   + Plus item with ñáéíóú";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -79,7 +79,7 @@ fn test_unicode_complex_nesting() {
     * Level 3 with ñáéíóú
       * Level 4 with русский
         * Level 5 with עברית";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -96,7 +96,7 @@ fn test_unicode_complex_nesting_invalid() {
   * Level 2 with こんにちは (correct indent - 2 spaces)
      * Level 3 with ñáéíóú (wrong indent - 5 spaces)
     * Level 3 with русский (correct indent - 4 spaces)";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -112,7 +112,7 @@ fn test_unicode_fix_functionality() {
 * Item with Unicode café
  * Wrong indent with 🔥
    * Also wrong with 汉字";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed, "* Item with Unicode café\n  * Wrong indent with 🔥\n   * Also wrong with 汉字",
@@ -129,7 +129,7 @@ fn test_unicode_in_blockquotes() {
 >   * Nested with 汉字
 >   * Another nested with 🔥
 > * Back to level 1 with こんにちは";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -147,7 +147,7 @@ fn test_unicode_with_continuation_text() {
   * Nested item with こんにちは
     Nested continuation with مرحبا
 * Another item with ñáéíóú";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -166,7 +166,7 @@ fn test_unicode_edge_cases() {
   * Arabic with diacritics: مَرْحَبًا
 * Unicode whitespace variants should still work";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -182,7 +182,7 @@ fn test_unicode_rtl_content() {
   * Nested Hebrew: עוד טקסט עברי
   * Arabic text: مرحبا بالعالم
 * Mixed RTL and LTR: Hello שלום مرحبا";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),

@@ -40,7 +40,7 @@ Real reference: [real reference][ref]
 Images too: \![not an image](image.jpg)
 Real image: ![actual image](image.jpg)"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // LintContext correctly handles escaped brackets
     assert_eq!(ctx.links.len(), 2, "Should only detect 2 real links");
@@ -55,7 +55,7 @@ fn test_complex_escaped_brackets() {
 Text with \[brackets\] in the middle
 Multiple \[escaped\] \[brackets\] on same line"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Currently, both LintContext and DocumentStructure don't handle double backslash escapes
     // This is a potential future enhancement: when \\ precedes [, the first \ escapes the second \
@@ -81,7 +81,7 @@ fn test_nested_brackets_with_escapes() {
 Nested reference: [text with \[brackets\]][ref]
 [ref]: https://example.com"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Should correctly parse links with escaped brackets inside
     assert_eq!(ctx.links.len(), 2);

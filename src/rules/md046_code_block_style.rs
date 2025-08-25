@@ -926,7 +926,7 @@ mod tests {
     fn test_consistent_style_with_fenced_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "```\ncode\n```\n\nMore text\n\n```\nmore code\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // All blocks are fenced, so consistent style should be OK
@@ -937,7 +937,7 @@ mod tests {
     fn test_consistent_style_with_indented_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "Text\n\n    code\n    more code\n\nMore text\n\n    another block";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // All blocks are indented, so consistent style should be OK
@@ -948,7 +948,7 @@ mod tests {
     fn test_consistent_style_mixed() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "```\nfenced code\n```\n\nText\n\n    indented code\n\nMore";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Mixed styles should be flagged
@@ -959,7 +959,7 @@ mod tests {
     fn test_fenced_style_with_indented_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "Text\n\n    indented code\n    more code\n\nMore text";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Indented blocks should be flagged when fenced style is required
@@ -971,7 +971,7 @@ mod tests {
     fn test_indented_style_with_fenced_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
         let content = "Text\n\n```\nfenced code\n```\n\nMore text";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Fenced blocks should be flagged when indented style is required
@@ -983,7 +983,7 @@ mod tests {
     fn test_unclosed_code_block() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\ncode without closing fence";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -994,7 +994,7 @@ mod tests {
     fn test_nested_code_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\nouter\n```\n\ninner text\n\n```\ncode\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // This should parse as two separate code blocks
@@ -1005,7 +1005,7 @@ mod tests {
     fn test_fix_indented_to_fenced() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "Text\n\n    code line 1\n    code line 2\n\nMore text";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(fixed.contains("```\ncode line 1\ncode line 2\n```"));
@@ -1015,7 +1015,7 @@ mod tests {
     fn test_fix_fenced_to_indented() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
         let content = "Text\n\n```\ncode line 1\ncode line 2\n```\n\nMore text";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(fixed.contains("    code line 1\n    code line 2"));
@@ -1026,7 +1026,7 @@ mod tests {
     fn test_fix_unclosed_block() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\ncode without closing";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should add closing fence
@@ -1037,7 +1037,7 @@ mod tests {
     fn test_code_block_in_list() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "- List item\n    code in list\n    more code\n- Next item";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Code in lists should not be flagged
@@ -1075,7 +1075,7 @@ mod tests {
     fn test_tilde_fence() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "~~~\ncode\n~~~";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Tilde fences should be accepted as fenced blocks
@@ -1086,7 +1086,7 @@ mod tests {
     fn test_language_specification() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```rust\nfn main() {}\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1096,7 +1096,7 @@ mod tests {
     fn test_empty_content() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1113,7 +1113,7 @@ mod tests {
     fn test_markdown_documentation_block() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```markdown\n# Example\n\n```\ncode\n```\n\nText\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Nested code blocks in markdown documentation should be allowed
@@ -1124,7 +1124,7 @@ mod tests {
     fn test_preserve_trailing_newline() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\ncode\n```\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, content);

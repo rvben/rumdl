@@ -630,13 +630,13 @@ mod tests {
 
     fn lint(content: &str) -> Vec<LintWarning> {
         let rule = MD032BlanksAroundLists::default();
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         rule.check(&ctx).expect("Lint check failed")
     }
 
     fn fix(content: &str) -> String {
         let rule = MD032BlanksAroundLists::default();
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         rule.fix(&ctx).expect("Lint fix failed")
     }
 

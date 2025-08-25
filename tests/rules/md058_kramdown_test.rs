@@ -14,7 +14,7 @@ fn test_kramdown_block_attributes_auto_detected() {
 {:.striped}
 
 Some text"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should auto-detect Kramdown block attributes");
 }
@@ -31,7 +31,7 @@ fn test_non_kramdown_braces_still_flagged() {
 {not kramdown}
 
 Some text"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should flag non-Kramdown brace lines");
     assert!(result[0].message.contains("Missing blank line after"));
@@ -51,7 +51,7 @@ fn test_kramdown_table_css_class_variants() {
 {:.striped}
 
 Text"#;
-    let ctx = LintContext::new(content1);
+    let ctx = LintContext::new(content1, rumdl_lib::config::MarkdownFlavor::Standard);
     assert!(rule.check(&ctx).unwrap().is_empty());
 
     // ID attribute
@@ -63,7 +63,7 @@ Text"#;
 {:#my-table}
 
 Text"#;
-    let ctx = LintContext::new(content2);
+    let ctx = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
     assert!(rule.check(&ctx).unwrap().is_empty());
 
     // Multiple attributes
@@ -75,7 +75,7 @@ Text"#;
 {:.striped #my-table .responsive}
 
 Text"#;
-    let ctx = LintContext::new(content3);
+    let ctx = LintContext::new(content3, rumdl_lib::config::MarkdownFlavor::Standard);
     assert!(rule.check(&ctx).unwrap().is_empty());
 }
 
@@ -89,7 +89,7 @@ fn test_normal_tables_still_checked() {
 |----------|----------|
 | Cell 1   | Cell 2   |
 Some text immediately after"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -109,7 +109,7 @@ fn test_table_before_still_checked() {
 {:.striped}
 
 Text"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should flag missing blank line before table");
     assert!(result[0].message.contains("Missing blank line before"));
@@ -124,7 +124,7 @@ fn test_fix_preserves_kramdown_attributes() {
 | A    | B    |
 {:.striped}
 Text after"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Should add blank line before the table but not after (due to attribute)

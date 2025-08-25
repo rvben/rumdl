@@ -9,10 +9,58 @@ use log;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::{BTreeSet, HashMap};
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::str::FromStr;
 use toml_edit::DocumentMut;
+
+/// Markdown flavor/dialect enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkdownFlavor {
+    /// Standard Markdown without flavor-specific adjustments
+    #[serde(rename = "standard", alias = "none", alias = "")]
+    #[default]
+    Standard,
+    /// MkDocs flavor with auto-reference support
+    #[serde(rename = "mkdocs")]
+    MkDocs,
+    // Future flavors can be added here when they have actual implementation differences
+    // Planned: GFM (GitHub Flavored Markdown) - for GitHub-specific features like tables, strikethrough
+    // Planned: CommonMark - for strict CommonMark compliance
+}
+
+impl fmt::Display for MarkdownFlavor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MarkdownFlavor::Standard => write!(f, "standard"),
+            MarkdownFlavor::MkDocs => write!(f, "mkdocs"),
+        }
+    }
+}
+
+impl FromStr for MarkdownFlavor {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "standard" | "" | "none" => Ok(MarkdownFlavor::Standard),
+            "mkdocs" => Ok(MarkdownFlavor::MkDocs),
+            // Accept but warn about unimplemented flavors
+            "gfm" | "github" => {
+                eprintln!("Warning: GFM flavor not yet implemented, using standard");
+                Ok(MarkdownFlavor::Standard)
+            }
+            "commonmark" => {
+                eprintln!("Warning: CommonMark flavor not yet implemented, using standard");
+                Ok(MarkdownFlavor::Standard)
+            }
+            _ => Err(format!("Unknown markdown flavor: {s}")),
+        }
+    }
+}
 
 lazy_static! {
     // Map common markdownlint config keys to rumdl rule names
@@ -62,34 +110,16 @@ pub struct Config {
 impl Config {
     /// Check if the Markdown flavor is set to MkDocs
     pub fn is_mkdocs_flavor(&self) -> bool {
-        self.global
-            .flavor
-            .as_ref()
-            .map(|f| f.to_lowercase() == "mkdocs")
-            .unwrap_or(false)
+        self.global.flavor == MarkdownFlavor::MkDocs
     }
 
-    /// Check if the Markdown flavor is set to GitHub Flavored Markdown
-    pub fn is_gfm_flavor(&self) -> bool {
-        self.global
-            .flavor
-            .as_ref()
-            .map(|f| f.to_lowercase() == "gfm")
-            .unwrap_or(false)
-    }
+    // Future methods for when GFM and CommonMark are implemented:
+    // pub fn is_gfm_flavor(&self) -> bool
+    // pub fn is_commonmark_flavor(&self) -> bool
 
-    /// Check if the Markdown flavor is set to CommonMark
-    pub fn is_commonmark_flavor(&self) -> bool {
-        self.global
-            .flavor
-            .as_ref()
-            .map(|f| f.to_lowercase() == "commonmark")
-            .unwrap_or(false)
-    }
-
-    /// Get the configured Markdown flavor as a normalized string
-    pub fn markdown_flavor(&self) -> Option<String> {
-        self.global.flavor.as_ref().map(|f| f.to_lowercase())
+    /// Get the configured Markdown flavor
+    pub fn markdown_flavor(&self) -> MarkdownFlavor {
+        self.global.flavor
     }
 
     /// Legacy method for backwards compatibility - redirects to is_mkdocs_flavor
@@ -142,8 +172,8 @@ pub struct GlobalConfig {
 
     /// Markdown flavor/dialect to use (mkdocs, gfm, commonmark, etc.)
     /// When set, adjusts parsing and validation rules for that specific Markdown variant
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub flavor: Option<String>,
+    #[serde(default)]
+    pub flavor: MarkdownFlavor,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -167,7 +197,7 @@ impl Default for GlobalConfig {
             output_format: None,
             fixable: Vec::new(),
             unfixable: Vec::new(),
-            flavor: None,
+            flavor: MarkdownFlavor::default(),
         }
     }
 }
@@ -371,7 +401,7 @@ disable = ["MD001"]
         let config: Config = sourced.into();
 
         // Check that flavor was loaded
-        assert_eq!(config.global.flavor, Some("mkdocs".to_string()));
+        assert_eq!(config.global.flavor, MarkdownFlavor::MkDocs);
         assert!(config.is_mkdocs_flavor());
         assert!(config.is_mkdocs_project()); // Test backwards compatibility
         assert_eq!(config.global.disable, vec!["MD001".to_string()]);
@@ -1084,7 +1114,7 @@ pub struct SourcedGlobalConfig {
     pub output_format: Option<SourcedValue<String>>,
     pub fixable: SourcedValue<Vec<String>>,
     pub unfixable: SourcedValue<Vec<String>>,
-    pub flavor: Option<SourcedValue<String>>,
+    pub flavor: SourcedValue<MarkdownFlavor>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -1099,7 +1129,7 @@ impl Default for SourcedGlobalConfig {
             output_format: None,
             fixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             unfixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
-            flavor: None,
+            flavor: SourcedValue::new(MarkdownFlavor::default(), ConfigSource::Default),
         }
     }
 }
@@ -1190,19 +1220,13 @@ impl SourcedConfig {
             fragment.global.unfixable.overrides.first().and_then(|o| o.line),
         );
 
-        // Merge flavor if present
-        if let Some(flavor_fragment) = fragment.global.flavor {
-            if let Some(ref mut flavor) = self.global.flavor {
-                flavor.merge_override(
-                    flavor_fragment.value,
-                    flavor_fragment.source,
-                    flavor_fragment.overrides.first().and_then(|o| o.file.clone()),
-                    flavor_fragment.overrides.first().and_then(|o| o.line),
-                );
-            } else {
-                self.global.flavor = Some(flavor_fragment);
-            }
-        }
+        // Merge flavor
+        self.global.flavor.merge_override(
+            fragment.global.flavor.value,
+            fragment.global.flavor.source,
+            fragment.global.flavor.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.flavor.overrides.first().and_then(|o| o.line),
+        );
 
         // Merge output_format if present
         if let Some(output_format_fragment) = fragment.global.output_format {
@@ -1494,7 +1518,7 @@ impl From<SourcedConfig> for Config {
             output_format: sourced.global.output_format.as_ref().map(|v| v.value.clone()),
             fixable: sourced.global.fixable.value,
             unfixable: sourced.global.unfixable.value,
-            flavor: sourced.global.flavor.as_ref().map(|v| v.value.clone()),
+            flavor: sourced.global.flavor.value,
         };
         Config { global, rules }
     }
@@ -1801,18 +1825,9 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 .push_override(normalized_values, source, file.clone(), None);
         }
         if let Some(flavor) = rumdl_table.get("flavor")
-            && let Ok(value) = String::deserialize(flavor.clone())
+            && let Ok(value) = MarkdownFlavor::deserialize(flavor.clone())
         {
-            if fragment.global.flavor.is_none() {
-                fragment.global.flavor = Some(SourcedValue::new(value.clone(), source));
-            } else {
-                fragment
-                    .global
-                    .flavor
-                    .as_mut()
-                    .unwrap()
-                    .push_override(value, source, file.clone(), None);
-            }
+            fragment.global.flavor.push_override(value, source, file.clone(), None);
         }
 
         // --- Re-introduce special line-length handling ---
@@ -2132,16 +2147,11 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                 }
                 "flavor" => {
                     if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
-                        let val = formatted_string.value().clone();
-                        if fragment.global.flavor.is_none() {
-                            fragment.global.flavor = Some(SourcedValue::new(val.clone(), source));
+                        let val = formatted_string.value();
+                        if let Ok(flavor) = MarkdownFlavor::from_str(val) {
+                            fragment.global.flavor.push_override(flavor, source, file.clone(), None);
                         } else {
-                            fragment
-                                .global
-                                .flavor
-                                .as_mut()
-                                .unwrap()
-                                .push_override(val, source, file.clone(), None);
+                            log::warn!("[WARN] Unknown markdown flavor '{val}' in {path}");
                         }
                     } else {
                         log::warn!(

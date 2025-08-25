@@ -121,7 +121,12 @@ impl ContentCharacteristics {
 /// Lint a file against the given rules with intelligent rule filtering
 /// Assumes the provided `rules` vector contains the final,
 /// configured, and filtered set of rules to be executed.
-pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResult {
+pub fn lint(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    _verbose: bool,
+    flavor: crate::config::MarkdownFlavor,
+) -> LintResult {
     let mut warnings = Vec::new();
     let _overall_start = Instant::now();
 
@@ -157,8 +162,8 @@ pub fn lint(content: &str, rules: &[Box<dyn Rule>], _verbose: bool) -> LintResul
         None
     };
 
-    // Parse LintContext once (migration step)
-    let lint_ctx = crate::lint_context::LintContext::new(content);
+    // Parse LintContext once (migration step) with the provided flavor
+    let lint_ctx = crate::lint_context::LintContext::new(content, flavor);
 
     for rule in applicable_rules {
         let _rule_start = Instant::now();
@@ -438,7 +443,7 @@ mod tests {
     fn test_lint_empty_content() {
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
 
-        let result = lint("", &rules, false);
+        let result = lint("", &rules, false, crate::config::MarkdownFlavor::Standard);
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
     }
@@ -448,7 +453,7 @@ mod tests {
         let content = "## Level 2\n#### Level 4"; // Skips level 3
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
 
-        let result = lint(content, &rules, false);
+        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard);
         assert!(result.is_ok());
         let warnings = result.unwrap();
         assert!(!warnings.is_empty());
@@ -461,7 +466,7 @@ mod tests {
         let content = "<!-- rumdl-disable MD001 -->\n## Level 2\n#### Level 4";
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
 
-        let result = lint(content, &rules, false);
+        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard);
         assert!(result.is_ok());
         let warnings = result.unwrap();
         assert!(warnings.is_empty()); // Should be disabled by inline comment
@@ -476,7 +481,7 @@ mod tests {
             // A list-related rule would be skipped
         ];
 
-        let result = lint(content, &rules, false);
+        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard);
         assert!(result.is_ok());
     }
 
@@ -553,7 +558,7 @@ mod tests {
         let content = "# Heading\n\nParagraph with **bold** text.";
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD012NoMultipleBlanks::new(1))];
 
-        let result = lint(content, &rules, false);
+        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard);
         assert!(result.is_ok());
     }
 

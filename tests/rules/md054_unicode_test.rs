@@ -15,7 +15,7 @@ fn test_unicode_edge_cases() {
 [🔥🌟✨Unicode link with lots of emojis 🌈⭐💫🌠](https://example.com/emoji)
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Unicode characters should not trigger warnings");
 
@@ -29,7 +29,7 @@ This text is intentionally very long to test edge cases with string length handl
 ](https://example.com/long-unicode)
 "#;
 
-    let ctx = LintContext::new(content_long);
+    let ctx = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Long Unicode content should not cause panic");
 
@@ -48,7 +48,7 @@ And a full reference: [Unicode 汉字][unicode-ref]
 
     // Test with a restricted style configuration
     let rule_restricted = MD054LinkImageStyle::new(true, false, true, true, true, true);
-    let ctx = LintContext::new(content_mixed);
+    let ctx = LintContext::new(content_mixed, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule_restricted.check(&ctx).unwrap();
     assert!(
         !result.is_empty(),
@@ -60,7 +60,7 @@ And a full reference: [Unicode 汉字][unicode-ref]
 Text before [Unicode link at exact چmulti-byteڇ character boundary](https://example.com)
 "#;
 
-    let ctx = LintContext::new(content_boundaries);
+    let ctx = LintContext::new(content_boundaries, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Unicode character boundaries should not cause issues");
 }
@@ -80,7 +80,7 @@ fn test_unicode_images() {
 [ref]: https://example.com/unicode/ñáéíóú.png
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Unicode in image links should not trigger warnings");
 
@@ -94,7 +94,7 @@ fn test_unicode_images() {
 [unicode-ref]: https://example.com/汉字.png
 "#;
 
-    let ctx = LintContext::new(content_mixed);
+    let ctx = LintContext::new(content_mixed, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule_restricted.check(&ctx).unwrap();
     assert!(
         !result.is_empty(),
@@ -108,7 +108,7 @@ fn test_shortcut_link() {
 
     // Test for multi-byte character after shortcut link
     let shortcut_lnk = "[https://www.example.com]例";
-    let ctx = LintContext::new(shortcut_lnk);
+    let ctx = LintContext::new(shortcut_lnk, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }

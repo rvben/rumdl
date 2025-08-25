@@ -302,7 +302,7 @@ mod tests {
     fn test_correct_h1_first_heading() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "# Main Title\n\n## Subsection\n\nContent here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -312,7 +312,7 @@ mod tests {
     fn test_incorrect_h2_first_heading() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Introduction\n\nContent here\n\n# Main Title";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn test_empty_document() {
         let rule = MD002FirstHeadingH1::default();
-        let ctx = LintContext::new("");
+        let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -337,7 +337,7 @@ mod tests {
     fn test_document_with_no_headings() {
         let rule = MD002FirstHeadingH1::default();
         let content = "This is just paragraph text.\n\nMore paragraph text.\n\n- List item 1\n- List item 2";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -347,7 +347,7 @@ mod tests {
     fn test_setext_style_heading() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Introduction\n------------\n\nContent here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -362,7 +362,7 @@ mod tests {
     fn test_correct_setext_h1() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Main Title\n==========\n\nContent here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -372,7 +372,7 @@ mod tests {
     fn test_with_front_matter() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "---\ntitle: Test Document\nauthor: Test Author\n---\n\n## Introduction\n\nContent";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -387,7 +387,7 @@ mod tests {
     fn test_fix_atx_heading() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Introduction\n\nContent here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Introduction\n\nContent here");
@@ -397,7 +397,7 @@ mod tests {
     fn test_fix_closed_atx_heading() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Introduction ##\n\nContent here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Introduction #\n\nContent here");
@@ -407,7 +407,7 @@ mod tests {
     fn test_fix_setext_heading() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Introduction\n------------\n\nContent here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Introduction\n=======\n\nContent here");
@@ -417,7 +417,7 @@ mod tests {
     fn test_fix_with_indented_heading() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "  ## Introduction\n\nContent here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "  # Introduction\n\nContent here");
@@ -427,7 +427,7 @@ mod tests {
     fn test_custom_level_requirement() {
         let rule = MD002FirstHeadingH1::new(2);
         let content = "# Main Title\n\n## Subsection";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -442,7 +442,7 @@ mod tests {
     fn test_fix_to_custom_level() {
         let rule = MD002FirstHeadingH1::new(2);
         let content = "# Main Title\n\nContent";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "## Main Title\n\nContent");
@@ -452,7 +452,7 @@ mod tests {
     fn test_multiple_headings() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "### Introduction\n\n# Main Title\n\n## Section\n\n#### Subsection";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Only the first heading matters
@@ -470,19 +470,22 @@ mod tests {
         let rule = MD002FirstHeadingH1::default();
 
         // Should skip empty content
-        let ctx = LintContext::new("");
+        let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
         assert!(rule.should_skip(&ctx));
 
         // Should skip content without heading indicators
-        let ctx = LintContext::new("Just paragraph text\n\nMore text");
+        let ctx = LintContext::new(
+            "Just paragraph text\n\nMore text",
+            crate::config::MarkdownFlavor::Standard,
+        );
         assert!(rule.should_skip(&ctx));
 
         // Should not skip content with ATX heading
-        let ctx = LintContext::new("Some text\n# Heading");
+        let ctx = LintContext::new("Some text\n# Heading", crate::config::MarkdownFlavor::Standard);
         assert!(!rule.should_skip(&ctx));
 
         // Should not skip content with potential setext heading
-        let ctx = LintContext::new("Title\n=====");
+        let ctx = LintContext::new("Title\n=====", crate::config::MarkdownFlavor::Standard);
         assert!(!rule.should_skip(&ctx));
     }
 
@@ -505,7 +508,7 @@ mod tests {
     fn test_fix_preserves_content_structure() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "### Heading\n\nParagraph 1\n\n## Section\n\nParagraph 2";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Heading\n\nParagraph 1\n\n## Section\n\nParagraph 2");
@@ -515,7 +518,7 @@ mod tests {
     fn test_long_setext_underline() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Short Title\n----------------------------------------\n\nContent";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         // The fix should use a reasonable length underline, not preserve the exact length
@@ -526,7 +529,7 @@ mod tests {
     fn test_fix_already_correct() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "# Correct Heading\n\nContent";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content);
@@ -536,7 +539,7 @@ mod tests {
     fn test_heading_with_special_characters() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Heading with **bold** and _italic_ text\n\nContent";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -549,7 +552,7 @@ mod tests {
     fn test_atx_heading_with_extra_spaces() {
         let rule = MD002FirstHeadingH1::new(1);
         let content = "##    Introduction    \n\nContent";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Introduction\n\nContent");

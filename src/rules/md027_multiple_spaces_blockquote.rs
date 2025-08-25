@@ -323,7 +323,7 @@ mod tests {
     fn test_valid_blockquote() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = "> This is a blockquote\n> > Nested quote";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Valid blockquotes should not be flagged");
     }
@@ -332,7 +332,7 @@ mod tests {
     fn test_multiple_spaces_after_marker() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = ">  This has two spaces\n>   This has three spaces";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
@@ -347,7 +347,7 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         // LintContext sees these as single-level blockquotes because of the space between markers
         let content = ">  Two spaces after marker\n>>  Two spaces in nested blockquote";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("Multiple spaces"));
@@ -360,7 +360,7 @@ mod tests {
         // LintContext sees >>text as a valid nested blockquote with no space after marker
         // MD027 doesn't flag this as malformed, only as missing space after marker
         let content = ">>This is a nested blockquote without space after markers";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // This should not be flagged at all since >>text is valid CommonMark
         assert_eq!(result.len(), 0);
@@ -371,7 +371,7 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         // LintContext sees >>>text as a valid triple-nested blockquote
         let content = ">>>This is deeply nested without spaces after markers";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // This should not be flagged - >>>text is valid CommonMark
         assert_eq!(result.len(), 0);
@@ -383,7 +383,7 @@ mod tests {
         // "> >text" is parsed as single-level blockquote with ">text" as content
         // This is valid CommonMark and not detected as malformed
         let content = "> >This looks like nested but is actually single level with >This as content";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
     }
@@ -393,7 +393,7 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         // 4+ spaces makes this a code block, not a blockquote
         let content = "   >This has 3 spaces indent and no space after marker";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // LintContext sees this as a blockquote with no space after marker
         // MD027 doesn't flag this as malformed
@@ -404,7 +404,7 @@ mod tests {
     fn test_fix_multiple_spaces() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = ">  Two spaces\n>   Three spaces";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> Two spaces\n> Three spaces");
     }
@@ -414,7 +414,7 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         // These are valid nested blockquotes, not malformed
         let content = ">>Nested without spaces\n>>>Deeply nested without spaces";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         // No fix needed - these are valid
         assert_eq!(fixed, content);
@@ -425,7 +425,7 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         // This is valid - single blockquote with >Extra as content
         let content = "> >Extra marker here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         // No fix needed
         assert_eq!(fixed, content);
@@ -435,7 +435,7 @@ mod tests {
     fn test_code_block_ignored() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = "```\n>  This is in a code block\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Code blocks should be ignored");
     }
@@ -444,7 +444,7 @@ mod tests {
     fn test_short_content_not_flagged() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = ">>>\n>>";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Very short content should not be flagged");
     }
@@ -453,7 +453,7 @@ mod tests {
     fn test_non_prose_not_flagged() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = ">>#header\n>>[link]\n>>`code`\n>>http://example.com";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Non-prose content should not be flagged");
     }
@@ -462,12 +462,12 @@ mod tests {
     fn test_preserve_trailing_newline() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = ">  Two spaces\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> Two spaces\n");
 
         let content_no_newline = ">  Two spaces";
-        let ctx2 = LintContext::new(content_no_newline);
+        let ctx2 = LintContext::new(content_no_newline, crate::config::MarkdownFlavor::Standard);
         let fixed2 = rule.fix(&ctx2).unwrap();
         assert_eq!(fixed2, "> Two spaces");
     }
@@ -476,7 +476,7 @@ mod tests {
     fn test_mixed_issues() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = ">  Multiple spaces here\n>>Normal nested quote\n> Normal quote";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should only flag the multiple spaces");
         assert_eq!(result[0].line, 1);
@@ -519,7 +519,7 @@ mod tests {
     fn test_empty_blockquote() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = ">\n>  \n> content";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Empty blockquotes with multiple spaces should still be flagged
         assert_eq!(result.len(), 1);
@@ -530,7 +530,7 @@ mod tests {
     fn test_fix_preserves_indentation() {
         let rule = MD027MultipleSpacesBlockquote;
         let content = "  >  Indented with multiple spaces";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "  > Indented with multiple spaces");
     }
@@ -540,20 +540,20 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         // Tab after marker - should be flagged as multiple spaces
         let content = ">\tTab after marker";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Tab after marker should be flagged");
         assert_eq!(result[0].message, "Multiple spaces after quote marker (>)");
 
         // Tab and space after marker
         let content2 = ">\t Space then tab";
-        let ctx2 = LintContext::new(content2);
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
         assert_eq!(result2.len(), 1, "Tab and space should be flagged");
 
         // Two tabs after marker
         let content3 = ">\t\tTwo tabs";
-        let ctx3 = LintContext::new(content3);
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard);
         let result3 = rule.check(&ctx3).unwrap();
         assert_eq!(result3.len(), 1, "Two tabs should be flagged");
     }
@@ -563,14 +563,14 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         // Space then tab
         let content = "> \tSpace then tab";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].column, 3); // Points to the tab
 
         // Tab then space
         let content2 = ">\t Tab then space";
-        let ctx2 = LintContext::new(content2);
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].column, 3); // Points to the space after tab
@@ -581,13 +581,13 @@ mod tests {
         let rule = MD027MultipleSpacesBlockquote;
         // Fix should remove extra tabs
         let content = ">\t\tTwo tabs";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> Two tabs");
 
         // Fix mixed spaces and tabs
         let content2 = "> \t Mixed";
-        let ctx2 = LintContext::new(content2);
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let fixed2 = rule.fix(&ctx2).unwrap();
         assert_eq!(fixed2, "> Mixed");
     }

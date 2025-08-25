@@ -184,7 +184,7 @@ fn process_files_sequential(
     files
         .iter()
         .map(|(path, content)| {
-            let result = rumdl_lib::lint(content, rules, false);
+            let result = rumdl_lib::lint(content, rules, false, rumdl_lib::config::MarkdownFlavor::Standard);
             (path.clone(), result)
         })
         .collect()

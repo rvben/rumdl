@@ -34,7 +34,7 @@ fn test_md029_2_space_code_blocks_break_lists() {
   sudo dnf install ...
   ```"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should report 4 MD029 errors matching markdownlint
@@ -79,7 +79,7 @@ fn test_md029_4_space_code_blocks_continue_lists() {
 
 4. Test 4"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should not report any MD029 errors for properly indented code blocks
@@ -112,7 +112,7 @@ fn test_md029_3_space_code_blocks_continue_lists() {
 
 4. Test 4"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should not report any MD029 errors for 3-space indented code blocks
@@ -144,7 +144,7 @@ cargo install ...
 
 4. Test 4"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should report MD029 errors for all items after unindented code blocks
@@ -178,7 +178,7 @@ fn test_md029_detection_with_2_space_code_blocks() {
 
 4. Test 4"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should detect 3 MD029 issues
@@ -208,7 +208,7 @@ fn test_md029_wider_markers() {
 
 11. This should be flagged"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // With "10. " (3 chars + 1 space = 4), need 4 spaces for continuation

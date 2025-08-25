@@ -48,7 +48,7 @@ More **emphasis** and _underscores_ everywhere.
     // Test LintContext creation time
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ctx = LintContext::new(test_content);
+        let _ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
     }
     let creation_time = start.elapsed();
     println!(
@@ -58,7 +58,7 @@ More **emphasis** and _underscores_ everywhere.
     );
 
     // Create a context to test accessor methods
-    let ctx = LintContext::new(test_content);
+    let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Test character frequency queries
     let start = Instant::now();

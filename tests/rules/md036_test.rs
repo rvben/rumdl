@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD036NoEmphasisAsHeading;
 fn test_valid_emphasis() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "This is *emphasized* text\nThis text is also *emphasized*";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_valid_emphasis() {
 fn test_emphasis_only() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "*Emphasized*\n_Also emphasized_";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     // MD036 no longer provides automatic fixes
@@ -27,7 +27,7 @@ fn test_emphasis_only() {
 fn test_strong_only() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "**Strong**\n__Also strong__";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     // MD036 no longer provides automatic fixes
@@ -39,7 +39,7 @@ fn test_strong_only() {
 fn test_multiple_emphasis() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "\n*First emphasis*\n\nNormal line\n\n_Second emphasis_\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     // MD036 no longer provides automatic fixes
@@ -51,7 +51,7 @@ fn test_multiple_emphasis() {
 fn test_not_first_word() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "The *second* word\nA _middle_ emphasis";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -60,7 +60,7 @@ fn test_not_first_word() {
 fn test_first_word_only() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "*First* word emphasized\n**First** word strong";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -69,7 +69,7 @@ fn test_first_word_only() {
 fn test_mixed_emphasis() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "*First* is _second_ emphasis\n**First** is __second__ strong";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -78,7 +78,7 @@ fn test_mixed_emphasis() {
 fn test_emphasis_with_punctuation() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "\n*Hello with punctuation!*\n\n*Hi there!*\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Emphasis with punctuation should NOT be flagged (markdownlint parity)
     assert_eq!(result.len(), 0);
@@ -88,7 +88,7 @@ fn test_emphasis_with_punctuation() {
 fn test_emphasis_with_trailing_colon() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "**Example output:**";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Emphasis with colon should NOT be flagged (markdownlint parity)
     assert_eq!(result.len(), 0);
@@ -98,7 +98,7 @@ fn test_emphasis_with_trailing_colon() {
 fn test_preserve_punctuation_when_disabled() {
     let rule = MD036NoEmphasisAsHeading::new("".to_string());
     let content = "**Example output:**";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     // MD036 no longer provides automatic fixes
@@ -110,7 +110,7 @@ fn test_preserve_punctuation_when_disabled() {
 fn test_emphasis_with_various_punctuation() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "**Title with period.**\n\n*Question?*\n\n**Exclamation!**\n\n*Semicolon;*";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // All emphasis with punctuation should NOT be flagged (markdownlint parity)
     assert_eq!(result.len(), 0);
@@ -120,7 +120,7 @@ fn test_emphasis_with_various_punctuation() {
 fn test_emphasis_in_list() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "- *Not a heading*\n  - **Also not a heading**";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -129,7 +129,7 @@ fn test_emphasis_in_list() {
 fn test_emphasis_in_blockquote() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "> *Not a heading*\n> **Also not a heading**";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -138,7 +138,7 @@ fn test_emphasis_in_blockquote() {
 fn test_emphasis_in_code_block() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "```\n*Not a heading*\n**Also not a heading**\n```";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -147,7 +147,7 @@ fn test_emphasis_in_code_block() {
 fn test_existing_heading() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "# Already a heading\n## Also a heading";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -156,7 +156,7 @@ fn test_existing_heading() {
 fn test_emphasis_with_other_text() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "This line has *emphasis* in it\nThis line has **strong** text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -165,7 +165,7 @@ fn test_emphasis_with_other_text() {
 fn test_empty_emphasis() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "**\n__";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -174,7 +174,7 @@ fn test_empty_emphasis() {
 fn test_partial_emphasis() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "*Incomplete emphasis\n**Incomplete strong";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -183,7 +183,7 @@ fn test_partial_emphasis() {
 fn test_table_of_contents_labels() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content = "**Table of Contents**\n\n*Contents*\n\n__TOC__\n\n_Index_";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // None of these should be flagged as they are legitimate TOC labels
     assert!(result.is_empty());
@@ -194,7 +194,7 @@ fn test_table_of_contents_with_other_emphasis() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
     let content =
         "**Table of Contents**\n\n**This should be a heading**\n\n*Contents*\n\n*This should also be a heading*";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Only the non-TOC emphasis should be flagged
     assert_eq!(result.len(), 2);
@@ -230,7 +230,7 @@ fn test_markdownlint_parity_comprehensive() {
     ];
 
     for content in not_flagged_cases {
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
         assert!(
             warnings.is_empty(),
@@ -250,7 +250,7 @@ fn test_custom_punctuation_config() {
 **Default:**"#;
 
     // With custom punctuation that includes ! @ # but not :
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD036NoEmphasisAsHeading::new("!@#".to_string());
     let warnings = rule.check(&ctx).unwrap();
 
@@ -266,7 +266,7 @@ fn test_empty_punctuation_config() {
 **Another.**
 **Plain**"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD036NoEmphasisAsHeading::new("".to_string());
     let warnings = rule.check(&ctx).unwrap();
 
@@ -307,7 +307,7 @@ const result = myFunction("test", 42);
 **Questions?** Contact support@example.com
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?。，；：！？".to_string());
     let warnings = rule.check(&ctx).unwrap();
 
@@ -333,7 +333,7 @@ fn test_fix_without_punctuation() {
     ];
 
     for content in test_cases {
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
 
         // Should be flagged

@@ -8,7 +8,7 @@ fn test_md036_for_emphasis_only_lines() {
     // MD036 no longer provides automatic fixes to prevent document corruption
     let content = "Normal text\n\n**This should be a heading**\n\nMore text";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let md036 = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
 
     // Check that MD036 detects the issue

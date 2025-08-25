@@ -202,7 +202,7 @@ fn generate_problematic_content(size: usize) -> String {
 /// Benchmark fix performance for rules that support fixing
 fn bench_fix_performance(c: &mut Criterion) {
     let content = generate_problematic_content(100);
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // MD001 - Heading increment
     c.bench_function("MD001 fix", |b| {
@@ -401,7 +401,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 /// Benchmark fix performance with large content
 fn bench_fix_performance_large(c: &mut Criterion) {
     let content = generate_problematic_content(1000); // 10x larger
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Test the most commonly used fix rules with large content
     c.bench_function("MD009 fix large", |b| {

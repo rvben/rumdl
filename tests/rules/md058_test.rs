@@ -23,7 +23,7 @@ Some text before the table.
 Some text after the table.
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -41,7 +41,7 @@ Some text before the table.
 Some text after the table.
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
@@ -61,7 +61,7 @@ Some text before the table.
 Some text after the table.
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 6);
@@ -80,7 +80,7 @@ Some text before the table.
 Some text after the table.
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert!(result.iter().any(|w| w.message == "Missing blank line before table"));
@@ -107,7 +107,7 @@ Some text between tables.
 Some text after tables.
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -126,7 +126,7 @@ Some text between tables.
 Some text after tables.
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 }
@@ -151,7 +151,7 @@ Some text.
 More text.
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -168,7 +168,7 @@ fn test_table_at_document_start() {
 Some text after the table.
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -185,7 +185,7 @@ Some text before the table.
 | -------- | -------- |
 | Cell 1.1 | Cell 1.2 |"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -200,7 +200,7 @@ fn test_fix_missing_blank_lines() {
 | Cell 1   | Cell 2   |
 Text after."#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("Text before.\n\n| Header"));
     assert!(fixed.contains("Cell 2   |\n\nText after"));

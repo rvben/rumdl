@@ -283,7 +283,7 @@ mod tests {
     fn test_no_tabs() {
         let rule = MD010NoHardTabs::default();
         let content = "This is a line\nAnother line\nNo tabs here";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -292,7 +292,7 @@ mod tests {
     fn test_single_tab() {
         let rule = MD010NoHardTabs::default();
         let content = "Line with\ttab";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
@@ -304,7 +304,7 @@ mod tests {
     fn test_leading_tabs() {
         let rule = MD010NoHardTabs::default();
         let content = "\tIndented line\n\t\tDouble indented";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
@@ -317,7 +317,7 @@ mod tests {
     fn test_fix_tabs() {
         let rule = MD010NoHardTabs::default();
         let content = "\tIndented\nNormal\tline\nNo tabs";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "    Indented\nNormal    line\nNo tabs");
     }
@@ -326,7 +326,7 @@ mod tests {
     fn test_custom_spaces_per_tab() {
         let rule = MD010NoHardTabs::new(4);
         let content = "\tIndented";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "    Indented");
     }
@@ -335,7 +335,7 @@ mod tests {
     fn test_code_blocks_always_ignored() {
         let rule = MD010NoHardTabs::default();
         let content = "Normal\tline\n```\nCode\twith\ttab\n```\nAnother\tline";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should only flag tabs outside code blocks
         assert_eq!(result.len(), 2);
@@ -350,7 +350,7 @@ mod tests {
     fn test_code_blocks_never_checked() {
         let rule = MD010NoHardTabs::default();
         let content = "```\nCode\twith\ttab\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should never flag tabs in code blocks
         assert_eq!(result.len(), 0);
@@ -360,7 +360,7 @@ mod tests {
     fn test_html_comments_ignored() {
         let rule = MD010NoHardTabs::default();
         let content = "Normal\tline\n<!-- HTML\twith\ttab -->\nAnother\tline";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should not flag tabs in HTML comments
         assert_eq!(result.len(), 2);
@@ -372,7 +372,7 @@ mod tests {
     fn test_multiline_html_comments() {
         let rule = MD010NoHardTabs::default();
         let content = "Before\n<!--\nMultiline\twith\ttabs\ncomment\t-->\nAfter\ttab";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should only flag the tab after the comment
         assert_eq!(result.len(), 1);
@@ -383,7 +383,7 @@ mod tests {
     fn test_empty_lines_with_tabs() {
         let rule = MD010NoHardTabs::default();
         let content = "Normal line\n\t\t\n\t\nAnother line";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].message, "Empty line contains 2 tabs");
@@ -394,7 +394,7 @@ mod tests {
     fn test_mixed_tabs_and_spaces() {
         let rule = MD010NoHardTabs::default();
         let content = " \tMixed indentation\n\t Mixed again";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
     }
@@ -403,7 +403,7 @@ mod tests {
     fn test_consecutive_tabs() {
         let rule = MD010NoHardTabs::default();
         let content = "Text\t\t\tthree tabs\tand\tanother";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should group consecutive tabs
         assert_eq!(result.len(), 3);
@@ -457,13 +457,13 @@ mod tests {
         let custom_spaces = 8;
         let rule = MD010NoHardTabs::new(custom_spaces);
         let content = "\tTab";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "        Tab");
 
         // Code blocks are always ignored
         let content_with_code = "```\n\tTab in code\n```";
-        let ctx = LintContext::new(content_with_code);
+        let ctx = LintContext::new(content_with_code, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Tabs in code blocks are never flagged
         assert!(result.is_empty());
@@ -476,7 +476,7 @@ mod tests {
         for i in 0..1000 {
             content.push_str(&format!("Line {i}\twith\ttabs\n"));
         }
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2000);
     }
@@ -485,7 +485,7 @@ mod tests {
     fn test_preserve_content() {
         let rule = MD010NoHardTabs::default();
         let content = "**Bold**\ttext\n*Italic*\ttext\n[Link](url)\ttab";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "**Bold**    text\n*Italic*    text\n[Link](url)    tab");
     }
@@ -496,13 +496,13 @@ mod tests {
 
         // Tab at end of line
         let content = "Text\t";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
 
         // Only tabs
         let content = "\t\t\t";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].message, "Empty line contains 3 tabs");
@@ -513,7 +513,7 @@ mod tests {
         let rule = MD010NoHardTabs::default();
 
         let content = "Text\twith\ttab\n```makefile\ntarget:\n\tcommand\n\tanother\n```\nMore\ttabs";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should always preserve tabs in all code blocks

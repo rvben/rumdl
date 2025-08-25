@@ -24,7 +24,7 @@ Setext heading
    # Indented closed ATX heading #
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
@@ -40,7 +40,7 @@ Setext heading
     assert_eq!(warnings[4].line, 15); // "   # Indented closed ATX heading #"
 
     // Verify the fix
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert!(!fixed.contains("  ## Indented"));
     assert!(!fixed.contains("   ####"));
@@ -69,7 +69,7 @@ author: Test Author
 Content after front matter
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
@@ -79,7 +79,7 @@ Content after front matter
     assert_eq!(warnings[0].line, 8);
 
     // Verify the fix preserves front matter
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("---\ntitle:"));
     assert!(fixed.contains("---\n\n# Valid"));
@@ -108,7 +108,7 @@ fn test_code_blocks_with_headings() {
    ### Another indented heading
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
@@ -119,7 +119,7 @@ fn test_code_blocks_with_headings() {
     assert_eq!(warnings[1].line, 14); // "   ### Another indented heading"
 
     // Verify the fix preserves code blocks
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("```markdown\n# This is a heading"));
     assert!(fixed.contains("  ## This is an indented heading in a code block"));
@@ -145,7 +145,7 @@ fn test_nested_headings_with_mixed_styles() {
 #### Regular SubSubSubheading
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
@@ -156,7 +156,7 @@ fn test_nested_headings_with_mixed_styles() {
     assert_eq!(warnings[1].line, 7); // "  Indented Setext SubSubheading"
 
     // Also check fix
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("### Indented ATX Subheading")); // Fixed with no indentation
     assert!(fixed.contains("Indented Setext SubSubheading")); // Fixed with no indentation
@@ -177,7 +177,7 @@ fn test_heading_with_special_characters() {
    ### Indented heading with [link](https://example.com)
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
@@ -188,7 +188,7 @@ fn test_heading_with_special_characters() {
     assert_eq!(warnings[1].line, 5); // "   ### Indented heading with [link](https://example.com)"
 
     // Verify the fix preserves special characters
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("## Indented heading with **bold** and `code`"));
     assert!(fixed.contains("### Indented heading with [link](https://example.com)"));
@@ -208,7 +208,7 @@ fn test_empty_indented_headings() {
    ###
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
@@ -219,7 +219,7 @@ fn test_empty_indented_headings() {
     assert_eq!(warnings[1].line, 5); // "   ### "
 
     // Verify the fix works for empty headings
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("##"));
     assert!(fixed.contains("###"));
@@ -243,7 +243,7 @@ fn test_multiple_indentation_levels() {
     ## Heading with 4 spaces
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx);
     assert!(result.is_ok());
     let warnings = result.unwrap();
@@ -256,7 +256,7 @@ fn test_multiple_indentation_levels() {
     // Line 9 with 4 spaces is a code block, not a heading
 
     // Verify the fix works for different indentation levels
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     // The fix should have 3 unindented headings + 1 unchanged line that looks like a heading
     assert_eq!(fixed.matches("## Heading with").count(), 4);
@@ -283,7 +283,7 @@ Settings are applied in the following order (later sources override earlier ones
 Given this configuration file:"#;
 
     let rule = MD023HeadingStartLeft;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1, "Should detect one indented heading");

@@ -7,7 +7,7 @@ use rumdl_lib::rules::MD052ReferenceLinkImages;
 fn test_valid_reference_link() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "[example][id]\n\n[id]: http://example.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -19,7 +19,7 @@ fn test_valid_reference_links_multiple() {
 
 [ref1]: http://example.com/1
 [ref2]: http://example.com/2"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -29,7 +29,7 @@ fn test_valid_reference_links_multiple() {
 fn test_invalid_reference_link() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "[example][id]\n\n[other]: http://example.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].message, "Reference 'id' not found");
@@ -43,7 +43,7 @@ fn test_missing_multiple_definitions() {
 [link3][ref3]
 
 [ref1]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 }
@@ -53,7 +53,7 @@ fn test_missing_multiple_definitions() {
 fn test_invalid_reference_image() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "![example][id]\n\n[other]: http://example.com/image.jpg";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].message, "Reference 'id' not found");
@@ -63,7 +63,7 @@ fn test_invalid_reference_image() {
 fn test_valid_reference_image() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "![example][id]\n\n[id]: http://example.com/image.jpg";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -73,7 +73,7 @@ fn test_valid_reference_image() {
 fn test_case_insensitive() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "[example][ID]\n\n[id]: http://example.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -86,7 +86,7 @@ fn test_case_insensitive_mixed() {
 [Link 3][ref]
 
 [ReF]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -98,7 +98,7 @@ fn test_full_reference_link() {
     let content = r#"This is a [full reference link][label].
 
 [label]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -107,7 +107,7 @@ fn test_full_reference_link() {
 fn test_full_reference_link_missing() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "This is a [full reference link][label].";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].message, "Reference 'label' not found");
@@ -120,7 +120,7 @@ fn test_collapsed_reference_link() {
     let content = r#"This is a [collapsed reference][] link.
 
 [collapsed reference]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -129,7 +129,7 @@ fn test_collapsed_reference_link() {
 fn test_collapsed_reference_link_missing() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "This is a [collapsed reference][] link.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].message, "Reference 'collapsed reference' not found");
@@ -140,7 +140,7 @@ fn test_collapsed_reference_link_missing() {
 fn test_shortcut_reference() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "[example]\n\n[example]: http://example.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -149,7 +149,7 @@ fn test_shortcut_reference() {
 fn test_invalid_shortcut_reference() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "[example]\n\n[other]: http://example.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 }
@@ -161,7 +161,7 @@ fn test_shortcut_vs_inline_link() {
     let content = r#"This is an [inline link](http://example.com) and a [shortcut].
 
 [shortcut]: http://example.com/shortcut"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -175,7 +175,7 @@ Second [reference][same]
 Third [reference][same]
 
 [same]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -186,7 +186,7 @@ fn test_multiple_references_same_undefined() {
     let content = r#"First [reference][missing]
 Second [reference][missing]
 Third [reference][missing]"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should only report once for duplicate undefined references
     assert_eq!(result.len(), 1);
@@ -207,7 +207,7 @@ But this \[text][undefined] has [undefined] as a reference link.
 [ref1]: http://example.com/1
 [ref2]: http://example.com/2
 [undefined]: http://example.com/undefined"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -219,7 +219,7 @@ fn test_partially_escaped_brackets() {
     let content = r#"This is \[escaped text][ref] where [ref] needs definition.
 
 [ref]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -230,13 +230,13 @@ fn test_escaped_brackets_with_undefined_ref() {
     // The pattern \[text][undefined] should not detect [undefined] as a reference
     // because the entire construct is treated as escaped/literal text in CommonMark
     let content = r#"This is \[escaped][undefined] but undefined is not defined."#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
     // However, a separate [undefined] should still be detected
     let content2 = r#"This is \[escaped] and [undefined] but undefined is not defined."#;
-    let ctx2 = LintContext::new(content2);
+    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
     let result2 = rule.check(&ctx2).unwrap();
     assert_eq!(result2.len(), 1);
     assert_eq!(result2[0].message, "Reference 'undefined' not found");
@@ -250,7 +250,7 @@ fn test_escaped_image_brackets() {
 This is a real image: ![image][ref]
 
 [ref]: http://example.com/image.jpg"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -265,7 +265,7 @@ fn test_references_at_beginning() {
 # Document
 
 Using [link1][ref1] and [link2][ref2]."#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -281,7 +281,7 @@ Using [link1][ref1] here.
 [ref2]: http://example.com/2
 
 And [link2][ref2] here."#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -297,7 +297,7 @@ More text here.
 
 [ref1]: http://example.com/1
 [ref2]: http://example.com/2"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -315,7 +315,7 @@ Image: ![alt][image]
 [collapsed]: http://example.com/collapsed
 [shortcut]: http://example.com/shortcut
 [image]: http://example.com/image.jpg"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -330,7 +330,7 @@ fn test_code_blocks_ignored() {
 [real][ref] should be checked
 
 [ref]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -342,7 +342,7 @@ fn test_inline_links_not_checked() {
 ![Inline image](http://example.com/image.jpg) should not be checked.
 
 But [reference][undefined] should be checked."#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].message, "Reference 'undefined' not found");
@@ -356,7 +356,7 @@ fn test_list_items_excluded() {
 + [X] Yet another one
 
 But this [reference][undefined] should still be checked."#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 }
@@ -389,7 +389,7 @@ Here's an [undefined link][broken] and an ![undefined image][missing].
 [ref2]: http://example.com/ref2
 [ref3]: http://example.com/ref3
 [ref4]: http://example.com/ref4"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 
@@ -403,7 +403,7 @@ Here's an [undefined link][broken] and an ![undefined image][missing].
 fn test_empty_content() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -412,7 +412,7 @@ fn test_empty_content() {
 fn test_no_references() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "# Just a heading\n\nSome regular text\n\n> A blockquote";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -425,7 +425,7 @@ fn test_empty_reference_label() {
     let content = r#"This is a [link text][] reference.
 
 [link text]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -434,7 +434,7 @@ fn test_empty_reference_label() {
 fn test_empty_reference_label_undefined() {
     let rule = MD052ReferenceLinkImages::new();
     let content = "This is a [link text][] reference.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].message, "Reference 'link text' not found");
@@ -446,7 +446,7 @@ fn test_reference_with_special_chars() {
     let content = r#"Link with [special-chars_123][ref-with_special.chars].
 
 [ref-with_special.chars]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -470,7 +470,7 @@ fn test_reference_in_nested_structures() {
 [ref4]: http://example.com/4
 [ref5]: http://example.com/5
 [ref6]: http://example.com/6"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -483,7 +483,7 @@ fn test_reference_definitions_with_titles() {
 [ref1]: http://example.com "Title in double quotes"
 [ref2]: http://example.com 'Title in single quotes'
 [ref3]: http://example.com (Title in parentheses)"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -495,7 +495,7 @@ fn test_multiline_reference_links() {
 link text][ref] that spans lines.
 
 [ref]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -507,7 +507,7 @@ fn test_adjacent_reference_links() {
 
 [ref1]: http://example.com/1
 [ref2]: http://example.com/2"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -522,7 +522,7 @@ fn test_reference_definition_indentation() {
  [ref2]: http://example.com/2
   [ref3]: http://example.com/3
    [ref4]: http://example.com/4"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -534,7 +534,7 @@ fn test_reference_definition_too_indented() {
     let content = r#"[link][ref]
 
     [ref]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Debug: check what's happening
     if result.is_empty() {
@@ -559,7 +559,7 @@ fn test_output_example_section_ignored() {
 [undefined2][missing] should be caught here.
 
 [ref]: http://example.com"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Debug: print what's being detected
     for (i, warning) in result.iter().enumerate() {

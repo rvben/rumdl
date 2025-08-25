@@ -780,12 +780,10 @@ fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
 
     // Add flavor if it's set
     let mut global_lines = global_lines;
-    if let Some(ref flavor) = g.flavor {
-        global_lines.push((
-            format!("flavor = {:?}", flavor.value),
-            format!("[from {}]", format_provenance(flavor.source)),
-        ));
-    }
+    global_lines.push((
+        format!("flavor = {:?}", g.flavor.value),
+        format!("[from {}]", format_provenance(g.flavor.source)),
+    ));
     global_lines.push((String::new(), String::new()));
     all_lines.extend(global_lines);
     // All rules, but only if they have config items
@@ -1339,21 +1337,10 @@ build-backend = \"setuptools.build_meta\"
                                             None
                                         }
                                     }
-                                    "flavor" => {
-                                        if let Some(ref flavor) = final_config.global.flavor {
-                                            Some((
-                                                toml::Value::String(flavor.clone()),
-                                                sourced
-                                                    .global
-                                                    .flavor
-                                                    .as_ref()
-                                                    .map(|v| v.source)
-                                                    .unwrap_or(ConfigSource::Default),
-                                            ))
-                                        } else {
-                                            None
-                                        }
-                                    }
+                                    "flavor" => Some((
+                                        toml::Value::String(format!("{:?}", final_config.global.flavor).to_lowercase()),
+                                        sourced.global.flavor.source,
+                                    )),
                                     _ => None,
                                 };
 
@@ -1874,7 +1861,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     }
 
     // Create a lint context for the stdin content
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, config.markdown_flavor());
     let mut all_warnings = Vec::new();
 
     // Run all enabled rules on the content
@@ -1912,7 +1899,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
             print!("{fixed_content}");
 
             // Re-check the fixed content to see if any issues remain
-            let fixed_ctx = LintContext::new(&fixed_content);
+            let fixed_ctx = LintContext::new(&fixed_content, config.markdown_flavor());
             let mut remaining_warnings = Vec::new();
             for rule in rules {
                 if let Ok(warnings) = rule.check(&fixed_ctx) {
@@ -2143,6 +2130,7 @@ fn perform_check_run(args: &CheckArgs, config: &rumdl_config::Config, quiet: boo
                 args._fix,
                 args.verbose && !args.silent,
                 quiet,
+                config.global.flavor,
             );
 
             if !warnings.is_empty() {
@@ -2839,7 +2827,7 @@ fn process_file_with_formatter(
         // In fix mode, show warnings with [fixed] for issues that were fixed
         if !quiet {
             // Re-lint the fixed content to see which warnings remain
-            let fixed_ctx = LintContext::new(&content);
+            let fixed_ctx = LintContext::new(&content, config.markdown_flavor());
             let mut remaining_warnings = Vec::new();
 
             for rule in rules {
@@ -2940,8 +2928,8 @@ fn process_file_inner(
         std::env::set_var("RUMDL_FILE_PATH", file_path);
     }
 
-    // Use the standard lint function
-    let warnings_result = rumdl_lib::lint(&content, rules, verbose);
+    // Use the standard lint function with the configured flavor
+    let warnings_result = rumdl_lib::lint(&content, rules, verbose, config.markdown_flavor());
 
     // Clear the environment variable after processing
     unsafe {
@@ -3108,7 +3096,7 @@ fn apply_fixes(
                     continue;
                 }
 
-                let ctx = LintContext::new(content);
+                let ctx = LintContext::new(content, config.markdown_flavor());
                 match rule.fix(&ctx) {
                     Ok(fixed_content) => {
                         if fixed_content != *content {
@@ -3183,7 +3171,7 @@ fn apply_fixes_stdin(
                     continue;
                 }
 
-                let ctx = LintContext::new(content);
+                let ctx = LintContext::new(content, config.markdown_flavor());
                 match rule.fix(&ctx) {
                     Ok(fixed_content) => {
                         if fixed_content != *content {
@@ -3216,6 +3204,7 @@ fn process_file_collect_warnings(
     _fix: bool,
     verbose: bool,
     quiet: bool,
+    flavor: rumdl_lib::config::MarkdownFlavor,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     if verbose && !quiet {
         println!("Processing file: {file_path}");
@@ -3235,7 +3224,7 @@ fn process_file_collect_warnings(
     unsafe {
         std::env::set_var("RUMDL_FILE_PATH", file_path);
     }
-    let warnings_result = rumdl_lib::lint(&content, rules, verbose);
+    let warnings_result = rumdl_lib::lint(&content, rules, verbose, flavor);
     unsafe {
         std::env::remove_var("RUMDL_FILE_PATH");
     }

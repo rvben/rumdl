@@ -17,7 +17,7 @@ This is a comment that won't be rendered
 
 {::options parse_block_html="true" /}"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should not flag Kramdown extensions as HTML");
 }
@@ -40,7 +40,7 @@ puts "Hello"
 > Blockquote
 {:#special-quote}"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should not flag block attributes as HTML");
 }
@@ -61,7 +61,7 @@ This is fine
 
 {::options key="value" /}"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // MD033 reports opening and closing tags separately
     assert_eq!(result.len(), 4, "Should only flag actual HTML tags");
@@ -83,7 +83,7 @@ Nested comment
 Back to outer
 {:/comment}"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should handle nested Kramdown extensions");
 }
@@ -103,7 +103,7 @@ fn test_md033_invalid_kramdown_patterns() {
 
 <span>More HTML</span>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should detect the actual HTML tags (opening and closing separately)
     assert_eq!(
@@ -131,7 +131,7 @@ Comment here
 
 {:.class}"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should flag opening and closing div tags separately
     assert_eq!(result.len(), 2, "Should only flag non-allowed HTML");

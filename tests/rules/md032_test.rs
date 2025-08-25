@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD032BlanksAroundLists;
 fn test_valid_lists() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Some text\n\n* Item 1\n* Item 2\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_valid_lists() {
 fn test_missing_blank_line_before() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Some text\n* Item 1\n* Item 2\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 }
@@ -24,7 +24,7 @@ fn test_missing_blank_line_before() {
 fn test_missing_blank_line_after() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Some text\n\n* Item 1\n* Item 2\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 }
@@ -33,9 +33,9 @@ fn test_missing_blank_line_after() {
 fn test_fix_missing_blank_lines() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n* Item 1\n* Item 2\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    let _ctx_fixed = LintContext::new(&fixed);
+    let _ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert_eq!(fixed, "Text\n\n* Item 1\n* Item 2\n\nMore text");
 }
 
@@ -46,7 +46,7 @@ fn test_emphasis_not_list_marker_simple() {
     // Test simple emphasis pattern that should NOT be detected as a list marker
     let rule = MD032BlanksAroundLists::default();
     let content = "*Emphasis text*\n- List item\n- Another item";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the list items (lines 2-3) for missing blank line before,
@@ -66,7 +66,7 @@ fn test_emphasis_not_list_marker_multiple_stars() {
     let rule = MD032BlanksAroundLists::default();
     let content =
         "**Bold text here**\n*Italic text*\n***Bold italic***\n\n- Actual list item\n- Another item\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings - the list is properly surrounded by blank lines
@@ -81,7 +81,7 @@ fn test_emphasis_followed_by_list_needs_blank() {
     // This is the exact case from the parity corpus that was failing
     let rule = MD032BlanksAroundLists::default();
     let content = "**Problem: Permission errors**\n- On Windows: Run as administrator";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag that the list needs a blank line before it
@@ -101,7 +101,7 @@ fn test_nested_lists_issue_33() {
     // Test for GitHub issue #33 - Nested lists should not require blank lines between levels
     let rule = MD032BlanksAroundLists::default();
     let content = "## Heading\n\n1. List item 1\n   - sub list 1.1\n   - sub list 1.2\n1. List item 2\n   - sub list 2.1\n\nThat was a nice list.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings - the nested list is properly surrounded by blank lines
@@ -118,7 +118,7 @@ fn test_blockquote_numbers_issue_32() {
     // Test for GitHub issue #32 - Lines starting with numbers in blockquotes should not be detected as lists
     let rule = MD032BlanksAroundLists::default();
     let content = "> The following versions are vulnerable:\n>   all versions 9 and before\n>   10.5 - 10.6\n>   11.1 - 11.2\n> Other information";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no MD032 warnings - these are not list items
@@ -135,7 +135,7 @@ fn test_emphasis_patterns_not_lists() {
     // Test various emphasis patterns that contain * or + characters
     let rule = MD032BlanksAroundLists::default();
     let content = "**API Parameters**\n*userId (string) - The user ID*\n\n+ This is a real list item\n+ Another real item\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings - emphasis is not a list, and the real list is properly spaced
@@ -147,7 +147,7 @@ fn test_heading_emphasis_not_list() {
     // Test heading with emphasis that was causing false positives
     let rule = MD032BlanksAroundLists::default();
     let content = "## **Section Title**\n\nSome content\n\n- Real list item\n- Another item";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings - neither heading emphasis nor properly spaced list should trigger
@@ -158,11 +158,11 @@ fn test_heading_emphasis_not_list() {
 fn test_multiple_lists() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n* List 1\n* List 1\nText\n1. List 2\n2. List 2\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4);
     let fixed = rule.fix(&ctx).unwrap();
-    let _ctx_fixed = LintContext::new(&fixed);
+    let _ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert_eq!(
         fixed,
         "Text\n\n* List 1\n* List 1\n\nText\n\n1. List 2\n2. List 2\n\nText"
@@ -174,7 +174,7 @@ fn test_nested_lists() {
     // Nested lists should not require blank lines between parent and child items
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should only warn about missing blank lines around the outer list, not the nested items
     assert_eq!(
@@ -183,7 +183,7 @@ fn test_nested_lists() {
         "Should only warn about outer list boundaries, not nested items"
     );
     let fixed = rule.fix(&ctx).unwrap();
-    let _ctx_fixed = LintContext::new(&fixed);
+    let _ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert_eq!(fixed, "Text\n\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\n\nText");
 }
 
@@ -192,7 +192,7 @@ fn test_nested_lists_with_strict_mode() {
     // Even in strict mode, nested lists are a standard Markdown pattern and shouldn't require blank lines
     let rule = MD032BlanksAroundLists::strict();
     let content = "Text\n\n* Item 1\n  * Nested 1\n  * Nested 2\n* Item 2\n\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Even strict mode should not warn about nested lists - this is standard Markdown
     assert!(
@@ -206,7 +206,7 @@ fn test_deeply_nested_lists() {
     // Test multiple levels of nesting
     let rule = MD032BlanksAroundLists::default();
     let content = "## Section\n\n* Level 1\n  * Level 2\n    * Level 3\n      * Level 4\n  * Back to Level 2\n* Back to Level 1\n\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should not warn about nested list transitions
     assert!(result.is_empty(), "Should not warn about deeply nested lists");
@@ -217,7 +217,7 @@ fn test_nested_ordered_lists() {
     // Test nested ordered lists
     let rule = MD032BlanksAroundLists::default();
     let content = "## Section\n\n1. First item\n   1. Sub item 1.1\n   2. Sub item 1.2\n2. Second item\n   1. Sub item 2.1\n\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should not warn about nested ordered lists");
 }
@@ -227,7 +227,7 @@ fn test_mixed_nested_list_types() {
     // Test mixing ordered and unordered lists in nesting
     let rule = MD032BlanksAroundLists::default();
     let content = "## Section\n\n1. Ordered item\n   - Unordered sub-item\n   - Another unordered sub-item\n2. Another ordered item\n   * Different unordered marker\n\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should not warn about mixed nested list types");
 }
@@ -236,11 +236,11 @@ fn test_mixed_nested_list_types() {
 fn test_mixed_list_types() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n* Unordered\n* List\nText\n1. Ordered\n2. List\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4);
     let fixed = rule.fix(&ctx).unwrap();
-    let _ctx_fixed = LintContext::new(&fixed);
+    let _ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert_eq!(
         fixed,
         "Text\n\n* Unordered\n* List\n\nText\n\n1. Ordered\n2. List\n\nText"
@@ -251,7 +251,7 @@ fn test_mixed_list_types() {
 fn test_list_with_content() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n* Item 1\n  Content\n* Item 2\n  More content\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // --- Temporary Debugging ---
     let temp_structure = rumdl_lib::utils::document_structure::document_structure_from_str(ctx.content);
@@ -289,7 +289,7 @@ fn test_list_with_content() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
-    let _ctx_fixed = LintContext::new(&fixed);
+    let _ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert_eq!(fixed, "Text\n\n* Item 1\n  Content\n* Item 2\n  More content\n\nText");
 }
 
@@ -297,11 +297,11 @@ fn test_list_with_content() {
 fn test_list_at_start() {
     let rule = MD032BlanksAroundLists::default();
     let content = "* Item 1\n* Item 2\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let _ctx_fixed = LintContext::new(&fixed);
+    let _ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert_eq!(fixed, "* Item 1\n* Item 2\n\nText");
 }
 
@@ -309,11 +309,11 @@ fn test_list_at_start() {
 fn test_list_at_end() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n* Item 1\n* Item 2";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
-    let _ctx_fixed = LintContext::new(&fixed);
+    let _ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert_eq!(fixed, "Text\n\n* Item 1\n* Item 2");
 }
 
@@ -321,7 +321,7 @@ fn test_list_at_end() {
 fn test_multiple_blank_lines() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n\n\n* Item 1\n* Item 2\n\n\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -330,7 +330,7 @@ fn test_multiple_blank_lines() {
 fn test_list_with_blank_lines() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Text\n\n* Item 1\n\n* Item 2\n\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -350,7 +350,7 @@ fn test_md032_toc_false_positive() {
 
 ## Next Section
 "#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -362,7 +362,7 @@ fn test_md032_toc_false_positive() {
 fn test_list_followed_by_heading_invalid() {
     let rule = MD032BlanksAroundLists::default();
     let content = "* Item 1\n* Item 2\n## Next Section";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should warn for missing blank line before heading");
     assert!(result[0].message.contains("followed by blank line"));
@@ -372,7 +372,7 @@ fn test_list_followed_by_heading_invalid() {
 fn test_list_followed_by_code_block_invalid() {
     let rule = MD032BlanksAroundLists::default();
     let content = "* Item 1\n* Item 2\n```\ncode\n```";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should warn for missing blank line before code block");
     assert!(result[0].message.contains("followed by blank line"));
@@ -382,7 +382,7 @@ fn test_list_followed_by_code_block_invalid() {
 fn test_list_followed_by_blank_then_code_block_valid() {
     let rule = MD032BlanksAroundLists::default();
     let content = "* Item 1\n* Item 2\n\n```\ncode\n```";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should not warn when blank line precedes code block");
 }
@@ -401,7 +401,7 @@ fn test_allow_list_after_heading() {
     ];
 
     for case in valid_cases {
-        let ctx = LintContext::new(case);
+        let ctx = LintContext::new(case, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag lists after headings in: {case}");
     }
@@ -419,7 +419,7 @@ fn test_allow_list_after_colon() {
     ];
 
     for case in valid_cases {
-        let ctx = LintContext::new(case);
+        let ctx = LintContext::new(case, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag lists after colons in: {case}");
     }
@@ -436,7 +436,7 @@ fn test_strict_mode_flags_all() {
     ];
 
     for case in cases {
-        let ctx = LintContext::new(case);
+        let ctx = LintContext::new(case, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty(), "Strict mode should flag lists in: {case}");
     }
@@ -453,7 +453,7 @@ fn test_still_flags_inappropriate_cases() {
     ];
 
     for case in invalid_cases {
-        let ctx = LintContext::new(case);
+        let ctx = LintContext::new(case, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty(), "Should still flag inappropriate cases: {case}");
     }

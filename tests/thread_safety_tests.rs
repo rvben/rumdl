@@ -23,7 +23,7 @@ Another line.
 More content.
 "#;
 
-    let ctx = LintContext::new(test_content);
+    let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
     let shared_ctx = Arc::new(ctx);
     let results = Arc::new(Mutex::new(Vec::new()));
 
@@ -85,7 +85,10 @@ code block without language
 Text with *emphasis * and **strong **.
 "#;
 
-    let ctx = Arc::new(LintContext::new(test_content));
+    let ctx = Arc::new(LintContext::new(
+        test_content,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    ));
     let results = Arc::new(Mutex::new(Vec::new()));
 
     // Define different rules to test concurrently
@@ -184,7 +187,10 @@ Some content.
 ## Another Heading
 More content."#;
 
-    let ctx = Arc::new(LintContext::new(test_content));
+    let ctx = Arc::new(LintContext::new(
+        test_content,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    ));
     let results = Arc::new(Mutex::new(Vec::new()));
 
     let mut handles = vec![];
@@ -247,7 +253,10 @@ code without language
 Text with *bad emphasis * here.
 "#;
 
-    let ctx = Arc::new(LintContext::new(test_content));
+    let ctx = Arc::new(LintContext::new(
+        test_content,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    ));
     let results = Arc::new(Mutex::new(Vec::new()));
 
     let mut handles = vec![];
@@ -373,7 +382,10 @@ Content for section 9.
 Content for section 10.
 "#;
 
-    let ctx = Arc::new(LintContext::new(large_content));
+    let ctx = Arc::new(LintContext::new(
+        large_content,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    ));
     let success_count = Arc::new(Mutex::new(0));
 
     let mut handles = vec![];

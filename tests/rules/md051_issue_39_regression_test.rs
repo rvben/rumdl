@@ -22,7 +22,7 @@ There will be another section.
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - link to second section should work
@@ -49,7 +49,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - all complex punctuation should be handled correctly
@@ -78,7 +78,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - ampersands and colons should be handled correctly
@@ -110,7 +110,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - mixed punctuation should be handled correctly
@@ -139,7 +139,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - consecutive hyphens should be collapsed
@@ -171,7 +171,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::KramdownGfm);
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - all edge cases should work
@@ -201,7 +201,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - operation order should be correct
@@ -225,7 +225,7 @@ fn test_issue_39_github_vs_kramdown_differences() {
 Links: [Test](#testing--coverage)
 "#;
 
-    let ctx = LintContext::new(content_github);
+    let ctx = LintContext::new(content_github, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should work with GitHub-style fragments (ampersand removed)

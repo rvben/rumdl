@@ -31,8 +31,8 @@ fn test_unicode_normalization_spoofing_prevention() {
         let content1 = format!("# {version1}\n\n[Link](#test)");
         let content2 = format!("# {version2}\n\n[Link](#test)");
 
-        let ctx1 = LintContext::new(&content1);
-        let ctx2 = LintContext::new(&content2);
+        let ctx1 = LintContext::new(&content1, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new(&content2, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result1 = rule.check(&ctx1);
         let result2 = rule.check(&ctx2);
@@ -69,7 +69,7 @@ fn test_zero_width_character_injection() {
 
     for (input, description) in zero_width_cases {
         let content = format!("# {input}\n\n[Link](#wordbreak)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Zero-width character test failed: {description}");
@@ -115,7 +115,7 @@ fn test_bidirectional_text_injection() {
 
     for (input, description) in bidi_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Bidirectional text test failed: {description}");
@@ -154,7 +154,7 @@ fn test_control_character_injection() {
 
     for (input, description) in control_char_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Control character test failed: {description}");
@@ -195,7 +195,7 @@ fn test_emoji_symbol_edge_cases() {
 
     for (input, description) in emoji_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Emoji test failed: {description}");
@@ -227,7 +227,7 @@ fn test_private_use_area_handling() {
 
     for (input, description) in private_use_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Private use area test failed: {description}");
@@ -257,7 +257,7 @@ fn test_surrogate_pair_handling() {
 
     for (input, description) in high_codepoint_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "High codepoint test failed: {description}");
@@ -293,7 +293,7 @@ fn test_unicode_case_folding_edge_cases() {
 
     for (input, description) in case_folding_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Case folding test failed: {description}");
@@ -328,7 +328,7 @@ fn test_combining_character_sequences() {
 
     for (input, description) in combining_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Combining character test failed: {description}");
@@ -363,7 +363,7 @@ fn test_complex_unicode_security_scenarios() {
 
     for (input, description) in complex_scenarios {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let start = std::time::Instant::now();
         let result = rule.check(&ctx);

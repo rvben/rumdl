@@ -61,7 +61,7 @@ impl RumdlLanguageServer {
         drop(rumdl_config); // Release config lock early
 
         // Run rumdl linting
-        match crate::lint(text, &all_rules, false) {
+        match crate::lint(text, &all_rules, false, crate::config::MarkdownFlavor::Standard) {
             Ok(warnings) => {
                 let diagnostics = warnings.iter().map(warning_to_diagnostic).collect();
                 Ok(diagnostics)
@@ -96,7 +96,7 @@ impl RumdlLanguageServer {
         let mut any_changes = false;
 
         for rule in &all_rules {
-            let ctx = crate::lint_context::LintContext::new(&fixed_text);
+            let ctx = crate::lint_context::LintContext::new(&fixed_text, crate::config::MarkdownFlavor::Standard);
             match rule.fix(&ctx) {
                 Ok(new_text) => {
                     if new_text != fixed_text {
@@ -127,7 +127,7 @@ impl RumdlLanguageServer {
         let all_rules = rules::all_rules(&rumdl_config);
         drop(rumdl_config);
 
-        match crate::lint(text, &all_rules, false) {
+        match crate::lint(text, &all_rules, false, crate::config::MarkdownFlavor::Standard) {
             Ok(warnings) => {
                 let mut actions = Vec::new();
 

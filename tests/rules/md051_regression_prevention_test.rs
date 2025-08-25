@@ -42,7 +42,7 @@ fn regression_test_issue_39_critical_cases() {
 
     for (heading, expected_fragment, requirement) in critical_cases {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         if result.is_empty() {
@@ -115,7 +115,7 @@ fn regression_test_historical_patterns() {
 
     for (heading, expected_fragment) in historical_patterns {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
@@ -151,7 +151,7 @@ Valid internal links:
 [Should fail](#nonexistent)
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the nonexistent internal link
@@ -194,7 +194,7 @@ Fragment-only links (MUST be validated):
 [Invalid](#missing-section)
 "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid fragment-only link
@@ -228,7 +228,7 @@ fn regression_test_performance_bounds() {
 
     // Measure performance
     let start = std::time::Instant::now();
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
     let _result = rule.check(&ctx).unwrap();
     let duration = start.elapsed();
 
@@ -263,7 +263,7 @@ fn regression_test_unicode_handling() {
 
     for (heading, expected_fragment) in unicode_cases {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
@@ -292,7 +292,7 @@ fn regression_test_emoji_handling() {
 
     for (heading, expected_fragment) in emoji_cases {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
@@ -323,7 +323,7 @@ fn regression_test_mode_switching() {
     for (heading, github_expected, kramdown_expected) in mode_test_cases {
         // Test GitHub mode
         let content = format!("# {heading}\n\n[Link](#{github_expected})");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = github_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -333,7 +333,7 @@ fn regression_test_mode_switching() {
 
         // Test Kramdown mode
         let content = format!("# {heading}\n\n[Link](#{kramdown_expected})");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = kramdown_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -359,7 +359,7 @@ fn regression_test_basic_canary() {
 
     for (heading, expected_fragment) in canary_cases {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
@@ -389,12 +389,12 @@ fn regression_test_edge_cases() {
         if expected_fragment.is_empty() {
             // For empty expected fragments, just ensure no crash
             let content = format!("# {heading}\n\n");
-            let ctx = LintContext::new(&content);
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx);
             assert!(result.is_ok(), "Edge case crashed: '{heading}'");
         } else {
             let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-            let ctx = LintContext::new(&content);
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
 
             assert_eq!(
@@ -435,7 +435,7 @@ fn comprehensive_regression_suite() {
 
     for (heading, expected_fragment, category) in test_cases {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         let success = result.is_empty();

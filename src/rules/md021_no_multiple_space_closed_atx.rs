@@ -223,13 +223,13 @@ mod tests {
 
         // Test with correct spacing
         let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with multiple spaces
         let content = "#  Heading 1 #\n## Heading 2 ##\n### Heading 3  ###";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should flag the two headings with multiple spaces
         assert_eq!(result[0].line, 1);

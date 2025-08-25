@@ -422,21 +422,21 @@ mod tests {
         // Test with no spaces inside emphasis - should pass
         let content = "This is *correct* emphasis and **strong emphasis**";
         let structure = DocumentStructure::new(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(result.is_empty(), "No warnings expected for correct emphasis");
 
         // Test with actual spaces inside emphasis - use content that should warn
         let content = "This is * text with spaces * and more content";
         let structure = DocumentStructure::new(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(!result.is_empty(), "Expected warnings for spaces in emphasis");
 
         // Test with code blocks - emphasis in code should be ignored
         let content = "This is *correct* emphasis\n```\n* incorrect * in code block\n```\nOutside block with * spaces in emphasis *";
         let structure = DocumentStructure::new(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             !result.is_empty(),
@@ -450,7 +450,7 @@ mod tests {
         let content = r#"Check this [* spaced asterisk *](https://example.com/*test*) link.
 
 This has * real spaced emphasis * that should be flagged."#;
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Test passed - emphasis inside links are filtered out correctly
@@ -473,7 +473,7 @@ This has * real spaced emphasis * that should be flagged."#;
         let content = r#"Check [* spaced *](https://example.com/*test*) and inline * real spaced * text.
 
 [* link *]: https://example.com/*path*"#;
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Only the actual emphasis outside links should be flagged
@@ -490,7 +490,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case from issue #49
         let content = "The `__mul__` method is needed for left-hand multiplication (`vector * 3`) and `__rmul__` is needed for right-hand multiplication (`3 * vector`).";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -505,7 +505,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 1: inline code with single backticks inside bold emphasis
         let content = "Though, we often call this an **inline `if`** because it looks sort of like an `if`-`else` statement all in *one line* of code.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -514,7 +514,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 2: multiple inline code snippets inside emphasis
         let content2 = "The **`foo` and `bar`** methods are important.";
-        let ctx2 = LintContext::new(content2);
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
         assert!(
             result2.is_empty(),
@@ -523,7 +523,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 3: inline code with underscores for emphasis
         let content3 = "This is __inline `code`__ with underscores.";
-        let ctx3 = LintContext::new(content3);
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard);
         let result3 = rule.check(&ctx3).unwrap();
         assert!(
             result3.is_empty(),
@@ -532,7 +532,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 4: single asterisk emphasis with inline code
         let content4 = "This is *inline `test`* with single asterisks.";
-        let ctx4 = LintContext::new(content4);
+        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::Standard);
         let result4 = rule.check(&ctx4).unwrap();
         assert!(
             result4.is_empty(),
@@ -541,7 +541,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 5: actual spaces that should be flagged
         let content5 = "This has * real spaces * that should be flagged.";
-        let ctx5 = LintContext::new(content5);
+        let ctx5 = LintContext::new(content5, crate::config::MarkdownFlavor::Standard);
         let result5 = rule.check(&ctx5).unwrap();
         assert!(!result5.is_empty(), "Should still flag actual spaces in emphasis");
         assert!(result5[0].message.contains("Spaces inside emphasis markers"));

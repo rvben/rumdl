@@ -199,7 +199,7 @@ mod tests {
     fn test_image_with_alt_text() {
         let rule = MD045NoAltText::new();
         let content = "![A beautiful sunset](sunset.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -209,7 +209,7 @@ mod tests {
     fn test_image_without_alt_text() {
         let rule = MD045NoAltText::new();
         let content = "![](sunset.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -221,7 +221,7 @@ mod tests {
     fn test_image_with_only_whitespace_alt_text() {
         let rule = MD045NoAltText::new();
         let content = "![   ](sunset.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -232,7 +232,7 @@ mod tests {
     fn test_multiple_images() {
         let rule = MD045NoAltText::new();
         let content = "![Good alt text](image1.jpg)\n![](image2.jpg)\n![Another good one](image3.jpg)\n![](image4.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -244,7 +244,7 @@ mod tests {
     fn test_reference_style_image() {
         let rule = MD045NoAltText::new();
         let content = "![][sunset]\n\n[sunset]: sunset.jpg";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -290,7 +290,7 @@ mod tests {
     fn test_fix_with_smart_placeholders() {
         let rule = MD045NoAltText::new();
         let content = "![](team-photo.jpg)\n![](product_screenshot.png)\n![Good alt](logo.png)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(
@@ -303,7 +303,7 @@ mod tests {
     fn test_reference_style_with_alt_text() {
         let rule = MD045NoAltText::new();
         let content = "![Beautiful sunset][sunset]\n\n[sunset]: sunset.jpg";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -313,7 +313,7 @@ mod tests {
     fn test_image_in_code_block() {
         let rule = MD045NoAltText::new();
         let content = "```\n![](image.jpg)\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag images in code blocks
@@ -324,7 +324,7 @@ mod tests {
     fn test_image_in_inline_code() {
         let rule = MD045NoAltText::new();
         let content = "Use `![](image.jpg)` syntax";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag images in inline code
@@ -335,7 +335,7 @@ mod tests {
     fn test_fix_empty_alt_text() {
         let rule = MD045NoAltText::new();
         let content = "![](sunset.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "![Sunset image](sunset.jpg)");
@@ -345,7 +345,7 @@ mod tests {
     fn test_fix_whitespace_alt_text() {
         let rule = MD045NoAltText::new();
         let content = "![   ](sunset.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "![Sunset image](sunset.jpg)");
@@ -355,7 +355,7 @@ mod tests {
     fn test_fix_multiple_images() {
         let rule = MD045NoAltText::new();
         let content = "![Good](img1.jpg) ![](img2.jpg) ![](img3.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(
@@ -368,7 +368,7 @@ mod tests {
     fn test_fix_preserves_existing_alt_text() {
         let rule = MD045NoAltText::new();
         let content = "![This has alt text](image.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "![This has alt text](image.jpg)");
@@ -378,7 +378,7 @@ mod tests {
     fn test_fix_does_not_modify_code_blocks() {
         let rule = MD045NoAltText::new();
         let content = "```\n![](image.jpg)\n```\n![](real-image.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "```\n![](image.jpg)\n```\n![Real Image image](real-image.jpg)");
@@ -388,7 +388,7 @@ mod tests {
     fn test_complex_urls() {
         let rule = MD045NoAltText::new();
         let content = "![](https://example.com/path/to/image.jpg?query=value#fragment)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -398,7 +398,7 @@ mod tests {
     fn test_nested_parentheses_in_url() {
         let rule = MD045NoAltText::new();
         let content = "![](image(1).jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -408,7 +408,7 @@ mod tests {
     fn test_image_with_title() {
         let rule = MD045NoAltText::new();
         let content = "![](image.jpg \"Title text\")";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -419,7 +419,7 @@ mod tests {
     fn test_fix_preserves_title() {
         let rule = MD045NoAltText::new();
         let content = "![](image.jpg \"Title text\")";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "![Image image](image.jpg \"Title text\")");
@@ -429,7 +429,7 @@ mod tests {
     fn test_image_with_spaces_in_url() {
         let rule = MD045NoAltText::new();
         let content = "![](my image.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -439,7 +439,7 @@ mod tests {
     fn test_column_positions() {
         let rule = MD045NoAltText::new();
         let content = "Text before ![](image.jpg) text after";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -451,7 +451,7 @@ mod tests {
     fn test_multiline_content() {
         let rule = MD045NoAltText::new();
         let content = "Line 1\nLine 2 with ![](image.jpg)\nLine 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -465,7 +465,7 @@ mod tests {
         };
         let rule = MD045NoAltText::from_config_struct(config);
         let content = "![](image.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         // When custom placeholder is set, smart placeholders are not used
@@ -479,7 +479,7 @@ mod tests {
         };
         let rule = MD045NoAltText::from_config_struct(config);
         let content = "![Good](img1.jpg) ![](img2.jpg) ![   ](img3.jpg)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(

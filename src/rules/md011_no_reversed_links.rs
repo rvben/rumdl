@@ -412,7 +412,7 @@ mod tests {
 
         // Test with reversed link syntax
         let content = "Check out (https://example.com)[this link] for more info.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         // This should detect the reversed syntax
         let result = rule.check(&ctx).unwrap();
@@ -430,7 +430,7 @@ mod tests {
         let rule = MD011NoReversedLinks;
 
         let content = "Visit (https://example.com)[Example] and (https://test.com)[Test Site].";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
@@ -452,7 +452,7 @@ mod tests {
         let rule = MD011NoReversedLinks;
 
         let content = "This is a normal [link](https://example.com) and another [link](https://test.com).";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
@@ -477,7 +477,7 @@ mod tests {
 
             // Test what the actual rule produces
             let rule = MD011NoReversedLinks;
-            let ctx = LintContext::new(test_text);
+            let ctx = LintContext::new(test_text, crate::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
             if !result.is_empty() {
                 println!("Rule fix produces: {}", result[0].fix.as_ref().unwrap().replacement);
@@ -553,38 +553,38 @@ Another (https://test.com)[reversed] link should be flagged."#;
 
         // Test wrong bracket types
         let content = "Check out {https://example.com}[this website].";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Malformed link syntax"));
 
         // Test URL and text swapped
         let content = "Visit [https://example.com](Click Here).";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Malformed link syntax"));
 
         // Test that valid links are not flagged
         let content = "This is a [normal link](https://example.com).";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
 
         // Test that non-links are not flagged
         let content = "Regular text with [brackets] and (parentheses).";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
 
         // Test that risky patterns are NOT flagged (conservative approach)
         let content = "(example.com)is a test domain.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
 
         let content = "(optional)parameter should not be flagged.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
     }
@@ -595,7 +595,7 @@ Another (https://test.com)[reversed] link should be flagged."#;
 
         // Test wrong bracket types fix
         let content = "Check out {https://example.com}[this website].";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fix = result[0].fix.as_ref().unwrap();
@@ -603,7 +603,7 @@ Another (https://test.com)[reversed] link should be flagged."#;
 
         // Test URL and text swapped fix
         let content = "Visit [https://example.com](Click Here).";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fix = result[0].fix.as_ref().unwrap();
@@ -616,17 +616,17 @@ Another (https://test.com)[reversed] link should be flagged."#;
 
         // Test that edge cases are not flagged
         let content = "This (not-a-url)text should be ignored.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
 
         let content = "Also [regular text](not a url) should be ignored.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
 
         let content = "And {not-url}[not-text] should be ignored.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0);
     }
@@ -645,7 +645,7 @@ static ref TRAILING_PUNCTUATION: Regex = Regex::new(r"(?m)[.!?]+\s*$").unwrap();
 
 But this (https://example.com)[reversed link] should be flagged."#;
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag the reversed link outside the code block
@@ -660,19 +660,19 @@ But this (https://example.com)[reversed link] should be flagged."#;
 
         // Test that (text)[ref](url) pattern is not flagged
         let content = "This is a reference-style link: (see here)[ref](https://example.com)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should not flag (text)[ref](url) pattern");
 
         // Test that genuine reversed links are still caught
         let content = "This is reversed: (https://example.com)[click here]";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag genuine reversed links");
 
         // Test with spacing before the second parentheses
         let content = "Reference with space: (text)[ref] (url)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should not flag when space before (url)");
     }
@@ -683,13 +683,13 @@ But this (https://example.com)[reversed link] should be flagged."#;
 
         // Test escaped brackets and parentheses
         let content = r"Escaped: \(not a link\)\[also not\]";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should not flag escaped brackets");
 
         // Test with URL containing parentheses
         let content = "(https://example.com/path(with)parens)[text]";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should still flag URLs with nested parentheses");
     }
@@ -701,19 +701,19 @@ But this (https://example.com)[reversed link] should be flagged."#;
 
         // Test the exact case from issue #19
         let content = "I find `inspect.stack()[1].frame` a lot easier to understand (or at least guess about) at a glance than `inspect.stack()[1][0]`.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should not flag ()[1] patterns inside inline code");
 
         // Test other patterns that might look like reversed links in code
         let content = "Use `array()[0]` or `func()[1]` to access elements.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should not flag array access patterns in inline code");
 
         // Test that actual reversed links outside code are still caught
         let content = "Check out (https://example.com)[this link] and use `array()[1]`.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag actual reversed link but not code pattern");
         assert!(result[0].message.contains("Reversed link syntax"));
@@ -729,7 +729,7 @@ But this is wrong: (https://example.com)[Click here]
 result = inspect.stack()[1]
 ```
 "#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should only flag the actual reversed link");
         assert_eq!(result[0].line, 4, "Should flag the reversed link on line 4");
@@ -741,7 +741,7 @@ result = inspect.stack()[1]
         let rule = MD011NoReversedLinks;
 
         let content = r#"The first thing I need to find is the name of the redacted key name, `doc.<key_name_omitted>`. I'll use `SUBSTRING(ATTRIBUTES(doc)[0], 0, 1) == '<c>'` as that test, where `<c>` is different characters. This gets the first attribute from `doc` and uses `SUBSTRING` to get the first character."#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),

@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD042NoEmptyLinks;
 fn test_valid_links() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[Link text](https://example.com)\n[Another link](./local/path)";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_valid_links() {
 fn test_empty_link_text() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[](https://example.com)";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -26,7 +26,7 @@ fn test_empty_link_text() {
 fn test_empty_link_url() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[Link text]()";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -37,7 +37,7 @@ fn test_empty_link_url() {
 fn test_empty_link_both() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[]()";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -48,7 +48,7 @@ fn test_empty_link_both() {
 fn test_multiple_empty_links() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[Link]() and []() and [](url)";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(&ctx).unwrap();
@@ -62,7 +62,7 @@ fn test_multiple_empty_links() {
 fn test_whitespace_only_links() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[ ](  )";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -73,7 +73,7 @@ fn test_whitespace_only_links() {
 fn test_mixed_valid_and_empty_links() {
     let rule = MD042NoEmptyLinks::new();
     let content = "[Valid](https://example.com) and []() and [Another](./path)";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -100,7 +100,7 @@ Fenced code block with empty links:
 
 Another regular empty link: [empty text]()"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -123,7 +123,7 @@ Indented code block with empty links:
 
 Another regular empty link: [empty text]()"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -145,7 +145,7 @@ Another regular empty link: [empty text]()
 
 More inline code: `Check this [empty]() link`"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -186,7 +186,7 @@ Regular empty link: [](https://example.com)
 
 Final empty link: []()"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -226,7 +226,7 @@ Tilde fenced:
 
 Final empty: [empty text]()"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -252,7 +252,7 @@ Inline code: `[][empty-ref]`
 
 [empty-ref]: "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -279,7 +279,7 @@ Inline: `[]()` and more text
 
 Final: []()"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -295,31 +295,31 @@ fn test_md042_reference_links() {
 
     // Test valid reference link
     let content = "[text][ref]\n\n[ref]: https://example.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 
     // Test empty text reference link
     let content = "[][ref]\n\n[ref]: https://example.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
     // Test reference link with missing definition
     let content = "[text][missing]";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Empty URL due to missing reference
 
     // Test empty text with implicit reference
     let content = "[text][]\n\n[text]: https://example.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Valid implicit reference
 
     // Test both text and URL empty
     let content = "[][]";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Empty text and no matching reference
 }

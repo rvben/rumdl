@@ -313,7 +313,7 @@ mod tests {
     fn test_backtick_style_with_backticks() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
         let content = "```\ncode\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -323,7 +323,7 @@ mod tests {
     fn test_backtick_style_with_tildes() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
         let content = "~~~\ncode\n~~~";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2); // Opening and closing fence
@@ -336,7 +336,7 @@ mod tests {
     fn test_tilde_style_with_tildes() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
         let content = "~~~\ncode\n~~~";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -346,7 +346,7 @@ mod tests {
     fn test_tilde_style_with_backticks() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
         let content = "```\ncode\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2); // Opening and closing fence
@@ -357,7 +357,7 @@ mod tests {
     fn test_consistent_style_first_backtick() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
         let content = "```\ncode\n```\n\n~~~\nmore code\n~~~";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // First fence is backtick, so tildes should be flagged
@@ -370,7 +370,7 @@ mod tests {
     fn test_consistent_style_first_tilde() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
         let content = "~~~\ncode\n~~~\n\n```\nmore code\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // First fence is tilde, so backticks should be flagged
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn test_detect_style_backtick() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
-        let ctx = LintContext::new("```\ncode\n```");
+        let ctx = LintContext::new("```\ncode\n```", crate::config::MarkdownFlavor::Standard);
         let style = rule.detect_style(&ctx);
 
         assert_eq!(style, Some(CodeFenceStyle::Backtick));
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn test_detect_style_tilde() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
-        let ctx = LintContext::new("~~~\ncode\n~~~");
+        let ctx = LintContext::new("~~~\ncode\n~~~", crate::config::MarkdownFlavor::Standard);
         let style = rule.detect_style(&ctx);
 
         assert_eq!(style, Some(CodeFenceStyle::Tilde));
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn test_detect_style_none() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
-        let ctx = LintContext::new("No code fences here");
+        let ctx = LintContext::new("No code fences here", crate::config::MarkdownFlavor::Standard);
         let style = rule.detect_style(&ctx);
 
         assert_eq!(style, None);
@@ -410,7 +410,7 @@ mod tests {
     fn test_fix_backticks_to_tildes() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
         let content = "```\ncode\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "~~~\ncode\n~~~");
@@ -420,7 +420,7 @@ mod tests {
     fn test_fix_tildes_to_backticks() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
         let content = "~~~\ncode\n~~~";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "```\ncode\n```");
@@ -430,7 +430,7 @@ mod tests {
     fn test_fix_preserves_fence_length() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
         let content = "````\ncode with backtick\n```\ncode\n````";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "~~~~\ncode with backtick\n```\ncode\n~~~~");
@@ -440,7 +440,7 @@ mod tests {
     fn test_fix_preserves_language_info() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
         let content = "~~~rust\nfn main() {}\n~~~";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "```rust\nfn main() {}\n```");
@@ -450,7 +450,7 @@ mod tests {
     fn test_indented_code_fences() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
         let content = "  ```\n  code\n  ```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -460,7 +460,7 @@ mod tests {
     fn test_fix_indented_fences() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
         let content = "  ```\n  code\n  ```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "  ~~~\n  code\n  ~~~");
@@ -470,7 +470,7 @@ mod tests {
     fn test_nested_fences_not_changed() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
         let content = "```\ncode with ``` inside\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "~~~\ncode with ``` inside\n~~~");
@@ -480,7 +480,7 @@ mod tests {
     fn test_multiple_code_blocks() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
         let content = "~~~\ncode1\n~~~\n\nText\n\n~~~python\ncode2\n~~~";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 4); // 2 opening + 2 closing fences
@@ -490,7 +490,7 @@ mod tests {
     fn test_empty_content() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
         let content = "";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -500,7 +500,7 @@ mod tests {
     fn test_preserve_trailing_newline() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
         let content = "~~~\ncode\n~~~\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "```\ncode\n```\n");
@@ -510,7 +510,7 @@ mod tests {
     fn test_no_trailing_newline() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
         let content = "~~~\ncode\n~~~";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "```\ncode\n```");

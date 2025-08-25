@@ -11,7 +11,7 @@ fn benchmark_rule(rule: &dyn Rule, test_cases: &[(&str, &str)], iterations: u32)
     for (name, content) in test_cases {
         // Warm up
         for _ in 0..10 {
-            let ctx = LintContext::new(content);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
             let _ = rule.check(&ctx);
             let _ = rule.fix(&ctx);
         }
@@ -19,7 +19,7 @@ fn benchmark_rule(rule: &dyn Rule, test_cases: &[(&str, &str)], iterations: u32)
         // Benchmark check
         let start = Instant::now();
         for _ in 0..iterations {
-            let ctx = LintContext::new(content);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
             let _ = rule.check(&ctx);
         }
         let check_time = start.elapsed().as_micros() as u64 / iterations as u64;
@@ -27,7 +27,7 @@ fn benchmark_rule(rule: &dyn Rule, test_cases: &[(&str, &str)], iterations: u32)
         // Benchmark fix
         let start = Instant::now();
         for _ in 0..iterations {
-            let ctx = LintContext::new(content);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
             let _ = rule.fix(&ctx);
         }
         let fix_time = start.elapsed().as_micros() as u64 / iterations as u64;

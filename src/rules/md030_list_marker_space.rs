@@ -359,7 +359,7 @@ mod tests {
         let rule = MD030ListMarkerSpace::default();
         let content = "* Item 1\n* Item 2\n  * Nested item\n1. Ordered item";
         let structure = DocumentStructure::new(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             result.is_empty(),
@@ -367,7 +367,7 @@ mod tests {
         );
         let content = "*  Item 1 (too many spaces)\n* Item 2\n1.   Ordered item (too many spaces)";
         let structure = DocumentStructure::new(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         // Expect warnings for lines with too many spaces after the marker
         assert_eq!(

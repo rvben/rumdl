@@ -1,3 +1,4 @@
+use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -373,10 +374,11 @@ pub struct LintContext<'a> {
     emphasis_spans_cache: Mutex<Option<Arc<Vec<EmphasisSpan>>>>, // Lazy-loaded emphasis spans
     table_rows_cache: Mutex<Option<Arc<Vec<TableRow>>>>, // Lazy-loaded table rows
     bare_urls_cache: Mutex<Option<Arc<Vec<BareUrl>>>>, // Lazy-loaded bare URLs
+    pub flavor: MarkdownFlavor,           // Markdown flavor being used
 }
 
 impl<'a> LintContext<'a> {
-    pub fn new(content: &'a str) -> Self {
+    pub fn new(content: &'a str, flavor: MarkdownFlavor) -> Self {
         let mut line_offsets = vec![0];
         for (i, c) in content.char_indices() {
             if c == '\n' {
@@ -415,6 +417,7 @@ impl<'a> LintContext<'a> {
             emphasis_spans_cache: Mutex::new(None),
             table_rows_cache: Mutex::new(None),
             bare_urls_cache: Mutex::new(None),
+            flavor,
         }
     }
 
@@ -2366,7 +2369,7 @@ mod tests {
 
     #[test]
     fn test_empty_content() {
-        let ctx = LintContext::new("");
+        let ctx = LintContext::new("", MarkdownFlavor::Standard);
         assert_eq!(ctx.content, "");
         assert_eq!(ctx.line_offsets, vec![0]);
         assert_eq!(ctx.offset_to_line_col(0), (1, 1));
@@ -2375,7 +2378,7 @@ mod tests {
 
     #[test]
     fn test_single_line() {
-        let ctx = LintContext::new("# Hello");
+        let ctx = LintContext::new("# Hello", MarkdownFlavor::Standard);
         assert_eq!(ctx.content, "# Hello");
         assert_eq!(ctx.line_offsets, vec![0]);
         assert_eq!(ctx.offset_to_line_col(0), (1, 1));
@@ -2385,7 +2388,7 @@ mod tests {
     #[test]
     fn test_multi_line() {
         let content = "# Title\n\nSecond line\nThird line";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
         assert_eq!(ctx.line_offsets, vec![0, 8, 9, 21]);
         // Test offset to line/col
         assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // start
@@ -2398,7 +2401,7 @@ mod tests {
     #[test]
     fn test_line_info() {
         let content = "# Title\n    indented\n\ncode:\n```rust\nfn main() {}\n```";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
 
         // Test line info
         assert_eq!(ctx.lines.len(), 7);
@@ -2434,7 +2437,7 @@ mod tests {
     #[test]
     fn test_list_item_detection() {
         let content = "- Unordered item\n  * Nested item\n1. Ordered item\n   2) Nested ordered\n\nNot a list";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
 
         // Line 1: "- Unordered item"
         let line1 = &ctx.lines[0];
@@ -2468,7 +2471,7 @@ mod tests {
     #[test]
     fn test_offset_to_line_col_edge_cases() {
         let content = "a\nb\nc";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
         // line_offsets: [0, 2, 4]
         assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // 'a'
         assert_eq!(ctx.offset_to_line_col(1), (1, 2)); // after 'a'

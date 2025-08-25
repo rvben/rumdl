@@ -11,7 +11,7 @@ fn test_md029_valid() {
 1. Item 2
 1. Item 3"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -24,7 +24,7 @@ fn test_md029_ordered_any_valid() {
 2. Item 2
 3. Item 3"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -37,7 +37,7 @@ fn test_md029_ordered_any_invalid() {
 1. Item 2
 1. Item 3"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
 
@@ -53,7 +53,7 @@ fn test_md029_nested() {
    1. Nested first
    1. Nested second
 1. Second item"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -64,7 +64,7 @@ fn test_md029_fix() {
     let content = r#"1. First item
 3. Second item
 5. Third item"#;
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "1. First item\n2. Second item\n3. Third item");
 }
@@ -98,7 +98,7 @@ more code
 final code
 ```"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -132,7 +132,7 @@ fn test_md029_nested_with_code_blocks() {
    ```
 3. Third step"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     println!("Warnings: {result:?}");
     assert!(
@@ -171,7 +171,7 @@ fn test_md029_code_blocks_in_nested_lists() {
 
    2. Another nested"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should handle numbering correctly despite code blocks
@@ -195,7 +195,7 @@ fn test_md029_fenced_vs_indented_in_list() {
 
 3. Final item"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
     assert!(warnings.is_empty(), "Ordered numbering should be accepted");
@@ -216,7 +216,7 @@ fn test_zero_padded_numbers() {
 02. Second item
 05. Wrong number with padding";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should detect that 05 should be 03
@@ -236,7 +236,7 @@ fn test_lists_with_inline_html() {
 <div>Some HTML block</div>
 4. Wrong number after HTML";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // HTML should not interfere with numbering detection
@@ -257,7 +257,7 @@ fn test_lists_with_html_comments() {
 <!-- Another comment -->
 4. Wrong number after comments";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Comments should not break list sequences
@@ -276,7 +276,7 @@ fn test_lists_with_mathematical_expressions() {
 2. The result of 1.5 + 2.3 is 3.8
 4. Wrong number with math: 10.5 / 2.1";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Mathematical expressions shouldn't interfere with list numbering
@@ -304,7 +304,7 @@ fn test_deeply_nested_lists() {
           1. Level 6 item
           3. Wrong number at deep level";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle deep nesting and detect the wrong number
@@ -329,7 +329,7 @@ fn test_analyze_performance_errors() {
 
     println!("Content:\n{content}");
 
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     println!("Found {} warnings:", result.len());
@@ -354,7 +354,7 @@ fn test_performance_with_many_small_lists() {
         content.push_str(&format!("3. List {i} item 3 (wrong)\n\n")); // Wrong number
     }
 
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     let start = std::time::Instant::now();
     let result = rule.check(&ctx).unwrap();
@@ -387,7 +387,7 @@ fn test_lists_with_continuation_paragraphs() {
 
    This item has wrong numbering.";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Continuation paragraphs should not break sequences
@@ -407,7 +407,7 @@ fn test_mixed_indentation_patterns() {
      1. Indented 5 spaces total
   3. Back to 2 spaces - wrong number";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle non-standard indentation robustly
@@ -428,7 +428,7 @@ fn test_single_item_edge_cases() {
 
     for (style, content, should_have_error) in test_cases {
         let rule = MD029OrderedListPrefix::new(style.clone());
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         if should_have_error {
@@ -451,7 +451,7 @@ second line of first item
 1. Second item first line
 second line of second item"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have warnings for:
@@ -482,7 +482,7 @@ fn test_md029_multiline_3_space_indent() {
 1. Second item first line
    second line of second item"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have warning for second "1." since it should be "2."
@@ -500,7 +500,7 @@ fn test_md029_multiline_4_space_indent() {
 1. Second item first line
     second line of second item"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should have warning for second "1." since it should be "2."
@@ -518,7 +518,7 @@ fn test_md029_multiline_2_space_indent() {
 1. Second item first line
   second line of second item"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // 2 spaces is not enough for ordered list continuation (need 3)
@@ -539,7 +539,7 @@ code block
 2. Second item
    continuation line"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Code blocks should not break list numbering");
 }
@@ -553,7 +553,7 @@ fn test_md029_fix_multiline_3_space() {
 1. Second item first line
    second line of second item"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
 
     let expected = r#"1. First item first line
@@ -576,7 +576,7 @@ fn test_md029_double_digit_marker_width() {
 11. Eleventh item
      continuation with 5 spaces"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // All items should be part of the same list
@@ -598,7 +598,7 @@ fn test_md029_double_digit_insufficient_indent() {
 11. Eleventh item
     text"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Line 2 has 3 spaces (OK for "9. ")
@@ -628,7 +628,7 @@ fn test_md029_triple_digit_marker_width() {
 101. One hundred first item
      continuation with 5 spaces"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // All items should be part of the same list
@@ -650,7 +650,7 @@ fn test_md029_quadruple_digit_marker_width() {
 1111. Eleven eleven item
       continuation with 6 spaces"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // All items should be part of the same list
@@ -672,7 +672,7 @@ fn test_md029_large_digit_insufficient_indent() {
 1000. Item one thousand
      only 5 spaces (not enough for "1000. " which needs 6)"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // We expect the list to be broken into multiple blocks
@@ -695,7 +695,7 @@ lazy continuation
 1. Second item
 another lazy line"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
 
     // MD029 only fixes numbering, not indentation
@@ -720,7 +720,7 @@ lazy line
   two space indent
     four space indent"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should detect lazy continuations (0 and 2 space lines)
@@ -750,7 +750,7 @@ fn test_md029_simple_insufficient_indent() {
    not enough spaces
 10. Item ten again"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Line 2 has 3 spaces but needs 4 for "10. "
@@ -780,7 +780,7 @@ fn test_md029_nested_ordered_lists_issue_52() {
    1. Sub 3
    1. Sub 4"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag 2 errors (not 3 as the bug produced):
@@ -841,7 +841,7 @@ fn test_md029_nested_ordered_lists_bug() {
    1. Sub 3
    1. Sub 4"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Debug info
     println!("List blocks found:");
@@ -944,7 +944,7 @@ fn test_md029_triple_nested_ordered_lists() {
       1. Level 3 item 5
       3. Level 3 item 6 - wrong"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should detect 2 errors: lines 7 and 11 (second items at level 3 under different parents)
@@ -984,7 +984,7 @@ fn test_md029_ordered_under_unordered_parents() {
 - Unordered parent 3
   1. Another sequence starts at 1"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should find 2 errors: second items under each unordered parent
@@ -1017,7 +1017,7 @@ fn test_md029_lists_with_code_block_interruptions() {
    ```
    1. Should be 2 after code block"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should find 1 error: the nested "1." that should be "2."
@@ -1037,7 +1037,7 @@ fn test_md029_mixed_indentation_robustness() {
    1. 3-space nested (back to standard)
    5. Should be 2"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle mixed indentation gracefully and detect numbering errors
@@ -1065,7 +1065,7 @@ fn test_md029_all_styles_with_nesting() {
 
     for style in styles {
         let rule = MD029OrderedListPrefix::new(style.clone());
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx);
 
         // Just verify it doesn't crash and produces some result

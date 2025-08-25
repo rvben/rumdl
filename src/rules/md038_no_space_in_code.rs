@@ -381,7 +381,7 @@ mod tests {
             "URL example ` https://example.com/very/long/path?query=value&more=params ` here.", // Complex long URL
         ];
         for case in valid_cases {
-            let ctx = crate::lint_context::LintContext::new(case);
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
             assert!(result.is_empty(), "Valid case should not have warnings: {case}");
         }
@@ -398,7 +398,7 @@ mod tests {
             "Multiple ` word ` spans with ` text ` in one line.", // Multiple simple cases
         ];
         for case in invalid_cases {
-            let ctx = crate::lint_context::LintContext::new(case);
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
             assert!(!result.is_empty(), "Invalid case should have warnings: {case}");
         }
@@ -418,7 +418,7 @@ mod tests {
             "This is ` code ` with both leading and trailing space.",
         ];
         for case in invalid_cases {
-            let ctx = crate::lint_context::LintContext::new(case);
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
             assert!(!result.is_empty(), "Strict mode should flag all spaces: {case}");
         }
@@ -443,7 +443,7 @@ mod tests {
             ),
         ];
         for (input, expected) in test_cases {
-            let ctx = crate::lint_context::LintContext::new(input);
+            let ctx = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard);
             let result = rule.fix(&ctx).unwrap();
             assert_eq!(result, expected, "Fix did not produce expected output for: {input}");
         }
@@ -453,7 +453,7 @@ mod tests {
     fn test_check_invalid_leading_space() {
         let rule = MD038NoSpaceInCode::new();
         let input = "This has a ` leading space` in code";
-        let ctx = crate::lint_context::LintContext::new(input);
+        let ctx = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
@@ -463,7 +463,7 @@ mod tests {
     #[test]
     fn test_code_span_parsing_nested_backticks() {
         let content = "Code with ` nested `code` example ` should preserve backticks";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         println!("Content: {content}");
         println!("Code spans found:");

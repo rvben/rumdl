@@ -344,7 +344,7 @@ mod tests {
     fn test_asterisk_style_with_asterisks() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "This is **strong text** here.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -354,7 +354,7 @@ mod tests {
     fn test_asterisk_style_with_underscores() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "This is __strong text__ here.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -371,7 +371,7 @@ mod tests {
     fn test_underscore_style_with_underscores() {
         let rule = MD050StrongStyle::new(StrongStyle::Underscore);
         let content = "This is __strong text__ here.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -381,7 +381,7 @@ mod tests {
     fn test_underscore_style_with_asterisks() {
         let rule = MD050StrongStyle::new(StrongStyle::Underscore);
         let content = "This is **strong text** here.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -396,7 +396,7 @@ mod tests {
     fn test_consistent_style_first_asterisk() {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
         let content = "First **strong** then __also strong__.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // First strong is **, so __ should be flagged
@@ -412,7 +412,7 @@ mod tests {
     fn test_consistent_style_first_underscore() {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
         let content = "First __strong__ then **also strong**.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // First strong is __, so ** should be flagged
@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn test_detect_style_asterisk() {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
-        let ctx = LintContext::new("This has **strong** text.");
+        let ctx = LintContext::new("This has **strong** text.", crate::config::MarkdownFlavor::Standard);
         let style = rule.detect_style(&ctx);
 
         assert_eq!(style, Some(StrongStyle::Asterisk));
@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn test_detect_style_underscore() {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
-        let ctx = LintContext::new("This has __strong__ text.");
+        let ctx = LintContext::new("This has __strong__ text.", crate::config::MarkdownFlavor::Standard);
         let style = rule.detect_style(&ctx);
 
         assert_eq!(style, Some(StrongStyle::Underscore));
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn test_detect_style_none() {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
-        let ctx = LintContext::new("No strong text here.");
+        let ctx = LintContext::new("No strong text here.", crate::config::MarkdownFlavor::Standard);
         let style = rule.detect_style(&ctx);
 
         assert_eq!(style, None);
@@ -455,7 +455,7 @@ mod tests {
     fn test_strong_in_code_block() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "```\n__strong__ in code\n```\n__strong__ outside";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Only the strong outside code block should be flagged
@@ -467,7 +467,7 @@ mod tests {
     fn test_strong_in_inline_code() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "Text with `__strong__` in code and __strong__ outside.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Only the strong outside inline code should be flagged
@@ -478,7 +478,7 @@ mod tests {
     fn test_escaped_strong() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "This is \\__not strong\\__ but __this is__.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Only the unescaped strong should be flagged
@@ -491,7 +491,7 @@ mod tests {
     fn test_fix_asterisks_to_underscores() {
         let rule = MD050StrongStyle::new(StrongStyle::Underscore);
         let content = "This is **strong** text.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "This is __strong__ text.");
@@ -501,7 +501,7 @@ mod tests {
     fn test_fix_underscores_to_asterisks() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "This is __strong__ text.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "This is **strong** text.");
@@ -511,7 +511,7 @@ mod tests {
     fn test_fix_multiple_strong() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "First __strong__ and second __also strong__.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "First **strong** and second **also strong**.");
@@ -521,7 +521,7 @@ mod tests {
     fn test_fix_preserves_code_blocks() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "```\n__strong__ in code\n```\n__strong__ outside";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "```\n__strong__ in code\n```\n**strong** outside");
@@ -531,7 +531,7 @@ mod tests {
     fn test_multiline_content() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "Line 1 with __strong__\nLine 2 with __another__\nLine 3 normal";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -543,7 +543,7 @@ mod tests {
     fn test_nested_emphasis() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "This has __strong with *emphasis* inside__.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -553,7 +553,7 @@ mod tests {
     fn test_empty_content() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -577,7 +577,7 @@ Hint:
 
 
 [__dict__]: https://www.pythonmorsels.com/where-are-attributes-stored/"#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // None of the __ patterns in links should be flagged
@@ -594,7 +594,7 @@ Instead of assigning to `self.value`, we're relying on the [`__dict__`][__dict__
 This is __real strong text__ that should be flagged.
 
 [__dict__]: https://www.pythonmorsels.com/where-are-attributes-stored/"#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Only the real strong text should be flagged, not the __ in links
@@ -612,7 +612,7 @@ This is __real strong text__ that should be flagged.
     fn test_front_matter_not_flagged() {
         let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
         let content = "---\ntitle: What's __init__.py?\nother: __value__\n---\n\nThis __should be flagged__.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Only the strong text outside front matter should be flagged
@@ -635,7 +635,7 @@ This has HTML with underscores:
 <iframe src="https://example.com/__init__/__repr__"> </iframe>
 
 This __should be flagged__ as inconsistent."#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Only the strong text outside HTML tags should be flagged

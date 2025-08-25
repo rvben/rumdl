@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD028NoBlanksBlockquote;
 fn test_md028_valid() {
     let rule = MD028NoBlanksBlockquote;
     let content = "> Quote\n> Another line\n\n> New quote\n> Another line\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_md028_valid() {
 fn test_md028_invalid() {
     let rule = MD028NoBlanksBlockquote;
     let content = "> Quote\n> Another line\n>\n> Still same quote\n> Another line\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
@@ -25,7 +25,7 @@ fn test_md028_invalid() {
 fn test_md028_multiple_blanks() {
     let rule = MD028NoBlanksBlockquote;
     let content = "> Quote\n> Another line\n>\n>\n> Still same quote\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 3);
@@ -36,7 +36,7 @@ fn test_md028_multiple_blanks() {
 fn test_md028_fix() {
     let rule = MD028NoBlanksBlockquote;
     let content = "> Quote\n> Another line\n>\n> Still same quote\n> Another line\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result,
@@ -48,12 +48,12 @@ fn test_md028_fix() {
 fn test_md028_nested_blockquotes() {
     let rule = MD028NoBlanksBlockquote;
     let content = "> Outer quote\n>> Nested quote\n>>\n>> Still nested\n> Back to outer\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed_result = rule.check(&fixed_ctx).unwrap();
     assert!(fixed_result.is_empty());
     assert_eq!(
@@ -66,12 +66,12 @@ fn test_md028_nested_blockquotes() {
 fn test_md028_indented_blockquotes() {
     let rule = MD028NoBlanksBlockquote;
     let content = "  > Indented quote\n  > Another line\n  >\n  > Still same quote\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed_result = rule.check(&fixed_ctx).unwrap();
     assert!(fixed_result.is_empty());
     assert_eq!(
@@ -84,12 +84,12 @@ fn test_md028_indented_blockquotes() {
 fn test_md028_multi_blockquotes() {
     let rule = MD028NoBlanksBlockquote;
     let content = "> First quote\n> Another line\n\n> Second quote\n> Another line\n>\n> Still second quote\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 6);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed_result = rule.check(&fixed_ctx).unwrap();
     assert!(fixed_result.is_empty());
     assert_eq!(

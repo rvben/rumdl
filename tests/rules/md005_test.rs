@@ -11,7 +11,7 @@ fn test_valid_unordered_list() {
   * Nested 1
   * Nested 2
 * Item 3";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -25,7 +25,7 @@ fn test_valid_ordered_list() {
    1. Nested 1
    2. Nested 2
 3. Item 3";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // With dynamic alignment, nested items should align with parent's text content
     // Ordered items starting with "1. " have text at column 3, so nested items need 3 spaces
@@ -59,7 +59,7 @@ And a list:
 
 - Item1
 - Item2";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should not flag YAML lists in frontmatter
     assert!(result.is_empty(), "MD005 should not check lists in frontmatter");
@@ -72,7 +72,7 @@ fn test_invalid_unordered_indent() {
 * Item 1
  * Item 2
    * Nested 1";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // With dynamic alignment, line 3 correctly aligns with line 2's text position
     // Only line 2 is incorrectly indented
@@ -88,7 +88,7 @@ fn test_invalid_ordered_indent() {
 1. Item 1
  2. Item 2
     1. Nested 1";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -106,7 +106,7 @@ fn test_mixed_list_types() {
   1. Nested ordered
   * Nested unordered
 * Item 2";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -118,7 +118,7 @@ fn test_multiple_levels() {
 * Level 1
    * Level 2
       * Level 3";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
@@ -143,7 +143,7 @@ fn test_empty_lines() {
   * Nested 1
 
 * Item 2";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -155,7 +155,7 @@ fn test_no_lists() {
 Just some text
 More text
 Even more text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -171,7 +171,7 @@ fn test_complex_nesting() {
     1. Ordered 3
     2. Still 3
 * Back to 1";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -187,7 +187,7 @@ fn test_invalid_complex_nesting() {
       1. Ordered 3
      2. Still 3
 * Back to 1";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // With dynamic alignment, fewer items need correction
     // Lines 2,4: should align with Level 1's text (2 spaces)

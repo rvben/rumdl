@@ -23,7 +23,7 @@ __مرحبا بالعالم__
 
 _Привет мир_";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4, "Should detect all Unicode emphasis as headings");
 
@@ -51,7 +51,7 @@ fn test_md036_punctuation_edge_cases() {
 
 *No punctuation*";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // With punctuation allowed, these should be ignored except the last one
     assert_eq!(result.len(), 1, "Should only detect emphasis without punctuation");
@@ -78,7 +78,7 @@ fn test_md036_toc_labels() {
 
 **Custom Heading**";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // With empty punctuation, MD036 detects more emphasis as headings
     // TOC labels are only ignored when punctuation is configured
@@ -116,7 +116,7 @@ fn test_md036_complex_contexts() {
 |-----------|----------|
 | **Cell**  | *Data*   |";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Only the first line should be detected
     assert_eq!(result.len(), 1, "Should only detect standalone emphasis");
@@ -145,7 +145,7 @@ Not **standalone** emphasis
 
 **Multiple** **emphasis** **markers**";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Empty emphasis and mixed should not be detected
     // Only line 9 with triple asterisks might be detected
@@ -170,7 +170,7 @@ __ Привет __
 
 *\u{00A0}Non-breaking space\u{00A0}*";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should detect ASCII spaces, not sure about Unicode spaces
     assert!(result.len() >= 4, "Should detect spaces in emphasis");
@@ -206,7 +206,7 @@ spaces
 
 ** nested * space * **";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.len() >= 5, "Should detect various spacing issues");
 }
@@ -223,7 +223,7 @@ Mix of * good* and *bad * emphasis * markers *
 
 ** Bold ** with _ italic _ and __more bold __";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should detect all instances with spaces
     assert!(result.len() >= 8, "Should detect all spacing issues");
@@ -263,7 +263,7 @@ fn test_md037_edge_patterns() {
 * code block *
 ```";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Empty emphasis and escaped content might behave differently
     assert!(!result.is_empty(), "Should detect some spacing issues");
@@ -287,7 +287,7 @@ This is *inline 你好* emphasis
 
 Another _inline مرحبا_ style";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Asterisk styles should be flagged
     assert_eq!(result.len(), 3, "Should detect asterisk emphasis");
@@ -315,7 +315,7 @@ _This underscore should be flagged_
 
 _Another incorrect_";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Underscore styles should be flagged
     assert_eq!(result.len(), 2, "Should detect inconsistent underscore emphasis");
@@ -328,7 +328,7 @@ _First style is underscore_
 
 _Correct style_";
 
-    let ctx2 = LintContext::new(content2);
+    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
     let result2 = rule.check(&ctx2).unwrap();
     assert_eq!(result2.len(), 1, "Should detect inconsistent asterisk emphasis");
 }
@@ -349,7 +349,7 @@ Email: user_name@company_domain.com
 
 But _this emphasis_ should be fixed";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should only detect emphasis, not URLs");
 
@@ -378,7 +378,7 @@ Link with [*emphasis*](url) inside
 
 Image with ![*alt text*](img.png) emphasis";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // With link filtering, should detect only standalone asterisk emphasis (not in links/images)
     // Only the asterisk emphasis outside of links should be flagged
@@ -407,7 +407,7 @@ This is **inline 你好** emphasis
 
 Another __inline مرحبا__ style";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Double asterisk styles should be flagged
     assert_eq!(result.len(), 3, "Should detect double asterisk emphasis");
@@ -435,7 +435,7 @@ __This underscore should be flagged__
 
 __Another incorrect__";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Double underscore styles should be flagged
     assert_eq!(result.len(), 2, "Should detect inconsistent strong emphasis");
@@ -457,7 +457,7 @@ __Real strong emphasis__
 
 __Should be \\*\\*fixed\\*\\* to asterisks__";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Should only detect real emphasis
     assert_eq!(result.len(), 2, "Should only detect unescaped emphasis");
@@ -480,7 +480,7 @@ This has * spaces * and *wrong style*
 
 More __bold __ with spaces";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Each rule should detect its issues
     let result036 = md036.check(&ctx).unwrap();
@@ -520,7 +520,7 @@ fn test_emphasis_in_special_constructs() {
 
 <div>HTML with * spaces *</div>";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = md037.check(&ctx).unwrap();
     // Should detect spaces in blockquotes, lists, and HTML tags (not in links, tables, or comments)
     assert_eq!(
@@ -538,13 +538,13 @@ fn test_emphasis_performance_edge_cases() {
     let long_text = "a".repeat(500);
     let content = format!("* {long_text} *\n\n** {long_text} **");
 
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = md037.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should handle long lines");
 
     // Test with many emphasis markers
     let many_emphasis = "* text * ".repeat(50);
-    let ctx2 = LintContext::new(&many_emphasis);
+    let ctx2 = LintContext::new(&many_emphasis, rumdl_lib::config::MarkdownFlavor::Standard);
     let result2 = md037.check(&ctx2).unwrap();
     assert_eq!(result2.len(), 50, "Should handle many emphasis markers");
 }
@@ -558,9 +558,9 @@ fn test_emphasis_line_endings() {
     let content_crlf = "* spaces *\r\n* more *";
     let content_no_ending = "* spaces *";
 
-    let ctx_lf = LintContext::new(content_lf);
-    let ctx_crlf = LintContext::new(content_crlf);
-    let ctx_no_ending = LintContext::new(content_no_ending);
+    let ctx_lf = LintContext::new(content_lf, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_crlf = LintContext::new(content_crlf, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_no_ending = LintContext::new(content_no_ending, rumdl_lib::config::MarkdownFlavor::Standard);
 
     assert_eq!(md037.check(&ctx_lf).unwrap().len(), 2);
     assert_eq!(md037.check(&ctx_crlf).unwrap().len(), 2);
@@ -586,7 +586,7 @@ _b_
 
 _ _";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result036 = md036.check(&ctx).unwrap();
     let result037 = md037.check(&ctx).unwrap();
 
@@ -611,7 +611,7 @@ fn test_emphasis_html_entities() {
 
 *&lt;tag&gt;*";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = md037.check(&ctx).unwrap();
     // Should detect spaces around entities
     assert_eq!(result.len(), 3, "Should detect spaces around HTML entities");
@@ -632,7 +632,7 @@ emphasis: *also not*
 
 Normal content";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = md036.check(&ctx).unwrap();
     // Should only detect emphasis outside front matter
     assert_eq!(result.len(), 1, "Should ignore front matter");
@@ -658,7 +658,7 @@ __bold___italic_
 
 ___both___";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result049 = md049.check(&ctx).unwrap();
     let result050 = md050.check(&ctx).unwrap();
 

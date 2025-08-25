@@ -561,7 +561,7 @@ mod tests {
     fn test_valid_headings() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "\n# Heading 1\n\nSome content.\n\n## Heading 2\n\nMore content.\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -570,7 +570,7 @@ mod tests {
     fn test_missing_blank_above() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\n\nSome content.\n\n## Heading 2\n\nMore content.\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0); // No warning for first heading
 
@@ -588,7 +588,7 @@ mod tests {
     fn test_missing_blank_below() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "\n# Heading 1\nSome content.\n\n## Heading 2\n\nMore content.\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
@@ -602,7 +602,7 @@ mod tests {
     fn test_missing_blank_above_and_below() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\nSome content.\n## Heading 2\nMore content.\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 3); // Missing blanks: below first heading, above second heading, below second heading
 
@@ -617,7 +617,7 @@ mod tests {
     fn test_fix_headings() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\nSome content.\n## Heading 2\nMore content.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
         let expected = "# Heading 1\n\nSome content.\n\n## Heading 2\n\nMore content.";
@@ -628,7 +628,7 @@ mod tests {
     fn test_consecutive_headings_pattern() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
         // Using more specific assertions to check the structure
@@ -661,7 +661,7 @@ mod tests {
     fn test_blanks_around_setext_headings() {
         let rule = MD022BlanksAroundHeadings::default();
         let content = "Heading 1\n=========\nSome content.\nHeading 2\n---------\nMore content.";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
         // Check that the fix follows requirements without being too rigid about the exact output format
@@ -691,7 +691,7 @@ mod tests {
         );
 
         // Verify that the fixed content has no warnings
-        let fixed_ctx = LintContext::new(&result);
+        let fixed_ctx = LintContext::new(&result, crate::config::MarkdownFlavor::Standard);
         let fixed_warnings = rule.check(&fixed_ctx).unwrap();
         assert!(fixed_warnings.is_empty(), "Fixed content should have no warnings");
     }
@@ -702,7 +702,7 @@ mod tests {
 
         // Case 1: Testing consecutive headings
         let content1 = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx1 = LintContext::new(content1);
+        let ctx1 = LintContext::new(content1, crate::config::MarkdownFlavor::Standard);
         let result1 = rule.fix(&ctx1).unwrap();
         // Verify structure rather than exact content as the fix implementation may vary
         assert!(result1.contains("# Heading 1"));
@@ -717,7 +717,7 @@ mod tests {
 
         // Case 2: Headings with content
         let content2 = "# Heading 1\nContent under heading 1\n## Heading 2";
-        let ctx2 = LintContext::new(content2);
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.fix(&ctx2).unwrap();
         // Verify structure
         assert!(result2.contains("# Heading 1"));
@@ -734,7 +734,7 @@ mod tests {
 
         // Case 3: Multiple consecutive headings with blank lines preserved
         let content3 = "# Heading 1\n\n\n## Heading 2\n\n\n### Heading 3\n\nContent";
-        let ctx3 = LintContext::new(content3);
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard);
         let result3 = rule.fix(&ctx3).unwrap();
         // Just verify it doesn't crash and properly formats headings
         assert!(result3.contains("# Heading 1"));
@@ -781,7 +781,7 @@ Even more content.
 
 Final content.";
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule._fix_content(&ctx);
         assert_eq!(
             result, expected,
@@ -795,13 +795,13 @@ Final content.";
 
         // Test with trailing newline
         let content_with_newline = "# Title\nContent here.\n";
-        let ctx = LintContext::new(content_with_newline);
+        let ctx = LintContext::new(content_with_newline, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
         assert!(result.ends_with('\n'), "Should preserve trailing newline");
 
         // Test without trailing newline
         let content_without_newline = "# Title\nContent here.";
-        let ctx = LintContext::new(content_without_newline);
+        let ctx = LintContext::new(content_without_newline, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
         assert!(
             !result.ends_with('\n'),
@@ -816,7 +816,7 @@ Final content.";
 
         let expected = "## Configuration\n\nThis rule has the following configuration options:\n\n- `option1`: Description of option 1.\n- `option2`: Description of option 2.\n\n## Another Section\n\nSome content here.";
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule._fix_content(&ctx);
         assert_eq!(result, expected, "Fix should not add blank lines before lists");
     }

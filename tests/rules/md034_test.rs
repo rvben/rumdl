@@ -7,7 +7,7 @@ use std::fs::write;
 fn test_valid_urls() {
     let rule = MD034NoBareUrls;
     let content = "[Link](https://example.com)\n<https://example.com>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -16,7 +16,7 @@ fn test_valid_urls() {
 fn test_bare_urls() {
     let rule = MD034NoBareUrls;
     let content = "This is a bare URL: https://example.com/foobar";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Bare URLs should be flagged");
     assert_eq!(result[0].line, 1);
@@ -29,7 +29,7 @@ fn test_bare_urls() {
 fn test_multiple_urls() {
     let rule = MD034NoBareUrls;
     let content = "Visit https://example.com and http://another.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Bare URLs should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
@@ -43,7 +43,7 @@ fn test_urls_in_code_block() {
 https://example.com
 ```
 https://outside.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Only https://outside.com should be flagged (URL in code block is ignored)
     assert_eq!(result.len(), 1, "Bare URL outside code block should be flagged");
@@ -55,7 +55,7 @@ https://outside.com";
 fn test_urls_in_inline_code() {
     let rule = MD034NoBareUrls;
     let content = "`https://example.com`\nhttps://outside.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // https://outside.com should be flagged (URL in inline code is ignored)
     assert_eq!(result.len(), 1, "Bare URL outside inline code should be flagged");
@@ -67,7 +67,7 @@ fn test_urls_in_inline_code() {
 fn test_urls_in_markdown_links() {
     let rule = MD034NoBareUrls;
     let content = "[Example](https://example.com)\nhttps://bare.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // https://bare.com should be flagged (URL in markdown link is ignored)
     assert_eq!(result.len(), 1, "Bare URL should be flagged");
@@ -79,7 +79,7 @@ fn test_urls_in_markdown_links() {
 fn test_ftp_urls() {
     let rule = MD034NoBareUrls;
     let content = "Download from ftp://example.com/file";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -90,7 +90,7 @@ fn test_ftp_urls() {
 fn test_complex_urls() {
     let rule = MD034NoBareUrls;
     let content = "Visit https://example.com/path?param=value#fragment";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Bare URL should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
@@ -101,7 +101,7 @@ fn test_complex_urls() {
 fn test_multiple_protocols() {
     let rule = MD034NoBareUrls;
     let content = "http://example.com\nhttps://secure.com\nftp://files.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let debug_str = format!("test_multiple_protocols\nMD034 test content: {content}\n");
     let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
@@ -114,7 +114,7 @@ fn test_multiple_protocols() {
 fn test_mixed_content() {
     let rule = MD034NoBareUrls;
     let content = "# Heading\nVisit https://example.com\n> Quote with https://another.com";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let debug_str = format!("test_mixed_content\nMD034 test content: {content}\n");
     let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
@@ -130,7 +130,7 @@ fn test_mixed_content() {
 fn test_not_urls() {
     let rule = MD034NoBareUrls;
     let content = "Text with example.com and just://something";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -140,7 +140,7 @@ fn test_badge_links_not_flagged() {
     let rule = MD034NoBareUrls;
     let content =
         "[![npm version](https://img.shields.io/npm/v/react.svg?style=flat)](https://www.npmjs.com/package/react)";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Badge links should not be flagged as bare URLs");
 }
@@ -154,7 +154,7 @@ fn test_multiple_badges_and_links_on_one_line() {
 [![(Runtime) Build and Test](https://github.com/facebook/react/actions/workflows/runtime_build_and_test.yml/badge.svg)](https://github.com/facebook/react/actions/workflows/runtime_build_and_test.yml) \
 [![(Compiler) TypeScript](https://github.com/facebook/react/actions/workflows/compiler_typescript.yml/badge.svg?branch=main)](https://github.com/facebook/react/actions/workflows/compiler_typescript.yml) \
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://legacy.reactjs.org/docs/how-to-contribute.html#your-first-pull-request)";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -165,7 +165,7 @@ fn test_multiple_badges_and_links_on_one_line() {
 #[test]
 fn debug_ast_multiple_urls() {
     let content = "Visit https://example.com and http://another.com";
-    let _ctx = LintContext::new(content);
+    let _ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let debug_str = format!("MD034 test content: {content}\n");
     match write("/tmp/md034_ast_debug.txt", debug_str) {
         Ok(_) => (),
@@ -222,7 +222,7 @@ fn test_md034_edge_cases() {
         ("http://example.com", 1),
     ];
     for (content, expected) in cases.iter() {
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), *expected, "Failed for content: {content}");
         let fixed = rule.fix(&ctx).unwrap();
@@ -231,7 +231,7 @@ fn test_md034_edge_cases() {
         if *expected > 0 {
             assert_ne!(fixed, *content, "Fix should change content with warnings: {content}");
             // The fixed version should have no warnings
-            let ctx_fixed = LintContext::new(&fixed);
+            let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
             let result_fixed = rule.check(&ctx_fixed).unwrap();
             assert_eq!(result_fixed.len(), 0, "Fixed content should have no warnings: {fixed}");
         } else {
@@ -365,7 +365,7 @@ fn test_md034_edge_cases() {
 fn test_bare_email_addresses() {
     let rule = MD034NoBareUrls;
     let content = "Contact us at support@example.com or admin@test.org";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Bare email addresses should be flagged as bare URLs");
     assert_eq!(result[0].line, 1);
@@ -411,7 +411,7 @@ fn test_email_addresses_various_formats() {
     ];
 
     for (content, expected_count, expected_fix) in test_cases.iter() {
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), *expected_count, "Failed for content: {content}");
 
@@ -446,7 +446,7 @@ fn test_email_exclusions() {
     ];
 
     for (content, expected_count) in test_cases.iter() {
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), *expected_count, "Failed for content: {content}");
     }
@@ -460,7 +460,7 @@ fn test_email_exclusions() {
 fn test_localhost_urls() {
     let rule = MD034NoBareUrls;
     let content = "Visit http://localhost:3000 and https://localhost:8080/api";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Localhost URLs should be flagged as bare URLs");
     assert!(
@@ -488,7 +488,7 @@ fn test_localhost_variations() {
     ];
 
     for (content, expected_count, expected_fix) in test_cases.iter() {
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), *expected_count, "Failed for content: {content}");
 
@@ -510,7 +510,7 @@ fn test_localhost_variations() {
 fn test_ip_address_urls() {
     let rule = MD034NoBareUrls;
     let content = "Connect to http://127.0.0.1:8080 or https://192.168.1.100";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "IP address URLs should be flagged as bare URLs");
     let fixed = rule.fix(&ctx).unwrap();
@@ -521,7 +521,7 @@ fn test_ip_address_urls() {
 fn test_combined_emails_and_localhost() {
     let rule = MD034NoBareUrls;
     let content = "Contact admin@localhost.com or visit http://localhost:9090\nAlso try user@example.org and https://192.168.1.1:3000";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4, "Should detect both emails and localhost URLs");
 
@@ -538,7 +538,7 @@ fn test_multiline_markdown_links_not_flagged() {
     // This is the exact pattern that was causing false positives before the fix
     let content = "Details about each issue type and the issue lifecycle are discussed in the [MLflow Issue\nPolicy](https://github.com/mlflow/mlflow/blob/master/ISSUE_POLICY.md).\n\nAfter you have agreed upon an implementation strategy for your feature\nor patch with an MLflow committer, the next step is to introduce your\nchanges (see [developing\nchanges](https://github.com/mlflow/mlflow/blob/master/CONTRIBUTING.md#developing-and-testing-mlflow))\nas a pull request against the MLflow Repository.";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag any URLs since they are all properly formatted as markdown links
@@ -563,7 +563,7 @@ fn test_issue_48_url_in_link_text() {
     let rule = MD034NoBareUrls;
     let content = "Also don't forget that the next time you need to figure out which `datetime` format you need, **[use the strptime tool at https://pym.dev/strptime](https://www.pythonmorsels.com/strptime/)**!";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // The URL https://pym.dev/strptime is part of the link text and should NOT be flagged
@@ -586,7 +586,7 @@ This is **some text**.
 <input type="email" name="fields[email]" id="drip-email" placeholder="email@domain.com">
 <input name="fields[url]" value="https://www.example.com">"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Neither the email in placeholder nor the URL in value should be flagged
@@ -604,7 +604,7 @@ fn test_mixed_multiline_links_and_bare_urls() {
     // Test content with both multi-line markdown links (should not be flagged) and bare URLs (should be flagged)
     let content = "This has a [multi-line\nlink](https://github.com/example/repo) which should not be flagged.\n\nBut this bare URL should be flagged: https://bare-url.com\n\nAnd this [another multi-line\nlink with long URL](https://github.com/very/long/repository/path/that/spans/multiple/lines) should also not be flagged.";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the one bare URL

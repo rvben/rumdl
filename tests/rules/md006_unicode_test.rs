@@ -11,7 +11,7 @@ fn test_unicode_list_items() {
   * Nested item with Unicode 汉字
   * Nested item with mixed Unicode こんにちは
 * Item with Arabic مرحبا";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -28,7 +28,7 @@ Some Unicode text here 汉字.
   * First item with Unicode café should not be indented
   * Second item with emoji 🔥 should not be indented
   * Third item with Unicode こんにちは should not be indented";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Indented Unicode list items should trigger warnings");
     let fixed = rule.fix(&ctx).unwrap();
@@ -50,7 +50,7 @@ Some Unicode text here こんにちは
 
   * Indented Unicode list 1 🔥
   * Indented Unicode list 2 مرحبا";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Indented Unicode list items should trigger warnings");
     let fixed = rule.fix(&ctx).unwrap();
@@ -70,7 +70,7 @@ fn test_unicode_lists_with_blank_lines() {
   * Nested Unicode item 汉字
 
 * Unicode item 2 🔥";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -89,7 +89,7 @@ fn test_unicode_code_blocks() {
 ```
 
 * Regular Unicode item こんにちは outside code block";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Unicode content in code blocks should be ignored");
 }

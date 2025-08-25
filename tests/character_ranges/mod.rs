@@ -64,7 +64,7 @@ pub fn test_character_ranges(test: CharacterRangeTest) {
     let rule = create_rule_by_name(test.rule_name).unwrap_or_else(|| panic!("Unknown rule: {}", test.rule_name));
 
     // Run the rule check
-    let ctx = LintContext::new(test.content);
+    let ctx = LintContext::new(test.content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule
         .check(&ctx)
         .unwrap_or_else(|e| panic!("Rule {} failed to check content: {}", test.rule_name, e));

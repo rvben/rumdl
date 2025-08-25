@@ -473,7 +473,7 @@ mod tests {
         // Test with properly formatted code blocks
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\n\nSome text here.";
         let structure = document_structure_from_str(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert!(
             warnings.is_empty(),
@@ -483,7 +483,7 @@ mod tests {
         // Test with missing blank line before
         let content = "# Test Code Blocks\n```rust\nfn main() {}\n```\n\nSome text here.";
         let structure = document_structure_from_str(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(warnings.len(), 1, "Expected 1 warning for missing blank line before");
         assert_eq!(warnings[0].line, 2, "Warning should be on line 2");
@@ -495,7 +495,7 @@ mod tests {
         // Test with missing blank line after
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\nSome text here.";
         let structure = document_structure_from_str(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(warnings.len(), 1, "Expected 1 warning for missing blank line after");
         assert_eq!(warnings[0].line, 5, "Warning should be on line 5");
@@ -507,7 +507,7 @@ mod tests {
         // Test with missing blank lines both before and after
         let content = "# Test Code Blocks\n```rust\nfn main() {}\n```\nSome text here.";
         let structure = document_structure_from_str(content);
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
         assert_eq!(
             warnings.len(),
@@ -526,7 +526,7 @@ mod tests {
 content
 ```
 ````"#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0, "Should not flag nested code blocks");
 
@@ -557,7 +557,7 @@ console.log("Hello, world!");
 
 More text here."#;
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(
             warnings.len(),
@@ -574,7 +574,7 @@ echo "nested"
 ````
 `````"#;
 
-        let ctx_5 = LintContext::new(content_5);
+        let ctx_5 = LintContext::new(content_5, crate::config::MarkdownFlavor::Standard);
         let warnings_5 = rule.check(&ctx_5).unwrap();
         assert_eq!(warnings_5.len(), 0, "Should handle deeply nested code blocks");
     }
@@ -585,7 +585,7 @@ echo "nested"
 
         // Test content with trailing newline
         let content = "Some text\n```\ncode\n```\nMore text\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should preserve the trailing newline
@@ -599,7 +599,7 @@ echo "nested"
 
         // Test content without trailing newline
         let content = "Some text\n```\ncode\n```\nMore text";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should not add trailing newline if original didn't have one
@@ -616,7 +616,7 @@ echo "nested"
         let rule = MD031BlanksAroundFences::new(true);
 
         let content = "1. First item\n   ```python\n   code_in_list()\n   ```\n2. Second item";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
 
         // Should flag missing blank lines before and after code block in list
@@ -631,7 +631,7 @@ echo "nested"
         let rule = MD031BlanksAroundFences::new(false);
 
         let content = "1. First item\n   ```python\n   code_in_list()\n   ```\n2. Second item";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
 
         // Should not flag missing blank lines inside lists
@@ -644,7 +644,7 @@ echo "nested"
         let rule = MD031BlanksAroundFences::new(false);
 
         let content = "Some text\n```python\ncode_outside_list()\n```\nMore text";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
 
         // Should still flag missing blank lines outside lists
@@ -677,7 +677,7 @@ echo "nested"
         let rule = MD031BlanksAroundFences::new(false);
 
         let content = "1. First item\n   ```python\n   code()\n   ```\n2. Second item";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should not add blank lines when list_items is false
@@ -690,7 +690,7 @@ echo "nested"
         let rule = MD031BlanksAroundFences::new(true);
 
         let content = "1. First item\n   ```python\n   code()\n   ```\n2. Second item";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should add blank lines when list_items is true

@@ -288,7 +288,7 @@ mod tests {
     fn test_atx_heading_style() {
         let rule = MD003HeadingStyle::default();
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -297,7 +297,7 @@ mod tests {
     fn test_setext_heading_style() {
         let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
         let content = "Heading 1\n=========\n\nHeading 2\n---------";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -308,7 +308,7 @@ mod tests {
         let content = "---\ntitle: Test\n---\n\n# Heading 1\n## Heading 2";
 
         // Test should detect headings and apply consistent style
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -321,7 +321,7 @@ mod tests {
         // Default rule uses Atx which serves as our "consistent" mode
         let rule = MD003HeadingStyle::default();
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -331,7 +331,7 @@ mod tests {
         // Test with consistent style (ATX)
         let rule = MD003HeadingStyle::new(HeadingStyle::Consistent);
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Make test more resilient
@@ -343,7 +343,7 @@ mod tests {
         // Test with incorrect style
         let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
         let content = "# Heading 1 #\nHeading 2\n-----\n### Heading 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             !result.is_empty(),
@@ -353,7 +353,7 @@ mod tests {
         // Test with setext style
         let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
         let content = "Heading 1\n=========\nHeading 2\n---------\n### Heading 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // The level 3 heading can't be setext, so it's valid as ATX
         assert!(
@@ -367,7 +367,7 @@ mod tests {
         let rule = MD003HeadingStyle::new(HeadingStyle::SetextWithAtx);
         // Setext for h1/h2, ATX for h3-h6
         let content = "Heading 1\n=========\n\nHeading 2\n---------\n\n### Heading 3\n\n#### Heading 4";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -376,7 +376,7 @@ mod tests {
 
         // Test incorrect usage - ATX for h1/h2
         let content_wrong = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx_wrong = LintContext::new(content_wrong);
+        let ctx_wrong = LintContext::new(content_wrong, crate::config::MarkdownFlavor::Standard);
         let result_wrong = rule.check(&ctx_wrong).unwrap();
         assert_eq!(
             result_wrong.len(),
@@ -390,7 +390,7 @@ mod tests {
         let rule = MD003HeadingStyle::new(HeadingStyle::SetextWithAtxClosed);
         // Setext for h1/h2, ATX closed for h3-h6
         let content = "Heading 1\n=========\n\nHeading 2\n---------\n\n### Heading 3 ###\n\n#### Heading 4 ####";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -399,7 +399,7 @@ mod tests {
 
         // Test incorrect usage - regular ATX for h3+
         let content_wrong = "Heading 1\n=========\n\n### Heading 3\n\n#### Heading 4";
-        let ctx_wrong = LintContext::new(content_wrong);
+        let ctx_wrong = LintContext::new(content_wrong, crate::config::MarkdownFlavor::Standard);
         let result_wrong = rule.check(&ctx_wrong).unwrap();
         assert_eq!(
             result_wrong.len(),

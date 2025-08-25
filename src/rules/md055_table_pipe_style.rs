@@ -374,7 +374,7 @@ mod tests {
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
         // With the fixed implementation, the delimiter row should have pipes removed
@@ -395,7 +395,7 @@ mod tests {
         let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
 
         let content = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
         // Output the actual result for debugging
@@ -414,7 +414,7 @@ mod tests {
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
 
         // Should have 3 warnings - header row, delimiter row, and data row
@@ -435,7 +435,7 @@ mod tests {
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
 
         let content = "# Table Example\n\nHere's a table with leading and trailing pipes:\n\n| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |\n| Data 4   | Data 5   | Data 6   |\n\nMore content after the table.";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
         // The table should be fixed, with delimiter row pipes properly removed
@@ -460,7 +460,7 @@ mod tests {
         let rule = MD055TablePipeStyle::new("leading_or_trailing".to_string()); // Invalid style
 
         let content = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
         // Output the actual result for debugging
@@ -475,7 +475,7 @@ mod tests {
 
         // Now check a content that needs actual modification
         let content = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3";
-        let ctx2 = crate::lint_context::LintContext::new(content);
+        let ctx2 = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx2).unwrap();
 
         // Should add pipes to match the default "leading_and_trailing" style

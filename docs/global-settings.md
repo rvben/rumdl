@@ -17,6 +17,7 @@ Global settings are configured in the `[global]` section of your configuration f
 | [`include`](#include) | `string[]` | `[]` | Files/directories to include |
 | [`respect_gitignore`](#respect_gitignore) | `boolean` | `true` | Respect .gitignore files |
 | [`line_length`](#line_length) | `integer` | `80` | Default line length for rules |
+| [`flavor`](#flavor) | `string` | `"standard"` | Markdown flavor to use |
 
 ## Configuration Examples
 
@@ -51,6 +52,9 @@ respect_gitignore = false
 
 # Set global line length (used by MD013 and other line-length rules)
 line_length = 120
+
+# Set markdown flavor (standard, mkdocs)
+flavor = "mkdocs"
 ```
 
 ### pyproject.toml Configuration
@@ -64,6 +68,7 @@ exclude = ["node_modules", "build", "dist"]
 include = ["docs/*.md", "README.md"]
 respect_gitignore = true
 line_length = 120
+flavor = "standard"
 ```
 
 ## Detailed Settings Reference
@@ -253,6 +258,45 @@ line_length = 100  # Global default
 
 [MD013]
 line_length = 120  # MD013 uses 120, overriding global setting
+```
+
+### `flavor`
+
+**Type**: `string`
+**Default**: `"standard"`
+**CLI Equivalent**: `--flavor`
+
+Specifies the Markdown flavor to use for parsing and linting. Different flavors have different parsing rules and feature support.
+
+```toml
+[global]
+flavor = "mkdocs"  # Use MkDocs flavor
+```
+
+**Available Flavors**:
+- `"standard"` (default): Standard Markdown syntax
+- `"mkdocs"`: MkDocs-specific extensions and syntax
+
+**Note**: Additional flavors like `"gfm"` (GitHub Flavored Markdown) and `"commonmark"` are planned for future releases. Currently, specifying these will emit a warning and use standard flavor.
+
+**Behavior**:
+- Affects how certain rules behave, particularly:
+  - MD042: Empty links handling (MkDocs allows certain shorthand links)
+  - MD052: Reference-style links and images (MkDocs has special syntax)
+  - Future: May affect table parsing, code blocks, and other flavor-specific features
+- Some rules may be automatically adjusted based on the flavor
+
+**Usage Notes**:
+- Choose the flavor that matches your documentation system
+- MkDocs flavor is useful for projects using MkDocs or Material for MkDocs
+- Currently only `standard` and `mkdocs` have implementation differences
+- Future releases will add support for additional flavors with their specific features
+
+**Example CLI usage**:
+
+```bash
+# Use MkDocs flavor for linting
+rumdl check --flavor mkdocs docs/
 ```
 
 ## Configuration Precedence

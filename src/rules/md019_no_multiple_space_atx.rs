@@ -185,7 +185,7 @@ mod tests {
 
         // Test with heading that has multiple spaces
         let content = "#  Multiple Spaces\n\nRegular content\n\n##   More Spaces";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should flag both headings
         assert_eq!(result[0].line, 1);
@@ -193,7 +193,7 @@ mod tests {
 
         // Test with proper headings
         let content = "# Single Space\n\n## Also correct";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),

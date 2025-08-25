@@ -364,13 +364,13 @@ mod tests {
 
     fn run_check(content: &str) -> LintResult {
         let rule = MD040FencedCodeLanguage;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         rule.check(&ctx)
     }
 
     fn run_fix(content: &str) -> Result<String, LintError> {
         let rule = MD040FencedCodeLanguage;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         rule.fix(&ctx)
     }
 
@@ -794,19 +794,19 @@ console.log(`template string with backticks`);
         let rule = MD040FencedCodeLanguage;
 
         // Document without code fences should skip
-        let ctx = LintContext::new("# Just a header\n\nSome text");
+        let ctx = LintContext::new("# Just a header\n\nSome text", crate::config::MarkdownFlavor::Standard);
         assert!(rule.should_skip(&ctx));
 
         // Document with backtick fences should not skip
-        let ctx = LintContext::new("```\ncode\n```");
+        let ctx = LintContext::new("```\ncode\n```", crate::config::MarkdownFlavor::Standard);
         assert!(!rule.should_skip(&ctx));
 
         // Document with tilde fences should not skip
-        let ctx = LintContext::new("~~~\ncode\n~~~");
+        let ctx = LintContext::new("~~~\ncode\n~~~", crate::config::MarkdownFlavor::Standard);
         assert!(!rule.should_skip(&ctx));
 
         // Empty document should skip
-        let ctx = LintContext::new("");
+        let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
         assert!(rule.should_skip(&ctx));
     }
 }

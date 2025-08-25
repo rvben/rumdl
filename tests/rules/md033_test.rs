@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD033NoInlineHtml;
 fn test_no_html() {
     let rule = MD033NoInlineHtml::default();
     let content = "Just regular markdown\n\n# Heading\n\n* List item";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_no_html() {
 fn test_simple_html_tag() {
     let rule = MD033NoInlineHtml::default();
     let content = "Some <b>bold</b> text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Reports one warning per HTML tag (true markdownlint compatibility)
     assert_eq!(result.len(), 2); // <b> and </b>
@@ -29,7 +29,7 @@ fn test_simple_html_tag() {
 fn test_self_closing_tag() {
     let rule = MD033NoInlineHtml::default();
     let content = "An image: <img src=\"test.png\" />";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Current implementation detects self-closing HTML tags
     assert_eq!(result.len(), 1);
@@ -41,7 +41,7 @@ fn test_self_closing_tag() {
 fn test_allowed_elements() {
     let rule = MD033NoInlineHtml::with_allowed(vec!["b".to_string(), "i".to_string()]);
     let content = "Some <b>bold</b> and <i>italic</i> but not <u>underlined</u>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -50,7 +50,7 @@ fn test_allowed_elements() {
 fn test_html_in_code_block() {
     let rule = MD033NoInlineHtml::default();
     let content = "Normal text\n```\n<div>This is in a code block</div>\n```\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -59,7 +59,7 @@ fn test_html_in_code_block() {
 fn test_fix_html_tags() {
     let rule = MD033NoInlineHtml::default();
     let content = "Some <b>bold</b> text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content);
 }
@@ -68,7 +68,7 @@ fn test_fix_html_tags() {
 fn test_fix_self_closing_tags() {
     let rule = MD033NoInlineHtml::default();
     let content = "Line break<br/>here";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content);
 }
@@ -77,7 +77,7 @@ fn test_fix_self_closing_tags() {
 fn test_multiple_tags() {
     let rule = MD033NoInlineHtml::default();
     let content = "<div><p>Nested</p></div>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Reports one warning per HTML tag (true markdownlint compatibility)
     assert_eq!(result.len(), 4); // <div>, <p>, </p>, </div>
@@ -91,7 +91,7 @@ fn test_multiple_tags() {
 fn test_attributes() {
     let rule = MD033NoInlineHtml::default();
     let content = "<div class=\"test\" id=\"main\">Content</div>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Reports one warning per HTML tag (true markdownlint compatibility)
     assert_eq!(result.len(), 2); // <div> and </div>
@@ -103,7 +103,7 @@ fn test_attributes() {
 fn test_mixed_content() {
     let rule = MD033NoInlineHtml::default();
     let content = "# Heading\n\n<div>HTML content</div>\n\n* List item\n\n<span>More HTML</span>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Reports one warning per HTML tag (true markdownlint compatibility)
     // Two lines with HTML: line 3 and line 7, each with 2 tags
@@ -120,7 +120,7 @@ fn test_mixed_content() {
 fn test_preserve_content() {
     let rule = MD033NoInlineHtml::default();
     let content = "Text with <strong>important</strong> content";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content);
 }
@@ -129,7 +129,7 @@ fn test_preserve_content() {
 fn test_multiline_html() {
     let rule = MD033NoInlineHtml::default();
     let content = "<div>\nMultiline\ncontent\n</div>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Now detects both opening and closing tags (improved behavior)
     assert_eq!(result.len(), 2);
@@ -139,7 +139,7 @@ fn test_multiline_html() {
 fn test_ignore_code_spans() {
     let rule = MD033NoInlineHtml::default();
     let content = "Use `<div>` for a block element";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -150,25 +150,25 @@ fn test_complex_code_block_patterns() {
 
     // Test with mixed fence styles
     let content = "Text\n```\n<div>Code block 1</div>\n```\nMore text\n~~~\n<span>Code block 2</span>\n~~~\nEnd text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
     // Test with code block at start of document
     let content = "```\n<div>Starts with code</div>\n```\nText with <b>bold</b>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // <b> and </b> outside code block
 
     // Test with code block at end of document
     let content = "Text with <i>italic</i>\n```\n<div>Ends with code</div>\n```";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // <i> and </i> outside code block
 
     // Test adjacent code blocks
     let content = "```\n<div>Block 1</div>\n```\n```\n<span>Block 2</span>\n```";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -179,25 +179,25 @@ fn test_code_span_binary_search() {
 
     // Test HTML tag immediately before a code span
     let content = "<span>`code`</span>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // <span> and </span> outside code span
 
     // Test HTML tag immediately after a code span
     let content = "`code`<div>text</div>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // <div> and </div> outside code span
 
     // Test HTML tag exactly at position boundaries
     let content = "Text `<div>` more text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0); // <div> is inside code span
 
     // Test many code spans to trigger binary search optimization
     let content = "`1` `2` `3` `4` `5` `6` `7` `8` `9` `10` `11` `12` <span>text</span>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // <span> and </span> outside code spans
 }
@@ -208,17 +208,17 @@ fn test_fix_preserves_structure_html() {
 
     // Verify HTML fix is a no-op (output equals input)
     let content = "Normal <b>bold</b>\n```\n<div>Code block</div>\n```\nMore <i>italic</i>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content);
 
     let content = "Text with `<span>` and <div>block</div>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content);
 
     let content = "<div><p>Nested content</p></div>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content);
 }
@@ -230,7 +230,7 @@ fn test_markdown_comments() {
     // Test with markdownlint comments
     let content =
         "Some content\n<!-- markdownlint-disable -->\nIgnored content\n<!-- markdownlint-enable -->\nMore content";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // These should not be flagged as HTML tags
@@ -238,7 +238,7 @@ fn test_markdown_comments() {
 
     // Test with regular HTML comments
     let content = "Some content\n<!-- This is a comment -->\nMore content";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Comments should not be flagged
@@ -255,7 +255,7 @@ fn test_urls_in_angle_brackets() {
                    Secure transfer: <ftps://secure.example.com/data>\n\
                    Contact us: <mailto:user@example.com>\n\
                    Complex URL: <https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // URLs in angle brackets should not be flagged as HTML
@@ -273,7 +273,7 @@ fn test_mixed_urls_and_html() {
     let content = "Visit <https://example.com> for more info.\n\
                    This has <strong>real HTML</strong> tags.\n\
                    Email us at <mailto:test@example.com> or use <em>emphasis</em>.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the real HTML tags, not the URLs
@@ -309,7 +309,7 @@ fn test_edge_case_urls() {
                    Real URL: <https://example.com>\n\
                    Fake tag: <https>\n\
                    Real tag: <div>";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag <notaurl>, <https>, and <div> but not the real URL
@@ -340,7 +340,7 @@ Indented HTML (CommonMark code block):
 
 More regular HTML: <span>should be flagged</span>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -377,7 +377,7 @@ Tab indented (code block):
 
 Regular HTML: <p>flagged</p>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -408,7 +408,7 @@ Mixed indented content (all in code block):
 
 Back to regular: <span>flagged</span>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -439,7 +439,7 @@ Indented code block with blank lines:
 
 Regular again: <em>flagged</em>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -474,7 +474,7 @@ Indented code block:
 
 Regular: <span>flagged</span>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -518,7 +518,7 @@ More indented:
 
 Regular: <em>flagged</em>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -546,7 +546,7 @@ Mixed indentation levels:
 
 Regular: <strong>flagged</strong>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -582,7 +582,7 @@ Regular: <div>flagged</div>
 
 Regular: <strong>flagged</strong>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
@@ -622,7 +622,7 @@ And fenced code blocks should be ignored:
 
 Back to regular: <em>flagged</em>"#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 

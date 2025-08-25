@@ -101,7 +101,13 @@ This is a line that exceeds the default 80 characters but is less than the confi
 "#;
 
     // Run the linter with the NEW configured rules vector
-    let warnings = rumdl_lib::lint(test_content, &configured_rules, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(
+        test_content,
+        &configured_rules,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .expect("Linting should succeed");
 
     // Check MD013 behavior - should not trigger on >80 but <120 chars
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -145,7 +151,13 @@ fn test_config_priority() {
         + &"A".repeat(98); // 98 A's + 2 chars for "# " = 100 chars
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl_lib::lint(&line_100_chars, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(
+        &line_100_chars,
+        &configured_rules_1,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .expect("Linting should succeed");
 
     // Should not trigger MD013 because config value is 120
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -165,7 +177,13 @@ fn test_config_priority() {
     let configured_rules_2 = apply_rule_configs(&initial_rules, &config);
 
     // Should now trigger MD013
-    let warnings = rumdl_lib::lint(&line_100_chars, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(
+        &line_100_chars,
+        &configured_rules_2,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .expect("Linting should succeed");
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
     assert_eq!(md013_warnings, 1, "MD013 should trigger with configured line_length 50");
 }
@@ -199,7 +217,13 @@ fn test_partial_rule_config() {
         "This is a regular line that is longer than 80 characters but shorter than 100 characters in length.";
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl_lib::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(
+        test_content,
+        &configured_rules_1,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .expect("Linting should succeed");
 
     // Should NOT trigger MD013 because line_length is set to 100
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -222,7 +246,13 @@ fn test_partial_rule_config() {
     let configured_rules_2 = apply_rule_configs(&initial_rules, &config);
 
     // Run linting with the NEW configured rules vector
-    let warnings = rumdl_lib::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(
+        test_content,
+        &configured_rules_2,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .expect("Linting should succeed");
 
     // Now should trigger MD013 because line_length is less than the line length
     let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -266,7 +296,13 @@ This line exceeds 20 characters.
     let configured_rules_1 = apply_rule_configs(&initial_rules_1, &config_1);
 
     // Run linting (MD001 should still run here as we haven't filtered)
-    let warnings_1 = rumdl_lib::lint(test_content, &configured_rules_1, false).expect("Linting should succeed");
+    let warnings_1 = rumdl_lib::lint(
+        test_content,
+        &configured_rules_1,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .expect("Linting should succeed");
 
     // Verify MD001 WAS triggered (as filtering is not tested here)
     let md001_warnings_1 = warnings_1.iter().filter(|w| w.rule_name == Some("MD001")).count();
@@ -299,7 +335,13 @@ line_length = 20 # Set a low limit to trigger it
     let configured_rules_2 = apply_rule_configs(&initial_rules_2, &config_2);
 
     // Run linting
-    let warnings_2 = rumdl_lib::lint(test_content, &configured_rules_2, false).expect("Linting should succeed");
+    let warnings_2 = rumdl_lib::lint(
+        test_content,
+        &configured_rules_2,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .expect("Linting should succeed");
 
     // Verify MD013 triggers with configured length
     let md013_warnings_2 = warnings_2.iter().filter(|w| w.rule_name == Some("MD013")).count();
@@ -362,7 +404,13 @@ This line > 10.
 "#;
 
     // Run linting with the configured (but not filtered) ruleset
-    let warnings = rumdl_lib::lint(test_content, &configured_rules, false).expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(
+        test_content,
+        &configured_rules,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    )
+    .expect("Linting should succeed");
 
     // Verify MD013 triggered with its configured value (10)
     let md013_warnings = warnings

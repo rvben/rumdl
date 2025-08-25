@@ -23,7 +23,7 @@ fn main() {
         let mut times = Vec::new();
         for _ in 0..10 {
             let start = Instant::now();
-            let ctx = LintContext::new(content);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
             let elapsed = start.elapsed();
             times.push(elapsed.as_micros());
 

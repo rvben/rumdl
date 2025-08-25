@@ -33,7 +33,7 @@ fn test_regex_catastrophic_backtracking_prevention() {
 
     for pattern in catastrophic_patterns {
         let content = format!("# {pattern}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
@@ -88,7 +88,7 @@ fn test_memory_allocation_under_stress() {
 
     for (pattern, description) in memory_stress_patterns {
         let content = format!("# {pattern}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         // Monitor timing and assume memory usage correlates
         let start = Instant::now();
@@ -119,7 +119,7 @@ fn test_algorithmic_complexity_scaling() {
     for size in sizes {
         let heading = "word ".repeat(size);
         let content = format!("# {heading}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
@@ -172,7 +172,7 @@ fn test_concurrent_processing() {
             let content = content.to_string();
 
             thread::spawn(move || {
-                let ctx = LintContext::new(&content);
+                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
                 let start = Instant::now();
                 let result = rule.check(&ctx);
                 let duration = start.elapsed();
@@ -214,7 +214,7 @@ fn test_many_links_performance() {
         content.push_str(&format!("[Invalid {i}](#missing-{i})\n"));
     }
 
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     let start = Instant::now();
     let result = rule.check(&ctx);
@@ -271,7 +271,7 @@ fn test_deeply_nested_markdown_performance() {
     content.push_str(&complex_heading);
     content.push_str("\n\n[Link](#deeply-nested)\n");
 
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     let start = Instant::now();
     let result = rule.check(&ctx);
@@ -313,7 +313,7 @@ fn test_large_document_performance() {
         content.push_str(&format!("[Invalid {i}](#missing-{i})\n"));
     }
 
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     let start = Instant::now();
     let result = rule.check(&ctx);
@@ -365,7 +365,7 @@ fn test_performance_regression_prevention() {
 
     for (pattern, description) in regression_patterns {
         let content = format!("# {pattern}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
@@ -405,7 +405,7 @@ fn test_fragment_generation_performance() {
 
     for (heading, description) in fragment_test_cases.iter() {
         let content = format!("# {heading}\n\n");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         // Time the fragment generation (indirectly via rule check)
         let start = Instant::now();
@@ -436,7 +436,7 @@ fn test_performance_under_memory_pressure() {
     for doc_num in 0..document_count {
         let heading = "Large Document ".to_string() + &"word ".repeat(document_size);
         let content = format!("# {heading}\n\n[Link](#large-document)");
-        let ctx = LintContext::new(&content);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let start = Instant::now();
         let result = rule.check(&ctx);

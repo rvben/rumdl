@@ -26,7 +26,7 @@ fn test_optimized_rules_performance() {
 
     println!("Generated test content of {} bytes", content.len());
 
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
     // Test MD033 (HTML rule)
     let html_rule = MD033NoInlineHtml::default();
     let start = Instant::now();

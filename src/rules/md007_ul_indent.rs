@@ -395,7 +395,7 @@ mod tests {
     fn test_valid_list_indent() {
         let rule = MD007ULIndent::default();
         let content = "* Item 1\n  * Item 2\n    * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -408,7 +408,7 @@ mod tests {
     fn test_invalid_list_indent() {
         let rule = MD007ULIndent::default();
         let content = "* Item 1\n   * Item 2\n      * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 2);
@@ -421,7 +421,7 @@ mod tests {
     fn test_mixed_indentation() {
         let rule = MD007ULIndent::default();
         let content = "* Item 1\n  * Item 2\n   * Item 3\n  * Item 4";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 3);
@@ -432,7 +432,7 @@ mod tests {
     fn test_fix_indentation() {
         let rule = MD007ULIndent::default();
         let content = "* Item 1\n   * Item 2\n      * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
         // With dynamic alignment:
         // Item 2 aligns with Item 1's text (2 spaces)
@@ -451,7 +451,7 @@ repos:
     hooks:
     -   id: rumdl-check
 ```"#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -463,7 +463,7 @@ repos:
     fn test_blockquoted_list_indent() {
         let rule = MD007ULIndent::default();
         let content = "> * Item 1\n>   * Item 2\n>     * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -475,7 +475,7 @@ repos:
     fn test_blockquoted_list_invalid_indent() {
         let rule = MD007ULIndent::default();
         let content = "> * Item 1\n>    * Item 2\n>       * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -490,7 +490,7 @@ repos:
     fn test_nested_blockquote_list_indent() {
         let rule = MD007ULIndent::default();
         let content = "> > * Item 1\n> >   * Item 2\n> >     * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -502,7 +502,7 @@ repos:
     fn test_blockquote_list_with_code_block() {
         let rule = MD007ULIndent::default();
         let content = "> * Item 1\n>   * Item 2\n>   ```\n>   code\n>   ```\n>   * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -524,7 +524,7 @@ repos:
         ];
 
         for content in test_cases {
-            let ctx = LintContext::new(content);
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
             assert!(
                 result.is_empty(),
@@ -545,7 +545,7 @@ repos:
         ];
 
         for (content, expected_warnings, line) in test_cases {
-            let ctx = LintContext::new(content);
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
             assert_eq!(
                 result.len(),
@@ -569,7 +569,7 @@ repos:
         ];
 
         for (content, expected_warnings, line) in test_cases {
-            let ctx = LintContext::new(content);
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
             assert_eq!(
                 result.len(),
@@ -586,7 +586,7 @@ repos:
     fn test_custom_indent_2_spaces() {
         let rule = MD007ULIndent::new(2); // Default
         let content = "* Item 1\n  * Item 2\n    * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -597,7 +597,7 @@ repos:
         let rule = MD007ULIndent::new(3);
 
         let content = "* Item 1\n   * Item 2\n      * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // With dynamic alignment, Item 2 should align with Item 1's text (2 spaces)
         // and Item 3 should align with Item 2's text (4 spaces), not fixed increments
@@ -606,7 +606,7 @@ repos:
         // Test that dynamic alignment works correctly
         // Item 3 should align with Item 2's text content (4 spaces)
         let correct_content = "* Item 1\n  * Item 2\n    * Item 3";
-        let ctx = LintContext::new(correct_content);
+        let ctx = LintContext::new(correct_content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -616,7 +616,7 @@ repos:
         // Test dynamic alignment behavior (default start_indented=false)
         let rule = MD007ULIndent::new(4);
         let content = "* Item 1\n    * Item 2\n        * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // With dynamic alignment, should expect 2 spaces and 6 spaces, not 4 and 8
         assert!(!result.is_empty()); // Should have warnings due to alignment
@@ -624,7 +624,7 @@ repos:
         // Test correct dynamic alignment
         // Item 3 should align with Item 2's text content (4 spaces)
         let correct_content = "* Item 1\n  * Item 2\n    * Item 3";
-        let ctx = LintContext::new(correct_content);
+        let ctx = LintContext::new(correct_content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -635,7 +635,7 @@ repos:
 
         // Single tab
         let content = "* Item 1\n\t* Item 2";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Tab indentation should trigger warning");
 
@@ -645,14 +645,14 @@ repos:
 
         // Multiple tabs
         let content_multi = "* Item 1\n\t* Item 2\n\t\t* Item 3";
-        let ctx = LintContext::new(content_multi);
+        let ctx = LintContext::new(content_multi, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         // With dynamic alignment: Item 3 aligns with Item 2 at correct position
         assert_eq!(fixed, "* Item 1\n  * Item 2\n   * Item 3");
 
         // Mixed tabs and spaces
         let content_mixed = "* Item 1\n \t* Item 2\n\t * Item 3";
-        let ctx = LintContext::new(content_mixed);
+        let ctx = LintContext::new(content_mixed, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         // With dynamic alignment: Item 3 aligns with Item 2 at correct position
         assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
@@ -671,7 +671,7 @@ repos:
   1. Ordered sub-item
   * Unordered sub-item"#;
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "All unordered list indentation should be correct");
 
@@ -692,7 +692,7 @@ repos:
 + Plus
   + Nested plus"#;
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -707,7 +707,7 @@ repos:
 + Plus
     + Wrong plus"#;
 
-        let ctx = LintContext::new(wrong_content);
+        let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 3, "All marker types should be checked for indentation");
     }
@@ -716,7 +716,7 @@ repos:
     fn test_empty_list_items() {
         let rule = MD007ULIndent::default();
         let content = "* Item 1\n* \n  * Item 2";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -733,7 +733,7 @@ repos:
   ```
   * Item 2
     * Item 3"#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -748,7 +748,7 @@ tags:
 ---
 * Item 1
   * Item 2"#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Lists in YAML front matter should be ignored");
     }
@@ -757,7 +757,7 @@ tags:
     fn test_fix_preserves_content() {
         let rule = MD007ULIndent::default();
         let content = "* Item 1 with **bold** and *italic*\n   * Item 2 with `code`\n     * Item 3 with [link](url)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         // With dynamic alignment: Item 3 aligns with Item 2's text (2 + 2 + 1 = 5 spaces)
         let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n     * Item 3 with [link](url)";
@@ -778,13 +778,13 @@ tags:
         // Level 1: 6 spaces (start_indent + indent = 4 + 2)
         // Level 2: 8 spaces (start_indent + 2*indent = 4 + 4)
         let content = "    * Item 1\n      * Item 2\n        * Item 3";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Expected no warnings with start_indented config");
 
         // Wrong first level indentation
         let wrong_content = "  * Item 1\n    * Item 2";
-        let ctx = LintContext::new(wrong_content);
+        let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
@@ -803,7 +803,7 @@ tags:
 
         // When start_indented is false, first level items at any indentation are allowed
         let content = "   * Item 1"; // First level at 3 spaces
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -812,7 +812,7 @@ tags:
 
         // Multiple first level items at different indentations should all be allowed
         let content = "* Item 1\n  * Item 2\n    * Item 3"; // All at level 0 (different indents)
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -829,7 +829,7 @@ tags:
       * L4
         * L5
           * L6"#;
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
@@ -840,7 +840,7 @@ tags:
       * L4
          * L5
             * L6"#;
-        let ctx = LintContext::new(wrong_content);
+        let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2, "Deep nesting errors should be detected");
     }
@@ -855,7 +855,7 @@ tags:
 
 2. **Oracle Unified Directory (OUD)**
    - Extended user directory services";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should have no warnings - 3 spaces is correct for bullets under numbered items
         assert!(
@@ -870,7 +870,7 @@ tags:
         let content = "\
 1. **Active Directory/LDAP**
   - Wrong: only 2 spaces";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should flag incorrect indentation
         assert_eq!(
@@ -892,7 +892,7 @@ tags:
 * Top level
   * Nested bullet (2 spaces is correct)
     * Deeply nested (4 spaces)";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should have no warnings - standard bullet nesting still uses 2-space increments
         assert!(

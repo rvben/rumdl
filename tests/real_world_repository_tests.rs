@@ -26,7 +26,7 @@ fn test_large_repository_simulation() {
         println!("Testing file: {filename}");
         let start_time = Instant::now();
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let mut all_warnings = Vec::new();
 
         for rule in &rules {
@@ -423,7 +423,7 @@ fn test_memory_usage_with_large_content() {
     ];
 
     for rule in &rules {
-        let ctx = LintContext::new(&large_content);
+        let ctx = LintContext::new(&large_content, rumdl_lib::config::MarkdownFlavor::Standard);
 
         let start_time = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");

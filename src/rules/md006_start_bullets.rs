@@ -468,7 +468,7 @@ mod tests {
         // Test with properly formatted lists
         let content_valid = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
         let structure_valid = DocumentStructure::new(content_valid);
-        let ctx_valid = crate::lint_context::LintContext::new(content_valid);
+        let ctx_valid = crate::lint_context::LintContext::new(content_valid, crate::config::MarkdownFlavor::Standard);
         let result_valid = rule.check_with_structure(&ctx_valid, &structure_valid).unwrap();
         assert!(
             result_valid.is_empty(),
@@ -478,7 +478,8 @@ mod tests {
         // Test with improperly indented list - adjust expectations based on actual implementation
         let content_invalid = "  * Item 1\n  * Item 2\n    * Nested item";
         let structure = DocumentStructure::new(content_invalid);
-        let ctx_invalid = crate::lint_context::LintContext::new(content_invalid);
+        let ctx_invalid =
+            crate::lint_context::LintContext::new(content_invalid, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx_invalid, &structure).unwrap();
 
         // If no warnings are generated, the test should be updated to match implementation behavior
@@ -492,7 +493,7 @@ mod tests {
         // Test with mixed indentation - standard nesting is VALID
         let content = "* Item 1\n  * Item 2 (standard nesting is valid)";
         let structure = DocumentStructure::new(content);
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
         // Assert that standard nesting does NOT generate warnings
         assert!(
@@ -511,7 +512,7 @@ mod tests {
 
 2. **Oracle Unified Directory (OUD)**
    - Extended user directory services";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should have no warnings - 3 spaces is valid for bullets under numbered items
         assert!(
@@ -527,7 +528,7 @@ mod tests {
 1. **Active Directory/LDAP**
   - Wrong: only 2 spaces
  - Wrong: only 1 space";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should flag the incorrect indentations (less than 3 spaces)
         assert_eq!(
@@ -546,7 +547,7 @@ mod tests {
 * Top level
   * Nested bullet (2 spaces is correct)
     * Deeply nested (4 spaces)";
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Should have no warnings - standard bullet nesting still works
         assert!(

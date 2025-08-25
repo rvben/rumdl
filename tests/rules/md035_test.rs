@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD035HRStyle;
 fn test_valid_hr_style() {
     let rule = MD035HRStyle::default();
     let content = "Some text\n\n---\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_valid_hr_style() {
 fn test_invalid_hr_style() {
     let rule = MD035HRStyle::default();
     let content = "Some text\n\n***\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
 }
@@ -24,7 +24,7 @@ fn test_invalid_hr_style() {
 fn test_mixed_hr_styles() {
     let rule = MD035HRStyle::default();
     let content = "Some text\n\n---\n\nMiddle text\n\n***\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
 }
@@ -33,7 +33,7 @@ fn test_mixed_hr_styles() {
 fn test_fix_hr_style() {
     let rule = MD035HRStyle::default();
     let content = "Some text\n\n***\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "Some text\n\n---\n\nMore text");
 }
@@ -42,7 +42,7 @@ fn test_fix_hr_style() {
 fn test_indented_hr() {
     let rule = MD035HRStyle::default();
     let content = "Some text\n\n  ***\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -53,7 +53,7 @@ fn test_indented_hr() {
 fn test_spaced_hr() {
     let rule = MD035HRStyle::default();
     let content = "Some text\n\n* * *\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -64,7 +64,7 @@ fn test_spaced_hr() {
 fn test_consistent_style_first_hr_asterisks() {
     let rule = MD035HRStyle::new("consistent".to_string());
     let content = "Some text\n\n***\n\n---\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -75,7 +75,7 @@ fn test_consistent_style_first_hr_asterisks() {
 fn test_consistent_style_first_hr_underscores() {
     let rule = MD035HRStyle::new("consistent".to_string());
     let content = "Some text\n\n___\n\n***\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -86,7 +86,7 @@ fn test_consistent_style_first_hr_underscores() {
 fn test_consistent_style_no_hr_defaults_to_dash() {
     let rule = MD035HRStyle::new("consistent".to_string());
     let content = "Some text\n\nNo HR here\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -97,7 +97,7 @@ fn test_consistent_style_no_hr_defaults_to_dash() {
 fn test_empty_string_style_behaves_like_consistent() {
     let rule = MD035HRStyle::new("".to_string());
     let content = "Some text\n\n***\n\n---\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -108,7 +108,7 @@ fn test_empty_string_style_behaves_like_consistent() {
 fn test_consistent_style_most_prevalent_dash() {
     let rule = MD035HRStyle::new("consistent".to_string());
     let content = "Some text\n\n---\n\n***\n\n---\n\nMore text\n\n***";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -120,7 +120,7 @@ fn test_consistent_style_most_prevalent_dash() {
 fn test_consistent_style_most_prevalent_asterisk() {
     let rule = MD035HRStyle::new("consistent".to_string());
     let content = "Some text\n\n***\n\n---\n\n***\n\nMore text\n\n***";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -132,7 +132,7 @@ fn test_consistent_style_most_prevalent_asterisk() {
 fn test_consistent_style_tie_first_encountered() {
     let rule = MD035HRStyle::new("consistent".to_string());
     let content = "Some text\n\n***\n\n---\n\n---\n\n***\n\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
@@ -144,7 +144,7 @@ fn test_consistent_style_tie_first_encountered() {
 fn test_empty_string_style_most_prevalent() {
     let rule = MD035HRStyle::new("".to_string());
     let content = "Some text\n\n___\n\n***\n\n___\n\nMore text\n\n***";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();

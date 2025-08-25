@@ -11,7 +11,7 @@ fn test_valid_unordered_list() {
   * Nested item
   * Another nested item
 * Item 3";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -24,7 +24,7 @@ fn test_valid_nested_list() {
   * Item 2
     * Deeply nested item
   * Item 3";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -41,7 +41,7 @@ Some text here.
   * First item should not be indented
   * Second item should not be indented
   * Third item should not be indented";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(&ctx).unwrap();
@@ -67,7 +67,7 @@ fn test_mixed_list_styles() {
 - Another item
   - Nested item
 - Final item";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -83,7 +83,7 @@ Some text here
 
   * Indented list 1
   * Indented list 2";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
@@ -109,7 +109,7 @@ fn test_empty_lines() {
   * Nested item
 
 * Item 2";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -121,7 +121,7 @@ fn test_no_lists() {
 Just some text
 More text
 Even more text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -136,7 +136,7 @@ fn test_code_blocks_ignored() {
 ```
 
 * Regular item outside code block";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -161,7 +161,7 @@ fn test_nested_list_with_multiline_content_not_flagged() {
     that new APIs are broadly useful to ML developers, easy to work
     with, and simple yet powerful.";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag any list items since they are properly nested
@@ -191,7 +191,7 @@ fn test_nested_list_with_markdown_link_continuation() {
   * Another nested item
 * Second top-level item";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag any list items since the nesting is correct
@@ -220,7 +220,7 @@ Some breaking content
 * Valid top-level item after break
   * Valid nested item after break";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the 2 items that are improperly indented after the break

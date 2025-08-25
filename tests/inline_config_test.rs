@@ -15,7 +15,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
 "#;
 
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     // Find MD013 warnings
     let md013_warnings: Vec<_> = warnings
@@ -38,7 +38,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
 "#;
 
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     // Find MD013 warnings
     let md013_warnings: Vec<_> = warnings
@@ -62,7 +62,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
 "#;
 
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     // Find MD013 warnings
     let md013_warnings: Vec<_> = warnings
@@ -92,7 +92,7 @@ This is another very long line that exceeds 80 characters and should not trigger
 "#;
 
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     // Find warnings by rule
     let md013_warnings: Vec<_> = warnings
@@ -136,7 +136,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
 "#;
 
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     // All warnings should be from lines after the enable comment
     for warning in &warnings {
@@ -170,7 +170,7 @@ Trailing spaces should now trigger MD009
 "#;
 
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     // Find warnings by rule
     let md013_warnings: Vec<_> = warnings
@@ -216,7 +216,7 @@ This is a very long line that exceeds 80 characters but is disabled by the previ
 "#;
 
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     // Find MD013 warnings
     let md013_warnings: Vec<_> = warnings
@@ -279,7 +279,7 @@ This is another very long line that exceeds 80 characters and should not trigger
 "#;
 
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     // Find warnings by rule
     let md013_warnings: Vec<_> = warnings
@@ -311,7 +311,7 @@ This is another very long line that exceeds 80 characters and should not trigger
 fn test_md009_simple() {
     let content = "Test  ";
     let rules = all_rules(&Config::default());
-    let warnings = lint(content, &rules, false).unwrap();
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
 
     let md009_warnings: Vec<_> = warnings
         .iter()

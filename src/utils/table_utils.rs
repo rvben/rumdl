@@ -486,7 +486,7 @@ mod tests {
 | Cell 1    | Cell 2    |
 | Cell 3    | Cell 4    |";
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1);
@@ -513,7 +513,7 @@ More text
 |----------|-------|
 | Data 2   | Data  |";
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 2);
@@ -540,7 +540,7 @@ More text
 
 Next paragraph";
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1);
@@ -563,7 +563,7 @@ Next paragraph";
 |------|-------|
 | Data | Here  |";
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1); // Only the table outside code block
@@ -580,7 +580,7 @@ No tables here
 - List item with | pipe
 * Another list item";
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 0);
@@ -596,7 +596,7 @@ But no delimiter row
 |---------|-------|
 | Data    | Here  |";
 
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1); // Only the proper table

@@ -166,7 +166,7 @@ mod tests {
     fn test_valid_trailing_newline() {
         let rule = MD047SingleTrailingNewline;
         let content = "Line 1\nLine 2\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -175,7 +175,7 @@ mod tests {
     fn test_missing_trailing_newline() {
         let rule = MD047SingleTrailingNewline;
         let content = "Line 1\nLine 2";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fixed = rule.fix(&ctx).unwrap();
@@ -186,7 +186,7 @@ mod tests {
     fn test_multiple_trailing_newlines() {
         let rule = MD047SingleTrailingNewline;
         let content = "Line 1\nLine 2\n\n\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fixed = rule.fix(&ctx).unwrap();
@@ -197,7 +197,7 @@ mod tests {
     fn test_blank_file() {
         let rule = MD047SingleTrailingNewline;
         let content = "";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -206,7 +206,7 @@ mod tests {
     fn test_file_with_only_newlines() {
         let rule = MD047SingleTrailingNewline;
         let content = "\n\n\n";
-        let ctx = LintContext::new(content);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fixed = rule.fix(&ctx).unwrap();

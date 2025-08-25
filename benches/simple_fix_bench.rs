@@ -41,7 +41,7 @@ fn generate_test_content() -> String {
 /// Benchmark the most commonly used fix rules
 fn bench_common_fixes(c: &mut Criterion) {
     let content = generate_test_content();
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // MD009 - Trailing spaces (most common fix)
     c.bench_function("MD009 trailing spaces fix", |b| {
@@ -112,7 +112,7 @@ fn bench_string_approaches(c: &mut Criterion) {
 /// Test fix vs check performance ratio
 fn bench_fix_vs_check(c: &mut Criterion) {
     let content = generate_test_content();
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     let rule = MD009TrailingSpaces::default();
 

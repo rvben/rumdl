@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD010NoHardTabs;
 fn test_no_hard_tabs() {
     let rule = MD010NoHardTabs::default();
     let content = "This line is fine\n    Indented with spaces";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -17,7 +17,7 @@ fn test_content_with_no_tabs_various_contexts() {
 
     // Test various content without tabs
     let content = "# Heading without tabs\n\n    Indented with spaces\n\n- List item\n  - Nested with spaces\n\n```\nCode without tabs\n```";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Content with only spaces should pass");
 }
@@ -26,7 +26,7 @@ fn test_content_with_no_tabs_various_contexts() {
 fn test_leading_hard_tabs() {
     let rule = MD010NoHardTabs::default();
     let content = "\tIndented line\n\t\tDouble indented";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // One warning per line (grouped consecutive tabs)
     assert_eq!(result[0].line, 1);
@@ -39,7 +39,7 @@ fn test_leading_hard_tabs() {
 fn test_alignment_tabs() {
     let rule = MD010NoHardTabs::default();
     let content = "Text with\ttab for alignment";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 1);
@@ -50,7 +50,7 @@ fn test_alignment_tabs() {
 fn test_empty_line_tabs() {
     let rule = MD010NoHardTabs::default();
     let content = "Normal line\n\t\t\n\tMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     // Line 3 starts with tab after blank line, so it's an indented code block and is skipped
     assert_eq!(result.len(), 1); // Only the empty line with tabs
@@ -62,7 +62,7 @@ fn test_empty_line_tabs() {
 fn test_code_blocks_allowed() {
     let rule = MD010NoHardTabs::new(4);
     let content = "Normal line\n```\n\tCode with tab\n\tMore code\n```\nNormal\tline";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Only the tab outside code block is flagged
     assert_eq!(result[0].line, 6);
@@ -72,7 +72,7 @@ fn test_code_blocks_allowed() {
 fn test_code_blocks_not_allowed() {
     let rule = MD010NoHardTabs::default(); // code blocks are always skipped now
     let content = "Normal line\n```\n\tCode with tab\n\tMore code\n```\nNormal\tline";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Only tab outside code block is flagged
     assert_eq!(result[0].line, 6);
@@ -82,7 +82,7 @@ fn test_code_blocks_not_allowed() {
 fn test_fix_with_code_blocks() {
     let rule = MD010NoHardTabs::new(2); // 2 spaces per tab, preserve code blocks
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "  Indented line\n```\n\tCode\n```\n    Double indented");
 }
@@ -91,7 +91,7 @@ fn test_fix_with_code_blocks() {
 fn test_fix_without_code_blocks() {
     let rule = MD010NoHardTabs::new(2); // 2 spaces per tab, code blocks always preserved
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "  Indented line\n```\n\tCode\n```\n    Double indented");
 }
@@ -100,7 +100,7 @@ fn test_fix_without_code_blocks() {
 fn test_mixed_indentation() {
     let rule = MD010NoHardTabs::default();
     let content = "    Spaces\n\tTab\n  \tMixed";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
@@ -113,13 +113,13 @@ fn test_html_comments_with_tabs() {
 
     // Single line HTML comment with tabs
     let content = "<!-- This comment has a \t tab -->\nNormal line";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Should ignore tabs in single-line HTML comments");
 
     // Multi-line HTML comment with tabs
     let content = "<!-- Start of comment\nUser: \t\tuser\nPassword:\tpass\n-->\nNormal\tline";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -143,7 +143,7 @@ fn test_md010_tabs_in_nested_code_blocks() {
 
     // Note: The last line has a blank line before it and starts with tab, so it's an indented code block
     let content = "No\ttabs\there\n\n```\n\tTabs\tin\tcode\n```\n\nRegular\ttext\twith\ttabs";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
 
     assert!(
@@ -165,7 +165,7 @@ fn test_md010_tabs_in_indented_code() {
     let rule = MD010NoHardTabs::new(4);
 
     let content = "Text\n\n\t\tCode with tabs\n\t\tMore code\n\nText\twith\ttab";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
 
     assert!(
@@ -183,7 +183,7 @@ fn test_md010_mixed_indentation_in_code() {
     let rule = MD010NoHardTabs::new(2);
 
     let content = "```python\n  spaces\n\ttab\n  \tmixed\n```\n\nOutside\ttab";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Code block content should be preserved exactly
@@ -207,7 +207,7 @@ fn test_interaction_list_code_tabs() {
 
     // Test MD010 - tabs in list items are replaced, tabs in code blocks are preserved
     let rule_tabs = MD010NoHardTabs::new(4);
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed_tabs = rule_tabs.fix(&ctx).unwrap();
 
     // Expected: tabs in list items are replaced with spaces, tabs in code blocks preserved
@@ -231,7 +231,7 @@ fn test_multiple_tabs_on_same_line() {
 
     // Test with multiple separate tabs on same line
     let content = "Start\there\tand\there\twith\ttabs";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 5, "Should detect each tab separately");
 
@@ -248,7 +248,7 @@ fn test_tab_character_in_different_positions() {
 
     // Test tabs at start, middle, and end
     let content = "\tStart tab\nMiddle\ttab\nEnd tab\t\n\t\tDouble start\nMixed \t \t spaces";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 6, "Should detect all tabs");
@@ -267,7 +267,7 @@ fn test_mixed_tabs_and_spaces_detailed() {
     // Various mixed indentation patterns
     let content =
         "  \tTwo spaces then tab\n\t  Tab then two spaces\n \t \t Space tab space tab\n\t\t  Two tabs then spaces";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 5, "Should detect all tabs");
@@ -286,7 +286,7 @@ fn test_empty_lines_with_only_tabs_variations() {
 
     // Various empty line patterns
     let content = "\t\n\t\t\n\t\t\t\n\t \t\n \t \t \n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 7, "Should detect all tab groups");
@@ -308,7 +308,7 @@ fn test_configuration_spaces_per_tab() {
 
     // Test with 2 spaces per tab
     let rule2 = MD010NoHardTabs::new(2);
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed2 = rule2.fix(&ctx).unwrap();
     assert_eq!(fixed2, "  One tab\n    Two tabs\n      Three tabs");
 
@@ -327,7 +327,7 @@ fn test_configuration_code_blocks_parameter() {
 
     // Code blocks are always skipped now
     let rule = MD010NoHardTabs::new(4);
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should always skip tabs in code blocks");
     assert_eq!(result[0].line, 1);
@@ -345,7 +345,7 @@ fn test_consecutive_vs_separate_tabs() {
 
     // Test grouping of consecutive tabs
     let content = "\t\t\tThree consecutive\nOne\tthen\tanother\t";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 4, "Should have 1 group for consecutive, 3 separate");
@@ -362,7 +362,7 @@ fn test_fix_preserves_content_structure() {
     // Complex content with various elements
     let content = "# Header\n\n\tIndented paragraph\n\n- List\n\t- Nested\n\t\t- Double nested\n\n```\n\tCode block\n```\n\n> Quote\n> \tWith tab\n\n| Col1\t| Col2\t|\n|---\t|---\t|\n| Data\t| Data\t|";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Verify structure is preserved
@@ -386,14 +386,14 @@ fn test_edge_cases() {
 
     // Test edge cases
     let content = "\t"; // Single tab only
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].message, "Empty line contains tab");
 
     // Test file ending with tab
     let content2 = "Text\t";
-    let ctx2 = LintContext::new(content2);
+    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
     let result2 = rule.check(&ctx2).unwrap();
     assert_eq!(result2.len(), 1);
 
@@ -409,7 +409,7 @@ fn test_inline_code_spans() {
 
     // Test tabs in inline code spans
     let content = "Text with `inline\tcode` and\ttab outside";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
     // Should detect both tabs (inline code spans are not excluded like code blocks)

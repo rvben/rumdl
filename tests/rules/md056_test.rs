@@ -20,7 +20,7 @@ fn test_consistent_column_count() {
 | Cell 2.1 | Cell 2.2 | Cell 2.3 |
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -32,7 +32,7 @@ Cell 1.1 | Cell 1.2 | Cell 1.3
 Cell 2.1 | Cell 2.2 | Cell 2.3
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -48,7 +48,7 @@ fn test_inconsistent_column_count() {
 | Cell 2.1 | Cell 2.2 | Cell 2.3 | Extra |
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 4); // 2 columns instead of 3
@@ -69,7 +69,7 @@ fn test_complex_tables() {
 |          | Cell 2.2 |          |
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -81,7 +81,7 @@ fn test_complex_tables() {
 | 4    | 5      | 6     |
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -102,7 +102,7 @@ fn test_code_blocks_ignored() {
 ```
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -117,7 +117,7 @@ fn test_fix_too_few_columns() {
 | Cell 1.1 | Cell 1.2 |
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     assert!(result.contains("| Cell 1.1 | Cell 1.2 |  |"));
 }
@@ -132,7 +132,7 @@ fn test_fix_too_many_columns() {
 | Cell 1.1 | Cell 1.2 | Cell 1.3 | Extra |
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     assert!(result.contains("| Cell 1.1 | Cell 1.2 | Cell 1.3 |"));
     assert!(!result.contains("Extra"));
@@ -152,7 +152,7 @@ but isn't actually a table row.
 | Cell 1.1 | Cell 1.2 |
     "#;
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }

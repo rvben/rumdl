@@ -460,7 +460,7 @@ mod tests {
         let rule = MD057ExistingRelativeLinks::new();
         let content = "[Link](missing.md)";
 
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should have no warnings without base path");
     }
@@ -492,7 +492,7 @@ mod tests {
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
         // Test the rule
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Should have one warning for the missing.md link but not for the media file
@@ -530,7 +530,7 @@ mod tests {
         // Test with default settings
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Should have one warning for missing.md
@@ -560,7 +560,7 @@ mod tests {
         // Test with skip_media_files = true (default)
         let rule_skip_media = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result_skip = rule_skip_media.check(&ctx).unwrap();
 
         // Should have no warnings when media files are skipped
@@ -575,7 +575,7 @@ mod tests {
             .with_path(base_path)
             .with_skip_media_files(false);
 
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result_all = rule_check_all.check(&ctx).unwrap();
 
         // Should warn about the missing media file
@@ -604,7 +604,7 @@ mod tests {
         let content = "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
         let structure = DocumentStructure::new(content);
 
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check_with_structure(&ctx, &structure).unwrap();
 
         // Should only find the real link, not the one in code
@@ -634,7 +634,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
         // Test the rule
-        let ctx = crate::lint_context::LintContext::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         // Should only have warning for the normal link, not for links in code spans

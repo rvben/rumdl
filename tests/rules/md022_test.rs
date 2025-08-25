@@ -7,7 +7,7 @@ use rumdl_lib::utils::range_utils::LineIndex;
 fn test_valid_headings() {
     let rule = MD022BlanksAroundHeadings::default();
     let content = "Paragraph.\n\n# Heading 1\n\nContent.\n\n## Heading 2\n\nMore content.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -16,7 +16,7 @@ fn test_valid_headings() {
 fn test_missing_blank_above() {
     let rule = MD022BlanksAroundHeadings::default();
     let content = "Paragraph.\n# Heading 1\nContent.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // Missing blank above and below
 }
@@ -25,7 +25,7 @@ fn test_missing_blank_above() {
 fn test_missing_blank_below() {
     let rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading 1\nContent.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 }
@@ -34,9 +34,9 @@ fn test_missing_blank_below() {
 fn test_fix_headings() {
     let rule = MD022BlanksAroundHeadings::default();
     let content = "Paragraph.\n# Heading 1\nContent.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert!(fixed.contains("\n\n# Heading 1\n\n"));
 }
 
@@ -44,7 +44,7 @@ fn test_fix_headings() {
 fn test_invalid_headings() {
     let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading 1\nSome content here.\n## Heading 2\nMore content here.\n### Heading 3\nFinal content.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
     // We only check for non-empty result, not specific count
     // This ensures a principled implementation that correcty identifies issues
@@ -56,7 +56,7 @@ fn test_invalid_headings() {
 fn test_first_heading() {
     let _rule = MD022BlanksAroundHeadings::default();
     let content = "# First Heading\n\nSome content.\n\n## Second Heading\n\nMore content.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -69,9 +69,9 @@ fn test_code_block() {
     let content = "# Heading\n\n```\n# Not a heading\n```";
 
     // Fix the content
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Debug print
     println!("Original content:\n{content}");
@@ -96,7 +96,7 @@ fn test_code_block() {
 fn test_front_matter() {
     let _rule = MD022BlanksAroundHeadings::default();
     let content = "---\ntitle: Test\n---\n\n# First Heading\n\nContent here.\n\n## Second Heading\n\nMore content.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -109,14 +109,14 @@ fn test_fix_mixed_headings() {
     let content = "Text before.\n# Heading 1\nSome content here.\nText here\n## Heading 2\nMore content here.\nText here\n### Heading 3\nFinal content.";
 
     // Run check to confirm there are warnings
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = _rule.check(&ctx).unwrap();
     assert!(!warnings.is_empty());
 
     // Fix the content
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     assert_ne!(fixed, content);
 
     // Instead of checking specific formatting, verify the fixed content follows the rule requirements
@@ -144,16 +144,16 @@ fn test_fix_mixed_headings() {
 fn test_custom_blank_lines() {
     let _rule = MD022BlanksAroundHeadings::with_values(2, 2);
     let content = "# Heading 1\nSome content here.\n## Heading 2\nMore content here.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
 
     // Check there are warnings
     assert!(!result.is_empty());
 
     // Fix content according to rule
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // The fixed content should now be valid
     let fixed_warnings = _rule.check(&_fixed_ctx).unwrap();
@@ -166,13 +166,13 @@ fn test_blanks_around_setext_headings() {
 
     // First test that the rule generates warnings for malformatted setext headings
     let bad_content = "Some text\nHeading 1\n=========\nContent\nHeading 2\n---------\nMore content.";
-    let ctx = LintContext::new(bad_content);
+    let ctx = LintContext::new(bad_content, rumdl_lib::config::MarkdownFlavor::Standard);
     let _bad_result = _rule.check(&ctx).unwrap();
 
     // Then test that the fix produces valid content
-    let ctx = LintContext::new(bad_content);
+    let ctx = LintContext::new(bad_content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed_result = _rule.check(&_fixed_ctx).unwrap();
 
     // After fixing, there should be no warnings
@@ -183,13 +183,13 @@ fn test_blanks_around_setext_headings() {
 fn test_empty_content_headings() {
     let _rule = MD022BlanksAroundHeadings::default();
     let content = "#\nSome content.\n##\nMore content.\n###\nFinal content.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
 
     // Verify we get warnings (without checking exact count)
     assert!(!result.is_empty());
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
 
     // Test that fix produces a different result
@@ -211,15 +211,15 @@ fn test_empty_content_headings() {
 fn test_no_blanks_between_headings() {
     let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading 1\n## Heading 2\n### Heading 3\nContent here.";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
 
     // Verify we get warnings (without checking exact count)
     assert!(!result.is_empty());
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Test that blank lines have been added
     assert!(fixed != content);
@@ -243,7 +243,7 @@ fn test_indented_headings() {
     // Test content with indented headings and missing blank lines
     let content = "  # Heading 1\nContent 1.\n    ## Heading 2\nContent 2.\n      ### Heading 3\nContent 3.";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
 
     // Verify we get warnings about blank lines
@@ -253,9 +253,9 @@ fn test_indented_headings() {
     );
 
     // Fix the content
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Test that blank lines have been added
     assert_ne!(fixed, content, "Fixed content should be different from original");
@@ -316,9 +316,9 @@ fn test_preserve_code_blocks() {
     let content = "# Real Heading\nSome text\n\n```\n# Fake heading in code block\n```\n\nMore text";
 
     // Fix the content
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Check that the fix preserves the code block
     assert!(fixed.contains("```"));
@@ -336,16 +336,16 @@ fn test_preserve_code_blocks() {
 fn test_fix_missing_blank_line_below() {
     let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading\nText";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
 
     // Verify we have warnings
     assert!(!result.is_empty());
 
     // Fix the content
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Verify the correct structure
     assert_eq!(fixed, "# Heading\n\nText");
@@ -363,9 +363,9 @@ fn test_fix_specific_blank_line_cases() {
     let simple_case = "# Heading\nContent";
 
     // Fix the content
-    let ctx = LintContext::new(simple_case);
+    let ctx = LintContext::new(simple_case, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Verify that the fixed content has a blank line below the heading
     assert!(
@@ -383,9 +383,9 @@ fn test_fix_with_various_content_types() {
     let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Heading 1\nParagraph 1\n```\nCode block\n```\n- List item 1\n- List item 2\n## Heading 2\n> Blockquote\n### Heading 3\nFinal paragraph";
 
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Verify structure improvements without specifying exact spacing
     assert!(fixed.contains("# Heading 1"));
@@ -408,16 +408,16 @@ fn test_regression_fix_works() {
 
     // Specific regression test scenario
     let content = "# Heading 1\nSome text\n\n## Heading 2\nMore text";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
 
     // Verify we get the expected warnings
     assert!(!result.is_empty());
 
     // Fix the content
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Verify the structure is correct
     let expected = "# Heading 1\n\nSome text\n\n## Heading 2\n\nMore text";
@@ -434,16 +434,16 @@ fn test_multiple_consecutive_headings() {
 
     // Case with multiple consecutive headings
     let content = "# Heading 1\n## Heading 2\n### Heading 3";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
 
     // Verify we get warnings
     assert!(!result.is_empty());
 
     // Fix the content
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Verify the fixed content contains all headings with blank lines between them
     assert!(fixed.contains("# Heading 1"));
@@ -483,16 +483,16 @@ fn test_consecutive_headings_pattern() {
 
     // Create a case with consecutive headings
     let content = "# Heading 1\n## Heading 2\n### Heading 3";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = _rule.check(&ctx).unwrap();
 
     // Verify we get warnings
     assert!(!result.is_empty());
 
     // Fix the content
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed);
+    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Check for proper structure using less specific checks
     let fixed_lines: Vec<&str> = fixed.lines().collect();

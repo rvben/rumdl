@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD025SingleTitle;
 fn test_md025_valid() {
     let rule = MD025SingleTitle::default();
     let content = "# Title\n## Heading 2\n### Heading 3\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_md025_valid() {
 fn test_md025_invalid() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n# Title 2\n## Heading\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
@@ -25,7 +25,7 @@ fn test_md025_invalid() {
 fn test_md025_no_title() {
     let rule = MD025SingleTitle::default();
     let content = "## Heading 2\n### Heading 3\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -34,7 +34,7 @@ fn test_md025_no_title() {
 fn test_md025_with_front_matter() {
     let rule = MD025SingleTitle::default();
     let content = "---\ntitle: Document Title\n---\n# Title\n## Heading 2\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should not flag a single title after front matter");
 }
@@ -43,7 +43,7 @@ fn test_md025_with_front_matter() {
 fn test_md025_multiple_with_front_matter() {
     let rule = MD025SingleTitle::default();
     let content = "---\ntitle: Document Title\n---\n# Title 1\n## Heading 2\n# Title 2\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 6);
@@ -53,7 +53,7 @@ fn test_md025_multiple_with_front_matter() {
 fn test_md025_with_code_blocks() {
     let rule = MD025SingleTitle::default();
     let content = "# Title\n\n```markdown\n# This is not a real title\n```\n\n## Heading\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should ignore titles in code blocks");
 }
@@ -62,7 +62,7 @@ fn test_md025_with_code_blocks() {
 fn test_md025_with_custom_level() {
     let rule = MD025SingleTitle::new(2, "");
     let content = "# Heading 1\n## Heading 2.1\n## Heading 2.2\n### Heading 3\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
@@ -72,7 +72,7 @@ fn test_md025_with_custom_level() {
 fn test_md025_indented_headings() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n\n  # Title 2\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
@@ -82,7 +82,7 @@ fn test_md025_indented_headings() {
 fn test_md025_with_multiple_violations() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n\n# Title 2\n\n# Title 3\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 3);
@@ -93,7 +93,7 @@ fn test_md025_with_multiple_violations() {
 fn test_md025_empty_document() {
     let rule = MD025SingleTitle::default();
     let content = "";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -102,7 +102,7 @@ fn test_md025_empty_document() {
 fn test_md025_closing_hashes() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1 #\n\n# Title 2 #\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
@@ -114,7 +114,7 @@ fn test_md025_setext_headings() {
     // Setext headings (using === or ---) are now detected by this rule
     // Multiple level-1 setext headings should be flagged
     let content = "Title 1\n=======\n\nTitle 2\n=======\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Second title should be flagged
     assert_eq!(result[0].line, 4); // "Title 2" line
@@ -132,7 +132,7 @@ fn test_md025_performance() {
         content.push_str(&format!("## Heading {i}\n\nSome text here.\n\n"));
     }
 
-    let ctx = LintContext::new(&content);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
     let start = std::time::Instant::now();
     let result = rule.check(&ctx).unwrap();
     let duration = start.elapsed();
@@ -148,7 +148,7 @@ fn test_md025_performance() {
 fn test_md025_fix() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n# Title 2\n## Heading\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "# Title 1\n## Title 2\n## Heading\n");
 }
@@ -157,7 +157,7 @@ fn test_md025_fix() {
 fn test_md025_fix_multiple() {
     let rule = MD025SingleTitle::default();
     let content = "# Title 1\n# Title 2\n# Title 3\n## Heading\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n## Heading\n");
 }
@@ -168,9 +168,9 @@ fn test_md025_fix_with_indentation() {
     // In Markdown, content indented with 4+ spaces is considered a code block
     // so the heavily indented heading is not processed as a heading
     let content = "# Title 1\n  # Title 2\n    # Title 3\n";
-    let ctx = LintContext::new(content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // Expected behavior: verify the title is fixed properly
     assert!(fixed_ctx.content.contains("# Title 1"));
