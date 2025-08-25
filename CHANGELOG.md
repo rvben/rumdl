@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **MkDocs Support**: Added MkDocs markdown flavor (closes #63)
+  - New `flavor = "mkdocs"` configuration option
+  - MkDocs auto-references (e.g., `[class.Name][]`, `[module.function][]`) are no longer flagged as errors
+  - MD042 and MD052 rules now recognize MkDocs-specific patterns
+  - Type-safe enum implementation for better extensibility
+
+### Fixed
+- **MD005**: Dynamic indent detection to respect user's chosen pattern (fixes #64)
+  - Analyzes existing document to detect 2-space vs 4-space indentation
+  - Preserves user's indentation style instead of forcing a default
+
+### Changed
+- **Configuration**: Renamed MD013 'enable_reflow' to 'reflow' with backwards compatibility
+
 ## [0.0.126] - 2025-08-23
 
 ### Fixed
