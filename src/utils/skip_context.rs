@@ -7,7 +7,10 @@ use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
 use crate::utils::kramdown_utils::is_math_block_delimiter;
 use crate::utils::mkdocs_admonitions;
+use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_snippets;
+use crate::utils::mkdocs_tabs;
+use crate::utils::mkdocstrings_refs;
 use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -74,6 +77,21 @@ pub fn is_in_skip_context(ctx: &LintContext, byte_pos: usize) -> bool {
         return true;
     }
 
+    // Check MkDocs footnote definitions
+    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_footnotes::is_within_footnote_definition(ctx.content, byte_pos) {
+        return true;
+    }
+
+    // Check MkDocs content tabs
+    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_tabs::is_within_tab_content(ctx.content, byte_pos) {
+        return true;
+    }
+
+    // Check MkDocstrings autodoc blocks
+    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocstrings_refs::is_within_autodoc_block(ctx.content, byte_pos) {
+        return true;
+    }
+
     false
 }
 
@@ -85,6 +103,21 @@ pub fn is_mkdocs_snippet_line(line: &str, flavor: MarkdownFlavor) -> bool {
 /// Check if a line is a MkDocs admonition marker
 pub fn is_mkdocs_admonition_line(line: &str, flavor: MarkdownFlavor) -> bool {
     flavor == MarkdownFlavor::MkDocs && mkdocs_admonitions::is_admonition_marker(line)
+}
+
+/// Check if a line is a MkDocs footnote definition
+pub fn is_mkdocs_footnote_line(line: &str, flavor: MarkdownFlavor) -> bool {
+    flavor == MarkdownFlavor::MkDocs && mkdocs_footnotes::is_footnote_definition(line)
+}
+
+/// Check if a line is a MkDocs tab marker
+pub fn is_mkdocs_tab_line(line: &str, flavor: MarkdownFlavor) -> bool {
+    flavor == MarkdownFlavor::MkDocs && mkdocs_tabs::is_tab_marker(line)
+}
+
+/// Check if a line is a MkDocstrings autodoc marker
+pub fn is_mkdocstrings_autodoc_line(line: &str, flavor: MarkdownFlavor) -> bool {
+    flavor == MarkdownFlavor::MkDocs && mkdocstrings_refs::is_autodoc_marker(line)
 }
 
 /// Check if a byte position is within an HTML comment

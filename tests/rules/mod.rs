@@ -92,6 +92,7 @@ mod inline_content_edge_cases_test;
 mod link_edge_cases_test;
 mod list_rules_integration_test;
 mod mkdocs_admonitions_test;
+mod mkdocs_extensions_test;
 mod mkdocs_snippets_test;
 
 // Test cases for MD003 - Heading Style
