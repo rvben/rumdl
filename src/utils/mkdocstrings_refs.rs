@@ -13,25 +13,123 @@ use regex::Regex;
 
 lazy_static! {
     /// Pattern to match auto-doc insertion markers
-    /// ::: module.path.ClassName
+    /// ::: module.path.ClassName or ::: handler:module.path
+    /// Module paths must be valid Python/JS identifiers (no special chars, no consecutive dots)
     static ref AUTODOC_MARKER: Regex = Regex::new(
-        r"^(\s*):::\s+[\w.]+(?::[\w.]+)?\s*$"
+        r"^(\s*):::\s+[a-zA-Z_][a-zA-Z0-9_]*(?:[:\.][a-zA-Z_][a-zA-Z0-9_]*)*\s*$"
     ).unwrap();
 
     /// Pattern to match cross-reference links in various forms
     /// [module.Class][], [text][module.Class], [module.Class]
     static ref CROSSREF_PATTERN: Regex = Regex::new(
-        r"\[(?:[^\]]*)\]\[[\w.:]+\]|\[[\w.:]+\]\[\]"
+        r"\[(?:[^\]]*)\]\[[a-zA-Z_][a-zA-Z0-9_]*(?:[:\.][a-zA-Z_][a-zA-Z0-9_]*)*\]|\[[a-zA-Z_][a-zA-Z0-9_]*(?:[:\.][a-zA-Z_][a-zA-Z0-9_]*)*\]\[\]"
     ).unwrap();
 
     /// Pattern to match handler options in YAML format (indented under :::)
     static ref HANDLER_OPTIONS: Regex = Regex::new(
         r"^(\s{4,})\w+:"
     ).unwrap();
+
+    /// Pattern to validate module/class names
+    static ref VALID_MODULE_PATH: Regex = Regex::new(
+        r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*$"
+    ).unwrap();
 }
 
 /// Check if a line is an auto-doc insertion marker
 pub fn is_autodoc_marker(line: &str) -> bool {
+    // First check for basic pattern
+    if !line.trim_start().starts_with(":::") {
+        return false;
+    }
+
+    let trimmed = line.trim();
+    if trimmed.len() <= 3 {
+        return false;
+    }
+
+    // Extract the module path
+    let after_marker = trimmed[3..].trim();
+    if after_marker.is_empty() {
+        return false;
+    }
+
+    // Split by whitespace to get just the module path
+    let module_path = after_marker.split_whitespace().next().unwrap_or("");
+
+    // Validate the module path doesn't contain dangerous characters
+    // No shell special characters, no path traversal
+    if module_path.contains("..")
+        || module_path.contains('/')
+        || module_path.contains('\\')
+        || module_path.contains('$')
+        || module_path.contains('`')
+        || module_path.contains('(')
+        || module_path.contains(')')
+        || module_path.contains(';')
+        || module_path.contains('&')
+        || module_path.contains('|')
+        || module_path.contains('>')
+        || module_path.contains('<')
+        || module_path.contains('\'')
+        || module_path.contains('"')
+        || module_path.contains('\n')
+        || module_path.contains('\r')
+    {
+        return false;
+    }
+
+    // Check for valid Python/JS module path format
+    // Support both . and : separators for different handlers
+    // Split on : first (for handler:module format)
+    let parts: Vec<&str> = if module_path.contains(':') {
+        // Could be handler:module.path or module.path:function
+        let colon_parts: Vec<&str> = module_path.splitn(2, ':').collect();
+        // Validate each part separately
+        let mut all_valid = true;
+        for part in &colon_parts {
+            // Each part should be valid identifier or dot-separated path
+            if !part.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+                all_valid = false;
+                break;
+            }
+            // Can't start or end with dot
+            if part.starts_with('.') || part.ends_with('.') || part.contains("..") {
+                all_valid = false;
+                break;
+            }
+        }
+        if !all_valid {
+            return false;
+        }
+        colon_parts
+    } else {
+        vec![module_path]
+    };
+
+    // Additional validation for each part
+    for part in parts {
+        // Skip empty parts
+        if part.is_empty() {
+            return false;
+        }
+        // Check each segment separated by dots
+        for segment in part.split('.') {
+            if segment.is_empty() {
+                return false;
+            }
+            // Must start with letter or underscore
+            if !segment.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
+                return false;
+            }
+            // Rest must be alphanumeric or underscore
+            if !segment.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return false;
+            }
+        }
+    }
+
+    // Final check with the full regex
     AUTODOC_MARKER.is_match(line)
 }
 
@@ -42,10 +140,9 @@ pub fn contains_crossref(line: &str) -> bool {
 
 /// Get the indentation level of an autodoc marker
 pub fn get_autodoc_indent(line: &str) -> Option<usize> {
-    if let Some(caps) = AUTODOC_MARKER.captures(line)
-        && let Some(indent) = caps.get(1)
-    {
-        return Some(indent.as_str().len());
+    if AUTODOC_MARKER.is_match(line) {
+        // Use consistent indentation calculation (tabs = 4 spaces)
+        return Some(super::mkdocs_common::get_line_indent(line));
     }
     None
 }
@@ -53,7 +150,7 @@ pub fn get_autodoc_indent(line: &str) -> Option<usize> {
 /// Check if a line is part of autodoc options (YAML format)
 pub fn is_autodoc_options(line: &str, base_indent: usize) -> bool {
     // Options must be indented at least 4 spaces more than the ::: marker
-    let line_indent = line.chars().take_while(|&c| c == ' ' || c == '\t').count();
+    let line_indent = super::mkdocs_common::get_line_indent(line);
 
     // Empty lines within options are allowed
     if line.trim().is_empty() {

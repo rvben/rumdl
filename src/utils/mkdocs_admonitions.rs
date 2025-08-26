@@ -16,13 +16,19 @@ use regex::Regex;
 lazy_static! {
     /// Pattern to match admonition start markers
     /// Matches: !!! type, ??? type, ???+ type, with optional "title" and modifiers
+    /// Type must be alphanumeric with optional dashes/underscores (no special chars)
     static ref ADMONITION_START: Regex = Regex::new(
-        r#"^(\s*)(?:!!!|\?\?\?\+?)\s+(\w+)(?:\s+(?:inline(?:\s+end)?))?\s*(?:"[^"]*")?\s*$"#
+        r#"^(\s*)(?:!!!|\?\?\?\+?)\s+([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+(?:inline(?:\s+end)?))?\s*(?:"[^"]*")?\s*$"#
     ).unwrap();
 
     /// Pattern to match just the admonition marker without capturing groups
     static ref ADMONITION_MARKER: Regex = Regex::new(
         r"^(\s*)(?:!!!|\?\?\?\+?)\s+"
+    ).unwrap();
+
+    /// Pattern to validate admonition type characters
+    static ref VALID_TYPE: Regex = Regex::new(
+        r"^[a-zA-Z][a-zA-Z0-9_-]*$"
     ).unwrap();
 }
 
@@ -32,6 +38,37 @@ lazy_static! {
 
 /// Check if a line is an admonition start marker
 pub fn is_admonition_start(line: &str) -> bool {
+    // First check with the basic marker
+    if !ADMONITION_MARKER.is_match(line) {
+        return false;
+    }
+
+    // Extract and validate the type
+    let trimmed = line.trim_start();
+    let after_marker = if let Some(stripped) = trimmed.strip_prefix("!!!") {
+        stripped
+    } else if let Some(stripped) = trimmed.strip_prefix("???+") {
+        stripped
+    } else if let Some(stripped) = trimmed.strip_prefix("???") {
+        stripped
+    } else {
+        return false;
+    };
+
+    let after_marker = after_marker.trim_start();
+    if after_marker.is_empty() {
+        return false;
+    }
+
+    // Extract the type (first word)
+    let type_part = after_marker.split_whitespace().next().unwrap_or("");
+
+    // Validate the type contains only allowed characters
+    if !VALID_TYPE.is_match(type_part) {
+        return false;
+    }
+
+    // Final check with the full regex
     ADMONITION_START.is_match(line)
 }
 
@@ -42,10 +79,9 @@ pub fn is_admonition_marker(line: &str) -> bool {
 
 /// Extract the indentation level of an admonition (for tracking nested content)
 pub fn get_admonition_indent(line: &str) -> Option<usize> {
-    if let Some(caps) = ADMONITION_START.captures(line)
-        && let Some(indent) = caps.get(1)
-    {
-        return Some(indent.as_str().len());
+    if ADMONITION_START.is_match(line) {
+        // Use consistent indentation calculation (tabs = 4 spaces)
+        return Some(super::mkdocs_common::get_line_indent(line));
     }
     None
 }
@@ -53,7 +89,7 @@ pub fn get_admonition_indent(line: &str) -> Option<usize> {
 /// Check if a line is part of admonition content (based on indentation)
 pub fn is_admonition_content(line: &str, base_indent: usize) -> bool {
     // Admonition content must be indented at least 4 spaces more than the marker
-    let line_indent = line.chars().take_while(|&c| c == ' ' || c == '\t').count();
+    let line_indent = super::mkdocs_common::get_line_indent(line);
 
     // Empty lines within admonitions are allowed
     if line.trim().is_empty() {

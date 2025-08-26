@@ -37,10 +37,9 @@ pub fn contains_footnote_reference(line: &str) -> bool {
 
 /// Get the indentation level of a footnote definition
 pub fn get_footnote_indent(line: &str) -> Option<usize> {
-    if let Some(caps) = FOOTNOTE_DEF.captures(line)
-        && let Some(indent) = caps.get(1)
-    {
-        return Some(indent.as_str().len());
+    if FOOTNOTE_DEF.is_match(line) {
+        // Use consistent indentation calculation (tabs = 4 spaces)
+        return Some(get_line_indent(line));
     }
     None
 }

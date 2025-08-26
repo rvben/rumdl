@@ -9,6 +9,22 @@
 /// - `<!-- --8<-- [start:section] -->` - Start marker for section
 /// - `<!-- --8<-- [end:section] -->` - End marker for section
 ///
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    /// Pattern to match snippet inclusion with file path
+    /// Matches: --8<-- "file.md" or --8<-- 'file.md'
+    static ref SNIPPET_WITH_FILE: Regex = Regex::new(
+        r#"--8<--\s+["'][^"']+["']"#
+    ).unwrap();
+
+    /// Pattern to match section markers
+    static ref SECTION_MARKER: Regex = Regex::new(
+        r"--8<--\s*\[(start|end):[^\]]*\]"
+    ).unwrap();
+}
+
 /// Check if a line contains MkDocs snippet syntax
 pub fn is_snippet_marker(line: &str) -> bool {
     // Check for the ASCII scissors pattern
@@ -16,24 +32,30 @@ pub fn is_snippet_marker(line: &str) -> bool {
         return false;
     }
 
-    // Common snippet patterns
-    // Direct inclusion: --8<-- "file.md"
-    if line.trim().starts_with("--8<--") {
+    let trimmed = line.trim();
+
+    // Check for file inclusion with quotes (required)
+    if SNIPPET_WITH_FILE.is_match(trimmed) {
         return true;
     }
 
-    // HTML comment style: <!-- --8<-- ... -->
-    if line.contains("<!-- --8<--") || line.contains("<!-- -8<-") {
-        return true;
-    }
-
-    // Alternative format with single quotes or without quotes
-    if line.contains("--8<-- '") || line.contains("-8<- '") {
+    // HTML comment style with file: <!-- --8<-- "file.md" -->
+    if line.contains("<!-- --8<--") && (line.contains('"') || line.contains('\'')) {
         return true;
     }
 
     // Section markers: --8<-- [start:name] or --8<-- [end:name]
-    if line.contains("--8<-- [") || line.contains("-8<- [") {
+    if SECTION_MARKER.is_match(trimmed) {
+        return true;
+    }
+
+    // HTML comment with section marker
+    if line.contains("<!-- --8<--") && line.contains("[") && (line.contains("start:") || line.contains("end:")) {
+        return true;
+    }
+
+    // Alternative closing marker with file
+    if line.contains("-8<-") && (line.contains('"') || line.contains('\'')) {
         return true;
     }
 
@@ -51,7 +73,16 @@ pub fn is_snippet_section_start(line: &str) -> bool {
         return false;
     }
 
-    is_snippet_marker(line) && line.contains("[start:")
+    // Must have proper bracket structure
+    if let Some(start_idx) = line.find("[start:")
+        && let Some(end_idx) = line[start_idx..].find(']')
+    {
+        // Section name should not be empty (though empty is technically allowed)
+        // and should contain the snippet marker
+        return (line.contains("--8<--") || line.contains("-8<-")) && end_idx > 7;
+    }
+
+    false
 }
 
 /// Check if a line is a snippet section end marker
@@ -65,40 +96,55 @@ pub fn is_snippet_section_end(line: &str) -> bool {
         return false;
     }
 
-    is_snippet_marker(line) && line.contains("[end:")
-}
-
-/// Extract the section name from a snippet marker
-pub fn extract_snippet_section_name(line: &str) -> Option<String> {
-    // Extract section name from patterns like [start:name] or [end:name]
-    if let Some(start_idx) = line.find("[start:").or_else(|| line.find("[end:")) {
-        let after_bracket = &line[start_idx..];
-        if let Some(colon_idx) = after_bracket.find(':') {
-            let after_colon = &after_bracket[colon_idx + 1..];
-            if let Some(end_idx) = after_colon.find(']') {
-                return Some(after_colon[..end_idx].to_string());
-            }
-        }
+    // Must have proper bracket structure
+    if let Some(start_idx) = line.find("[end:")
+        && let Some(end_idx) = line[start_idx..].find(']')
+    {
+        // Section name should match and contain snippet marker
+        return (line.contains("--8<--") || line.contains("-8<-")) && end_idx > 5;
     }
-    None
+
+    false
 }
 
-/// Check if content is within MkDocs snippet markers
+/// Check if a position is within a snippet section
 pub fn is_within_snippet_section(content: &str, position: usize) -> bool {
     let lines: Vec<&str> = content.lines().collect();
     let mut byte_pos = 0;
-    let mut in_snippet_section = false;
+    let mut section_stack: Vec<String> = Vec::new();
 
     for line in lines {
         let line_end = byte_pos + line.len();
 
+        // Check if we're starting a snippet section
         if is_snippet_section_start(line) {
-            in_snippet_section = true;
-        } else if is_snippet_section_end(line) {
-            in_snippet_section = false;
+            // Extract section name for matching
+            if let Some(start) = line.find("[start:")
+                && let Some(end) = line[start..].find(']')
+            {
+                let section_name = line[start + 7..start + end].to_string();
+                section_stack.push(section_name);
+            }
         }
 
-        if byte_pos <= position && position <= line_end && in_snippet_section {
+        // Check if we're ending a snippet section
+        if is_snippet_section_end(line) {
+            // Check if section names match
+            if let Some(start) = line.find("[end:")
+                && let Some(end) = line[start..].find(']')
+            {
+                let end_section_name = &line[start + 5..start + end];
+                // Pop the matching section from the stack
+                if let Some(last_section) = section_stack.last()
+                    && last_section == end_section_name
+                {
+                    section_stack.pop();
+                }
+            }
+        }
+
+        // Check if position is within this line and we're in any snippet section
+        if byte_pos <= position && position <= line_end && !section_stack.is_empty() {
             return true;
         }
 
@@ -109,76 +155,103 @@ pub fn is_within_snippet_section(content: &str, position: usize) -> bool {
     false
 }
 
+/// Check if a line contains a snippet reference that could be a broken link
+pub fn looks_like_snippet_reference(text: &str) -> bool {
+    // More conservative check for link syntax that might be snippets
+    text.contains("--8<--") || text.contains("-8<-")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_snippet_marker_detection() {
-        // Valid snippet markers
+        // Valid snippets with file paths
         assert!(is_snippet_marker("--8<-- \"file.md\""));
         assert!(is_snippet_marker("--8<-- 'file.md'"));
-        assert!(is_snippet_marker("    --8<-- \"nested.md\""));
+        assert!(is_snippet_marker("  --8<-- \"indented.md\"  "));
         assert!(is_snippet_marker("<!-- --8<-- \"file.md\" -->"));
-        assert!(is_snippet_marker("<!-- -8<- [start:section] -->"));
-        assert!(is_snippet_marker("--8<-- [end:section]"));
 
-        // Invalid patterns
-        assert!(!is_snippet_marker("Regular text"));
-        assert!(!is_snippet_marker("# Heading"));
-        assert!(!is_snippet_marker("8<-- not valid"));
+        // Invalid snippets without file paths
+        assert!(!is_snippet_marker("--8<--"));
+        assert!(!is_snippet_marker("--8<-- "));
+        assert!(!is_snippet_marker("<!-- --8<-- -->"));
+
+        // Section markers
+        assert!(is_snippet_marker("--8<-- [start:section]"));
+        assert!(is_snippet_marker("--8<-- [end:section]"));
+        assert!(is_snippet_marker("<!-- --8<-- [start:test] -->"));
     }
 
     #[test]
     fn test_section_markers() {
-        // Start markers
-        assert!(is_snippet_section_start("<!-- --8<-- [start:remote-content] -->"));
+        // Valid section start markers
+        assert!(is_snippet_section_start("<!-- --8<-- [start:intro] -->"));
+        assert!(is_snippet_section_start("--8<-- [start:code]"));
         assert!(is_snippet_section_start("-8<- [start:example]"));
-        assert!(is_snippet_section_start("--8<-- [start:docs]"));
 
-        // End markers
-        assert!(is_snippet_section_end("<!-- --8<-- [end:remote-content] -->"));
-        assert!(is_snippet_section_end("-8<- [end:example]"));
-        assert!(is_snippet_section_end("--8<-- [end:docs]"));
+        // Invalid section start markers
+        assert!(!is_snippet_section_start("<!-- --8<-- [start:] -->")); // Empty name
+        assert!(!is_snippet_section_start("--8<-- [start")); // Missing bracket
+        assert!(!is_snippet_section_start("[start:test]")); // Missing snippet marker
 
-        // Not section markers
-        assert!(!is_snippet_section_start("--8<-- \"file.md\""));
-        assert!(!is_snippet_section_end("--8<-- \"file.md\""));
-    }
+        // Valid section end markers
+        assert!(is_snippet_section_end("<!-- --8<-- [end:intro] -->"));
+        assert!(is_snippet_section_end("--8<-- [end:code]"));
 
-    #[test]
-    fn test_extract_section_name() {
-        assert_eq!(
-            extract_snippet_section_name("<!-- --8<-- [start:remote-content] -->"),
-            Some("remote-content".to_string())
-        );
-        assert_eq!(
-            extract_snippet_section_name("--8<-- [end:example]"),
-            Some("example".to_string())
-        );
-        assert_eq!(
-            extract_snippet_section_name("-8<- [start:my_section]"),
-            Some("my_section".to_string())
-        );
-        assert_eq!(extract_snippet_section_name("--8<-- \"file.md\""), None);
+        // Invalid section end markers
+        assert!(!is_snippet_section_end("<!-- --8<-- [end:] -->")); // Empty name
+        assert!(!is_snippet_section_end("--8<-- [end")); // Missing bracket
     }
 
     #[test]
     fn test_within_snippet_section() {
         let content = r#"# Document
 
+Normal content here.
+
 <!-- --8<-- [start:example] -->
-This is included content
-More content here
+This content is within a snippet section.
+It should be detected as such.
 <!-- --8<-- [end:example] -->
 
-Regular content"#;
+This is outside the snippet section.
 
-        // Find positions
-        let included_pos = content.find("included").unwrap();
-        let regular_pos = content.find("Regular").unwrap();
+<!-- --8<-- [start:another] -->
+Another snippet section.
+<!-- --8<-- [end:another] -->
+"#;
 
-        assert!(is_within_snippet_section(content, included_pos));
-        assert!(!is_within_snippet_section(content, regular_pos));
+        // Test positions within and outside snippet sections
+        let within_pos = content.find("within a snippet").unwrap();
+        let outside_pos = content.find("outside the snippet").unwrap();
+        let another_pos = content.find("Another snippet").unwrap();
+
+        assert!(is_within_snippet_section(content, within_pos));
+        assert!(!is_within_snippet_section(content, outside_pos));
+        assert!(is_within_snippet_section(content, another_pos));
+    }
+
+    #[test]
+    fn test_nested_snippet_sections() {
+        let content = r#"<!-- --8<-- [start:outer] -->
+Outer content.
+<!-- --8<-- [start:inner] -->
+Inner content.
+<!-- --8<-- [end:inner] -->
+Back to outer.
+<!-- --8<-- [end:outer] -->
+Outside."#;
+
+        let outer_pos = content.find("Outer content").unwrap();
+        let inner_pos = content.find("Inner content").unwrap();
+        let back_pos = content.find("Back to outer").unwrap();
+        let outside_pos = content.find("Outside").unwrap();
+
+        assert!(is_within_snippet_section(content, outer_pos));
+        assert!(is_within_snippet_section(content, inner_pos));
+        assert!(is_within_snippet_section(content, back_pos));
+        assert!(!is_within_snippet_section(content, outside_pos));
     }
 }

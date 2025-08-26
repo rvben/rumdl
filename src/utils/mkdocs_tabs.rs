@@ -26,6 +26,74 @@ lazy_static! {
 
 /// Check if a line is a tab marker
 pub fn is_tab_marker(line: &str) -> bool {
+    // First check if it starts like a tab marker
+    if !line.trim_start().starts_with("===") {
+        return false;
+    }
+
+    let trimmed = line.trim();
+
+    // Must have content after ===
+    if trimmed.len() <= 3 || !trimmed.chars().nth(3).is_some_and(|c| c.is_whitespace()) {
+        return false;
+    }
+
+    // Check for proper quote matching if quotes are used
+    let after_marker = trimmed[3..].trim_start();
+    if after_marker.starts_with('"') {
+        // Must have a closing quote
+        if after_marker.len() < 2 {
+            return false;
+        }
+        // Find the closing quote (not escaped)
+        let mut chars = after_marker.chars().skip(1);
+        let mut found_closing = false;
+        let mut prev_backslash = false;
+
+        while let Some(ch) = chars.next() {
+            if ch == '"' && !prev_backslash {
+                found_closing = true;
+                // Check that nothing follows the closing quote except whitespace
+                let rest: String = chars.collect();
+                if !rest.trim().is_empty() {
+                    return false;
+                }
+                break;
+            }
+            prev_backslash = ch == '\\';
+        }
+
+        if !found_closing {
+            return false;
+        }
+    } else if after_marker.starts_with('\'') {
+        // Handle single quotes similarly
+        if after_marker.len() < 2 {
+            return false;
+        }
+        let mut chars = after_marker.chars().skip(1);
+        let mut found_closing = false;
+        let mut prev_backslash = false;
+
+        while let Some(ch) = chars.next() {
+            if ch == '\'' && !prev_backslash {
+                found_closing = true;
+                // Check that nothing follows the closing quote except whitespace
+                let rest: String = chars.collect();
+                if !rest.trim().is_empty() {
+                    return false;
+                }
+                break;
+            }
+            prev_backslash = ch == '\\';
+        }
+
+        if !found_closing {
+            return false;
+        }
+    }
+
+    // Use the original regex as a final check
     TAB_MARKER.is_match(line)
 }
 
@@ -36,10 +104,9 @@ pub fn is_tab_start(line: &str) -> bool {
 
 /// Get the indentation level of a tab marker
 pub fn get_tab_indent(line: &str) -> Option<usize> {
-    if let Some(caps) = TAB_MARKER.captures(line)
-        && let Some(indent) = caps.get(1)
-    {
-        return Some(indent.as_str().len());
+    if TAB_MARKER.is_match(line) {
+        // Use consistent indentation calculation (tabs = 4 spaces)
+        return Some(get_line_indent(line));
     }
     None
 }
