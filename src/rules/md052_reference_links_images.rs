@@ -66,12 +66,26 @@ impl MD052ReferenceLinkImages {
         false
     }
 
-    fn extract_references(&self, content: &str) -> HashSet<String> {
+    fn extract_references(&self, content: &str, mkdocs_mode: bool) -> HashSet<String> {
+        use crate::config::MarkdownFlavor;
+        use crate::utils::skip_context::is_mkdocs_snippet_line;
+
         let mut references = HashSet::new();
         let mut in_code_block = false;
         let mut code_fence_marker = String::new();
 
         for line in content.lines() {
+            // Skip lines that look like MkDocs snippet markers (only in MkDocs mode)
+            if is_mkdocs_snippet_line(
+                line,
+                if mkdocs_mode {
+                    MarkdownFlavor::MkDocs
+                } else {
+                    MarkdownFlavor::Standard
+                },
+            ) {
+                continue;
+            }
             // Handle code block boundaries
             if let Some(cap) = FENCED_CODE_START.captures(line) {
                 if let Some(marker) = cap.get(0) {
@@ -475,7 +489,7 @@ impl Rule for MD052ReferenceLinkImages {
         // Check if we're in MkDocs mode from the context
         let mkdocs_mode = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        let references = self.extract_references(content);
+        let references = self.extract_references(content, mkdocs_mode);
 
         // Use optimized detection method with cached link/image data
         for (line_num, col, match_len, reference) in
@@ -816,7 +830,7 @@ Want to fill out this form?
     fn test_extract_references() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[ref1]: url1\n[Ref2]: url2\n[REF3]: url3";
-        let refs = rule.extract_references(content);
+        let refs = rule.extract_references(content, false);
 
         assert_eq!(refs.len(), 3);
         assert!(refs.contains("ref1"));

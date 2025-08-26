@@ -394,7 +394,7 @@ impl<'a> LintContext<'a> {
 
         // Parse links, images, references, and list blocks
         // Skip code spans - they'll be computed lazily
-        let links = Self::parse_links(content, &lines, &code_blocks);
+        let links = Self::parse_links(content, &lines, &code_blocks, flavor);
         let images = Self::parse_images(content, &lines, &code_blocks);
         let reference_defs = Self::parse_reference_defs(content, &lines);
         let list_blocks = Self::parse_list_blocks(&lines);
@@ -671,7 +671,14 @@ impl<'a> LintContext<'a> {
     }
 
     /// Parse all links in the content
-    fn parse_links(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<ParsedLink> {
+    fn parse_links(
+        content: &str,
+        lines: &[LineInfo],
+        code_blocks: &[(usize, usize)],
+        flavor: MarkdownFlavor,
+    ) -> Vec<ParsedLink> {
+        use crate::utils::skip_context::is_mkdocs_snippet_line;
+
         // Pre-size based on a heuristic: most markdown files have relatively few links
         let mut links = Vec::with_capacity(content.len() / 500); // ~1 link per 500 chars
 
@@ -693,6 +700,19 @@ impl<'a> LintContext<'a> {
 
             // Skip if in code block or span
             if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+                continue;
+            }
+
+            // Skip if this link is on a MkDocs snippet line
+            // Find which line this link is on
+            let line_idx = lines
+                .iter()
+                .position(|line| {
+                    match_start >= line.byte_offset && (match_start < line.byte_offset + line.content.len() + 1)
+                })
+                .unwrap_or(0);
+
+            if is_mkdocs_snippet_line(&lines[line_idx].content, flavor) {
                 continue;
             }
 

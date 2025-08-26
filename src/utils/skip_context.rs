@@ -3,8 +3,10 @@
 //! This module provides centralized context detection for various markdown constructs
 //! that should typically be skipped when processing rules.
 
+use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
 use crate::utils::kramdown_utils::is_math_block_delimiter;
+use crate::utils::mkdocs_snippets;
 use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -61,7 +63,17 @@ pub fn is_in_skip_context(ctx: &LintContext, byte_pos: usize) -> bool {
         return true;
     }
 
+    // Check MkDocs snippet sections
+    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_snippets::is_within_snippet_section(ctx.content, byte_pos) {
+        return true;
+    }
+
     false
+}
+
+/// Check if a line should be skipped due to MkDocs snippet syntax
+pub fn is_mkdocs_snippet_line(line: &str, flavor: MarkdownFlavor) -> bool {
+    flavor == MarkdownFlavor::MkDocs && mkdocs_snippets::is_snippet_marker(line)
 }
 
 /// Check if a byte position is within an HTML comment

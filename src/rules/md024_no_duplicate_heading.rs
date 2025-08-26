@@ -51,8 +51,28 @@ impl Rule for MD024NoDuplicateHeading {
         let mut current_section_path: Vec<(u8, String)> = Vec::new(); // Stack of (level, heading_text)
         let mut seen_siblings: HashMap<String, HashSet<String>> = HashMap::new(); // parent_path -> set of child headings
 
+        // Track if we're in a snippet section (MkDocs flavor)
+        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+        let mut in_snippet_section = false;
+
         // Process headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            // Check for MkDocs snippet markers if using MkDocs flavor
+            if is_mkdocs {
+                if crate::utils::mkdocs_snippets::is_snippet_section_start(&line_info.content) {
+                    in_snippet_section = true;
+                    continue; // Skip this line
+                } else if crate::utils::mkdocs_snippets::is_snippet_section_end(&line_info.content) {
+                    in_snippet_section = false;
+                    continue; // Skip this line
+                }
+            }
+
+            // Skip lines within snippet sections (for MkDocs)
+            if is_mkdocs && in_snippet_section {
+                continue;
+            }
+
             if let Some(heading) = &line_info.heading {
                 // Skip empty headings
                 if heading.text.is_empty() {
