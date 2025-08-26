@@ -191,6 +191,11 @@ impl MarkdownlintConfig {
     ) -> crate::config::SourcedConfigFragment {
         let mut fragment = crate::config::SourcedConfigFragment::default();
         let file = file_path.map(|s| s.to_string());
+
+        // Accumulate disabled and enabled rules
+        let mut disabled_rules = Vec::new();
+        let mut enabled_rules = Vec::new();
+
         for (key, value) in &self.0 {
             // Special handling for line-length as a global setting
             if key.eq_ignore_ascii_case("line-length") || key.eq_ignore_ascii_case("line_length") {
@@ -211,21 +216,11 @@ impl MarkdownlintConfig {
                 // Special handling for boolean values (true/false)
                 if value.is_bool() {
                     if !value.as_bool().unwrap_or(false) {
-                        // Add to global.disable
-                        fragment.global.disable.push_override(
-                            vec![norm_rule_key.clone()],
-                            crate::config::ConfigSource::Markdownlint,
-                            file.clone(),
-                            None,
-                        );
+                        // Accumulate disabled rules
+                        disabled_rules.push(norm_rule_key.clone());
                     } else {
-                        // Add to global.enable (if true)
-                        fragment.global.enable.push_override(
-                            vec![norm_rule_key.clone()],
-                            crate::config::ConfigSource::Markdownlint,
-                            file.clone(),
-                            None,
-                        );
+                        // Accumulate enabled rules
+                        enabled_rules.push(norm_rule_key.clone());
                     }
                     continue;
                 }
@@ -269,6 +264,27 @@ impl MarkdownlintConfig {
                 }
             }
         }
+
+        // Set all disabled rules at once
+        if !disabled_rules.is_empty() {
+            fragment.global.disable.push_override(
+                disabled_rules,
+                crate::config::ConfigSource::Markdownlint,
+                file.clone(),
+                None,
+            );
+        }
+
+        // Set all enabled rules at once
+        if !enabled_rules.is_empty() {
+            fragment.global.enable.push_override(
+                enabled_rules,
+                crate::config::ConfigSource::Markdownlint,
+                file.clone(),
+                None,
+            );
+        }
+
         if let Some(_f) = file {
             // SourcedConfigFragment does not have loaded_files, so skip
         }

@@ -1,5 +1,6 @@
 use rumdl_lib::config::{ConfigSource, normalize_key};
 use rumdl_lib::markdownlint_config::MarkdownlintConfig;
+use std::collections::HashMap;
 
 #[test]
 fn test_markdownlint_config_mapping() {
@@ -202,4 +203,51 @@ fn test_markdownlint_config_provenance_debug_output() {
 // Helper to parse from string for test
 fn load_markdownlint_config_from_str(s: &str) -> Result<rumdl_lib::markdownlint_config::MarkdownlintConfig, String> {
     serde_json::from_str(s).map_err(|e| format!("Failed to parse JSON: {e}"))
+}
+
+#[test]
+fn test_multiple_disabled_rules_migration() {
+    // Test case from issue #64 - multiple rules set to false should all be in the disable list
+    let config_str = r#"
+MD007:
+  indent: 4
+MD033: false
+MD041: false
+MD013: false
+MD014: false
+MD024:
+  siblings_only: true
+MD046: false
+MD059: false
+"#;
+
+    let config_map: HashMap<String, serde_yaml::Value> =
+        serde_yaml::from_str(config_str).expect("Failed to parse YAML");
+    let ml_config = MarkdownlintConfig(config_map);
+    let fragment = ml_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
+
+    // Check that all disabled rules (except MD059 which doesn't exist in rumdl) are in the disable list
+    let expected_disabled = vec!["MD013", "MD014", "MD033", "MD041", "MD046"];
+    let disabled = &fragment.global.disable.value;
+
+    // Sort both for easier comparison
+    let mut expected_sorted = expected_disabled.clone();
+    expected_sorted.sort();
+    let mut disabled_sorted: Vec<String> = disabled.clone();
+    disabled_sorted.sort();
+
+    assert_eq!(
+        disabled_sorted, expected_sorted,
+        "Expected disabled rules {expected_sorted:?} but got {disabled_sorted:?}"
+    );
+
+    // Check that MD007 and MD024 configs are preserved
+    assert!(fragment.rules.contains_key("MD007"));
+    assert_eq!(fragment.rules["MD007"].values["indent"].value.as_integer(), Some(4));
+
+    assert!(fragment.rules.contains_key("MD024"));
+    assert_eq!(
+        fragment.rules["MD024"].values["siblings-only"].value.as_bool(),
+        Some(true)
+    );
 }
