@@ -5,6 +5,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
+use crate::utils::mkdocs_admonitions;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use serde::{Deserialize, Serialize};
 
@@ -126,11 +127,75 @@ impl Rule for MD031BlanksAroundFences {
 
         let mut in_code_block = false;
         let mut current_fence_marker: Option<String> = None;
+        let mut in_admonition = false;
+        let mut admonition_indent = 0;
+        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
         let mut i = 0;
 
         while i < lines.len() {
             let line = lines[i];
             let trimmed = line.trim_start();
+
+            // Check for MkDocs admonition start
+            if is_mkdocs && mkdocs_admonitions::is_admonition_start(line) {
+                // Check for blank line before admonition (similar to code blocks)
+                if i > 0 && !Self::is_empty_line(lines[i - 1]) && self.should_require_blank_line(i, &lines) {
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "No blank line before admonition block".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
+                            replacement: "\n".to_string(),
+                        }),
+                    });
+                }
+
+                in_admonition = true;
+                admonition_indent = mkdocs_admonitions::get_admonition_indent(line).unwrap_or(0);
+                i += 1;
+                continue;
+            }
+
+            // Check if we're exiting an admonition
+            if in_admonition {
+                if !line.trim().is_empty() && !mkdocs_admonitions::is_admonition_content(line, admonition_indent) {
+                    // We've exited the admonition
+                    in_admonition = false;
+
+                    // Check for blank line after admonition (current line should be blank)
+                    if !Self::is_empty_line(line) && self.should_require_blank_line(i - 1, &lines) {
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: "No blank line after admonition block".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(i, 0, 0),
+                                replacement: "\n".to_string(),
+                            }),
+                        });
+                    }
+
+                    admonition_indent = 0;
+                    // Don't continue - process this line normally
+                } else {
+                    // Still in admonition
+                    i += 1;
+                    continue;
+                }
+            }
 
             // Determine fence marker if this is a fence line
             let fence_marker = if trimmed.starts_with("```") {
