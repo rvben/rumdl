@@ -1,6 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use toml;
 
@@ -41,7 +42,7 @@ impl MD046CodeBlockStyle {
                 && (trimmed.contains(". ") || trimmed.contains(") ")))
     }
 
-    fn is_indented_code_block(&self, lines: &[&str], i: usize) -> bool {
+    fn is_indented_code_block(&self, lines: &[&str], i: usize, is_mkdocs: bool) -> bool {
         if i >= lines.len() {
             return false;
         }
@@ -58,12 +59,18 @@ impl MD046CodeBlockStyle {
             return false;
         }
 
+        // Skip if this is MkDocs tab content
+        if is_mkdocs && self.is_in_mkdocs_tab(lines, i) {
+            return false;
+        }
+
         // Check if preceded by a blank line (typical for code blocks)
         // OR if the previous line is also an indented code block (continuation)
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
         let prev_is_indented_code = i > 0
             && (lines[i - 1].starts_with("    ") || lines[i - 1].starts_with("\t"))
-            && !self.is_part_of_list_structure(lines, i - 1);
+            && !self.is_part_of_list_structure(lines, i - 1)
+            && !(is_mkdocs && self.is_in_mkdocs_tab(lines, i - 1));
 
         // If no blank line before and previous line is not indented code,
         // it's likely list continuation, not a code block
@@ -141,6 +148,31 @@ impl MD046CodeBlockStyle {
             }
         }
 
+        false
+    }
+
+    /// Helper function to check if a line is part of MkDocs tab content
+    fn is_in_mkdocs_tab(&self, lines: &[&str], i: usize) -> bool {
+        // Look backwards for tab markers
+        for j in (0..i).rev() {
+            let line = lines[j];
+
+            // Check if this is a tab marker
+            if mkdocs_tabs::is_tab_marker(line) {
+                let tab_indent = mkdocs_tabs::get_tab_indent(line).unwrap_or(0);
+                // Check if current line has proper tab content indentation
+                if mkdocs_tabs::is_tab_content(lines[i], tab_indent) {
+                    return true;
+                }
+                // If we found a tab but indentation doesn't match, we're not in it
+                return false;
+            }
+
+            // If we hit a non-indented, non-empty line that's not a tab, stop searching
+            if !line.trim().is_empty() && !line.starts_with("    ") && !mkdocs_tabs::is_tab_marker(line) {
+                break;
+            }
+        }
         false
     }
 
@@ -411,7 +443,7 @@ impl MD046CodeBlockStyle {
         Ok(warnings)
     }
 
-    fn detect_style(&self, content: &str) -> Option<CodeBlockStyle> {
+    fn detect_style(&self, content: &str, is_mkdocs: bool) -> Option<CodeBlockStyle> {
         // Empty content has no style
         if content.is_empty() {
             return None;
@@ -428,7 +460,7 @@ impl MD046CodeBlockStyle {
             if self.is_fenced_code_block_start(line) {
                 fenced_found = true;
                 fenced_line = fenced_line.min(i);
-            } else if self.is_indented_code_block(&lines, i) {
+            } else if self.is_indented_code_block(&lines, i, is_mkdocs) {
                 indented_found = true;
                 indented_line = indented_line.min(i);
             }
@@ -529,8 +561,9 @@ impl Rule for MD046CodeBlockStyle {
         let lines: Vec<&str> = content.lines().collect();
 
         // Determine target style
+        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
         let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => self.detect_style(content).unwrap_or(CodeBlockStyle::Fenced),
+            CodeBlockStyle::Consistent => self.detect_style(content, is_mkdocs).unwrap_or(CodeBlockStyle::Fenced),
             _ => self.config.style,
         };
 
@@ -579,11 +612,11 @@ impl Rule for MD046CodeBlockStyle {
                     result.push_str(line);
                     result.push('\n');
                 }
-            } else if self.is_indented_code_block(&lines, i) {
+            } else if self.is_indented_code_block(&lines, i, is_mkdocs) {
                 // This is an indented code block
 
                 // Check if we need to start a new fenced block
-                let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1);
+                let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1, is_mkdocs);
 
                 if target_style == CodeBlockStyle::Fenced {
                     if !prev_line_is_indented && !in_indented_block {
@@ -599,7 +632,8 @@ impl Rule for MD046CodeBlockStyle {
                     }
 
                     // Check if this is the end of the indented block
-                    let _next_line_is_indented = i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1);
+                    let _next_line_is_indented =
+                        i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1, is_mkdocs);
                     if !_next_line_is_indented && in_indented_block {
                         result.push_str("```\n");
                         in_indented_block = false;
@@ -715,6 +749,9 @@ impl Rule for MD046CodeBlockStyle {
         let line_index = LineIndex::new(ctx.content.to_string());
         let mut warnings = Vec::new();
 
+        // Check if we're in MkDocs mode
+        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+
         // Determine the target style from the detected style in the document
         let target_style = match self.config.style {
             CodeBlockStyle::Consistent => {
@@ -727,7 +764,7 @@ impl Rule for MD046CodeBlockStyle {
                         && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~"))
                     {
                         first_fenced_line = i;
-                    } else if first_indented_line == usize::MAX && self.is_indented_code_block(&lines, i) {
+                    } else if first_indented_line == usize::MAX && self.is_indented_code_block(&lines, i, is_mkdocs) {
                         first_indented_line = i;
                     }
 
@@ -843,10 +880,10 @@ impl Rule for MD046CodeBlockStyle {
                 }
             }
             // Check for indented code blocks
-            else if !self.is_in_list(&lines, i) && self.is_indented_code_block(&lines, i) {
+            else if !self.is_in_list(&lines, i) && self.is_indented_code_block(&lines, i, is_mkdocs) {
                 if target_style == CodeBlockStyle::Fenced {
                     // Check if this is the start of a new indented block
-                    let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1);
+                    let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1, is_mkdocs);
 
                     if !prev_line_is_indented {
                         // Calculate precise character range for the entire indented line
@@ -1048,7 +1085,7 @@ mod tests {
     fn test_detect_style_fenced() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "```\ncode\n```";
-        let style = rule.detect_style(content);
+        let style = rule.detect_style(content, false);
 
         assert_eq!(style, Some(CodeBlockStyle::Fenced));
     }
@@ -1057,7 +1094,7 @@ mod tests {
     fn test_detect_style_indented() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "Text\n\n    code\n\nMore";
-        let style = rule.detect_style(content);
+        let style = rule.detect_style(content, false);
 
         assert_eq!(style, Some(CodeBlockStyle::Indented));
     }
@@ -1066,7 +1103,7 @@ mod tests {
     fn test_detect_style_none() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "No code blocks here";
-        let style = rule.detect_style(content);
+        let style = rule.detect_style(content, false);
 
         assert_eq!(style, None);
     }
@@ -1128,5 +1165,96 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_mkdocs_tabs_not_flagged_as_indented_code() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+=== "Python"
+
+    This is tab content
+    Not an indented code block
+    
+    ```python
+    def hello():
+        print("Hello")
+    ```
+
+=== "JavaScript"
+
+    More tab content here
+    Also not an indented code block"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag tab content as indented code blocks
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_mkdocs_tabs_with_actual_indented_code() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+=== "Tab 1"
+
+    This is tab content
+
+Regular text
+
+    This is an actual indented code block
+    Should be flagged"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag the actual indented code block but not the tab content
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_mkdocs_tabs_detect_style() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = r#"=== "Tab 1"
+
+    Content in tab
+    More content
+    
+=== "Tab 2"
+
+    Content in second tab"#;
+
+        // In MkDocs mode, tab content should not be detected as indented code blocks
+        let style = rule.detect_style(content, true);
+        assert_eq!(style, None); // No code blocks detected
+
+        // In standard mode, it would detect indented code blocks
+        let style = rule.detect_style(content, false);
+        assert_eq!(style, Some(CodeBlockStyle::Indented));
+    }
+
+    #[test]
+    fn test_mkdocs_nested_tabs() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+=== "Outer Tab"
+
+    Some content
+    
+    === "Nested Tab"
+    
+        Nested tab content
+        Should not be flagged"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+
+        // Nested tabs should not be flagged
+        assert_eq!(result.len(), 0);
     }
 }
