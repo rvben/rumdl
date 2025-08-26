@@ -1,3 +1,4 @@
+use super::mkdocs_common::{BytePositionTracker, ContextStateMachine, MKDOCS_CONTENT_INDENT, get_line_indent};
 /// MkDocs Content Tabs detection utilities
 ///
 /// The Tabbed extension provides support for grouped content tabs
@@ -45,61 +46,51 @@ pub fn get_tab_indent(line: &str) -> Option<usize> {
 
 /// Check if a line is part of tab content (based on indentation)
 pub fn is_tab_content(line: &str, base_indent: usize) -> bool {
-    // Tab content must be indented at least 4 spaces more than the marker
-    let line_indent = line.chars().take_while(|&c| c == ' ' || c == '\t').count();
-
     // Empty lines are not considered content on their own
     // They're handled separately in context
     if line.trim().is_empty() {
         return false;
     }
 
-    // Content must be indented at least 4 spaces from the tab marker
-    line_indent >= base_indent + 4
+    // Content must be indented at least MKDOCS_CONTENT_INDENT spaces from the tab marker
+    get_line_indent(line) >= base_indent + MKDOCS_CONTENT_INDENT
 }
 
 /// Check if content at a byte position is within a tab content area
 pub fn is_within_tab_content(content: &str, position: usize) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut byte_pos = 0;
-    let mut in_tab = false;
-    let mut tab_indent = 0;
+    let tracker = BytePositionTracker::new(content);
+    let mut state = ContextStateMachine::new();
     let mut in_tab_group = false;
 
-    for line in lines {
-        let line_end = byte_pos + line.len();
-
+    for (_idx, line, start, end) in tracker.iter_with_positions() {
         // Check if we're starting a new tab
         if is_tab_marker(line) {
             // If this is the first tab, we're starting a tab group
             if !in_tab_group {
                 in_tab_group = true;
             }
-            in_tab = true;
-            tab_indent = get_tab_indent(line).unwrap_or(0);
-        } else if in_tab {
+            let indent = get_tab_indent(line).unwrap_or(0);
+            state.enter_context(indent, "tab".to_string());
+        } else if state.is_in_context() {
             // Check if we're still in tab content
-            if !line.trim().is_empty() && !is_tab_content(line, tab_indent) {
+            if !line.trim().is_empty() && !is_tab_content(line, state.context_indent()) {
                 // Check if this is another tab at the same level (continues the group)
-                if is_tab_marker(line) && get_tab_indent(line).unwrap_or(0) == tab_indent {
+                if is_tab_marker(line) && get_tab_indent(line).unwrap_or(0) == state.context_indent() {
                     // Continue with new tab
-                    in_tab = true;
+                    let indent = get_tab_indent(line).unwrap_or(0);
+                    state.enter_context(indent, "tab".to_string());
                 } else {
                     // Non-tab content that's not properly indented ends the tab group
-                    in_tab = false;
+                    state.exit_context();
                     in_tab_group = false;
-                    tab_indent = 0;
                 }
             }
         }
 
         // Check if the position is within this line and we're in a tab
-        if byte_pos <= position && position <= line_end && in_tab {
+        if start <= position && position <= end && state.is_in_context() {
             return true;
         }
-
-        // Account for newline character
-        byte_pos = line_end + 1;
     }
 
     false

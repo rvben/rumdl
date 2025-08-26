@@ -1,3 +1,4 @@
+use super::mkdocs_common::{BytePositionTracker, ContextStateMachine, MKDOCS_CONTENT_INDENT, get_line_indent};
 /// MkDocs Footnotes detection utilities
 ///
 /// The Footnotes extension provides support for footnotes with references
@@ -46,51 +47,43 @@ pub fn get_footnote_indent(line: &str) -> Option<usize> {
 
 /// Check if a line is part of a multi-line footnote definition
 pub fn is_footnote_continuation(line: &str, base_indent: usize) -> bool {
-    // Continuation lines must be indented at least 4 spaces more than the definition
-    let line_indent = line.chars().take_while(|&c| c == ' ' || c == '\t').count();
-
     // Empty lines within footnotes are allowed
     if line.trim().is_empty() {
         return true;
     }
 
-    // Content must be indented at least 4 spaces from the footnote definition
-    line_indent >= base_indent + 4
+    // Content must be indented at least MKDOCS_CONTENT_INDENT spaces from the footnote definition
+    get_line_indent(line) >= base_indent + MKDOCS_CONTENT_INDENT
 }
 
 /// Check if content at a byte position is within a footnote definition
 pub fn is_within_footnote_definition(content: &str, position: usize) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut byte_pos = 0;
-    let mut in_footnote = false;
-    let mut footnote_indent = 0;
+    let tracker = BytePositionTracker::new(content);
+    let mut state = ContextStateMachine::new();
 
-    for line in lines {
-        let line_end = byte_pos + line.len();
-
+    for (_idx, line, start, end) in tracker.iter_with_positions() {
         // Check if we're starting a footnote definition
         if is_footnote_definition(line) {
-            in_footnote = true;
-            footnote_indent = get_footnote_indent(line).unwrap_or(0);
-        } else if in_footnote && !line.trim().is_empty() && !is_footnote_continuation(line, footnote_indent) {
-            // Non-empty line that's not properly indented ends the footnote
-            in_footnote = false;
-            footnote_indent = 0;
+            let indent = get_footnote_indent(line).unwrap_or(0);
+            state.enter_context(indent, "footnote".to_string());
+        } else if state.is_in_context() {
+            // Check if we're still in the footnote
+            if !line.trim().is_empty() && !is_footnote_continuation(line, state.context_indent()) {
+                // Non-empty line that's not properly indented ends the footnote
+                state.exit_context();
 
-            // Check if this line starts a new footnote
-            if is_footnote_definition(line) {
-                in_footnote = true;
-                footnote_indent = get_footnote_indent(line).unwrap_or(0);
+                // Check if this line starts a new footnote
+                if is_footnote_definition(line) {
+                    let indent = get_footnote_indent(line).unwrap_or(0);
+                    state.enter_context(indent, "footnote".to_string());
+                }
             }
         }
 
         // Check if the position is within this line and we're in a footnote
-        if byte_pos <= position && position <= line_end && in_footnote {
+        if start <= position && position <= end && state.is_in_context() {
             return true;
         }
-
-        // Account for newline character
-        byte_pos = line_end + 1;
     }
 
     false
