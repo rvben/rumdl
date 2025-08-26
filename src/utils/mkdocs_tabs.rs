@@ -14,8 +14,9 @@ use regex::Regex;
 lazy_static! {
     /// Pattern to match tab markers
     /// Matches: === "Label" or === Label
+    /// Lenient: accepts unclosed quotes, escaped quotes within quotes
     static ref TAB_MARKER: Regex = Regex::new(
-        r#"^(\s*)===\s+(?:"([^"]+)"|([^\s]+))\s*$"#
+        r"^(\s*)===\s+.*$"  // Just need content after ===
     ).unwrap();
 
     /// Simple pattern to check for any tab marker
@@ -27,8 +28,16 @@ lazy_static! {
 /// Check if a line is a tab marker
 pub fn is_tab_marker(line: &str) -> bool {
     // First check if it starts like a tab marker
-    if !line.trim_start().starts_with("===") {
+    let trimmed_start = line.trim_start();
+    if !trimmed_start.starts_with("===") {
         return false;
+    }
+
+    // Reject double === (like "=== ===")
+    // Check what comes after the first ===
+    let after_marker = &trimmed_start[3..];
+    if after_marker.trim_start().starts_with("===") {
+        return false; // Double === is invalid
     }
 
     let trimmed = line.trim();
@@ -38,60 +47,9 @@ pub fn is_tab_marker(line: &str) -> bool {
         return false;
     }
 
-    // Check for proper quote matching if quotes are used
-    let after_marker = trimmed[3..].trim_start();
-    if after_marker.starts_with('"') {
-        // Must have a closing quote
-        if after_marker.len() < 2 {
-            return false;
-        }
-        // Find the closing quote (not escaped)
-        let mut chars = after_marker.chars().skip(1);
-        let mut found_closing = false;
-        let mut prev_backslash = false;
-
-        while let Some(ch) = chars.next() {
-            if ch == '"' && !prev_backslash {
-                found_closing = true;
-                // Check that nothing follows the closing quote except whitespace
-                let rest: String = chars.collect();
-                if !rest.trim().is_empty() {
-                    return false;
-                }
-                break;
-            }
-            prev_backslash = ch == '\\';
-        }
-
-        if !found_closing {
-            return false;
-        }
-    } else if after_marker.starts_with('\'') {
-        // Handle single quotes similarly
-        if after_marker.len() < 2 {
-            return false;
-        }
-        let mut chars = after_marker.chars().skip(1);
-        let mut found_closing = false;
-        let mut prev_backslash = false;
-
-        while let Some(ch) = chars.next() {
-            if ch == '\'' && !prev_backslash {
-                found_closing = true;
-                // Check that nothing follows the closing quote except whitespace
-                let rest: String = chars.collect();
-                if !rest.trim().is_empty() {
-                    return false;
-                }
-                break;
-            }
-            prev_backslash = ch == '\\';
-        }
-
-        if !found_closing {
-            return false;
-        }
-    }
+    // Be lenient with quote matching to handle real-world markdown
+    // A future rule can warn about unclosed quotes
+    // For now, just ensure there's some content after ===
 
     // Use the original regex as a final check
     TAB_MARKER.is_match(line)

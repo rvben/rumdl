@@ -14,9 +14,10 @@ use regex::Regex;
 lazy_static! {
     /// Pattern to match auto-doc insertion markers
     /// ::: module.path.ClassName or ::: handler:module.path
-    /// Module paths must be valid Python/JS identifiers (no special chars, no consecutive dots)
+    /// Lenient: accepts any non-whitespace after ::: to detect potentially dangerous patterns
+    /// Security validation should happen at a different layer (e.g., a specific rule)
     static ref AUTODOC_MARKER: Regex = Regex::new(
-        r"^(\s*):::\s+[a-zA-Z_][a-zA-Z0-9_]*(?:[:\.][a-zA-Z_][a-zA-Z0-9_]*)*\s*$"
+        r"^(\s*):::\s+\S+.*$"  // Just need non-whitespace after :::
     ).unwrap();
 
     /// Pattern to match cross-reference links in various forms
@@ -38,99 +39,39 @@ lazy_static! {
 
 /// Check if a line is an auto-doc insertion marker
 pub fn is_autodoc_marker(line: &str) -> bool {
-    // First check for basic pattern
-    if !line.trim_start().starts_with(":::") {
+    // First check with regex
+    if !AUTODOC_MARKER.is_match(line) {
         return false;
     }
 
+    // Additional validation: reject obviously malformed paths
+    // like consecutive dots (module..Class) which Python/JS would reject
     let trimmed = line.trim();
-    if trimmed.len() <= 3 {
-        return false;
-    }
-
-    // Extract the module path
-    let after_marker = trimmed[3..].trim();
-    if after_marker.is_empty() {
-        return false;
-    }
-
-    // Split by whitespace to get just the module path
-    let module_path = after_marker.split_whitespace().next().unwrap_or("");
-
-    // Validate the module path doesn't contain dangerous characters
-    // No shell special characters, no path traversal
-    if module_path.contains("..")
-        || module_path.contains('/')
-        || module_path.contains('\\')
-        || module_path.contains('$')
-        || module_path.contains('`')
-        || module_path.contains('(')
-        || module_path.contains(')')
-        || module_path.contains(';')
-        || module_path.contains('&')
-        || module_path.contains('|')
-        || module_path.contains('>')
-        || module_path.contains('<')
-        || module_path.contains('\'')
-        || module_path.contains('"')
-        || module_path.contains('\n')
-        || module_path.contains('\r')
-    {
-        return false;
-    }
-
-    // Check for valid Python/JS module path format
-    // Support both . and : separators for different handlers
-    // Split on : first (for handler:module format)
-    let parts: Vec<&str> = if module_path.contains(':') {
-        // Could be handler:module.path or module.path:function
-        let colon_parts: Vec<&str> = module_path.splitn(2, ':').collect();
-        // Validate each part separately
-        let mut all_valid = true;
-        for part in &colon_parts {
-            // Each part should be valid identifier or dot-separated path
-            if !part.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
-                all_valid = false;
-                break;
+    if let Some(start) = trimmed.find(":::") {
+        let after_marker = &trimmed[start + 3..].trim();
+        // Get the module path (first non-whitespace token)
+        if let Some(module_path) = after_marker.split_whitespace().next() {
+            // Reject paths with consecutive dots/colons or starting/ending with separator
+            if module_path.starts_with('.') || module_path.starts_with(':') {
+                return false; // Can't start with separator
             }
-            // Can't start or end with dot
-            if part.starts_with('.') || part.ends_with('.') || part.contains("..") {
-                all_valid = false;
-                break;
+            if module_path.ends_with('.') || module_path.ends_with(':') {
+                return false; // Can't end with separator
             }
-        }
-        if !all_valid {
-            return false;
-        }
-        colon_parts
-    } else {
-        vec![module_path]
-    };
-
-    // Additional validation for each part
-    for part in parts {
-        // Skip empty parts
-        if part.is_empty() {
-            return false;
-        }
-        // Check each segment separated by dots
-        for segment in part.split('.') {
-            if segment.is_empty() {
-                return false;
-            }
-            // Must start with letter or underscore
-            if !segment.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
-                return false;
-            }
-            // Rest must be alphanumeric or underscore
-            if !segment.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                return false;
+            if module_path.contains("..")
+                || module_path.contains("::")
+                || module_path.contains(".:")
+                || module_path.contains(":.")
+            {
+                return false; // No consecutive separators
             }
         }
     }
 
-    // Final check with the full regex
-    AUTODOC_MARKER.is_match(line)
+    // For a linter, we want to be lenient and detect most autodoc-like syntax
+    // even if it contains dangerous or potentially invalid module paths
+    // A separate rule can validate and warn about dangerous patterns
+    true
 }
 
 /// Check if a line contains cross-reference links

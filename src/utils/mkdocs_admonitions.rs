@@ -17,8 +17,9 @@ lazy_static! {
     /// Pattern to match admonition start markers
     /// Matches: !!! type, ??? type, ???+ type, with optional "title" and modifiers
     /// Type must be alphanumeric with optional dashes/underscores (no special chars)
+    /// Lenient: accepts unclosed quotes for real-world markdown handling
     static ref ADMONITION_START: Regex = Regex::new(
-        r#"^(\s*)(?:!!!|\?\?\?\+?)\s+([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+(?:inline(?:\s+end)?))?\s*(?:"[^"]*")?\s*$"#
+        r#"^(\s*)(?:!!!|\?\?\?\+?)\s+([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+(?:inline(?:\s+end)?))?.*$"#
     ).unwrap();
 
     /// Pattern to match just the admonition marker without capturing groups

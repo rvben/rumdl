@@ -20,8 +20,9 @@ lazy_static! {
 
     /// Pattern to match footnote definitions at start of line
     /// [^1]: Definition text
+    /// Lenient: accepts empty definitions for real-world markdown
     static ref FOOTNOTE_DEF: Regex = Regex::new(
-        r"^(\s*)\[\^([a-zA-Z0-9_-]+)\]:\s+"
+        r"^(\s*)\[\^([a-zA-Z0-9_-]+)\]:\s*"  // \s* instead of \s+ to allow empty
     ).unwrap();
 }
 

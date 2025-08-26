@@ -291,8 +291,10 @@ mod unicode_tests {
 
     #[test]
     fn test_emoji_and_symbols() {
-        // Emoji in various contexts
-        assert!(mkdocs_admonitions::is_admonition_start("!!! 📝"));
+        // Emoji as type is NOT valid (not a valid CSS class name)
+        assert!(!mkdocs_admonitions::is_admonition_start("!!! 📝"));
+
+        // Emoji in quoted titles is valid
         assert!(mkdocs_tabs::is_tab_marker("=== \"📊 Charts\""));
         assert!(mkdocs_snippets::is_snippet_marker("--8<-- \"📁/file.md\""));
 
