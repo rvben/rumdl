@@ -83,6 +83,17 @@ impl Rule for MD009TrailingSpaces {
                         continue;
                     }
 
+                    // Check if this is an empty blockquote line (like "> " or ">> ")
+                    // These are allowed to have a single trailing space by MD028
+                    let trimmed_line = line.trim_end();
+                    if trimmed_line.chars().all(|c| c == '>' || c == ' ' || c == '\t')
+                        && trimmed_line.contains('>')
+                        && trailing_spaces == 1
+                    {
+                        // This is an empty blockquote line with single trailing space - allowed
+                        continue;
+                    }
+
                     // Calculate precise character range for all trailing spaces on empty line
                     let (start_line, start_col, end_line, end_col) = calculate_trailing_range(line_num + 1, line, 0);
 
@@ -121,10 +132,16 @@ impl Rule for MD009TrailingSpaces {
                 continue;
             }
 
-            // Empty blockquote lines should just have trailing spaces removed like normal lines
-            // No special handling needed - they'll be caught by the general trailing spaces check below
-
+            // Check if this is an empty blockquote line ("> " or ">> " etc)
+            // These are allowed by MD028 to have a single trailing space
             let trimmed = line.trim_end();
+            let is_empty_blockquote_with_space = trimmed.chars().all(|c| c == '>' || c == ' ' || c == '\t')
+                && trimmed.contains('>')
+                && trailing_spaces == 1;
+
+            if is_empty_blockquote_with_space {
+                continue; // Allow single trailing space for empty blockquote lines
+            }
             // Calculate precise character range for all trailing spaces
             let (start_line, start_col, end_line, end_col) =
                 calculate_trailing_range(line_num + 1, line, trimmed.len());

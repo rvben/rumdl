@@ -17,7 +17,8 @@ impl MD028NoBlanksBlockquote {
         for _ in 0..level {
             result.push('>');
         }
-        // Don't add a space after the marker for empty lines to avoid MD009 conflicts
+        // Add a single space after the marker for proper blockquote formatting
+        result.push(' ');
 
         result
     }
@@ -208,7 +209,7 @@ mod tests {
         let content = "> First\n>\n> Third";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "> First\n>\n> Third");
+        assert_eq!(fixed, "> First\n> \n> Third");
     }
 
     #[test]
@@ -217,7 +218,7 @@ mod tests {
         let content = ">> Nested\n>>\n>> More";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, ">> Nested\n>>\n>> More");
+        assert_eq!(fixed, ">> Nested\n>> \n>> More");
     }
 
     #[test]
@@ -226,7 +227,7 @@ mod tests {
         let content = "  > Indented quote\n  >\n  > More";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "  > Indented quote\n  >\n  > More");
+        assert_eq!(fixed, "  > Indented quote\n  > \n  > More");
     }
 
     #[test]
@@ -268,10 +269,10 @@ mod tests {
 
     #[test]
     fn test_get_replacement() {
-        assert_eq!(MD028NoBlanksBlockquote::get_replacement("", 1), ">");
-        assert_eq!(MD028NoBlanksBlockquote::get_replacement("  ", 1), "  >");
-        assert_eq!(MD028NoBlanksBlockquote::get_replacement("", 2), ">>");
-        assert_eq!(MD028NoBlanksBlockquote::get_replacement("  ", 3), "  >>>");
+        assert_eq!(MD028NoBlanksBlockquote::get_replacement("", 1), "> ");
+        assert_eq!(MD028NoBlanksBlockquote::get_replacement("  ", 1), "  > ");
+        assert_eq!(MD028NoBlanksBlockquote::get_replacement("", 2), ">> ");
+        assert_eq!(MD028NoBlanksBlockquote::get_replacement("  ", 3), "  >>> ");
     }
 
     #[test]
@@ -327,7 +328,7 @@ mod tests {
         assert_eq!(result.len(), 1);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, ">>> Deep nest\n>>>\n>>> More deep");
+        assert_eq!(fixed, ">>> Deep nest\n>>> \n>>> More deep");
     }
 
     #[test]

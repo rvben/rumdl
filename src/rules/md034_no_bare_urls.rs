@@ -23,6 +23,10 @@ lazy_static! {
     static ref URL_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftps?)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#).unwrap();
     static ref URL_FIX_REGEX: FancyRegex = FancyRegex::new(r#"(?<![\w\[\(\<])((?:https?|ftps?)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#).unwrap();
 
+    // Pattern to detect custom protocol patterns that shouldn't be flagged
+    // These are commonly used in documentation but aren't actual browsable URLs
+    static ref CUSTOM_PROTOCOL_PATTERN: Regex = Regex::new(r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#).unwrap();
+
     // Pattern to match markdown link format - capture destination in Group 1
     // Updated to handle nested brackets in badge links like [![badge](img)](link)
     static ref MARKDOWN_LINK_PATTERN: Regex = Regex::new(r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap();
@@ -193,6 +197,17 @@ impl MD034NoBareUrls {
                 // Skip invalid IPv6 patterns
                 if matched_str.contains("::") && !matched_str.contains('[') && matched_str.contains(']') {
                     continue;
+                }
+
+                // Skip custom protocols that aren't standard web protocols
+                // Check if there's a custom protocol pattern before this match
+                if start_in_line > 0 {
+                    // Look back to see if this is part of a custom protocol URL
+                    let prefix_start = start_in_line.saturating_sub(20); // Look back up to 20 chars
+                    let prefix = &line_content[prefix_start..start_in_line];
+                    if CUSTOM_PROTOCOL_PATTERN.is_match(prefix) {
+                        continue;
+                    }
                 }
 
                 let global_start = line_info.byte_offset + start_in_line;

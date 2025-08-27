@@ -22,7 +22,17 @@ lazy_static! {
     static ref OUTPUT_EXAMPLE_START: Regex = Regex::new(r"^#+\s*(?:Output|Example|Output Style|Output Format)\s*$").unwrap();
 
     // Pattern for GitHub alerts/callouts in blockquotes (e.g., > [!NOTE], > [!TIP], etc.)
-    static ref GITHUB_ALERT_REGEX: Regex = Regex::new(r"^\s*>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]").unwrap();
+    // Extended to include additional common alert types
+    static ref GITHUB_ALERT_REGEX: Regex = Regex::new(r"^\s*>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|INFO|SUCCESS|FAILURE|DANGER|BUG|EXAMPLE|QUOTE)\]").unwrap();
+
+    // Pattern to detect URLs that may contain brackets (IPv6, API endpoints, etc.)
+    // This pattern specifically looks for:
+    // - IPv6 addresses: https://[::1] or https://[2001:db8::1]
+    // - API paths with array notation: https://api.example.com/users[0]
+    // But NOT markdown reference links that happen to follow URLs
+    static ref URL_WITH_BRACKETS: Regex = Regex::new(
+        r"https?://(?:\[[0-9a-fA-F:]+\]|[^\s\[\]]+/[^\s]*\[\d+\])"
+    ).unwrap();
 }
 
 /// Rule MD052: Reference links and images should use reference style
@@ -336,6 +346,15 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
+            // Skip lines that contain URLs with brackets (IPv6, API endpoints, etc.)
+            // This prevents false positives for brackets within URLs
+            if URL_WITH_BRACKETS.is_match(line) {
+                // We need to be more careful - only skip the brackets that are actually part of URLs
+                // For now, skip the entire line if it contains a URL with brackets
+                // TODO: More precise detection to only skip brackets within the URL itself
+                continue;
+            }
+
             // Check shortcut references: [reference]
             if let Ok(captures) = SHORTCUT_REF_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
                 for cap in captures {
@@ -343,9 +362,23 @@ impl MD052ReferenceLinkImages {
                         let reference = ref_match.as_str();
                         let reference_lower = reference.to_lowercase();
 
-                        // Skip GitHub alerts (e.g., !NOTE, !TIP, !WARNING, !IMPORTANT, !CAUTION)
+                        // Skip GitHub alerts (including extended types)
                         if let Some(alert_type) = reference.strip_prefix('!')
-                            && matches!(alert_type, "NOTE" | "TIP" | "WARNING" | "IMPORTANT" | "CAUTION")
+                            && matches!(
+                                alert_type,
+                                "NOTE"
+                                    | "TIP"
+                                    | "WARNING"
+                                    | "IMPORTANT"
+                                    | "CAUTION"
+                                    | "INFO"
+                                    | "SUCCESS"
+                                    | "FAILURE"
+                                    | "DANGER"
+                                    | "BUG"
+                                    | "EXAMPLE"
+                                    | "QUOTE"
+                            )
                         {
                             continue;
                         }

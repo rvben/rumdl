@@ -19,6 +19,16 @@ lazy_static! {
     // Pattern to detect escaped brackets and parentheses
     static ref ESCAPED_CHARS: Regex = Regex::new(r"\\[\[\]()]").unwrap();
 
+    // Pattern to detect mathematical context indicators
+    static ref MATH_CONTEXT: Regex = Regex::new(
+        r"(?:f|g|h|sin|cos|tan|log|ln|exp|matrix|vector|det|lim|sum|prod|int)\s*\([^)]+\)|[∈∉⊆⊂⊃⊇∩∪∧∨¬∀∃∅∞∫∑∏√±×÷≠≤≥≈≡]|\b(?:where|such that|for all|exists|if and only if)\b"
+    ).unwrap();
+
+    // Pattern to detect function/array notation that shouldn't be flagged
+    static ref FUNCTION_ARRAY_NOTATION: Regex = Regex::new(
+        r"(?:[a-zA-Z_]\w*\([^)]*\)\[[^\]]+\])|(?:\([^)]+\)\[(?:element|index|derivative|integral|component|row|column|entry|coefficient|term)\])"
+    ).unwrap();
+
     // New patterns for detecting malformed link attempts where user intent is clear
     static ref MALFORMED_LINK_PATTERNS: Vec<(Regex, &'static str)> = vec![
         // Missing closing bracket: (URL)[text  or  [text](URL
@@ -77,10 +87,44 @@ impl MD011NoReversedLinks {
                 continue;
             }
 
+            // Skip if line contains mathematical context
+            if MATH_CONTEXT.is_match(line) {
+                line_start += line.len() + 1;
+                current_line += 1;
+                continue;
+            }
+
+            // Skip if line contains function/array notation
+            if FUNCTION_ARRAY_NOTATION.is_match(line) {
+                line_start += line.len() + 1;
+                current_line += 1;
+                continue;
+            }
+
             for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
                 // Extract URL and text
                 let url = &cap[1];
                 let text = &cap[2];
+
+                // Additional check: Skip if this looks like mathematical notation
+                // e.g., (0,1)[inclusive], (a,b)[intersection]
+                if text.len() < 20
+                    && (text.contains("inclusive")
+                        || text.contains("exclusive")
+                        || text.contains("intersection")
+                        || text.contains("union")
+                        || text.contains("element")
+                        || text.contains("derivative")
+                        || text.contains("component")
+                        || text.contains("index"))
+                {
+                    continue;
+                }
+
+                // Skip if URL part looks like coordinates or intervals
+                if url.contains(',') && !url.contains("://") && !url.contains('.') {
+                    continue;
+                }
 
                 let start = line_start + cap.get(0).unwrap().start();
                 results.push((current_line, start - line_start + 1, text.to_string(), url.to_string()));

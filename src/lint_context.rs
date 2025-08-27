@@ -1090,9 +1090,10 @@ impl<'a> LintContext<'a> {
                 // Consider tabs as multiple spaces, or actual multiple spaces
                 let has_multiple_spaces = spaces_after.len() > 1 || spaces_after.contains('\t');
 
-                // Check if needs MD028 fix (empty blockquote line)
-                // MD028 flags empty blockquote lines (content is empty)
-                let needs_md028_fix = content.trim().is_empty();
+                // Check if needs MD028 fix (empty blockquote line without proper spacing)
+                // MD028 flags empty blockquote lines that don't have a single space after the marker
+                // Lines like "> " or ">> " are already correct and don't need fixing
+                let needs_md028_fix = content.is_empty() && spaces_after.is_empty();
 
                 lines[i].blockquote = Some(BlockquoteInfo {
                     nesting_level,
