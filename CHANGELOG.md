@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.130] - 2025-08-27
+
+### Fixed
+- **MD052**: Fixed false positives with IPv6 URLs containing brackets (e.g., `http://[::1]:8080/path[0]`)
+- **MD053**: Made rule warning-only, removed automatic fixes to prevent accidental removal of intentionally kept references (fixes #69)
+- **MD009/MD028**: Resolved formatting loop between trailing spaces and blank blockquote lines
+- **MD002/MD041**: Fixed interaction where MD002 incorrectly flagged documents starting with level-1 heading
+- **MD011**: Prevented false positives with math-like expressions (e.g., `[0,1]`) outside code blocks
+- **MD034**: Improved bare URL detection to avoid false positives with bracketed paths in URLs
+
 ## [0.0.129] - 2025-08-26
 
 ## [0.0.128] - 2025-08-25
@@ -483,7 +493,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.129...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.130...HEAD
+[0.0.130]: https://github.com/rvben/rumdl/compare/v0.0.129...v0.0.130
 [0.0.129]: https://github.com/rvben/rumdl/compare/v0.0.128...v0.0.129
 [0.0.128]: https://github.com/rvben/rumdl/compare/v0.0.127...v0.0.128
 [0.0.127]: https://github.com/rvben/rumdl/compare/v0.0.126...v0.0.127
