@@ -15,9 +15,10 @@ lazy_static! {
     // Image reference format: ![text][reference]
     // REMOVED: static ref IMAGE_REFERENCE_REGEX: FancyRegex = FancyRegex::new(r"!\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
 
-    // Shortcut reference links: [reference] - must not be followed by a colon to avoid matching definitions
+    // Shortcut reference links: [reference] - must not be followed by a colon or another bracket to avoid matching definitions
+    // Allow references followed by parentheses (like "[reference] (text)")
     static ref SHORTCUT_REFERENCE_REGEX: FancyRegex =
-        FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!\s*[\[(:])").unwrap();
+        FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!\s*[\[:])").unwrap();
 
     // REMOVED: Empty reference links: [text][] or ![text][]
     // static ref EMPTY_LINK_REFERENCE_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\s*\[\s*\]").unwrap();

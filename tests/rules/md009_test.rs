@@ -148,7 +148,7 @@ fn test_md009_blockquote_truly_empty() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // ">   " should be detected
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Empty blockquote line needs a space after >");
+    assert_eq!(result[0].message, "3 trailing spaces found");
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn test_md009_fix_blockquote_empty_lines() {
     let content = "> Quote\n>   \n> More quote\n>\n> End\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "> Quote\n> \n> More quote\n>\n> End\n");
+    assert_eq!(result, "> Quote\n>\n> More quote\n>\n> End\n"); // Trailing spaces removed
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn test_md009_fix_complex_document() {
     // Headings should have all trailing spaces removed, regular text preserves 2 spaces for line breaks
     assert_eq!(
         result,
-        "# Title\n\nParagraph  \n\n- List  \n  - Nested  \n\n```\ncode   \n```\n\n> Quote  \n> \n\nEnd"
+        "# Title\n\nParagraph  \n\n- List  \n  - Nested  \n\n```\ncode   \n```\n\n> Quote  \n>\n\nEnd" // Empty blockquote line trailing spaces removed
     );
 }
 

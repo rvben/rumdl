@@ -73,7 +73,18 @@ pub fn is_snippet_marker(line: &str) -> bool {
     }
 
     // Check for section markers: --8<-- [start:name] or [end:name]
+    // Also check with comment prefixes: # -8<- [start:name]
     if SECTION_MARKER.is_match(trimmed) {
+        return true;
+    }
+
+    // Check for comment-prefixed section markers (# -8<- [start:name])
+    let without_comment = trimmed.trim_start_matches(['#', ';', '/', '*']).trim_start();
+    if (without_comment.starts_with("-8<-")
+        || without_comment.starts_with("--8<--")
+        || without_comment.starts_with("---8<---"))
+        && (without_comment.contains("[start:") || without_comment.contains("[end:"))
+    {
         return true;
     }
 
@@ -112,6 +123,8 @@ pub fn is_snippet_section_start(line: &str) -> bool {
     // <!-- --8<-- [start:section_name] -->
     // --8<-- [start:section_name]
     // -8<- [start:section_name]
+    // # -8<- [start:section_name]  (comment format for source files)
+    // ; -8<- [start:section_name]  (comment format for ini files)
 
     if !line.contains("start:") {
         return false;
@@ -122,8 +135,21 @@ pub fn is_snippet_section_start(line: &str) -> bool {
         && let Some(_end_idx) = line[_start_idx..].find(']')
     {
         // Empty section names are allowed (lenient for detection)
-        // Just check that we have the snippet marker
-        return line.contains("--8<--") || line.contains("-8<-") || line.contains("---8<---");
+        let trimmed = line.trim();
+
+        // Handle HTML comments specially
+        let content_to_check = if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+            // Extract content from HTML comment
+            trimmed.trim_start_matches("<!--").trim_end_matches("-->").trim()
+        } else {
+            // For other comment styles (# ; / *)
+            let without_comment = trimmed.trim_start_matches(['#', ';', '/', '*']);
+            without_comment.trim_start()
+        };
+
+        return content_to_check.starts_with("--8<--")
+            || content_to_check.starts_with("-8<-")
+            || content_to_check.starts_with("---8<---");
     }
 
     false
@@ -135,6 +161,8 @@ pub fn is_snippet_section_end(line: &str) -> bool {
     // <!-- --8<-- [end:section_name] -->
     // --8<-- [end:section_name]
     // -8<- [end:section_name]
+    // # -8<- [end:section_name]  (comment format for source files)
+    // ; -8<- [end:section_name]  (comment format for ini files)
 
     if !line.contains("end:") {
         return false;
@@ -145,8 +173,21 @@ pub fn is_snippet_section_end(line: &str) -> bool {
         && let Some(_end_idx) = line[_start_idx..].find(']')
     {
         // Empty section names are allowed (lenient for detection)
-        // Just check that we have the snippet marker
-        return line.contains("--8<--") || line.contains("-8<-") || line.contains("---8<---");
+        let trimmed = line.trim();
+
+        // Handle HTML comments specially
+        let content_to_check = if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+            // Extract content from HTML comment
+            trimmed.trim_start_matches("<!--").trim_end_matches("-->").trim()
+        } else {
+            // For other comment styles (# ; / *)
+            let without_comment = trimmed.trim_start_matches(['#', ';', '/', '*']);
+            without_comment.trim_start()
+        };
+
+        return content_to_check.starts_with("--8<--")
+            || content_to_check.starts_with("-8<-")
+            || content_to_check.starts_with("---8<---");
     }
 
     false
@@ -235,6 +276,7 @@ mod tests {
         assert!(is_snippet_section_start("<!-- --8<-- [start:intro] -->"));
         assert!(is_snippet_section_start("--8<-- [start:code]"));
         assert!(is_snippet_section_start("-8<- [start:example]"));
+        assert!(is_snippet_section_start("# -8<- [start:remote-content]")); // Comment style
 
         // Invalid section start markers
         // We're lenient with empty section names for detection (can warn later)

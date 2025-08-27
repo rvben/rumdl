@@ -390,7 +390,7 @@ impl<'a> LintContext<'a> {
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
         // Pre-compute line information
-        let lines = Self::compute_line_info(content, &line_offsets, &code_blocks);
+        let lines = Self::compute_line_info(content, &line_offsets, &code_blocks, flavor);
 
         // Parse links, images, references, and list blocks
         // Skip code spans - they'll be computed lazily
@@ -915,7 +915,12 @@ impl<'a> LintContext<'a> {
     }
 
     /// Pre-compute line information
-    fn compute_line_info(content: &str, line_offsets: &[usize], code_blocks: &[(usize, usize)]) -> Vec<LineInfo> {
+    fn compute_line_info(
+        content: &str,
+        line_offsets: &[usize],
+        code_blocks: &[(usize, usize)],
+        flavor: MarkdownFlavor,
+    ) -> Vec<LineInfo> {
         lazy_static! {
             // Regex for list detection - allow any whitespace including no space (to catch malformed lists)
             static ref UNORDERED_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)([-*+])([ \t]*)(.*)").unwrap();
@@ -1085,8 +1090,9 @@ impl<'a> LintContext<'a> {
                 // Consider tabs as multiple spaces, or actual multiple spaces
                 let has_multiple_spaces = spaces_after.len() > 1 || spaces_after.contains('\t');
 
-                // Check if needs MD028 fix (empty blockquote without proper spacing)
-                let needs_md028_fix = content.trim().is_empty() && spaces_after.is_empty();
+                // Check if needs MD028 fix (empty blockquote line)
+                // MD028 flags empty blockquote lines (content is empty)
+                let needs_md028_fix = content.trim().is_empty();
 
                 lines[i].blockquote = Some(BlockquoteInfo {
                     nesting_level,
@@ -1105,8 +1111,16 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Check for ATX headings
-            if let Some(caps) = ATX_HEADING_REGEX.captures(line) {
+            // Check for ATX headings (but skip MkDocs snippet lines)
+            // In MkDocs flavor, lines like "# -8<- [start:name]" are snippet markers, not headings
+            let is_snippet_line = if flavor == MarkdownFlavor::MkDocs {
+                crate::utils::mkdocs_snippets::is_snippet_section_start(line)
+                    || crate::utils::mkdocs_snippets::is_snippet_section_end(line)
+            } else {
+                false
+            };
+
+            if !is_snippet_line && let Some(caps) = ATX_HEADING_REGEX.captures(line) {
                 let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                 let hashes = caps.get(2).map_or("", |m| m.as_str());
                 let spaces_after = caps.get(3).map_or("", |m| m.as_str());

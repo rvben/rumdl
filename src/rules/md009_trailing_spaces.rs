@@ -28,11 +28,6 @@ impl MD009TrailingSpaces {
         Self { config }
     }
 
-    fn is_empty_blockquote_line(line: &str) -> bool {
-        let trimmed = line.trim_start();
-        trimmed.starts_with('>') && trimmed.trim_end() == ">"
-    }
-
     fn count_trailing_spaces(line: &str) -> usize {
         line.chars().rev().take_while(|&c| c == ' ').count()
     }
@@ -126,32 +121,8 @@ impl Rule for MD009TrailingSpaces {
                 continue;
             }
 
-            // Special handling for empty blockquote lines
-            if Self::is_empty_blockquote_line(line) {
-                let trimmed = line.trim_end();
-                // Calculate precise character range for trailing spaces after blockquote marker
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_trailing_range(line_num + 1, line, trimmed.len());
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    message: "Empty blockquote line needs a space after >".to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range_with_length(
-                            line_num + 1,
-                            trimmed.len() + 1,
-                            line.len() - trimmed.len(),
-                        ),
-                        replacement: " ".to_string(),
-                    }),
-                });
-                continue;
-            }
+            // Empty blockquote lines should just have trailing spaces removed like normal lines
+            // No special handling needed - they'll be caught by the general trailing spaces check below
 
             let trimmed = line.trim_end();
             // Calculate precise character range for all trailing spaces
@@ -222,7 +193,7 @@ impl Rule for MD009TrailingSpaces {
                 if self.config.list_item_empty_lines && Self::is_empty_list_item_line(line, prev_line) {
                     result.push_str(line);
                 } else {
-                    // Remove all trailing spaces
+                    // Remove all trailing spaces - line is empty so don't add anything
                 }
                 result.push('\n');
                 continue;
@@ -237,13 +208,7 @@ impl Rule for MD009TrailingSpaces {
                 continue;
             }
 
-            // Special handling for empty blockquote lines
-            if Self::is_empty_blockquote_line(line) {
-                result.push_str(trimmed);
-                result.push(' '); // Add a space after the blockquote marker
-                result.push('\n');
-                continue;
-            }
+            // No special handling for empty blockquote lines - treat them like regular lines
 
             // Handle lines with trailing spaces
             let is_truly_last_line = i == lines.len() - 1 && !content.ends_with('\n');
@@ -258,9 +223,17 @@ impl Rule for MD009TrailingSpaces {
                 trimmed.starts_with('#')
             };
 
+            // Check if this is an empty blockquote line (just ">")
+            let is_empty_blockquote = if let Some(line_info) = ctx.line_info(i + 1) {
+                line_info.blockquote.as_ref().is_some_and(|bq| bq.content.is_empty())
+            } else {
+                false
+            };
+
             // In non-strict mode, preserve line breaks by normalizing to br_spaces
-            // BUT: Never preserve trailing spaces in headings as they serve no purpose
-            if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 && !is_heading {
+            // BUT: Never preserve trailing spaces in headings or empty blockquotes as they serve no purpose
+            if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 && !is_heading && !is_empty_blockquote
+            {
                 // Optimize for common case of 2 spaces
                 match self.config.br_spaces {
                     0 => {}
@@ -425,10 +398,10 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
-        assert_eq!(result[0].message, "Empty blockquote line needs a space after >");
+        assert_eq!(result[0].message, "3 trailing spaces found");
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "> Quote\n> \n> More quote");
+        assert_eq!(fixed, "> Quote\n>\n> More quote"); // All trailing spaces removed
     }
 
     #[test]

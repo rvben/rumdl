@@ -144,12 +144,17 @@ impl Rule for MD027MultipleSpacesBlockquote {
                 // Fix blockquotes with multiple spaces after the marker
                 if blockquote.has_multiple_spaces_after_marker {
                     // Rebuild the line with exactly one space after the markers
-                    let fixed_line = format!(
-                        "{}{} {}",
-                        blockquote.indent,
-                        ">".repeat(blockquote.nesting_level),
-                        blockquote.content
-                    );
+                    // But don't add a space if the content is empty to avoid MD009 conflicts
+                    let fixed_line = if blockquote.content.is_empty() {
+                        format!("{}{}", blockquote.indent, ">".repeat(blockquote.nesting_level))
+                    } else {
+                        format!(
+                            "{}{} {}",
+                            blockquote.indent,
+                            ">".repeat(blockquote.nesting_level),
+                            blockquote.content
+                        )
+                    };
                     result.push(fixed_line);
                 } else {
                     result.push(line_info.content.clone());
