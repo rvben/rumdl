@@ -28,10 +28,12 @@ lazy_static! {
     // Pattern to detect URLs that may contain brackets (IPv6, API endpoints, etc.)
     // This pattern specifically looks for:
     // - IPv6 addresses: https://[::1] or https://[2001:db8::1]
+    // - IPv6 with zone IDs: https://[fe80::1%eth0]
+    // - IPv6 mixed notation: https://[::ffff:192.0.2.1]
     // - API paths with array notation: https://api.example.com/users[0]
     // But NOT markdown reference links that happen to follow URLs
     static ref URL_WITH_BRACKETS: Regex = Regex::new(
-        r"https?://(?:\[[0-9a-fA-F:]+\]|[^\s\[\]]+/[^\s]*\[\d+\])"
+        r"https?://(?:\[[0-9a-fA-F:.%]+\]|[^\s\[\]]+/[^\s]*\[\d+\])"
     ).unwrap();
 }
 
@@ -346,19 +348,49 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
-            // Skip lines that contain URLs with brackets (IPv6, API endpoints, etc.)
-            // This prevents false positives for brackets within URLs
-            if URL_WITH_BRACKETS.is_match(line) {
-                // We need to be more careful - only skip the brackets that are actually part of URLs
-                // For now, skip the entire line if it contains a URL with brackets
-                // TODO: More precise detection to only skip brackets within the URL itself
-                continue;
+            // Collect positions of brackets that are part of URLs (IPv6, etc.)
+            // so we can exclude them from reference checking
+            let mut url_bracket_ranges: Vec<(usize, usize)> = Vec::new();
+            for mat in URL_WITH_BRACKETS.find_iter(line) {
+                // Find all bracket pairs within this URL match
+                let url_str = mat.as_str();
+                let url_start = mat.start();
+
+                // Find brackets within the URL (e.g., in https://[::1]:8080)
+                let mut idx = 0;
+                while idx < url_str.len() {
+                    if let Some(bracket_start) = url_str[idx..].find('[') {
+                        let bracket_start_abs = url_start + idx + bracket_start;
+                        if let Some(bracket_end) = url_str[idx + bracket_start + 1..].find(']') {
+                            let bracket_end_abs = url_start + idx + bracket_start + 1 + bracket_end + 1;
+                            url_bracket_ranges.push((bracket_start_abs, bracket_end_abs));
+                            idx += bracket_start + bracket_end + 2;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
             }
 
             // Check shortcut references: [reference]
             if let Ok(captures) = SHORTCUT_REF_REGEX.captures_iter(line).collect::<Result<Vec<_>, _>>() {
                 for cap in captures {
                     if let Some(ref_match) = cap.get(1) {
+                        // Check if this bracket is part of a URL (IPv6, etc.)
+                        let bracket_start = cap.get(0).unwrap().start();
+                        let bracket_end = cap.get(0).unwrap().end();
+
+                        // Skip if this bracket pair is within any URL bracket range
+                        let is_in_url = url_bracket_ranges
+                            .iter()
+                            .any(|&(url_start, url_end)| bracket_start >= url_start && bracket_end <= url_end);
+
+                        if is_in_url {
+                            continue;
+                        }
+
                         let reference = ref_match.as_str();
                         let reference_lower = reference.to_lowercase();
 
