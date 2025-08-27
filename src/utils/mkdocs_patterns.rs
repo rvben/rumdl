@@ -27,12 +27,6 @@ pub fn is_mkdocs_auto_reference(reference: &str) -> bool {
     if reference.contains('-') && !reference.contains(' ') {
         return is_valid_hyphen_pattern(reference);
     }
-
-    // Check for simple identifiers (single word class/function names)
-    if is_valid_identifier(reference) {
-        return true;
-    }
-
     false
 }
 

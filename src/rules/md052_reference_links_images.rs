@@ -350,6 +350,16 @@ impl MD052ReferenceLinkImages {
                             continue;
                         }
 
+                        // Skip MkDocs snippet section markers like [start:section] or [end:section]
+                        // when they appear as part of snippet syntax (e.g., # -8<- [start:section])
+                        if mkdocs_mode
+                            && (reference.starts_with("start:") || reference.starts_with("end:"))
+                            && (crate::utils::mkdocs_snippets::is_snippet_section_start(line)
+                                || crate::utils::mkdocs_snippets::is_snippet_section_end(line))
+                        {
+                            continue;
+                        }
+
                         // Skip MkDocs auto-references if in MkDocs mode
                         if mkdocs_mode && is_mkdocs_auto_reference(reference) {
                             continue;
@@ -995,6 +1005,73 @@ tags = ["example", "test"]
             "Should only flag the undefined reference outside TOML frontmatter"
         );
         assert!(result[0].message.contains("missing"));
+    }
+
+    #[test]
+    fn test_mkdocs_snippet_markers_not_flagged() {
+        // Test for issue #68 - MkDocs snippet selection markers should not be flagged as undefined references
+        let rule = MD052ReferenceLinkImages::new();
+
+        // Test snippet section markers
+        let content = r#"# Document with MkDocs Snippets
+
+Some content here.
+
+# -8<- [start:remote-content]
+
+This is the remote content section.
+
+# -8<- [end:remote-content]
+
+More content here.
+
+<!-- --8<-- [start:another-section] -->
+Content in another section
+<!-- --8<-- [end:another-section] -->"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag any snippet markers as undefined references
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag MkDocs snippet markers as undefined references"
+        );
+
+        // Test that the snippet marker lines are properly skipped
+        // but regular undefined references on other lines are still caught
+        let content = r#"# Document
+
+# -8<- [start:section]
+Content with [reference] inside snippet section
+# -8<- [end:section]
+
+Regular [undefined] reference outside snippet markers."#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            2,
+            "Should flag undefined references but skip snippet marker lines"
+        );
+        // The references inside the content should be flagged, but not start: and end:
+        assert!(result[0].message.contains("reference"));
+        assert!(result[1].message.contains("undefined"));
+
+        // Test in standard mode - should flag the markers as undefined
+        let content = r#"# Document
+
+# -8<- [start:section]
+# -8<- [end:section]"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            2,
+            "In standard mode, snippet markers should be flagged as undefined references"
+        );
     }
 
     #[test]
