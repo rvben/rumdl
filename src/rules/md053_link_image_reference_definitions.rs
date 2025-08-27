@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::calculate_line_range;
@@ -110,9 +110,8 @@ impl RuleConfig for MD053Config {
 ///
 /// ## Fix Behavior
 ///
-/// When fixing issues, this rule removes unused reference definitions while preserving
-/// the document's structure, including handling proper blank line formatting around
-/// the removed definitions.
+/// This rule does not provide automatic fixes. Unused references must be manually reviewed
+/// and removed, as they may be intentionally kept for future use or as templates.
 #[derive(Clone)]
 pub struct MD053LinkImageReferenceDefinitions {
     config: MD053Config,
@@ -307,37 +306,6 @@ impl MD053LinkImageReferenceDefinitions {
             .iter()
             .any(|ignored| ignored.eq_ignore_ascii_case(definition_id))
     }
-
-    /// Clean up multiple consecutive blank lines that might be created after removing references
-    fn clean_up_blank_lines(&self, content: &str) -> String {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result_lines = Vec::new();
-        let mut consecutive_blanks = 0;
-
-        for line in lines {
-            if line.trim().is_empty() {
-                consecutive_blanks += 1;
-                if consecutive_blanks <= 1 {
-                    // Allow up to 1 consecutive blank line
-                    result_lines.push(line);
-                }
-            } else {
-                consecutive_blanks = 0;
-                result_lines.push(line);
-            }
-        }
-
-        // Remove leading and trailing blank lines
-        while !result_lines.is_empty() && result_lines[0].trim().is_empty() {
-            result_lines.remove(0);
-        }
-        while !result_lines.is_empty() && result_lines[result_lines.len() - 1].trim().is_empty() {
-            result_lines.pop();
-        }
-
-        // Don't add trailing newlines - let the content determine its own ending
-        result_lines.join("\n")
-    }
 }
 
 impl Default for MD053LinkImageReferenceDefinitions {
@@ -388,76 +356,17 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                 end_column: end_col,
                 message: format!("Unused link/image reference: [{definition}]"),
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    // Remove the entire line including the newline
-                    range: {
-                        let line_start = ctx.line_to_byte_offset(line_num).unwrap_or(0);
-                        let line_end = if line_num < ctx.lines.len() {
-                            ctx.line_to_byte_offset(line_num + 1).unwrap_or(content.len())
-                        } else {
-                            content.len()
-                        };
-                        line_start..line_end
-                    },
-                    replacement: String::new(), // Remove the line
-                }),
+                fix: None, // MD053 is warning-only, no automatic fixes
             });
         }
 
         Ok(warnings)
     }
 
-    /// Fix the content by removing unused link/image reference definitions.
-    ///
-    /// This implementation uses caching for improved performance on large documents.
-    /// It optimizes the process by:
-    /// 1. Using cached definitions to avoid re-parsing the document
-    /// 2. Preserving document structure while removing unused references
-    /// 3. Cleaning up any formatting issues created by the removals
+    /// MD053 does not provide automatic fixes
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let doc_structure = DocumentStructure::new(content);
-
-        // Find definitions and usages using DocumentStructure
-        let definitions = self.find_definitions(ctx, &doc_structure);
-        let usages = self.find_usages(&doc_structure, ctx);
-
-        // Get unused references by comparing definitions and usages
-        let unused_refs = self.get_unused_references(&definitions, &usages);
-
-        // If no unused references, return original content
-        if unused_refs.is_empty() {
-            return Ok(content.to_string());
-        }
-
-        // Collect all line ranges to remove (sort by start line descending)
-        let mut lines_to_remove: Vec<(usize, usize)> =
-            unused_refs.iter().map(|(_, start, end)| (*start, *end)).collect();
-        lines_to_remove.sort_by(|a, b| b.0.cmp(&a.0)); // Sort descending by start line
-
-        // Remove lines from end to beginning to preserve line numbers
-        let lines: Vec<&str> = ctx.lines.iter().map(|l| l.content.as_str()).collect();
-        let mut result_lines: Vec<&str> = lines.clone();
-
-        for (start_line, end_line) in lines_to_remove {
-            // Remove lines from start_line to end_line (inclusive)
-            if start_line < result_lines.len() && end_line < result_lines.len() {
-                result_lines.drain(start_line..=end_line);
-            }
-        }
-
-        // Join the remaining lines
-        let mut result = result_lines.join("\n");
-
-        // Preserve original ending (with or without newline)
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
-        }
-
-        // Clean up multiple consecutive blank lines that might have been created
-        let cleaned = self.clean_up_blank_lines(&result);
-
-        Ok(cleaned)
+        // This rule is warning-only, no automatic fixes provided
+        Ok(ctx.content.to_string())
     }
 
     /// Check if this rule should be skipped for performance
@@ -642,35 +551,36 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_removes_unused_definition() {
+    fn test_fix_returns_original() {
+        // MD053 is warning-only, fix should return original content
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[used]\n\n[used]: url1\n[unused]: url2\n\nMore content";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert!(fixed.contains("[used]: url1"));
-        assert!(!fixed.contains("[unused]: url2"));
-        assert!(fixed.contains("More content"));
+        assert_eq!(fixed, content);
     }
 
     #[test]
-    fn test_fix_preserves_blank_lines() {
+    fn test_fix_preserves_content() {
+        // MD053 is warning-only, fix should preserve all content
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "Content\n\n[unused]: url\n\nMore content";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(fixed, "Content\n\nMore content");
+        assert_eq!(fixed, content);
     }
 
     #[test]
-    fn test_fix_multiple_consecutive_definitions() {
+    fn test_fix_does_not_remove() {
+        // MD053 is warning-only, fix should not remove anything
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[unused1]: url1\n[unused2]: url2\n[unused3]: url3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(fixed, "");
+        assert_eq!(fixed, content);
     }
 
     #[test]
@@ -708,17 +618,6 @@ mod tests {
         assert!(usages.contains("ref1"));
         assert!(usages.contains("ref2"));
         assert!(usages.contains("ref3"));
-    }
-
-    #[test]
-    fn test_clean_up_blank_lines() {
-        let rule = MD053LinkImageReferenceDefinitions::new();
-
-        // Test multiple consecutive blank lines
-        assert_eq!(rule.clean_up_blank_lines("text\n\n\n\nmore text"), "text\n\nmore text");
-
-        // Test leading/trailing blank lines
-        assert_eq!(rule.clean_up_blank_lines("\n\ntext\n\n"), "text");
     }
 
     #[test]
@@ -777,8 +676,8 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_respects_ignored_definitions() {
-        // Test that fix respects ignored definitions
+    fn test_fix_with_ignored_definitions() {
+        // MD053 is warning-only, fix should not remove anything even with ignored definitions
         let config = MD053Config {
             ignored_definitions: vec!["template".to_string()],
         };
@@ -788,9 +687,7 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // Should keep template but remove unused
-        assert!(fixed.contains("[template]: https://example.com/template"));
-        assert!(!fixed.contains("[unused]: https://example.com/unused"));
-        assert!(fixed.contains("Some content."));
+        // Should keep everything since MD053 doesn't fix
+        assert_eq!(fixed, content);
     }
 }
