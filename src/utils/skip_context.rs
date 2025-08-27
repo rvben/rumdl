@@ -7,6 +7,7 @@ use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
 use crate::utils::kramdown_utils::is_math_block_delimiter;
 use crate::utils::mkdocs_admonitions;
+use crate::utils::mkdocs_critic;
 use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_snippets;
 use crate::utils::mkdocs_tabs;
@@ -92,6 +93,11 @@ pub fn is_in_skip_context(ctx: &LintContext, byte_pos: usize) -> bool {
         return true;
     }
 
+    // Check MkDocs Critic Markup
+    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_critic::is_within_critic_markup(ctx.content, byte_pos) {
+        return true;
+    }
+
     false
 }
 
@@ -118,6 +124,11 @@ pub fn is_mkdocs_tab_line(line: &str, flavor: MarkdownFlavor) -> bool {
 /// Check if a line is a MkDocstrings autodoc marker
 pub fn is_mkdocstrings_autodoc_line(line: &str, flavor: MarkdownFlavor) -> bool {
     flavor == MarkdownFlavor::MkDocs && mkdocstrings_refs::is_autodoc_marker(line)
+}
+
+/// Check if a line contains MkDocs Critic Markup
+pub fn is_mkdocs_critic_line(line: &str, flavor: MarkdownFlavor) -> bool {
+    flavor == MarkdownFlavor::MkDocs && mkdocs_critic::contains_critic_markup(line)
 }
 
 /// Check if a byte position is within an HTML comment

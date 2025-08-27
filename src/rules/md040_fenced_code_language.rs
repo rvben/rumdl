@@ -92,7 +92,14 @@ impl Rule for MD040FencedCodeLanguage {
                     // We're outside a code block, this opens one
                     // Check if language is specified
                     let after_fence = trimmed[fence_marker.len()..].trim();
-                    if after_fence.is_empty() {
+
+                    // Check if it has MkDocs title attribute but no language
+                    // Pattern: ``` title="Title" (missing language)
+                    // Valid: ```python title="Title" or ```py title="Title"
+                    let has_title_only =
+                        ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
+
+                    if after_fence.is_empty() || has_title_only {
                         // Calculate precise character range for the entire fence line that needs a language
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
 
@@ -278,18 +285,33 @@ impl Rule for MD040FencedCodeLanguage {
 
                     // Add 'text' as default language for opening fence if no language specified
                     let after_fence = trimmed[fence_marker.len()..].trim();
-                    if after_fence.is_empty() {
+
+                    // Check if it has MkDocs title attribute but no language
+                    let has_title_only =
+                        ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
+
+                    if after_fence.is_empty() || has_title_only {
                         // Decide whether to preserve indentation based on context
                         let should_preserve_indent = is_in_nested_context(i);
 
                         if should_preserve_indent {
                             // Preserve indentation for nested contexts
                             original_indent = line_indent;
-                            result.push_str(&format!("{original_indent}{fence_marker}text\n"));
+                            if has_title_only {
+                                // Insert language before title attribute
+                                result.push_str(&format!("{original_indent}{fence_marker}text {after_fence}\n"));
+                            } else {
+                                result.push_str(&format!("{original_indent}{fence_marker}text\n"));
+                            }
                         } else {
                             // Remove indentation for standalone code blocks
                             original_indent = String::new();
-                            result.push_str(&format!("{fence_marker}text\n"));
+                            if has_title_only {
+                                // Insert language before title attribute
+                                result.push_str(&format!("{fence_marker}text {after_fence}\n"));
+                            } else {
+                                result.push_str(&format!("{fence_marker}text\n"));
+                            }
                         }
                         fence_needs_language = true;
                     } else {

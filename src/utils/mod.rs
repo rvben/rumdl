@@ -15,6 +15,7 @@ pub mod kramdown_utils;
 pub mod markdown_elements;
 pub mod mkdocs_admonitions;
 pub mod mkdocs_common;
+pub mod mkdocs_critic;
 pub mod mkdocs_footnotes;
 pub mod mkdocs_patterns;
 pub mod mkdocs_snippets;

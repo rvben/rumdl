@@ -145,6 +145,14 @@ impl MD033NoInlineHtml {
             && content.split('@').all(|part| !part.is_empty())
     }
 
+    // Check if a tag has the markdown attribute (MkDocs/Material for MkDocs)
+    #[inline]
+    fn has_markdown_attribute(&self, tag: &str) -> bool {
+        // Check for various forms of markdown attribute
+        // Examples: <div markdown>, <div markdown="1">, <div class="result" markdown>
+        tag.contains(" markdown>") || tag.contains(" markdown=") || tag.contains(" markdown ")
+    }
+
     // Check if a tag is actually a URL in angle brackets
     #[inline]
     fn is_url_in_angle_brackets(&self, tag: &str) -> bool {
@@ -160,6 +168,7 @@ impl MD033NoInlineHtml {
     /// Find HTML tags that span multiple lines
     fn find_multiline_html_tags(
         &self,
+        ctx: &crate::lint_context::LintContext,
         content: &str,
         structure: &DocumentStructure,
         nomarkdown_ranges: &[(usize, usize)],
@@ -230,11 +239,15 @@ impl MD033NoInlineHtml {
                         let final_tag = &complete_tag[0..=end_pos];
 
                         // Apply the same filters as single-line tags
+                        let skip_mkdocs_markdown = ctx.flavor == crate::config::MarkdownFlavor::MkDocs
+                            && self.has_markdown_attribute(final_tag);
+
                         if !self.is_html_comment(final_tag)
                             && !self.is_likely_type_annotation(final_tag)
                             && !self.is_email_address(final_tag)
                             && !self.is_url_in_angle_brackets(final_tag)
                             && !self.is_tag_allowed(final_tag)
+                            && !skip_mkdocs_markdown
                             && HTML_TAG_FINDER.is_match(final_tag)
                         {
                             // Check for duplicates (avoid flagging the same position twice)
@@ -398,6 +411,11 @@ impl Rule for MD033NoInlineHtml {
                     continue;
                 }
 
+                // Skip tags with markdown attribute in MkDocs mode
+                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs && self.has_markdown_attribute(tag) {
+                    continue;
+                }
+
                 // Report each HTML tag individually (true markdownlint compatibility)
                 let (start_line, start_col, end_line, end_col) =
                     calculate_html_tag_range(line_num, line, tag_match.start(), tag_match.len());
@@ -415,7 +433,7 @@ impl Rule for MD033NoInlineHtml {
         }
 
         // Third pass: find multi-line HTML tags
-        self.find_multiline_html_tags(ctx.content, structure, &nomarkdown_ranges, &mut warnings);
+        self.find_multiline_html_tags(ctx, ctx.content, structure, &nomarkdown_ranges, &mut warnings);
 
         Ok(warnings)
     }
