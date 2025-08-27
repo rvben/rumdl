@@ -17,9 +17,7 @@ fn test_unused_reference() {
     let content = "[link1][id1]\n\n[id1]: http://example.com/1\n[id2]: http://example.com/2";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "[link1][id1]\n\n[id1]: http://example.com/1");
+    assert_eq!(result.len(), 1); // Should detect id2 as unused
 }
 
 #[test]
@@ -38,9 +36,7 @@ fn test_multiple_unused_references() {
         "[link1][id1]\n\n[id1]: http://example.com/1\n[id2]: http://example.com/2\n[id3]: http://example.com/3";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "[link1][id1]\n\n[id1]: http://example.com/1");
+    assert_eq!(result.len(), 2); // Should detect id2 and id3 as unused
 }
 
 #[test]
@@ -76,9 +72,7 @@ fn test_only_unused_references() {
     let content = "[id1]: http://example.com/1\n[id2]: http://example.com/2";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "");
+    assert_eq!(result.len(), 2); // All references are unused
 }
 
 #[test]
@@ -87,9 +81,7 @@ fn test_mixed_used_unused_references() {
     let content = "[link][used]\nSome text\n\n[used]: http://example.com/used\n[unused]: http://example.com/unused";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "[link][used]\nSome text\n\n[used]: http://example.com/used");
+    assert_eq!(result.len(), 1); // Should detect unused reference
 }
 
 #[test]
@@ -155,14 +147,7 @@ fn test_case_sensitivity() {
     assert!(result.is_empty());
 }
 
-#[test]
-fn test_fix_unused_references() {
-    let rule = MD053LinkImageReferenceDefinitions::default();
-    let content = "[unused]: https://example.com\n[used]: https://example.com\n[used] is a link";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
-    let result = rule.fix(&ctx).unwrap();
-    assert!(!result.contains("[unused]"));
-}
+// test_fix_unused_references removed - MD053 no longer provides fixes
 
 #[test]
 fn test_with_document_structure() {

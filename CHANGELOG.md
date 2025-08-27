@@ -19,7 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.129] - 2025-08-26
 
+### Added
+- **MkDocs Extended Support**: Enhanced MkDocs compatibility with PyMdown Extensions
+  - Snippets syntax (`--8<--`) support (fixes #62)
+  - Admonitions (`!!!`, `???`, `???+`) for collapsible note blocks
+  - Tabs (`=== "Tab Name"`) for content organization
+  - Footnotes (`[^ref]`) for reference-style citations
+  - Cross-references and auto-doc blocks
+
+### Fixed
+- **MkDocs Validation**: Made validation more lenient to detect malformed syntax
+- **Configuration Migration**: Fixed migration of multiple disabled rules from markdownlint config
+
 ## [0.0.128] - 2025-08-25
+
+### Fixed
+- **MD042/MD052**: Added support for simple identifiers in MkDocs auto-references
 
 ## [0.0.127] - 2025-08-25
 

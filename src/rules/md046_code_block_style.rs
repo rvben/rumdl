@@ -1176,7 +1176,7 @@ mod tests {
 
     This is tab content
     Not an indented code block
-    
+
     ```python
     def hello():
         print("Hello")
@@ -1223,7 +1223,7 @@ Regular text
 
     Content in tab
     More content
-    
+
 === "Tab 2"
 
     Content in second tab"#;
@@ -1245,9 +1245,9 @@ Regular text
 === "Outer Tab"
 
     Some content
-    
+
     === "Nested Tab"
-    
+
         Nested tab content
         Should not be flagged"#;
 
