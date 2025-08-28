@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.131] - 2025-08-28
+
+### Fixed
+- **MD002**: Implemented markdownlint compatibility - MD002 no longer triggers when first heading is on the first line, regardless of level (fixes #65)
+- **MD034**: Added support for multi-line MkDocs snippet blocks where markers appear on separate lines (fixes #70)
+
 ## [0.0.130] - 2025-08-27
 
 ### Fixed
@@ -508,7 +514,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.130...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.131...HEAD
+[0.0.131]: https://github.com/rvben/rumdl/compare/v0.0.130...v0.0.131
 [0.0.130]: https://github.com/rvben/rumdl/compare/v0.0.129...v0.0.130
 [0.0.129]: https://github.com/rvben/rumdl/compare/v0.0.128...v0.0.129
 [0.0.128]: https://github.com/rvben/rumdl/compare/v0.0.127...v0.0.128
