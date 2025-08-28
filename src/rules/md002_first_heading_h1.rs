@@ -122,53 +122,74 @@ impl Rule for MD002FirstHeadingH1 {
             .enumerate()
             .find_map(|(line_num, line_info)| line_info.heading.as_ref().map(|h| (line_num, line_info, h)));
 
-        if let Some((line_num, line_info, heading)) = first_heading
-            && heading.level != self.config.level as u8
-        {
-            let message = format!(
-                "First heading should be level {}, found level {}",
-                self.config.level, heading.level
-            );
+        if let Some((line_num, line_info, heading)) = first_heading {
+            // Check if the first heading is on the first non-empty line after front matter.
+            // If it is AND it's already H1, MD002 should not trigger (already correct).
+            // If it is but NOT H1, MD002 still should not trigger for markdownlint compatibility
+            // (MD002 is implicitly disabled when MD041 would be satisfied).
+            let first_content_line = ctx
+                .lines
+                .iter()
+                .enumerate()
+                .find(|(_, line_info)| !line_info.in_front_matter && !line_info.content.trim().is_empty())
+                .map(|(idx, _)| idx);
 
-            // Calculate the fix
-            let fix = {
-                let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(
-                    &heading.text,
-                    self.config.level,
-                    match heading.style {
-                        crate::lint_context::HeadingStyle::ATX => {
-                            if heading.has_closing_sequence {
-                                HeadingStyle::AtxClosed
-                            } else {
-                                HeadingStyle::Atx
-                            }
-                        }
-                        crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
-                        crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
-                    },
+            // If the first heading is on the first content line, don't trigger MD002
+            // This matches markdownlint behavior where MD002 doesn't apply to first-line headings
+            if let Some(first_line_idx) = first_content_line
+                && line_num == first_line_idx
+            {
+                return Ok(vec![]);
+            }
+
+            // Otherwise check if the heading level is correct
+            if heading.level != self.config.level as u8 {
+                let message = format!(
+                    "First heading should be level {}, found level {}",
+                    self.config.level, heading.level
                 );
 
-                // Use line content range to replace the entire heading line
-                let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
-                Some(Fix {
-                    range: line_index.line_content_range(line_num + 1), // Convert to 1-indexed
-                    replacement,
-                })
-            };
+                // Calculate the fix
+                let fix = {
+                    let replacement = crate::rules::heading_utils::HeadingUtils::convert_heading_style(
+                        &heading.text,
+                        self.config.level,
+                        match heading.style {
+                            crate::lint_context::HeadingStyle::ATX => {
+                                if heading.has_closing_sequence {
+                                    HeadingStyle::AtxClosed
+                                } else {
+                                    HeadingStyle::Atx
+                                }
+                            }
+                            crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
+                            crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
+                        },
+                    );
 
-            // Calculate precise range: highlight the entire first heading
-            let (start_line, start_col, end_line, end_col) = calculate_heading_range(line_num + 1, &line_info.content);
+                    // Use line content range to replace the entire heading line
+                    let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
+                    Some(Fix {
+                        range: line_index.line_content_range(line_num + 1), // Convert to 1-indexed
+                        replacement,
+                    })
+                };
 
-            return Ok(vec![LintWarning {
-                message,
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                severity: Severity::Warning,
-                fix,
-                rule_name: Some(self.name()),
-            }]);
+                // Calculate precise range: highlight the entire first heading
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_heading_range(line_num + 1, &line_info.content);
+
+                return Ok(vec![LintWarning {
+                    message,
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    severity: Severity::Warning,
+                    fix,
+                    rule_name: Some(self.name()),
+                }]);
+            }
         }
 
         Ok(vec![])
@@ -185,6 +206,22 @@ impl Rule for MD002FirstHeadingH1 {
             .find_map(|(line_num, line_info)| line_info.heading.as_ref().map(|h| (line_num, line_info, h)));
 
         if let Some((line_num, line_info, heading)) = first_heading {
+            // Check if the first heading is on the first non-empty line after front matter.
+            // If it is, MD002 should not apply (markdownlint compatibility).
+            let first_content_line = ctx
+                .lines
+                .iter()
+                .enumerate()
+                .find(|(_, line_info)| !line_info.in_front_matter && !line_info.content.trim().is_empty())
+                .map(|(idx, _)| idx);
+
+            if let Some(first_line_idx) = first_content_line
+                && line_num == first_line_idx
+            {
+                return Ok(content.to_string());
+            }
+
+            // If we're here, the heading is not on the first line, so check if it needs fixing
             if heading.level == self.config.level as u8 {
                 return Ok(content.to_string());
             }
@@ -310,18 +347,13 @@ mod tests {
 
     #[test]
     fn test_incorrect_h2_first_heading() {
+        // When heading is on first line, MD002 doesn't trigger (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Introduction\n\nContent here\n\n# Main Title";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .message
-                .contains("First heading should be level 1, found level 2")
-        );
-        assert_eq!(result[0].line, 1);
+        assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
     }
 
     #[test]
@@ -345,17 +377,13 @@ mod tests {
 
     #[test]
     fn test_setext_style_heading() {
+        // When heading is on first line, MD002 doesn't trigger (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Introduction\n------------\n\nContent here";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .message
-                .contains("First heading should be level 1, found level 2")
-        );
+        assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
     }
 
     #[test]
@@ -370,99 +398,90 @@ mod tests {
 
     #[test]
     fn test_with_front_matter() {
+        // When heading is immediately after front matter, MD002 doesn't trigger (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
-        let content = "---\ntitle: Test Document\nauthor: Test Author\n---\n\n## Introduction\n\nContent";
+        let content = "---\ntitle: Test Document\nauthor: Test Author\n---\n## Introduction\n\nContent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .message
-                .contains("First heading should be level 1, found level 2")
-        );
+        assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings after front matter
     }
 
     #[test]
     fn test_fix_atx_heading() {
+        // When heading is on first line, MD002 doesn't fix (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Introduction\n\nContent here";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "# Introduction\n\nContent here");
+        assert_eq!(fixed, content); // No fix applied for first-line headings
     }
 
     #[test]
     fn test_fix_closed_atx_heading() {
+        // When heading is on first line, MD002 doesn't fix (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Introduction ##\n\nContent here";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "# Introduction #\n\nContent here");
+        assert_eq!(fixed, content); // No fix applied for first-line headings
     }
 
     #[test]
     fn test_fix_setext_heading() {
+        // When heading is on first line, MD002 doesn't fix (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Introduction\n------------\n\nContent here";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "Introduction\n=======\n\nContent here");
+        assert_eq!(fixed, content); // No fix applied for first-line headings
     }
 
     #[test]
     fn test_fix_with_indented_heading() {
+        // When heading is on first line, MD002 doesn't fix (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "  ## Introduction\n\nContent here";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "  # Introduction\n\nContent here");
+        assert_eq!(fixed, content); // No fix applied for first-line headings
     }
 
     #[test]
     fn test_custom_level_requirement() {
+        // When heading is on first line, MD002 doesn't trigger (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(2);
         let content = "# Main Title\n\n## Subsection";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .message
-                .contains("First heading should be level 2, found level 1")
-        );
+        assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
     }
 
     #[test]
     fn test_fix_to_custom_level() {
+        // When heading is on first line, MD002 doesn't fix (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(2);
         let content = "# Main Title\n\nContent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "## Main Title\n\nContent");
+        assert_eq!(fixed, content); // No fix applied for first-line headings
     }
 
     #[test]
     fn test_multiple_headings() {
+        // When heading is on first line, MD002 doesn't trigger (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "### Introduction\n\n# Main Title\n\n## Section\n\n#### Subsection";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // Only the first heading matters
-        assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .message
-                .contains("First heading should be level 1, found level 3")
-        );
-        assert_eq!(result[0].line, 1);
+        assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
     }
 
     #[test]
@@ -506,23 +525,24 @@ mod tests {
 
     #[test]
     fn test_fix_preserves_content_structure() {
+        // When heading is on first line, MD002 doesn't fix (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "### Heading\n\nParagraph 1\n\n## Section\n\nParagraph 2";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "# Heading\n\nParagraph 1\n\n## Section\n\nParagraph 2");
+        assert_eq!(fixed, content); // No fix applied for first-line headings
     }
 
     #[test]
     fn test_long_setext_underline() {
+        // When heading is on first line, MD002 doesn't fix (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "Short Title\n----------------------------------------\n\nContent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        // The fix should use a reasonable length underline, not preserve the exact length
-        assert!(fixed.starts_with("Short Title\n======="));
+        assert_eq!(fixed, content); // No fix applied for first-line headings
     }
 
     #[test]
@@ -537,24 +557,97 @@ mod tests {
 
     #[test]
     fn test_heading_with_special_characters() {
+        // When heading is on first line, MD002 doesn't trigger (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "## Heading with **bold** and _italic_ text\n\nContent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "# Heading with **bold** and _italic_ text\n\nContent");
+        assert_eq!(fixed, content); // No fix applied for first-line headings
     }
 
     #[test]
     fn test_atx_heading_with_extra_spaces() {
+        // When heading is on first line, MD002 doesn't fix (markdownlint compatibility)
         let rule = MD002FirstHeadingH1::new(1);
         let content = "##    Introduction    \n\nContent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "# Introduction\n\nContent");
+        assert_eq!(fixed, content); // No fix applied for first-line headings
+    }
+
+    #[test]
+    fn test_md002_does_not_trigger_when_first_line_is_heading() {
+        // This tests markdownlint compatibility: MD002 should not trigger
+        // when the first line is a heading (even if it's not level 1)
+        // because MD041 would handle this case
+        let rule = MD002FirstHeadingH1::new(1);
+        let content = "## Introduction\n\nContent here";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // MD002 should NOT trigger because the heading is on the first line
+        assert_eq!(result.len(), 0, "MD002 should not trigger when first line is a heading");
+    }
+
+    #[test]
+    fn test_md002_triggers_when_heading_is_not_first_line() {
+        // MD002 should still trigger when the heading is NOT on the first line
+        let rule = MD002FirstHeadingH1::new(1);
+        let content = "Some text before heading\n\n## Introduction\n\nContent";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "MD002 should trigger when heading is not on first line"
+        );
+        assert!(result[0].message.contains("First heading should be level 1"));
+    }
+
+    #[test]
+    fn test_md002_with_front_matter_and_first_line_heading() {
+        // MD002 should not trigger when the first line after front matter is a heading
+        let rule = MD002FirstHeadingH1::new(1);
+        let content = "---\ntitle: Test\n---\n## Introduction\n\nContent";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "MD002 should not trigger when first line after front matter is a heading"
+        );
+    }
+
+    #[test]
+    fn test_md002_with_front_matter_and_delayed_heading() {
+        // MD002 should trigger when the heading is not immediately after front matter
+        let rule = MD002FirstHeadingH1::new(1);
+        let content = "---\ntitle: Test\n---\nSome text\n\n## Introduction\n\nContent";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "MD002 should trigger when heading is not immediately after front matter"
+        );
+    }
+
+    #[test]
+    fn test_md002_fix_does_not_change_first_line_heading() {
+        // Fix should not change a heading that's on the first line
+        let rule = MD002FirstHeadingH1::new(1);
+        let content = "### Third Level Heading\n\nContent";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, content, "Fix should not change heading on first line");
     }
 }
