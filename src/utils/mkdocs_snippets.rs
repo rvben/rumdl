@@ -88,17 +88,18 @@ pub fn is_snippet_marker(line: &str) -> bool {
         return true;
     }
 
-    // Block format: bare marker ONLY valid if truly alone (no trailing space)
-    // The test expects "--8<--" alone to be invalid without context
-    // Only accept if it's exactly the marker with optional semicolons
-    // But NOT if there's trailing whitespace suggesting missing file
-    if BARE_SNIPPET_MARKER.is_match(trimmed) && !trimmed.ends_with(' ') {
-        // Additional check: bare marker usually appears in pairs for blocks
-        // For now, we'll be conservative and not accept bare markers
-        // unless they're in HTML comments
-        if !line.contains("<!--") {
-            return false; // Bare marker without context is invalid
-        }
+    // Block format: bare marker is valid for multi-line snippet blocks
+    // According to PyMdown Extensions spec, bare markers like --8<-- on their own line
+    // are valid when used as opening/closing delimiters for multi-file blocks:
+    // --8<--
+    // file1.md
+    // file2.md
+    // --8<--
+    // Check for trailing whitespace (space or tab) BEFORE trimming
+    let trimmed_start = line.trim_start();
+    let has_trailing_whitespace = trimmed_start.ends_with(' ') || trimmed_start.ends_with('\t');
+    if BARE_SNIPPET_MARKER.is_match(trimmed) && !has_trailing_whitespace {
+        return true; // Valid bare marker for block format
     }
 
     // HTML comment variations
@@ -247,6 +248,51 @@ pub fn looks_like_snippet_reference(text: &str) -> bool {
     text.contains("--8<--") || text.contains("-8<-")
 }
 
+/// Check if a line is a bare snippet block delimiter (for multi-line blocks)
+pub fn is_snippet_block_delimiter(line: &str) -> bool {
+    let trimmed = line.trim();
+    // Check for trailing whitespace (space or tab) BEFORE full trim
+    let trimmed_start = line.trim_start();
+    let has_trailing_whitespace = trimmed_start.ends_with(' ') || trimmed_start.ends_with('\t');
+    // Bare markers without trailing whitespace are valid block delimiters
+    BARE_SNIPPET_MARKER.is_match(trimmed) && !has_trailing_whitespace
+}
+
+/// Check if a position is within a multi-line snippet block
+/// Multi-line blocks have the format:
+/// --8<--
+/// file1.md
+/// file2.md
+/// --8<--
+pub fn is_within_snippet_block(content: &str, position: usize) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut byte_pos = 0;
+    let mut in_block = false;
+
+    for line in lines {
+        let line_end = byte_pos + line.len();
+
+        // Check if this is a block delimiter that toggles state
+        if is_snippet_block_delimiter(line) {
+            if byte_pos <= position && position <= line_end {
+                // The position is on the delimiter itself
+                return true;
+            }
+            in_block = !in_block;
+        }
+
+        // Check if position is within this line and we're in a block
+        if in_block && byte_pos <= position && position <= line_end {
+            return true;
+        }
+
+        // Move to next line (account for newline character)
+        byte_pos = line_end + 1;
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,10 +305,14 @@ mod tests {
         assert!(is_snippet_marker("  --8<-- \"indented.md\"  "));
         assert!(is_snippet_marker("<!-- --8<-- \"file.md\" -->"));
 
-        // Invalid snippets without file paths
-        assert!(!is_snippet_marker("--8<--"));
-        assert!(!is_snippet_marker("--8<-- "));
-        assert!(!is_snippet_marker("<!-- --8<-- -->"));
+        // Bare markers are valid for multi-line blocks
+        assert!(is_snippet_marker("--8<--")); // Valid block delimiter
+        assert!(is_snippet_marker("-8<-")); // Shorter form
+        assert!(is_snippet_marker("---8<---")); // Longer form
+
+        // Invalid snippets with trailing spaces
+        assert!(!is_snippet_marker("--8<-- ")); // Trailing space suggests missing file
+        assert!(!is_snippet_marker("<!-- --8<-- -->")); // Empty HTML comment snippet
 
         // Section markers
         assert!(is_snippet_marker("--8<-- [start:section]"));
@@ -342,5 +392,100 @@ Outside."#;
         assert!(is_within_snippet_section(content, inner_pos));
         assert!(is_within_snippet_section(content, back_pos));
         assert!(!is_within_snippet_section(content, outside_pos));
+    }
+
+    #[test]
+    fn test_multi_line_snippet_blocks() {
+        let content = r#"# Document
+
+Some content before.
+
+--8<--
+file1.md
+file2.md
+https://raw.githubusercontent.com/example/repo/main/file.md
+--8<--
+
+Some content after.
+
+-8<-
+another_file.txt
+-8<-
+
+More content.
+"#;
+
+        // Test positions within the first block
+        let file1_pos = content.find("file1.md").unwrap();
+        let file2_pos = content.find("file2.md").unwrap();
+        let url_pos = content.find("https://raw.githubusercontent.com").unwrap();
+
+        // Test positions outside blocks
+        let before_pos = content.find("Some content before").unwrap();
+        let after_pos = content.find("Some content after").unwrap();
+        let more_pos = content.find("More content").unwrap();
+
+        // Test positions on delimiters
+        let first_delimiter = content.find("--8<--").unwrap();
+        let second_delimiter = content.rfind("--8<--").unwrap();
+
+        // Test position in second block
+        let another_file_pos = content.find("another_file.txt").unwrap();
+
+        // Assert content within blocks is detected
+        assert!(
+            is_within_snippet_block(content, file1_pos),
+            "file1.md should be in block"
+        );
+        assert!(
+            is_within_snippet_block(content, file2_pos),
+            "file2.md should be in block"
+        );
+        assert!(is_within_snippet_block(content, url_pos), "URL should be in block");
+        assert!(
+            is_within_snippet_block(content, another_file_pos),
+            "another_file.txt should be in block"
+        );
+
+        // Assert delimiters themselves are detected
+        assert!(
+            is_within_snippet_block(content, first_delimiter),
+            "First delimiter should be detected"
+        );
+        assert!(
+            is_within_snippet_block(content, second_delimiter),
+            "Second delimiter should be detected"
+        );
+
+        // Assert content outside blocks is not detected
+        assert!(
+            !is_within_snippet_block(content, before_pos),
+            "Content before block should not be detected"
+        );
+        assert!(
+            !is_within_snippet_block(content, after_pos),
+            "Content between blocks should not be detected"
+        );
+        assert!(
+            !is_within_snippet_block(content, more_pos),
+            "Content after blocks should not be detected"
+        );
+    }
+
+    #[test]
+    fn test_snippet_block_delimiter() {
+        // Valid block delimiters
+        assert!(is_snippet_block_delimiter("--8<--"));
+        assert!(is_snippet_block_delimiter("-8<-"));
+        assert!(is_snippet_block_delimiter("---8<---"));
+        assert!(!is_snippet_block_delimiter("  --8<--  ")); // With trailing whitespace = invalid
+        assert!(!is_snippet_block_delimiter("\t-8<-\t")); // With trailing tabs = invalid
+        assert!(is_snippet_block_delimiter("  --8<--")); // Leading whitespace only is OK
+        assert!(is_snippet_block_delimiter("\t--8<--")); // Leading tabs only is OK
+
+        // Invalid delimiters
+        assert!(!is_snippet_block_delimiter("--8<-- ")); // Trailing space after trim
+        assert!(!is_snippet_block_delimiter("--8<-- file.md")); // With content
+        assert!(!is_snippet_block_delimiter("<!-- --8<-- -->")); // In HTML comment
     }
 }

@@ -270,8 +270,8 @@ impl MD034NoBareUrls {
                 continue;
             }
 
-            // Skip if this is within a code span (code blocks already checked)
-            if ctx.is_in_code_block_or_span(match_start) {
+            // Skip if this is within any skip context (code blocks, MkDocs snippets, etc.)
+            if crate::utils::skip_context::is_in_skip_context(ctx, match_start) {
                 continue;
             }
 

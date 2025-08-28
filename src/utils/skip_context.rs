@@ -68,9 +68,14 @@ pub fn is_in_skip_context(ctx: &LintContext, byte_pos: usize) -> bool {
         return true;
     }
 
-    // Check MkDocs snippet sections
-    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_snippets::is_within_snippet_section(ctx.content, byte_pos) {
-        return true;
+    // Check MkDocs snippet sections and multi-line blocks
+    if ctx.flavor == MarkdownFlavor::MkDocs {
+        if mkdocs_snippets::is_within_snippet_section(ctx.content, byte_pos) {
+            return true;
+        }
+        if mkdocs_snippets::is_within_snippet_block(ctx.content, byte_pos) {
+            return true;
+        }
     }
 
     // Check MkDocs admonition blocks
