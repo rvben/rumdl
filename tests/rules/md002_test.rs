@@ -13,12 +13,12 @@ fn test_custom_level() {
 
 #[test]
 fn test_invalid_first_heading() {
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading\n### Subheading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 1);
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
 }
 
 #[test]
@@ -41,45 +41,49 @@ fn test_only_one_heading() {
 
 #[test]
 fn test_closed_atx_heading() {
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading ##\n### Subheading ###";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 1);
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Heading #\n### Subheading ###");
+    assert_eq!(fixed, content); // No fix needed
 }
 
 #[test]
 fn test_fix_first_heading() {
+    // With markdownlint compatibility, MD002 doesn't fix first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading\n### Subheading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Heading\n### Subheading");
+    assert_eq!(result, content); // No fix for first-line headings
 }
 
 #[test]
 fn test_fix_closed_atx_heading() {
+    // With markdownlint compatibility, MD002 doesn't fix first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading ##\n### Subheading ###";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Heading #\n### Subheading ###");
+    assert_eq!(result, content); // No fix for first-line headings
 }
 
 #[test]
 fn test_mixed_heading_styles() {
+    // With markdownlint compatibility, MD002 doesn't fix first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "## Heading\n### Subheading ###\n#### Another heading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Heading\n### Subheading ###\n#### Another heading");
+    assert_eq!(result, content); // No fix for first-line headings
 }
 
 #[test]
 fn test_indented_first_heading() {
+    // With markdownlint compatibility, MD002 doesn't fix first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "  ## Heading\n# Subheading";
     println!("Input: '{}'", content.replace("\n", "\\n"));
@@ -104,31 +108,31 @@ fn test_indented_first_heading() {
     }
     println!();
 
-    assert_eq!(result, "  # Heading\n# Subheading");
+    assert_eq!(result, content); // No fix for first-line headings
 }
 
 #[test]
 fn test_setext_heading() {
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "Heading\n-------\n\n### Subheading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 1);
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Heading\n=======\n\n### Subheading");
+    assert_eq!(fixed, content); // No fix for first-line headings
 }
 
 #[test]
 fn test_with_front_matter() {
+    // With markdownlint compatibility, MD002 doesn't trigger when heading is immediately after front matter
     let rule = MD002FirstHeadingH1::default();
     let content = "---\ntitle: Test\n---\n## Heading\n### Subheading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 4);
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings after front matter
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "---\ntitle: Test\n---\n# Heading\n### Subheading");
+    assert_eq!(fixed, content); // No fix needed
 }
 
 #[test]
@@ -157,45 +161,38 @@ fn test_document_starting_with_h1() {
 
 #[test]
 fn test_document_starting_with_h2() {
-    // Test case 2: Document starting with H2 (should fail)
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "## Introduction\n\nSome content here.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].message, "First heading should be level 1, found level 2");
-    assert_eq!(result[0].line, 1);
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
 
     // Test fix
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Introduction\n\nSome content here.");
+    assert_eq!(fixed, content); // No fix for first-line headings
 }
 
 #[test]
 fn test_document_starting_with_h3_to_h6() {
-    // Test case 3: Document starting with H3, H4, H5, H6 (should fail)
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
     let test_cases = vec![
-        ("### Section", 3, "# Section"),
-        ("#### Subsection", 4, "# Subsection"),
-        ("##### Detail", 5, "# Detail"),
-        ("###### Minute", 6, "# Minute"),
+        ("### Section", 3),
+        ("#### Subsection", 4),
+        ("##### Detail", 5),
+        ("###### Minute", 6),
     ];
 
-    for (input_heading, level, expected_fix) in test_cases {
+    for (input_heading, _level) in test_cases {
         let rule = MD002FirstHeadingH1::default();
         let content = format!("{input_heading}\n\nSome content.");
         let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(
-            result[0].message,
-            format!("First heading should be level 1, found level {level}")
-        );
-        assert_eq!(result[0].line, 1);
+        assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
 
         // Test fix
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, format!("{expected_fix}\n\nSome content."));
+        assert_eq!(fixed, content); // No fix for first-line headings
     }
 }
 
@@ -264,18 +261,16 @@ fn test_setext_style_h1() {
 
 #[test]
 fn test_setext_style_h2() {
-    // Test case 8: Setext style H2 (---- underline)
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
     let rule = MD002FirstHeadingH1::default();
     let content = "Document Title\n--------------\n\nSome content.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].message, "First heading should be level 1, found level 2");
-    assert_eq!(result[0].line, 1);
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
 
-    // Test fix (convert to Setext H1)
+    // Test fix
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Document Title\n=======\n\nSome content.");
+    assert_eq!(fixed, content); // No fix for first-line headings
 }
 
 #[test]
@@ -289,27 +284,26 @@ fn test_configuration_for_level_parameter() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 
-    // H1 as first heading should fail
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
+    // H1 as first heading
     let content = "# Main Title\n\nContent.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].message, "First heading should be level 2, found level 1");
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
 
     // Test fix
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "## Main Title\n\nContent.");
+    assert_eq!(fixed, content); // No fix for first-line headings
 
-    // H3 as first heading should also fail
+    // H3 as first heading
     let content = "### Section\n\nContent.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].message, "First heading should be level 2, found level 3");
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
 
     // Test fix
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "## Section\n\nContent.");
+    assert_eq!(fixed, content); // No fix for first-line headings
 }
 
 #[test]
@@ -354,23 +348,24 @@ fn test_various_edge_cases() {
 fn test_fix_preserves_heading_style() {
     let rule = MD002FirstHeadingH1::default();
 
+    // With markdownlint compatibility, MD002 doesn't fix first-line headings
     // Test closed ATX style preservation
     let content = "### Heading ###\n\nContent.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Heading #\n\nContent.");
+    assert_eq!(fixed, content); // No fix for first-line headings
 
     // Test regular ATX style preservation
     let content = "### Heading\n\nContent.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Heading\n\nContent.");
+    assert_eq!(fixed, content); // No fix for first-line headings
 
     // Test Setext style preservation
     let content = "Heading\n-------\n\nContent.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Heading\n=======\n\nContent.");
+    assert_eq!(fixed, content); // No fix for first-line headings
 }
 
 #[test]
@@ -432,15 +427,14 @@ fn test_setext_variations() {
         (many_dashes.as_str(), false), // Many -
     ];
 
-    for (content, is_h1) in test_cases {
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
+    for (content, _is_h1) in test_cases {
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        if is_h1 {
-            assert!(result.is_empty(), "Expected H1 for content: {content}");
-        } else {
-            assert_eq!(result.len(), 1, "Expected error for H2 content: {content}");
-            assert_eq!(result[0].message, "First heading should be level 1, found level 2");
-        }
+        assert!(
+            result.is_empty(),
+            "MD002 should not trigger for first-line heading: {content}"
+        );
     }
 }
 
@@ -448,39 +442,38 @@ fn test_setext_variations() {
 fn test_complex_fix_scenarios() {
     let rule = MD002FirstHeadingH1::default();
 
+    // With markdownlint compatibility, MD002 doesn't fix first-line headings
     // Test fix with multiple headings of different styles
     let content = "### First Heading ###\n\nSecond Heading\n--------------\n\n##### Third Heading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "# First Heading #\n\nSecond Heading\n--------------\n\n##### Third Heading"
-    );
+    assert_eq!(fixed, content); // No fix for first-line headings
 
     // Test fix with deeply indented heading
     let content = "        #### Deeply Indented";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "        # Deeply Indented");
+    assert_eq!(fixed, content); // No fix for first-line headings
 }
 
 #[test]
 fn test_edge_cases_with_special_characters() {
     let rule = MD002FirstHeadingH1::default();
 
+    // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
     // Test heading with special characters
     let content = "## Heading with #hashtag and *emphasis*";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Heading with #hashtag and *emphasis*");
+    assert_eq!(fixed, content); // No fix for first-line headings
 
     // Test heading with emoji
     let content = "### 🚀 Rocket Launch";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# 🚀 Rocket Launch");
+    assert_eq!(fixed, content); // No fix for first-line headings
 }
 
 #[test]
@@ -499,16 +492,12 @@ fn test_custom_level_configurations() {
             "Level {level} heading should pass for rule configured with level {level}"
         );
 
-        // Test that other levels fail
+        // With markdownlint compatibility, MD002 doesn't trigger for first-line headings
         if level != 1 {
             let content = "# Level 1 Heading";
             let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
-            assert_eq!(result.len(), 1);
-            assert_eq!(
-                result[0].message,
-                format!("First heading should be level {level}, found level 1")
-            );
+            assert_eq!(result.len(), 0); // MD002 doesn't trigger for first-line headings
         }
     }
 }
@@ -521,33 +510,29 @@ fn test_whitespace_only_lines() {
     let content = "   \n\t\n  \t  \n\n## First Heading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 5);
+    assert_eq!(result.len(), 0); // MD002 doesn't trigger - first non-empty line is a heading
 }
 
 #[test]
 fn test_fix_preserves_trailing_content() {
     let rule = MD002FirstHeadingH1::default();
 
-    // Test that fix preserves all content after the first heading
+    // With markdownlint compatibility, MD002 doesn't fix first-line headings
     let content = "## Wrong Level\n\nParagraph 1\n\n### Subheading\n\nParagraph 2\n\n```\nCode block\n```\n\nEnd.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "# Wrong Level\n\nParagraph 1\n\n### Subheading\n\nParagraph 2\n\n```\nCode block\n```\n\nEnd."
-    );
+    assert_eq!(fixed, content); // No fix for first-line headings
 }
 
 #[test]
 fn test_line_ending_preservation() {
     let rule = MD002FirstHeadingH1::default();
 
-    // Test that fix preserves line endings
+    // With markdownlint compatibility, MD002 doesn't fix first-line headings
     let content = "## Heading\nContent";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Heading\nContent");
+    assert_eq!(fixed, content); // No fix for first-line headings
 
     // No trailing newline should remain absent
     assert!(!fixed.ends_with('\n'));

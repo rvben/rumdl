@@ -17,10 +17,12 @@ fn test_md001_heading_increment() {
 
 #[test]
 fn test_md002_first_heading_h1() {
+    // With markdownlint compatibility, MD002 doesn't trigger when heading is on first line
+    // Test with heading not on first line
     let test = simple_test(
         "MD002",
-        "## Second level heading",
-        ExpectedWarning::new(1, 1, 1, 24, "## Second level heading"),
+        "Some text\n\n## Second level heading",
+        ExpectedWarning::new(3, 1, 3, 24, "## Second level heading"),
     );
     test_character_ranges(test);
 }

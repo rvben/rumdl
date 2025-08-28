@@ -85,9 +85,9 @@ mod malformed_syntax_tests {
         assert!(!mkdocs_snippets::is_snippet_marker("--8< \"file.md\""));
         assert!(!mkdocs_snippets::is_snippet_marker("8<-- \"file.md\""));
 
-        // Missing file path
-        assert!(!mkdocs_snippets::is_snippet_marker("--8<--"));
-        assert!(!mkdocs_snippets::is_snippet_marker("--8<-- "));
+        // Bare markers are valid for block format (issue #70)
+        assert!(mkdocs_snippets::is_snippet_marker("--8<--")); // Valid bare marker for block format
+        assert!(!mkdocs_snippets::is_snippet_marker("--8<-- ")); // Invalid - has trailing space
 
         // Unclosed quotes
         assert!(mkdocs_snippets::is_snippet_marker("--8<-- \"unclosed"));
