@@ -24,7 +24,6 @@ fn test_rumdl_lsp_config_defaults() {
     assert_eq!(config.config_path, None);
     assert!(config.enable_linting);
     assert!(!config.enable_auto_fix);
-    assert!(config.disable_rules.is_empty());
 }
 
 /// Test the RumdlLspConfig serialization/deserialization
@@ -34,7 +33,6 @@ fn test_rumdl_lsp_config_serde() {
         config_path: Some("/path/to/config.toml".to_string()),
         enable_linting: true,
         enable_auto_fix: false,
-        disable_rules: vec!["MD001".to_string(), "MD013".to_string()],
     };
 
     // Test serialization
@@ -46,7 +44,6 @@ fn test_rumdl_lsp_config_serde() {
     assert_eq!(deserialized.config_path, config.config_path);
     assert_eq!(deserialized.enable_linting, config.enable_linting);
     assert_eq!(deserialized.enable_auto_fix, config.enable_auto_fix);
-    assert_eq!(deserialized.disable_rules, config.disable_rules);
 }
 
 /// Test warning to diagnostic conversion
@@ -191,6 +188,10 @@ async fn test_lsp_server_initialization() {
     assert!(caps.text_document_sync.is_some());
     assert!(caps.code_action_provider.is_some());
     assert!(caps.diagnostic_provider.is_some());
+    assert!(
+        caps.document_formatting_provider.is_some(),
+        "Server must advertise document formatting capability"
+    );
 
     // Check server info
     assert!(init_result.server_info.is_some());
@@ -208,7 +209,6 @@ async fn test_lsp_server_initialization_with_config() {
         config_path: Some("/custom/path/.rumdl.toml".to_string()),
         enable_linting: true,
         enable_auto_fix: true,
-        disable_rules: vec!["MD001".to_string()],
     };
 
     let init_params = InitializeParams {

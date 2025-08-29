@@ -16,8 +16,6 @@ pub struct RumdlLspConfig {
     pub enable_linting: bool,
     /// Enable/disable auto-fixing on save
     pub enable_auto_fix: bool,
-    /// Rules to disable in the LSP server
-    pub disable_rules: Vec<String>,
 }
 
 impl Default for RumdlLspConfig {
@@ -26,7 +24,6 @@ impl Default for RumdlLspConfig {
             config_path: None,
             enable_linting: true,
             enable_auto_fix: false,
-            disable_rules: Vec::new(),
         }
     }
 }
@@ -165,7 +162,6 @@ mod tests {
         assert_eq!(config.config_path, None);
         assert!(config.enable_linting);
         assert!(!config.enable_auto_fix);
-        assert!(config.disable_rules.is_empty());
     }
 
     #[test]
@@ -174,7 +170,6 @@ mod tests {
             config_path: Some("/path/to/config.toml".to_string()),
             enable_linting: false,
             enable_auto_fix: true,
-            disable_rules: vec!["MD001".to_string(), "MD013".to_string()],
         };
 
         // Test serialization
@@ -182,15 +177,12 @@ mod tests {
         assert!(json.contains("\"config_path\":\"/path/to/config.toml\""));
         assert!(json.contains("\"enable_linting\":false"));
         assert!(json.contains("\"enable_auto_fix\":true"));
-        assert!(json.contains("\"MD001\""));
-        assert!(json.contains("\"MD013\""));
 
         // Test deserialization
         let deserialized: RumdlLspConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.config_path, config.config_path);
         assert_eq!(deserialized.enable_linting, config.enable_linting);
         assert_eq!(deserialized.enable_auto_fix, config.enable_auto_fix);
-        assert_eq!(deserialized.disable_rules, config.disable_rules);
     }
 
     #[test]
@@ -433,6 +425,5 @@ mod tests {
         assert!(!config.enable_linting);
         assert_eq!(config.config_path, None); // Should use default
         assert!(!config.enable_auto_fix); // Should use default
-        assert!(config.disable_rules.is_empty()); // Should use default
     }
 }

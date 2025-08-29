@@ -58,10 +58,14 @@ impl RumdlLanguageServer {
         // Get rumdl configuration
         let rumdl_config = self.rumdl_config.read().await;
         let all_rules = rules::all_rules(&rumdl_config);
+        let flavor = rumdl_config.markdown_flavor();
+
+        // Use the standard filter_rules function which respects config's disabled rules
+        let filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
         drop(rumdl_config); // Release config lock early
 
-        // Run rumdl linting
-        match crate::lint(text, &all_rules, false, crate::config::MarkdownFlavor::Standard) {
+        // Run rumdl linting with the configured flavor
+        match crate::lint(text, &filtered_rules, false, flavor) {
             Ok(warnings) => {
                 let diagnostics = warnings.iter().map(warning_to_diagnostic).collect();
                 Ok(diagnostics)
@@ -89,14 +93,18 @@ impl RumdlLanguageServer {
     async fn apply_all_fixes(&self, _uri: &Url, text: &str) -> Result<Option<String>> {
         let rumdl_config = self.rumdl_config.read().await;
         let all_rules = rules::all_rules(&rumdl_config);
+        let flavor = rumdl_config.markdown_flavor();
+
+        // Use the standard filter_rules function which respects config's disabled rules
+        let filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
         drop(rumdl_config);
 
         // Apply fixes sequentially for each rule
         let mut fixed_text = text.to_string();
         let mut any_changes = false;
 
-        for rule in &all_rules {
-            let ctx = crate::lint_context::LintContext::new(&fixed_text, crate::config::MarkdownFlavor::Standard);
+        for rule in &filtered_rules {
+            let ctx = crate::lint_context::LintContext::new(&fixed_text, flavor);
             match rule.fix(&ctx) {
                 Ok(new_text) => {
                     if new_text != fixed_text {
@@ -125,9 +133,13 @@ impl RumdlLanguageServer {
     async fn get_code_actions(&self, uri: &Url, text: &str, range: Range) -> Result<Vec<CodeAction>> {
         let rumdl_config = self.rumdl_config.read().await;
         let all_rules = rules::all_rules(&rumdl_config);
+        let flavor = rumdl_config.markdown_flavor();
+
+        // Use the standard filter_rules function which respects config's disabled rules
+        let filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
         drop(rumdl_config);
 
-        match crate::lint(text, &all_rules, false, crate::config::MarkdownFlavor::Standard) {
+        match crate::lint(text, &filtered_rules, false, flavor) {
             Ok(warnings) => {
                 let mut actions = Vec::new();
 
@@ -385,10 +397,13 @@ impl LanguageServer for RumdlLanguageServer {
             let rumdl_config = self.rumdl_config.read().await;
             let all_rules = rules::all_rules(&rumdl_config);
             let flavor = rumdl_config.markdown_flavor();
+
+            // Use the standard filter_rules function which respects config's disabled rules
+            let filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
             drop(rumdl_config);
 
             // Lint the document to get all warnings
-            match crate::lint(text, &all_rules, false, flavor) {
+            match crate::lint(text, &filtered_rules, false, flavor) {
                 Ok(warnings) => {
                     // Check if there are any fixable warnings
                     let has_fixes = warnings.iter().any(|w| w.fix.is_some());

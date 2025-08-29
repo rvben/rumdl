@@ -15,7 +15,6 @@ async fn test_basic_lsp_workflow() {
     assert_eq!(config.config_path, None);
     assert!(config.enable_linting);
     assert!(!config.enable_auto_fix);
-    assert!(config.disable_rules.is_empty());
 }
 
 /// Test realistic document content processing
@@ -93,7 +92,6 @@ async fn test_configuration_handling() {
         config_path: Some("/custom/path/.rumdl.toml".to_string()),
         enable_linting: true,
         enable_auto_fix: true,
-        disable_rules: vec!["MD001".to_string(), "MD013".to_string()],
     };
 
     // Test serialization/deserialization
@@ -103,7 +101,6 @@ async fn test_configuration_handling() {
     assert_eq!(deserialized.config_path, custom_config.config_path);
     assert_eq!(deserialized.enable_linting, custom_config.enable_linting);
     assert_eq!(deserialized.enable_auto_fix, custom_config.enable_auto_fix);
-    assert_eq!(deserialized.disable_rules, custom_config.disable_rules);
 }
 
 /// Test error recovery scenarios
