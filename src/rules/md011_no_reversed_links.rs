@@ -26,7 +26,12 @@ lazy_static! {
 
     // Pattern to detect function/array notation that shouldn't be flagged
     static ref FUNCTION_ARRAY_NOTATION: Regex = Regex::new(
-        r"(?:[a-zA-Z_]\w*\([^)]*\)\[[^\]]+\])|(?:\([^)]+\)\[(?:element|index|derivative|integral|component|row|column|entry|coefficient|term)\])"
+        r"(?:[a-zA-Z_]\w*\([^)]*\)\[[^\]]+\])|(?:\([^)]+\)\[(?:[^]]*(?:element|index|derivative|integral|component|row|column|entry|coefficient|term|partial|second|first|third|fourth|differential|gradient)[^]]*)\])"
+    ).unwrap();
+
+    // More comprehensive mathematical function pattern
+    static ref MATHEMATICAL_FUNCTION_PATTERN: Regex = Regex::new(
+        r"\b([a-zA-Z_]\w*)\s*\([^)]*\)\s*\[([^\]]+)\]"
     ).unwrap();
 
     // New patterns for detecting malformed link attempts where user intent is clear
@@ -94,17 +99,51 @@ impl MD011NoReversedLinks {
                 continue;
             }
 
-            // Skip if line contains function/array notation
-            if FUNCTION_ARRAY_NOTATION.is_match(line) {
-                line_start += line.len() + 1;
-                current_line += 1;
-                continue;
-            }
+            // Note: Individual function/array notation check moved to per-match level
 
             for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
                 // Extract URL and text
                 let url = &cap[1];
                 let text = &cap[2];
+                let _full_match = cap.get(0).unwrap().as_str();
+                let match_start = cap.get(0).unwrap().start();
+
+                // Check if this looks like a mathematical function by examining the context
+                // Look for a function name immediately before the opening parenthesis
+                let prefix = if match_start > 0 {
+                    let start_pos = match_start.saturating_sub(20); // Look up to 20 chars back
+                    &line[start_pos..match_start]
+                } else {
+                    ""
+                };
+
+                // Check if preceded by a function name pattern
+                if prefix
+                    .chars()
+                    .rev()
+                    .take_while(|&c| c.is_alphabetic() || c == '_')
+                    .count()
+                    > 0
+                {
+                    let mut function_chars: Vec<char> = prefix
+                        .chars()
+                        .rev()
+                        .take_while(|&c| c.is_alphabetic() || c == '_')
+                        .collect();
+                    function_chars.reverse();
+                    let function_name: String = function_chars.into_iter().collect();
+
+                    // Common mathematical function names and patterns
+                    if function_name.len() <= 8
+                        && ((function_name.len() <= 3 && function_name.chars().all(|c| c.is_ascii_alphabetic() && c.is_ascii_lowercase())) ||  // f, g, h, etc.
+                        ["sin", "cos", "tan", "log", "ln", "exp", "sqrt", "abs", "min", "max", "det"].contains(&function_name.as_str()))
+                    {
+                        continue;
+                    }
+                }
+
+                // Basic mathematical context check (conservative approach)
+                // Only check for very obvious cases to avoid breaking existing functionality
 
                 // Additional check: Skip if this looks like mathematical notation
                 // e.g., (0,1)[inclusive], (a,b)[intersection]
@@ -116,13 +155,27 @@ impl MD011NoReversedLinks {
                         || text.contains("element")
                         || text.contains("derivative")
                         || text.contains("component")
-                        || text.contains("index"))
+                        || text.contains("index")
+                        || text.contains("partial")
+                        || text.contains("differential")
+                        || text.contains("gradient")
+                        || text.contains("second")
+                        || text.contains("first")
+                        || text.contains("third"))
                 {
                     continue;
                 }
 
-                // Skip if URL part looks like coordinates or intervals
+                // Skip if URL part looks like coordinates, intervals, or mathematical variables
                 if url.contains(',') && !url.contains("://") && !url.contains('.') {
+                    continue;
+                }
+
+                // Skip if URL part looks like a single variable or simple mathematical expression
+                if url.len() <= 10
+                    && url.chars().all(|c| c.is_alphanumeric() || ",()".contains(c))
+                    && !url.contains("://")
+                {
                     continue;
                 }
 

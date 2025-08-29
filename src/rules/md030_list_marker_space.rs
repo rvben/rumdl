@@ -94,7 +94,9 @@ impl Rule for MD030ListMarkerSpace {
                 let marker_end = list_info.marker_column + list_info.marker.len();
                 let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
-                let expected_spaces = self.get_expected_spaces(list_type, false);
+                // Determine if this is a multi-line list item
+                let is_multi_line = self.is_multi_line_list_item(ctx, line_num);
+                let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
 
                 // Check for tabs in the spacing
                 let line_content = &line[list_info.marker_column..];
@@ -227,7 +229,8 @@ impl Rule for MD030ListMarkerSpace {
             }
 
             // Try to fix list marker spacing
-            if let Some(fixed_line) = self.try_fix_list_marker_spacing(line) {
+            let is_multi_line = self.is_multi_line_list_item(ctx, line_num);
+            if let Some(fixed_line) = self.try_fix_list_marker_spacing_with_context(line, is_multi_line) {
                 result_lines.push(fixed_line);
             } else {
                 result_lines.push(line.to_string());
@@ -245,8 +248,55 @@ impl Rule for MD030ListMarkerSpace {
 }
 
 impl MD030ListMarkerSpace {
-    /// Fix list marker spacing - handles tabs, multiple spaces, and mixed whitespace
-    fn try_fix_list_marker_spacing(&self, line: &str) -> Option<String> {
+    /// Check if a list item is multi-line (spans multiple lines or contains nested content)
+    fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
+        // Get the current list item info
+        let current_line_info = match ctx.line_info(line_num) {
+            Some(info) if info.list_item.is_some() => info,
+            _ => return false,
+        };
+
+        let current_list = current_line_info.list_item.as_ref().unwrap();
+        let lines: Vec<&str> = ctx.content.lines().collect();
+
+        // Check subsequent lines to see if they are continuation of this list item
+        for next_line_num in (line_num + 1)..=lines.len() {
+            if let Some(next_line_info) = ctx.line_info(next_line_num) {
+                // If we encounter another list item at the same or higher level, this item is done
+                if let Some(next_list) = &next_line_info.list_item {
+                    if next_list.marker_column <= current_list.marker_column {
+                        break; // Found the next list item at same/higher level
+                    }
+                    // If there's a nested list item, this is multi-line
+                    return true;
+                }
+
+                // If we encounter a non-empty line that's not indented enough to be part of this list item,
+                // this list item is done
+                let line_content = lines.get(next_line_num - 1).unwrap_or(&"");
+                if !line_content.trim().is_empty() {
+                    let expected_continuation_indent = current_list.content_column;
+                    let actual_indent = line_content.len() - line_content.trim_start().len();
+
+                    if actual_indent < expected_continuation_indent {
+                        break; // Line is not indented enough to be part of this list item
+                    }
+
+                    // If we find a continuation line, this is multi-line
+                    if actual_indent >= expected_continuation_indent {
+                        return true;
+                    }
+                }
+
+                // Empty lines don't affect the multi-line status by themselves
+            }
+        }
+
+        false
+    }
+
+    /// Fix list marker spacing with context - handles tabs, multiple spaces, and mixed whitespace
+    fn try_fix_list_marker_spacing_with_context(&self, line: &str, is_multi_line: bool) -> Option<String> {
         let trimmed = line.trim_start();
         let indent = &line[..line.len() - trimmed.len()];
 
@@ -260,8 +310,12 @@ impl MD030ListMarkerSpace {
                 {
                     let content = after_marker.trim_start();
                     if !content.is_empty() {
-                        // Use the configured number of spaces for unordered lists
-                        let spaces = " ".repeat(self.config.ul_single);
+                        // Use appropriate configuration based on whether it's multi-line
+                        let spaces = if is_multi_line {
+                            " ".repeat(self.config.ul_multi)
+                        } else {
+                            " ".repeat(self.config.ul_single)
+                        };
                         return Some(format!("{indent}{marker}{spaces}{content}"));
                     }
                 }
@@ -281,8 +335,12 @@ impl MD030ListMarkerSpace {
                 {
                     let content = after_dot.trim_start();
                     if !content.is_empty() {
-                        // Use the configured number of spaces for ordered lists
-                        let spaces = " ".repeat(self.config.ol_single);
+                        // Use appropriate configuration based on whether it's multi-line
+                        let spaces = if is_multi_line {
+                            " ".repeat(self.config.ol_multi)
+                        } else {
+                            " ".repeat(self.config.ol_single)
+                        };
                         return Some(format!("{indent}{before_dot}.{spaces}{content}"));
                     }
                 }
@@ -292,6 +350,8 @@ impl MD030ListMarkerSpace {
         None
     }
 
+    /// Fix list marker spacing - handles tabs, multiple spaces, and mixed whitespace
+    /// (Legacy method for backward compatibility - defaults to single-line behavior)
     /// Check if a line is part of an indented code block (4+ spaces with blank line before)
     fn is_indented_code_block(&self, line: &str, line_idx: usize, lines: &[&str]) -> bool {
         // Must start with 4+ spaces or tab

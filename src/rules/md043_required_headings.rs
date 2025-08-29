@@ -140,7 +140,7 @@ impl Rule for MD043RequiredHeadings {
                     end_column: 2,
                     message: format!("Required headings not found: {:?}", self.config.headings),
                     severity: Severity::Warning,
-                    fix: None,
+                    fix: None, // No automatic fix to prevent destructive changes
                 });
                 return Ok(warnings);
             }
@@ -178,7 +178,7 @@ impl Rule for MD043RequiredHeadings {
                         self.config.headings, actual_headings
                     ),
                     severity: Severity::Warning,
-                    fix: None,
+                    fix: None, // No automatic fix to prevent destructive changes
                 });
             }
         }
@@ -193,17 +193,32 @@ impl Rule for MD043RequiredHeadings {
             return Ok(content.to_string());
         }
 
-        let mut result = String::new();
+        let actual_headings = self.extract_headings(ctx);
 
-        // Add required headings
-        for (idx, heading) in self.config.headings.iter().enumerate() {
-            if idx > 0 {
-                result.push_str("\n\n");
-            }
-            result.push_str(heading);
+        // Check if headings already match - if so, no fix needed
+        if actual_headings.len() == self.config.headings.len()
+            && actual_headings
+                .iter()
+                .zip(self.config.headings.iter())
+                .all(|(actual, expected)| self.headings_match(expected, actual))
+        {
+            return Ok(content.to_string());
         }
 
-        Ok(result)
+        // IMPORTANT: MD043 fixes are inherently risky as they require restructuring the document.
+        // Instead of making destructive changes, we should be conservative and only make
+        // minimal changes when we're confident about the user's intent.
+
+        // For now, we'll avoid making destructive fixes and preserve the original content.
+        // This prevents data loss while still allowing the rule to identify issues.
+
+        // TODO: In the future, this could be enhanced to:
+        // 1. Insert missing required headings at appropriate positions
+        // 2. Rename existing headings to match requirements (when structure is similar)
+        // 3. Provide more granular fixes based on the specific mismatch
+
+        // Return original content unchanged to prevent data loss
+        Ok(content.to_string())
     }
 
     /// Optimized check using document structure
@@ -610,7 +625,8 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
-        let expected = "# Title\n\n# Content";
+        // MD043 now preserves original content to prevent data loss
+        let expected = "Wrong content";
         assert_eq!(fixed, expected);
     }
 }

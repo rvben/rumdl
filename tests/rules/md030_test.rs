@@ -510,4 +510,42 @@ mod tests {
             assert_eq!(*line, format!("* Item {i}"));
         }
     }
+
+    #[test]
+    fn test_multi_line_configuration_support() {
+        // Test that ul_multi and ol_multi configuration options are actually used
+        let rule = MD030ListMarkerSpace::new(
+            1, // ul_single
+            3, // ul_multi  - key test: multi-line should use this
+            1, // ol_single
+            4, // ol_multi  - key test: multi-line should use this
+        );
+
+        let content = "* Single line\n*  Multi-line item\n   with continuation\n1. Single ordered\n1.   Multi-line ordered\n     with continuation";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should find 2 violations:
+        // - Line 2: multi-line unordered list (expects 3 spaces, has 2)
+        // - Line 5: multi-line ordered list (expects 4 spaces, has 3)
+        assert_eq!(
+            result.len(),
+            2,
+            "Should detect multi-line spacing violations, got: {result:?}"
+        );
+
+        // Check the specific violations
+        assert_eq!(result[0].line, 2);
+        assert!(result[0].message.contains("Expected: 3"));
+        assert!(result[0].message.contains("Actual: 2"));
+
+        assert_eq!(result[1].line, 5);
+        assert!(result[1].message.contains("Expected: 4"));
+        assert!(result[1].message.contains("Actual: 3"));
+
+        // Test the fix
+        let fixed = rule.fix(&ctx).unwrap();
+        let expected = "* Single line\n*   Multi-line item\n   with continuation\n1. Single ordered\n1.    Multi-line ordered\n     with continuation";
+        assert_eq!(fixed, expected, "Multi-line spacing should be fixed correctly");
+    }
 }

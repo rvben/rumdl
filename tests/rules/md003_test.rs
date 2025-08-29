@@ -161,3 +161,31 @@ fn test_with_front_matter() {
         result.len()
     );
 }
+
+#[test]
+fn test_yaml_like_content_not_detected_as_headings() {
+    let rule = MD003HeadingStyle::default();
+    let content = "# Real Heading\n\n---\nconfig: value\nsetting: another value\n---\n\nMore content.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "YAML-like content with triple dashes should not be detected as Setext headings, but got {} warnings: {:?}",
+        result.len(),
+        result
+    );
+}
+
+#[test]
+fn test_legitimate_setext_headings_still_work() {
+    let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
+    let content = "Main Title\n==========\n\nSubtitle\n--------\n\nContent here.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Legitimate Setext headings should still work, but got {} warnings: {:?}",
+        result.len(),
+        result
+    );
+}

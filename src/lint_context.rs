@@ -1122,6 +1122,10 @@ impl<'a> LintContext<'a> {
             };
 
             if !is_snippet_line && let Some(caps) = ATX_HEADING_REGEX.captures(line) {
+                // Skip headings inside HTML comments
+                if crate::utils::skip_context::is_in_html_comment(content, lines[i].byte_offset) {
+                    continue;
+                }
                 let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
                 let hashes = caps.get(2).map_or("", |m| m.as_str());
                 let spaces_after = caps.get(3).map_or("", |m| m.as_str());
@@ -1228,7 +1232,30 @@ impl<'a> LintContext<'a> {
                         continue;
                     }
 
+                    // Skip Setext headings inside HTML comments
+                    if crate::utils::skip_context::is_in_html_comment(content, lines[i].byte_offset) {
+                        continue;
+                    }
+
                     let underline = next_line.trim();
+
+                    // Skip if the underline looks like YAML delimiter (exactly 3 or more dashes)
+                    // YAML uses exactly `---` while Setext headings typically use longer underlines
+                    if underline == "---" {
+                        continue;
+                    }
+
+                    // Skip if the current line looks like YAML key-value syntax
+                    let current_line_trimmed = line.trim();
+                    if current_line_trimmed.contains(':')
+                        && !current_line_trimmed.starts_with('#')
+                        && !current_line_trimmed.contains('[')
+                        && !current_line_trimmed.contains("](")
+                    {
+                        // This looks like "key: value" which suggests YAML, not a heading
+                        continue;
+                    }
+
                     let level = if underline.starts_with('=') { 1 } else { 2 };
                     let style = if level == 1 {
                         HeadingStyle::Setext1

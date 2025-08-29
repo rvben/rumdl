@@ -27,9 +27,6 @@ impl MD013LineLength {
                 tables,
                 headings,
                 strict,
-                heading_line_length: None,
-                code_block_line_length: None,
-                stern: false,
                 reflow: false,
             },
         }
@@ -64,7 +61,7 @@ impl MD013LineLength {
         current_line: usize,
         structure: &DocumentStructure,
     ) -> bool {
-        if self.config.strict || self.config.stern {
+        if self.config.strict {
             return false;
         }
 
@@ -185,14 +182,8 @@ impl Rule for MD013LineLength {
                 if let Some(strict) = obj.get("strict").and_then(|v| v.as_bool()) {
                     config.strict = strict;
                 }
-                if let Some(stern) = obj.get("stern").and_then(|v| v.as_bool()) {
-                    config.stern = stern;
-                }
-                if let Some(heading_line_length) = obj.get("heading_line_length").and_then(|v| v.as_u64()) {
-                    config.heading_line_length = Some(heading_line_length as usize);
-                }
-                if let Some(code_block_line_length) = obj.get("code_block_line_length").and_then(|v| v.as_u64()) {
-                    config.code_block_line_length = Some(code_block_line_length as usize);
+                if let Some(reflow) = obj.get("reflow").and_then(|v| v.as_bool()) {
+                    config.reflow = reflow;
                 }
                 config
             } else {
@@ -249,18 +240,8 @@ impl Rule for MD013LineLength {
             // Calculate effective length excluding unbreakable URLs
             let effective_length = self.calculate_effective_length(line);
 
-            // Determine the appropriate line length limit based on line type
-            let line_limit = if heading_lines_set.contains(&line_number) {
-                effective_config
-                    .heading_line_length
-                    .unwrap_or(effective_config.line_length)
-            } else if structure.is_in_code_block(line_number) {
-                effective_config
-                    .code_block_line_length
-                    .unwrap_or(effective_config.line_length)
-            } else {
-                effective_config.line_length
-            };
+            // Use single line length limit for all content
+            let line_limit = effective_config.line_length;
 
             // Skip short lines immediately
             if effective_length <= line_limit {
@@ -268,19 +249,15 @@ impl Rule for MD013LineLength {
             }
 
             // Skip various block types efficiently
-            if !effective_config.strict && !effective_config.stern {
+            if !effective_config.strict {
                 // Skip setext heading underlines
                 if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
                     continue;
                 }
 
                 // Skip block elements according to config flags (optimized checks)
-                if (effective_config.headings
-                    && heading_lines_set.contains(&line_number)
-                    && effective_config.heading_line_length.is_none())
-                    || (!effective_config.code_blocks
-                        && structure.is_in_code_block(line_number)
-                        && effective_config.code_block_line_length.is_none())
+                if (effective_config.headings && heading_lines_set.contains(&line_number))
+                    || (effective_config.code_blocks && structure.is_in_code_block(line_number))
                     || (effective_config.tables && table_lines_set.contains(&line_number))
                     || structure.is_in_blockquote(line_number)
                     || structure.is_in_html_block(line_number)
@@ -290,18 +267,6 @@ impl Rule for MD013LineLength {
 
                 // Skip lines that are only a URL, image ref, or link ref
                 if self.should_ignore_line(line, &lines, line_num, structure) {
-                    continue;
-                }
-            } else if effective_config.stern {
-                // In stern mode, only skip if explicitly configured
-                if (effective_config.headings
-                    && heading_lines_set.contains(&line_number)
-                    && effective_config.heading_line_length.is_none())
-                    || (!effective_config.code_blocks
-                        && structure.is_in_code_block(line_number)
-                        && effective_config.code_block_line_length.is_none())
-                    || (effective_config.tables && table_lines_set.contains(&line_number))
-                {
                     continue;
                 }
             }
@@ -453,8 +418,8 @@ impl MD013LineLength {
 
     /// Calculate effective line length excluding unbreakable URLs
     fn calculate_effective_length(&self, line: &str) -> usize {
-        if self.config.strict || self.config.stern {
-            // In strict or stern mode, count everything
+        if self.config.strict {
+            // In strict mode, count everything
             return line.chars().count();
         }
 
@@ -519,7 +484,7 @@ mod tests {
         assert_eq!(rule.config.line_length, 80);
         assert!(rule.config.code_blocks); // Default is true
         assert!(rule.config.tables); // Default is true
-        assert!(rule.config.headings);
+        assert!(rule.config.headings); // Default is true
         assert!(!rule.config.strict);
     }
 
@@ -569,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_code_blocks_exemption() {
-        let rule = MD013LineLength::new(30, false, false, false, false);
+        let rule = MD013LineLength::new(30, true, false, false, false);
         let content = "```\nThis is a very long line inside a code block that should be ignored.\n```";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
@@ -579,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_code_blocks_not_exempt_when_configured() {
-        let rule = MD013LineLength::new(30, true, false, false, false);
+        let rule = MD013LineLength::new(30, false, false, false, false);
         let content = "```\nThis is a very long line inside a code block that should NOT be ignored.\n```";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
@@ -755,8 +720,8 @@ mod tests {
 
     #[test]
     fn test_mixed_content() {
-        // code_blocks=false, tables=true, headings=true
-        let rule = MD013LineLength::new(30, false, true, true, false);
+        // code_blocks=true, tables=true, headings=true (all exempt)
+        let rule = MD013LineLength::new(30, true, true, true, false);
         let content = r#"# This heading is very long but should be exempt
 
 This regular paragraph line is too long and should trigger.

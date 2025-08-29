@@ -28,7 +28,8 @@ fn test_missing_heading() {
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Introduction\n\n# Methods\n\n# Results");
+    // MD043 now preserves original content to prevent data loss
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -40,7 +41,8 @@ fn test_extra_heading() {
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Introduction\n\n# Results");
+    // MD043 now preserves original content to prevent data loss
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -56,7 +58,8 @@ fn test_wrong_order() {
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Introduction\n\n# Methods\n\n# Results");
+    // MD043 now preserves original content to prevent data loss
+    assert_eq!(fixed, content);
 }
 
 #[test]

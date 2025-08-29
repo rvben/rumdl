@@ -63,11 +63,14 @@ impl ListUtils {
         }
 
         // Quick literal check for common list markers
-        let first_char = trimmed.chars().next().unwrap();
+        let Some(first_char) = trimmed.chars().next() else {
+            return false;
+        };
         match first_char {
             '*' | '+' | '-' => {
-                if trimmed.len() > 1 {
-                    let second_char = trimmed.chars().nth(1).unwrap();
+                if trimmed.len() > 1
+                    && let Some(second_char) = trimmed.chars().nth(1)
+                {
                     return second_char.is_whitespace();
                 }
                 false
@@ -101,9 +104,13 @@ impl ListUtils {
         }
 
         // Quick literal check for unordered list markers
-        let first_char = trimmed.chars().next().unwrap();
-        if (first_char == '*' || first_char == '+' || first_char == '-') && trimmed.len() > 1 {
-            let second_char = trimmed.chars().nth(1).unwrap();
+        let Some(first_char) = trimmed.chars().next() else {
+            return false;
+        };
+        if (first_char == '*' || first_char == '+' || first_char == '-')
+            && trimmed.len() > 1
+            && let Some(second_char) = trimmed.chars().nth(1)
+        {
             return second_char.is_whitespace();
         }
 
@@ -118,7 +125,15 @@ impl ListUtils {
         }
 
         let trimmed = line.trim_start();
-        if trimmed.is_empty() || !trimmed.chars().next().unwrap().is_ascii_digit() {
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        let Some(first_char) = trimmed.chars().next() else {
+            return false;
+        };
+
+        if !first_char.is_ascii_digit() {
             return false;
         }
 

@@ -2,6 +2,19 @@ use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
+/// Detect the line ending style used in the content
+fn detect_line_ending(content: &str) -> &'static str {
+    // Check for CRLF first (more specific than LF)
+    if content.contains("\r\n") {
+        "\r\n"
+    } else if content.contains('\n') {
+        "\n"
+    } else {
+        // Default to LF for empty or single-line files
+        "\n"
+    }
+}
+
 /// Rule MD047: File should end with a single newline
 ///
 /// See [docs/md047.md](../../docs/md047.md) for full documentation, configuration, and examples.
@@ -27,11 +40,14 @@ impl Rule for MD047SingleTrailingNewline {
             return Ok(warnings);
         }
 
-        // Check if file ends with newline
+        // Detect the line ending style used in the document
+        let line_ending = detect_line_ending(content);
+
+        // Check if file ends with newline (supporting both LF and CRLF)
         let has_trailing_newline = content.ends_with('\n');
 
-        // Check if file has multiple trailing newlines
-        let has_multiple_newlines = content.ends_with("\n\n");
+        // Check if file has multiple trailing newlines (supporting both styles)
+        let has_multiple_newlines = content.ends_with(&format!("{line_ending}{line_ending}"));
 
         // Only issue warning if there's no newline or more than one
         if !has_trailing_newline || has_multiple_newlines {
@@ -90,14 +106,14 @@ impl Rule for MD047SingleTrailingNewline {
                         // If there are multiple newlines, fix by ensuring just one
                         let trimmed = content.trim_end();
                         if !trimmed.is_empty() {
-                            "\n".to_string()
+                            line_ending.to_string()
                         } else {
                             // Handle the case where content is just whitespace and newlines
                             String::new()
                         }
                     } else {
-                        // If there's no newline, add one to the last line
-                        String::from("\n")
+                        // If there's no newline, add one using the detected line ending style
+                        line_ending.to_string()
                     },
                 }),
             });
@@ -114,9 +130,12 @@ impl Rule for MD047SingleTrailingNewline {
             return Ok(String::new());
         }
 
+        // Detect the line ending style used in the document
+        let line_ending = detect_line_ending(content);
+
         // Check current state
         let has_trailing_newline = content.ends_with('\n');
-        let has_multiple_newlines = content.ends_with("\n\n");
+        let has_multiple_newlines = content.ends_with(&format!("{line_ending}{line_ending}"));
 
         // Early return if content is already correct
         if has_trailing_newline && !has_multiple_newlines {
@@ -125,21 +144,27 @@ impl Rule for MD047SingleTrailingNewline {
 
         // Only allocate when we need to make changes
         if !has_trailing_newline {
-            // Content doesn't end with newline, add one
-            let mut result = String::with_capacity(content.len() + 1);
+            // Content doesn't end with newline, add one using detected style
+            let mut result = String::with_capacity(content.len() + line_ending.len());
             result.push_str(content);
-            result.push('\n');
+            result.push_str(line_ending);
             Ok(result)
         } else {
             // Has multiple newlines, trim them down to just one
-            let content_without_trailing_newlines = content.trim_end_matches('\n');
+            // Need to handle both LF and CRLF when trimming
+            let content_without_trailing_newlines = if line_ending == "\r\n" {
+                content.trim_end_matches("\r\n")
+            } else {
+                content.trim_end_matches('\n')
+            };
+
             if content_without_trailing_newlines.is_empty() {
                 // Handle the case where content is just newlines
-                Ok("\n".to_string())
+                Ok(line_ending.to_string())
             } else {
-                let mut result = String::with_capacity(content_without_trailing_newlines.len() + 1);
+                let mut result = String::with_capacity(content_without_trailing_newlines.len() + line_ending.len());
                 result.push_str(content_without_trailing_newlines);
-                result.push('\n');
+                result.push_str(line_ending);
                 Ok(result)
             }
         }
@@ -191,6 +216,46 @@ mod tests {
         assert_eq!(result.len(), 1);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Line 1\nLine 2\n");
+    }
+
+    #[test]
+    fn test_crlf_line_ending_preservation() {
+        let rule = MD047SingleTrailingNewline;
+        // Content with CRLF line endings but missing final newline
+        let content = "Line 1\r\nLine 2";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should preserve CRLF style
+        assert_eq!(fixed, "Line 1\r\nLine 2\r\n");
+        assert!(fixed.ends_with("\r\n"), "Should end with CRLF");
+    }
+
+    #[test]
+    fn test_crlf_multiple_newlines() {
+        let rule = MD047SingleTrailingNewline;
+        // Content with CRLF line endings and multiple trailing newlines
+        let content = "Line 1\r\nLine 2\r\n\r\n\r\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should preserve CRLF style and reduce to single trailing newline
+        assert_eq!(fixed, "Line 1\r\nLine 2\r\n");
+    }
+
+    #[test]
+    fn test_detect_line_ending() {
+        assert_eq!(detect_line_ending("Line 1\nLine 2"), "\n");
+        assert_eq!(detect_line_ending("Line 1\r\nLine 2"), "\r\n");
+        assert_eq!(detect_line_ending("Single line"), "\n");
+        assert_eq!(detect_line_ending(""), "\n");
+
+        // Mixed line endings should detect CRLF (first match wins)
+        assert_eq!(detect_line_ending("Line 1\r\nLine 2\nLine 3"), "\r\n");
     }
 
     #[test]
