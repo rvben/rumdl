@@ -313,7 +313,7 @@ rumdl implements 54 lint rules for Markdown files. Here are some key rule catego
 For a complete list of rules and their descriptions, see our [documentation](https://github.com/rvben/rumdl/blob/main/docs/RULES.md) or run:
 
 ```bash
-rumdl --list-rules
+rumdl rule
 ```
 
 ## Command-line Interface
