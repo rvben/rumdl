@@ -260,7 +260,7 @@ impl HeadingUtils {
                         '-'
                     };
                     let visible_length = text_content.chars().count();
-                    let underline_length = visible_length.max(3); // Ensure at least 3 underline chars
+                    let underline_length = visible_length.max(1); // Ensure at least 1 underline char
                     format!(
                         "{}{}\n{}{}",
                         indentation,
@@ -279,7 +279,7 @@ impl HeadingUtils {
                     // Use Setext for h1/h2
                     let underline_char = if level == 1 { '=' } else { '-' };
                     let visible_length = text_content.chars().count();
-                    let underline_length = visible_length.max(3);
+                    let underline_length = visible_length.max(1);
                     format!(
                         "{}{}\n{}{}",
                         indentation,
@@ -297,7 +297,7 @@ impl HeadingUtils {
                     // Use Setext for h1/h2
                     let underline_char = if level == 1 { '=' } else { '-' };
                     let visible_length = text_content.chars().count();
-                    let underline_length = visible_length.max(3);
+                    let underline_length = visible_length.max(1);
                     format!(
                         "{}{}\n{}{}",
                         indentation,
@@ -824,7 +824,7 @@ mod tests {
         // Very short text for setext
         assert_eq!(
             HeadingUtils::convert_heading_style("Hi", 1, HeadingStyle::Setext1),
-            "Hi\n==="
+            "Hi\n=="
         );
     }
 
