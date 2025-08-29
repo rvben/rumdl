@@ -54,6 +54,8 @@ impl MD014CommandsShowOutput {
 
     fn is_no_output_command(&self, cmd: &str) -> bool {
         let cmd = cmd.trim().to_lowercase();
+
+        // Basic shell commands that typically don't produce output
         cmd.contains("cd ")
             || cmd.contains("mkdir ")
             || cmd.contains("touch ")
@@ -62,6 +64,31 @@ impl MD014CommandsShowOutput {
             || cmd.contains("cp ")
             || cmd.contains("export ")
             || cmd.contains("set ")
+            || cmd.contains("alias ")
+            || cmd.contains("unset ")
+            || cmd.contains("source ")
+            || cmd.contains(". ")
+
+            // Package manager install/update commands (usually have output)
+            // Keeping these commented as they typically DO show output
+            // || cmd.contains("npm install")
+            // || cmd.contains("yarn add")
+            // || cmd.contains("pnpm install")
+            // || cmd.contains("bun install")
+            // || cmd.contains("cargo build")
+            // || cmd.contains("pip install")
+
+            // Git commands that don't produce output in normal operation
+            || cmd.contains("git add ")
+            || cmd.contains("git commit ")
+            || cmd.contains("git push ")
+            || cmd.contains("git checkout ")
+            || cmd.contains("git branch -d")
+            || cmd.contains("git stash")
+
+            // Make targets that might not produce output
+            || cmd == "make clean"
+            || cmd.contains("make install")
     }
 
     fn is_command_without_output(&self, block: &[&str], lang: &str) -> bool {

@@ -4,11 +4,11 @@
 //! that both CLI batch fixes and LSP individual fixes produce identical results.
 
 use crate::rule::{Fix, LintWarning};
+use crate::utils::ensure_consistent_line_endings;
 
 /// Apply a list of warning fixes to content, simulating how the LSP client would apply them
 /// This is used for testing consistency between CLI and LSP fix methods
 pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<String, String> {
-    let original_line_ending = crate::utils::detect_line_ending(content);
     let mut fixes: Vec<(usize, &Fix)> = warnings
         .iter()
         .enumerate()
@@ -84,25 +84,11 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
         }
 
         // Apply the fix by replacing the range with the replacement text
-        // Normalize fix replacement to match document line endings
-        let normalized_replacement = if original_line_ending == "\r\n" && !fix.replacement.contains("\r\n") {
-            fix.replacement.replace('\n', "\r\n")
-        } else {
-            fix.replacement.clone()
-        };
-
-        result.replace_range(fix.range.clone(), &normalized_replacement);
+        result.replace_range(fix.range.clone(), &fix.replacement);
     }
 
-    // For consistency with CLI behavior, normalize all line endings in the result
-    // to match the detected predominant style
-    let normalized_result = if original_line_ending == "\r\n" {
-        result.replace('\n', "\r\n")
-    } else {
-        result.replace("\r\n", "\n")
-    };
-
-    Ok(normalized_result)
+    // Ensure line endings are consistent with the original document
+    Ok(ensure_consistent_line_endings(content, &result))
 }
 
 /// Convert a single warning fix to a text edit-style representation

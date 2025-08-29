@@ -185,9 +185,9 @@ impl Rule for MD040FencedCodeLanguage {
                         || after_indent.starts_with("* ")
                         || after_indent.starts_with("+ ")
                         || (after_indent.len() > 2
-                            && after_indent.chars().nth(0).unwrap_or(' ').is_ascii_digit()
-                            && after_indent.chars().nth(1).unwrap_or(' ') == '.'
-                            && after_indent.chars().nth(2).unwrap_or(' ') == ' ')
+                            && after_indent.as_bytes().first().is_some_and(|&b| b.is_ascii_digit())
+                            && after_indent.as_bytes().get(1) == Some(&b'.')
+                            && after_indent.as_bytes().get(2) == Some(&b' '))
                     {
                         return true;
                     }

@@ -603,9 +603,10 @@ pub fn remove_trailing_hashes(text: &str) -> String {
         {
             // Find the start of the trailing hash sequence
             let mut first_hash_index = last_hash_index;
+            let trimmed_chars: Vec<char> = trimmed.chars().collect();
             while first_hash_index > 0 {
                 let prev_index = first_hash_index - 1;
-                if trimmed.chars().nth(prev_index) == Some('#') {
+                if prev_index < trimmed_chars.len() && trimmed_chars[prev_index] == '#' {
                     first_hash_index = prev_index;
                 } else {
                     break;

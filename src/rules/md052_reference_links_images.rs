@@ -488,20 +488,21 @@ impl MD052ReferenceLinkImages {
 
                             // Check 1: If preceded by ], this might be part of [text][ref]
                             // Look for the pattern ...][ref] and check if there's a matching [ before
-                            if col > 0 && line.chars().nth(col.saturating_sub(1)) == Some(']') {
+                            let line_chars: Vec<char> = line.chars().collect();
+                            if col > 0 && col <= line_chars.len() && line_chars.get(col - 1) == Some(&']') {
                                 // Look backwards for a [ that would make this [text][ref]
                                 let mut bracket_count = 1; // We already saw one ]
                                 let mut check_pos = col.saturating_sub(2);
                                 let mut found_opening = false;
 
-                                while check_pos > 0 {
-                                    match line.chars().nth(check_pos) {
-                                        Some(']') => bracket_count += 1,
-                                        Some('[') => {
+                                while check_pos > 0 && check_pos < line_chars.len() {
+                                    match line_chars.get(check_pos) {
+                                        Some(&']') => bracket_count += 1,
+                                        Some(&'[') => {
                                             bracket_count -= 1;
                                             if bracket_count == 0 {
                                                 // Check if this [ is escaped
-                                                if check_pos == 0 || line.chars().nth(check_pos - 1) != Some('\\') {
+                                                if check_pos == 0 || line_chars.get(check_pos - 1) != Some(&'\\') {
                                                     found_opening = true;
                                                 }
                                                 break;

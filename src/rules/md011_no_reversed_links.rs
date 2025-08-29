@@ -61,11 +61,18 @@ impl MD011NoReversedLinks {
             return false;
         }
 
+        // Use bytes for safe indexing since we're only looking for ASCII backslashes
+        let bytes = content.as_bytes();
+        if pos > bytes.len() {
+            return false;
+        }
+
         let mut backslash_count = 0;
         let mut check_pos = pos - 1;
 
         loop {
-            if content.chars().nth(check_pos) == Some('\\') {
+            // Safe because we're checking ASCII backslash which is single-byte
+            if bytes.get(check_pos) == Some(&b'\\') {
                 backslash_count += 1;
                 if check_pos == 0 {
                     break;
@@ -341,7 +348,9 @@ impl Rule for MD011NoReversedLinks {
                 let mut skip_match = false;
                 for esc_match in ESCAPED_CHARS.find_iter(match_text) {
                     let esc_pos = match_start + esc_match.start();
-                    if esc_pos > 0 && line.chars().nth(esc_pos.saturating_sub(1)) == Some('\\') {
+                    // Use bytes for safe indexing since we're checking for ASCII backslash
+                    let line_bytes = line.as_bytes();
+                    if esc_pos > 0 && esc_pos <= line_bytes.len() && line_bytes.get(esc_pos - 1) == Some(&b'\\') {
                         skip_match = true;
                         break;
                     }

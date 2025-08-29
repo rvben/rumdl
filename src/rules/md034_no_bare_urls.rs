@@ -82,9 +82,11 @@ impl MD034NoBareUrls {
 
         // Remove trailing punctuation characters
         while end > 0 {
-            if let Some(last_char) = url.chars().nth(end - 1) {
+            // Get the last character of the current substring safely
+            let current_url = &url[..end];
+            if let Some((last_char_pos, last_char)) = current_url.char_indices().next_back() {
                 if trailing_punct.contains(&last_char) {
-                    end -= last_char.len_utf8();
+                    end = last_char_pos;
                 } else {
                     break;
                 }
@@ -251,19 +253,21 @@ impl MD034NoBareUrls {
             }
 
             // Manual boundary check: not part of a larger word
-            let before = if match_start == 0 {
+            // Use bytes for ASCII checks (more efficient)
+            let bytes = content.as_bytes();
+            let before_byte = if match_start == 0 {
                 None
             } else {
-                content.get(match_start - 1..match_start)
+                bytes.get(match_start - 1).copied()
             };
-            let after = content.get(match_end..match_end + 1);
+            let after_byte = bytes.get(match_end).copied();
 
             let is_valid_boundary = if is_email {
-                before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
-                    && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_" && c != ".")
+                before_byte.is_none_or(|b| !b.is_ascii_alphanumeric() && b != b'_' && b != b'.')
+                    && after_byte.is_none_or(|b| !b.is_ascii_alphanumeric() && b != b'_' && b != b'.')
             } else {
-                before.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
-                    && after.is_none_or(|c| !c.chars().next().unwrap().is_alphanumeric() && c != "_")
+                before_byte.is_none_or(|b| !b.is_ascii_alphanumeric() && b != b'_')
+                    && after_byte.is_none_or(|b| !b.is_ascii_alphanumeric() && b != b'_')
             };
 
             if !is_valid_boundary {

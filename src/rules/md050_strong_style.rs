@@ -138,10 +138,11 @@ impl MD050StrongStyle {
 
         let mut backslash_count = 0;
         let mut i = pos;
+        let bytes = text.as_bytes();
         while i > 0 {
             i -= 1;
-            let c = text.chars().nth(i).unwrap_or(' ');
-            if c != '\\' {
+            // Safe for ASCII backslash
+            if i < bytes.len() && bytes[i] != b'\\' {
                 break;
             }
             backslash_count += 1;

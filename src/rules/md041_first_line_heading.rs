@@ -162,6 +162,9 @@ impl Rule for MD041FirstLineHeading {
             let first_line_content = &first_line_info.content;
             let (start_line, start_col, end_line, end_col) = calculate_line_range(first_line, first_line_content);
 
+            // Detect line ending style for the fix
+            let line_ending = crate::utils::detect_line_ending(content);
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: start_line,
@@ -172,7 +175,7 @@ impl Rule for MD041FirstLineHeading {
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: LineIndex::new(content.to_string()).line_col_to_byte_range_with_length(first_line, 1, 0),
-                    replacement: format!("{} Title\n\n", "#".repeat(self.level)),
+                    replacement: format!("{} Title{}{}", "#".repeat(self.level), line_ending, line_ending),
                 }),
             });
         }
@@ -185,6 +188,9 @@ impl Rule for MD041FirstLineHeading {
         if content.trim().is_empty() || self.has_front_matter_title(&content) {
             return Ok(content.to_string());
         }
+
+        // Detect the line ending style to use
+        let line_ending = crate::utils::detect_line_ending(&content);
 
         // Re-create context for the potentially fixed content
         let fixed_ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
@@ -220,7 +226,13 @@ impl Rule for MD041FirstLineHeading {
 
         if !has_any_heading {
             // Add a new title at the beginning
-            result.push_str(&format!("{} Title\n\n{}", "#".repeat(self.level), content));
+            result.push_str(&format!(
+                "{} Title{}{}{}",
+                "#".repeat(self.level),
+                line_ending,
+                line_ending,
+                content
+            ));
         } else if let Some(first_line_idx) = first_content_line_num {
             // Check if first content line is a heading of correct level
             let first_line_info = &fixed_ctx.lines[first_line_idx];
@@ -235,7 +247,7 @@ impl Rule for MD041FirstLineHeading {
                             result.push_str(line);
                         }
                         if i < lines.len() - 1 {
-                            result.push('\n');
+                            result.push_str(line_ending);
                         }
                     }
                 } else {
@@ -249,11 +261,16 @@ impl Rule for MD041FirstLineHeading {
                 // First line is not a heading, add a new title before it
                 for (i, line) in lines.iter().enumerate() {
                     if i == first_line_idx {
-                        result.push_str(&format!("{} Title\n\n", "#".repeat(self.level)));
+                        result.push_str(&format!(
+                            "{} Title{}{}",
+                            "#".repeat(self.level),
+                            line_ending,
+                            line_ending
+                        ));
                     }
                     result.push_str(line);
                     if i < lines.len() - 1 {
-                        result.push('\n');
+                        result.push_str(line_ending);
                     }
                 }
             }

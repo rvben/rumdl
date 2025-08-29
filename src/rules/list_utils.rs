@@ -68,10 +68,12 @@ impl ListUtils {
         };
         match first_char {
             '*' | '+' | '-' => {
-                if trimmed.len() > 1
-                    && let Some(second_char) = trimmed.chars().nth(1)
-                {
-                    return second_char.is_whitespace();
+                if trimmed.len() > 1 {
+                    let mut chars = trimmed.chars();
+                    chars.next(); // Skip first char
+                    if let Some(second_char) = chars.next() {
+                        return second_char.is_whitespace();
+                    }
                 }
                 false
             }

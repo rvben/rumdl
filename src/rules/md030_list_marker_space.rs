@@ -306,7 +306,7 @@ impl MD030ListMarkerSpace {
                 // Fix if there are tabs, multiple spaces, or mixed whitespace
                 if after_marker.starts_with('\t')
                     || after_marker.starts_with("  ")
-                    || (after_marker.starts_with(' ') && after_marker.chars().nth(1) == Some('\t'))
+                    || (after_marker.starts_with(' ') && after_marker.as_bytes().get(1) == Some(&b'\t'))
                 {
                     let content = after_marker.trim_start();
                     if !content.is_empty() {
@@ -331,7 +331,7 @@ impl MD030ListMarkerSpace {
                 // Fix if there are tabs, multiple spaces, or mixed whitespace
                 if after_dot.starts_with('\t')
                     || after_dot.starts_with("  ")
-                    || (after_dot.starts_with(' ') && after_dot.chars().nth(1) == Some('\t'))
+                    || (after_dot.starts_with(' ') && after_dot.as_bytes().get(1) == Some(&b'\t'))
                 {
                     let content = after_dot.trim_start();
                     if !content.is_empty() {
