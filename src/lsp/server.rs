@@ -218,6 +218,7 @@ impl LanguageServer for RumdlLanguageServer {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                     identifier: Some("rumdl".to_string()),
                     inter_file_dependencies: false,
@@ -368,6 +369,65 @@ impl LanguageServer for RumdlLanguageServer {
                 }
                 Err(e) => {
                     log::error!("Failed to get code actions: {e}");
+                    Ok(None)
+                }
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> JsonRpcResult<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+
+        if let Some(text) = self.documents.read().await.get(&uri) {
+            // Get all rules from config
+            let rumdl_config = self.rumdl_config.read().await;
+            let all_rules = rules::all_rules(&rumdl_config);
+            let flavor = rumdl_config.markdown_flavor();
+            drop(rumdl_config);
+
+            // Lint the document to get all warnings
+            match crate::lint(text, &all_rules, false, flavor) {
+                Ok(warnings) => {
+                    // Check if there are any fixable warnings
+                    let has_fixes = warnings.iter().any(|w| w.fix.is_some());
+
+                    if has_fixes {
+                        // Apply fixes using the fix_utils function
+                        match crate::utils::fix_utils::apply_warning_fixes(text, &warnings) {
+                            Ok(fixed_content) => {
+                                // Only return edits if the content actually changed
+                                if fixed_content != *text {
+                                    // Create a single TextEdit that replaces the entire document
+                                    let num_lines = text.lines().count();
+                                    let last_line = text.lines().last().unwrap_or("");
+
+                                    let edit = TextEdit {
+                                        range: Range {
+                                            start: Position { line: 0, character: 0 },
+                                            end: Position {
+                                                line: (num_lines.saturating_sub(1)) as u32,
+                                                character: last_line.len() as u32,
+                                            },
+                                        },
+                                        new_text: fixed_content,
+                                    };
+
+                                    return Ok(Some(vec![edit]));
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to apply fixes: {e}");
+                            }
+                        }
+                    }
+
+                    // No fixes available or applied
+                    Ok(None)
+                }
+                Err(e) => {
+                    log::error!("Failed to format document: {e}");
                     Ok(None)
                 }
             }
@@ -685,5 +745,44 @@ mod tests {
         let config = server.config.read().await;
         assert!(config.enable_auto_fix);
         assert_eq!(config.config_path, Some("/custom/path.toml".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_document_formatting() {
+        let server = create_test_server();
+        let uri = Url::parse("file:///test.md").unwrap();
+        let text = "# Test\n\nThis is a test  \nWith trailing spaces  ";
+
+        // Store document
+        server.documents.write().await.insert(uri.clone(), text.to_string());
+
+        // Create formatting params
+        let params = DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: FormattingOptions {
+                tab_size: 4,
+                insert_spaces: true,
+                properties: HashMap::new(),
+                trim_trailing_whitespace: Some(true),
+                insert_final_newline: Some(true),
+                trim_final_newlines: Some(true),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        // Call formatting
+        let result = server.formatting(params).await.unwrap();
+
+        // Should return text edits that fix the trailing spaces
+        assert!(result.is_some());
+        let edits = result.unwrap();
+        assert!(!edits.is_empty());
+
+        // The new text should have trailing spaces removed
+        let edit = &edits[0];
+        // The formatted text should have the trailing spaces removed from the middle line
+        // and a final newline added
+        let expected = "# Test\n\nThis is a test  \nWith trailing spaces\n";
+        assert_eq!(edit.new_text, expected);
     }
 }
