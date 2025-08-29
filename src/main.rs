@@ -2320,17 +2320,9 @@ fn perform_check_run(args: &CheckArgs, config: &rumdl_config::Config, quiet: boo
 
 /// Run the linter in watch mode, re-running on file changes
 fn run_watch_mode(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool, quiet: bool) {
-    // Determine the directory for config discovery
-    let discovery_dir = if !args.paths.is_empty() {
-        let path = std::path::Path::new(&args.paths[0]);
-        if path.is_absolute() {
-            if path.is_dir() { Some(path) } else { path.parent() }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    // Always use current directory for config discovery to ensure config files are found
+    // when pre-commit or other tools pass relative file paths
+    let discovery_dir = None;
 
     // Load initial configuration
     let mut sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
@@ -2498,19 +2490,9 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     }
 
     // 1. Determine the directory for config discovery
-    // Only use the path's directory for discovery if it's an absolute path
-    // This ensures we discover config from the project root when running relative commands
-    let discovery_dir = if !args.paths.is_empty() {
-        let path = std::path::Path::new(&args.paths[0]);
-        if path.is_absolute() {
-            if path.is_dir() { Some(path) } else { path.parent() }
-        } else {
-            // For relative paths, use current directory for discovery
-            None
-        }
-    } else {
-        None
-    };
+    // Always use current directory for discovery to ensure config files are found
+    // when pre-commit or other tools pass relative file paths
+    let discovery_dir = None;
 
     // 2. Load sourced config (for provenance and validation)
     let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
