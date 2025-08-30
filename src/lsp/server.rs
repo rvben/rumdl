@@ -459,16 +459,23 @@ impl LanguageServer for RumdlLanguageServer {
                                 // Only return edits if the content actually changed
                                 if fixed_content != *text {
                                     // Create a single TextEdit that replaces the entire document
-                                    let num_lines = text.lines().count();
-                                    let last_line = text.lines().last().unwrap_or("");
+                                    // Calculate proper end position by iterating through all characters
+                                    let mut line = 0u32;
+                                    let mut character = 0u32;
+
+                                    for ch in text.chars() {
+                                        if ch == '\n' {
+                                            line += 1;
+                                            character = 0;
+                                        } else {
+                                            character += 1;
+                                        }
+                                    }
 
                                     let edit = TextEdit {
                                         range: Range {
                                             start: Position { line: 0, character: 0 },
-                                            end: Position {
-                                                line: (num_lines.saturating_sub(1)) as u32,
-                                                character: last_line.len() as u32,
-                                            },
+                                            end: Position { line, character },
                                         },
                                         new_text: fixed_content,
                                     };
