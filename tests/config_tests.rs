@@ -883,3 +883,193 @@ line-length:
         std::env::set_current_dir(original_dir).unwrap();
     }
 }
+
+#[test]
+fn test_user_configuration_discovery() {
+    use std::env;
+
+    // Save original env vars
+    let original_xdg = env::var("XDG_CONFIG_HOME").ok();
+    let original_dir = env::current_dir().unwrap();
+
+    // Create temporary directories
+    let temp_dir = tempdir().unwrap();
+    let project_dir = temp_dir.path().join("project");
+    let config_dir = temp_dir.path().join("config");
+    let rumdl_config_dir = config_dir.join("rumdl");
+
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::create_dir_all(&rumdl_config_dir).unwrap();
+
+    // Set XDG_CONFIG_HOME to our temp config dir
+    unsafe {
+        env::set_var("XDG_CONFIG_HOME", &config_dir);
+    }
+
+    // Create user config file
+    let user_config_path = rumdl_config_dir.join("rumdl.toml");
+    let user_config_content = r#"
+[global]
+line-length = 88
+disable = ["MD041"]
+
+[MD007]
+indent = 4
+"#;
+    fs::write(&user_config_path, user_config_content).unwrap();
+
+    // Change to project directory (which has no config)
+    env::set_current_dir(&project_dir).unwrap();
+
+    // Test that user config is loaded when no project config exists
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load user config");
+
+    let config: Config = sourced.into();
+
+    // Verify user config was loaded
+    assert_eq!(
+        config.global.line_length, 88,
+        "Should load line-length from user config"
+    );
+    assert_eq!(
+        config.global.disable,
+        vec!["MD041"],
+        "Should load disabled rules from user config"
+    );
+
+    // Verify rule-specific settings
+    let indent = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD007", "indent");
+    assert_eq!(indent, Some(4), "Should load MD007 indent from user config");
+
+    // Now create a project config
+    let project_config_path = project_dir.join(".rumdl.toml");
+    let project_config_content = r#"
+[global]
+line-length = 100
+
+[MD007]
+indent = 2
+"#;
+    fs::write(&project_config_path, project_config_content).unwrap();
+
+    // Test that project config takes precedence over user config
+    let sourced_with_project =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load project config");
+
+    let config_with_project: Config = sourced_with_project.into();
+
+    // Verify project config takes precedence
+    assert_eq!(
+        config_with_project.global.line_length, 100,
+        "Project config should override user config"
+    );
+    let project_indent = rumdl_lib::config::get_rule_config_value::<usize>(&config_with_project, "MD007", "indent");
+    assert_eq!(
+        project_indent,
+        Some(2),
+        "Project MD007 config should override user config"
+    );
+
+    // Restore original environment
+    env::set_current_dir(original_dir).unwrap();
+    match original_xdg {
+        Some(val) => unsafe { env::set_var("XDG_CONFIG_HOME", val) },
+        None => unsafe { env::remove_var("XDG_CONFIG_HOME") },
+    }
+}
+
+#[test]
+fn test_user_configuration_file_precedence() {
+    use std::env;
+
+    // Save original env vars
+    let original_xdg = env::var("XDG_CONFIG_HOME").ok();
+    let original_dir = env::current_dir().unwrap();
+
+    // Create temporary directories
+    let temp_dir = tempdir().unwrap();
+    let project_dir = temp_dir.path().join("project");
+    let config_dir = temp_dir.path().join("config");
+    let rumdl_config_dir = config_dir.join("rumdl");
+
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::create_dir_all(&rumdl_config_dir).unwrap();
+
+    // Set XDG_CONFIG_HOME to our temp config dir
+    unsafe {
+        env::set_var("XDG_CONFIG_HOME", &config_dir);
+    }
+
+    // Create multiple user config files to test precedence
+    // .rumdl.toml (highest precedence)
+    let dot_rumdl_path = rumdl_config_dir.join(".rumdl.toml");
+    fs::write(
+        &dot_rumdl_path,
+        r#"[global]
+line-length = 77"#,
+    )
+    .unwrap();
+
+    // rumdl.toml (middle precedence)
+    let rumdl_path = rumdl_config_dir.join("rumdl.toml");
+    fs::write(
+        &rumdl_path,
+        r#"[global]
+line-length = 88"#,
+    )
+    .unwrap();
+
+    // pyproject.toml (lowest precedence)
+    let pyproject_path = rumdl_config_dir.join("pyproject.toml");
+    fs::write(
+        &pyproject_path,
+        r#"[tool.rumdl.global]
+line-length = 99"#,
+    )
+    .unwrap();
+
+    // Change to project directory (which has no config)
+    env::set_current_dir(&project_dir).unwrap();
+
+    // Test that .rumdl.toml is loaded first
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load user config");
+
+    let config: Config = sourced.into();
+    assert_eq!(
+        config.global.line_length, 77,
+        ".rumdl.toml should have highest precedence"
+    );
+
+    // Remove .rumdl.toml and test again
+    fs::remove_file(&dot_rumdl_path).unwrap();
+
+    let sourced2 =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load user config");
+
+    let config2: Config = sourced2.into();
+    assert_eq!(
+        config2.global.line_length, 88,
+        "rumdl.toml should be loaded when .rumdl.toml is absent"
+    );
+
+    // Remove rumdl.toml and test again
+    fs::remove_file(&rumdl_path).unwrap();
+
+    let sourced3 =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load user config");
+
+    let config3: Config = sourced3.into();
+    assert_eq!(
+        config3.global.line_length, 99,
+        "pyproject.toml should be loaded when other configs are absent"
+    );
+
+    // Restore original environment
+    env::set_current_dir(original_dir).unwrap();
+    match original_xdg {
+        Some(val) => unsafe { env::set_var("XDG_CONFIG_HOME", val) },
+        None => unsafe { env::remove_var("XDG_CONFIG_HOME") },
+    }
+}

@@ -1339,6 +1339,60 @@ impl SourcedConfig {
         None
     }
 
+    /// Discover user-level configuration file from platform-specific config directory.
+    /// Returns the first configuration file found in the user config directory.
+    fn user_configuration_path() -> Option<std::path::PathBuf> {
+        use etcetera::{BaseStrategy, choose_base_strategy};
+
+        match choose_base_strategy() {
+            Ok(strategy) => {
+                let config_dir = strategy.config_dir().join("rumdl");
+
+                // Check for config files in precedence order (same as project discovery)
+                const USER_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml"];
+
+                log::debug!(
+                    "[rumdl-config] Checking for user configuration in: {}",
+                    config_dir.display()
+                );
+
+                for filename in USER_CONFIG_FILES {
+                    let config_path = config_dir.join(filename);
+
+                    if config_path.exists() {
+                        // For pyproject.toml, verify it contains [tool.rumdl] section
+                        if *filename == "pyproject.toml" {
+                            if let Ok(content) = std::fs::read_to_string(&config_path) {
+                                if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") {
+                                    log::debug!(
+                                        "[rumdl-config] Found user configuration at: {}",
+                                        config_path.display()
+                                    );
+                                    return Some(config_path);
+                                }
+                                log::debug!("[rumdl-config] Found user pyproject.toml but no [tool.rumdl] section");
+                                continue;
+                            }
+                        } else {
+                            log::debug!("[rumdl-config] Found user configuration at: {}", config_path.display());
+                            return Some(config_path);
+                        }
+                    }
+                }
+
+                log::debug!(
+                    "[rumdl-config] No user configuration found in: {}",
+                    config_dir.display()
+                );
+                None
+            }
+            Err(e) => {
+                log::debug!("[rumdl-config] Failed to determine user config directory: {e}");
+                None
+            }
+        }
+    }
+
     /// Load and merge configurations from files and CLI overrides.
     /// If skip_auto_discovery is true, only explicit config paths are loaded.
     pub fn load_with_discovery(
@@ -1438,18 +1492,53 @@ impl SourcedConfig {
                 log::debug!("[rumdl-config] No configuration file found via upward traversal");
 
                 // Fallback to markdownlint config in current directory only
+                let mut found_markdownlint = false;
                 for filename in MARKDOWNLINT_CONFIG_FILES {
                     if std::path::Path::new(filename).exists() {
                         match load_from_markdownlint(filename) {
                             Ok(fragment) => {
                                 sourced_config.merge(fragment);
                                 sourced_config.loaded_files.push(filename.to_string());
+                                found_markdownlint = true;
                                 break; // Load only the first one found
                             }
                             Err(_e) => {
                                 // Log error but continue (it's just a fallback)
                             }
                         }
+                    }
+                }
+
+                // If no markdownlint config found, check for user configuration
+                if !found_markdownlint {
+                    if let Some(user_config_path) = Self::user_configuration_path() {
+                        let path_str = user_config_path.display().to_string();
+                        let filename = user_config_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+                        log::debug!("[rumdl-config] Loading user configuration file: {path_str}");
+
+                        if filename == "pyproject.toml" {
+                            let content =
+                                std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
+                                    source: e,
+                                    path: path_str.clone(),
+                                })?;
+                            if let Some(fragment) = parse_pyproject_toml(&content, &path_str)? {
+                                sourced_config.merge(fragment);
+                                sourced_config.loaded_files.push(path_str);
+                            }
+                        } else {
+                            let content =
+                                std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
+                                    source: e,
+                                    path: path_str.clone(),
+                                })?;
+                            let fragment = parse_rumdl_toml(&content, &path_str)?;
+                            sourced_config.merge(fragment);
+                            sourced_config.loaded_files.push(path_str);
+                        }
+                    } else {
+                        log::debug!("[rumdl-config] No user configuration file found");
                     }
                 }
             }

@@ -89,6 +89,7 @@ It offers:
     - [Usage Examples](#usage-examples)
   - [Configuration](#configuration)
     - [Configuration Discovery](#configuration-discovery)
+    - [Global Configuration](#global-configuration)
     - [Markdownlint Migration](#markdownlint-migration)
     - [Configuration File Example](#configuration-file-example)
     - [Initializing Configuration](#initializing-configuration)
@@ -548,6 +549,7 @@ The search follows these rules:
 - Stops at the first configuration file found
 - Stops searching when it encounters a `.git` directory (project boundary)
 - Maximum traversal depth of 100 directories
+- Falls back to user configuration if no project configuration is found (see Global Configuration below)
 
 To disable all configuration discovery and use only built-in defaults, use the `--isolated` flag:
 
@@ -558,6 +560,36 @@ rumdl check .
 # Ignore all configuration files
 rumdl check --isolated .
 ```
+
+### Global Configuration
+
+When no project configuration is found, rumdl will check for a user-level configuration file in your platform's standard config directory:
+
+**Location:**
+
+- **Linux/macOS**: `~/.config/rumdl/` (respects `XDG_CONFIG_HOME` if set)
+- **Windows**: `%APPDATA%\rumdl\`
+
+**Files checked (in order):**
+
+1. `.rumdl.toml`
+2. `rumdl.toml`
+3. `pyproject.toml` (must contain `[tool.rumdl]` section)
+
+This allows you to set personal preferences that apply to all projects without local configuration.
+
+**Example:** Create `~/.config/rumdl/rumdl.toml`:
+
+```toml
+[global]
+line-length = 100
+disable = ["MD013", "MD041"]
+
+[MD007]
+indent = 2
+```
+
+**Note:** User configuration is only used when no project configuration exists. Project configurations always take precedence.
 
 ### Markdownlint Migration
 
