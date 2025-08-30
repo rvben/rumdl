@@ -46,13 +46,14 @@ fn test_tables() {
 
 #[test]
 fn test_headings() {
+    // With all parameters false, we skip checking code blocks, tables, and headings
     let rule = MD013LineLength::new(20, false, false, false, false);
-    let content = "# This is a very long heading\nThis is a short heading.";
+    let content = "# This is a very long heading\nThis is a long line of text.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
-    assert_eq!(result[0].line, 1);
-    assert_eq!(result[1].line, 2);
+    // Only the second line (regular text) should be flagged, heading is skipped
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 2);
 }
 
 #[test]
@@ -245,13 +246,15 @@ fn test_parity_link_reference_definition_skipped() {
 }
 
 #[test]
-fn test_parity_table_rows_skipped() {
+fn test_parity_table_rows_checked() {
+    // With tables = true, table rows should be checked
     let rule = MD013LineLength::new(80, true, true, true, false);
-    let content = "| This is a very long table cell that should not be flagged by MD013 even if it is over the limit |
+    let content = "| This is a very long table cell that should be flagged by MD013 because it is over the limit |
 | --- |";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 1);
 }
 
 #[test]
@@ -345,15 +348,15 @@ fn test_tables_configurable() {
     let content = "| This is a very long table cell | Another very long table cell that exceeds limit |";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
-    // With tables = true (check tables)
+    // With tables = true (check tables - include in line length checking)
     let rule_check = MD013LineLength::new(50, true, true, true, false);
     let result_check = rule_check.check(&ctx).unwrap();
-    assert!(result_check.is_empty()); // Tables are skipped when tables=true
+    assert_eq!(result_check.len(), 1);
 
-    // With tables = false (don't skip tables)
-    let rule_no_skip = MD013LineLength::new(50, true, false, true, false);
-    let result_no_skip = rule_no_skip.check(&ctx).unwrap();
-    assert_eq!(result_no_skip.len(), 1);
+    // With tables = false (skip tables - exclude from line length checking)
+    let rule_skip = MD013LineLength::new(50, true, false, true, false);
+    let result_skip = rule_skip.check(&ctx).unwrap();
+    assert!(result_skip.is_empty());
 }
 
 #[test]
@@ -361,16 +364,16 @@ fn test_headings_configurable() {
     let content = "# This is a very long heading that exceeds the maximum character limit significantly";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
-    // With headings = true (skip headings)
-    let rule_skip = MD013LineLength::new(50, true, true, true, false);
-    let result_skip = rule_skip.check(&ctx).unwrap();
-    assert!(result_skip.is_empty());
-
-    // With headings = false (check headings)
-    let rule_check = MD013LineLength::new(50, true, true, false, false);
+    // With headings = true (check headings - include in line length checking)
+    let rule_check = MD013LineLength::new(50, true, true, true, false);
     let result_check = rule_check.check(&ctx).unwrap();
     assert_eq!(result_check.len(), 1);
     assert_eq!(result_check[0].line, 1);
+
+    // With headings = false (skip headings - exclude from line length checking)
+    let rule_skip = MD013LineLength::new(50, true, true, false, false);
+    let result_skip = rule_skip.check(&ctx).unwrap();
+    assert!(result_skip.is_empty());
 }
 
 #[test]

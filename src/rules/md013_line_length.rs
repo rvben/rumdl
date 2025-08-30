@@ -204,7 +204,8 @@ impl Rule for MD013LineLength {
         let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
 
         // Pre-compute table lines for efficiency instead of calling is_in_table for each line
-        let table_lines_set: std::collections::HashSet<usize> = if effective_config.tables {
+        // Always compute table lines so we know which lines are tables
+        let table_lines_set: std::collections::HashSet<usize> = {
             let mut table_lines = std::collections::HashSet::new();
             let mut in_table = false;
 
@@ -230,8 +231,6 @@ impl Rule for MD013LineLength {
                 }
             }
             table_lines
-        } else {
-            std::collections::HashSet::new()
         };
 
         for (line_num, line) in lines.iter().enumerate() {
@@ -255,10 +254,12 @@ impl Rule for MD013LineLength {
                     continue;
                 }
 
-                // Skip block elements according to config flags (optimized checks)
-                if (effective_config.headings && heading_lines_set.contains(&line_number))
-                    || (effective_config.code_blocks && structure.is_in_code_block(line_number))
-                    || (effective_config.tables && table_lines_set.contains(&line_number))
+                // Skip block elements according to config flags
+                // The flags mean: true = check these elements, false = skip these elements
+                // So we skip when the flag is FALSE and the line is in that element type
+                if (!effective_config.headings && heading_lines_set.contains(&line_number))
+                    || (!effective_config.code_blocks && structure.is_in_code_block(line_number))
+                    || (!effective_config.tables && table_lines_set.contains(&line_number))
                     || structure.is_in_blockquote(line_number)
                     || structure.is_in_html_block(line_number)
                 {
@@ -534,7 +535,8 @@ mod tests {
 
     #[test]
     fn test_code_blocks_exemption() {
-        let rule = MD013LineLength::new(30, true, false, false, false);
+        // With code_blocks = false, code blocks should be skipped
+        let rule = MD013LineLength::new(30, false, false, false, false);
         let content = "```\nThis is a very long line inside a code block that should be ignored.\n```";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
@@ -544,7 +546,8 @@ mod tests {
 
     #[test]
     fn test_code_blocks_not_exempt_when_configured() {
-        let rule = MD013LineLength::new(30, false, false, false, false);
+        // With code_blocks = true, code blocks should be checked
+        let rule = MD013LineLength::new(30, true, false, false, false);
         let content = "```\nThis is a very long line inside a code block that should NOT be ignored.\n```";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
@@ -553,23 +556,23 @@ mod tests {
     }
 
     #[test]
-    fn test_heading_exemption() {
+    fn test_heading_checked_when_enabled() {
         let rule = MD013LineLength::new(30, false, false, true, false);
         let content = "# This is a very long heading that would normally exceed the limit";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 0);
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
-    fn test_heading_not_exempt_when_configured() {
+    fn test_heading_exempt_when_disabled() {
         let rule = MD013LineLength::new(30, false, false, false, false);
         let content = "# This is a very long heading that should trigger a warning";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.len(), 0);
     }
 
     #[test]
@@ -586,13 +589,13 @@ mod tests {
     }
 
     #[test]
-    fn test_table_exemption() {
+    fn test_table_checked_when_enabled() {
         let rule = MD013LineLength::new(30, false, true, false, false);
         let content = "| This is a very long table header | Another long column header |\n|-----------------------------------|-------------------------------|";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 0);
+        assert_eq!(result.len(), 2); // Both table lines exceed limit
     }
 
     #[test]
@@ -720,8 +723,8 @@ mod tests {
 
     #[test]
     fn test_mixed_content() {
-        // code_blocks=true, tables=true, headings=true (all exempt)
-        let rule = MD013LineLength::new(30, true, true, true, false);
+        // code_blocks=false, tables=false, headings=false (all skipped/exempt)
+        let rule = MD013LineLength::new(30, false, false, false, false);
         let content = r#"# This heading is very long but should be exempt
 
 This regular paragraph line is too long and should trigger.

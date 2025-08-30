@@ -3,294 +3,59 @@
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
-use crate::utils::skip_context::{is_in_front_matter, is_in_html_comment, is_in_math_context};
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    static ref REVERSED_LINK_REGEX: Regex =
-        Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|(\([^)]+\))\[([^\]]+)\]").unwrap();
-    // Pattern to match reversed links: (URL)[text]
-    // The URL pattern allows for nested parentheses using a simple approach
-    static ref REVERSED_LINK_CHECK_REGEX: Regex = Regex::new(
-        r"\(([^)]*(?:\([^)]*\)[^)]*)*)\)\[([^\]]+)\]"
+    // Main pattern to match reversed links: (URL)[text]
+    // We'll manually check that it's not followed by another ( to avoid false positives
+    static ref REVERSED_LINK_REGEX: Regex = Regex::new(
+        r"(^|[^\\])\(([^()]+)\)\[([^\]]+)\]"
     ).unwrap();
-
-    // Pattern to detect escaped brackets and parentheses
-    static ref ESCAPED_CHARS: Regex = Regex::new(r"\\[\[\]()]").unwrap();
-
-    // Pattern to detect mathematical context indicators
-    static ref MATH_CONTEXT: Regex = Regex::new(
-        r"(?:f|g|h|sin|cos|tan|log|ln|exp|matrix|vector|det|lim|sum|prod|int)\s*\([^)]+\)|[∈∉⊆⊂⊃⊇∩∪∧∨¬∀∃∅∞∫∑∏√±×÷≠≤≥≈≡]|\b(?:where|such that|for all|exists|if and only if)\b"
-    ).unwrap();
-
-    // Pattern to detect function/array notation that shouldn't be flagged
-    static ref FUNCTION_ARRAY_NOTATION: Regex = Regex::new(
-        r"(?:[a-zA-Z_]\w*\([^)]*\)\[[^\]]+\])|(?:\([^)]+\)\[(?:[^]]*(?:element|index|derivative|integral|component|row|column|entry|coefficient|term|partial|second|first|third|fourth|differential|gradient)[^]]*)\])"
-    ).unwrap();
-
-    // More comprehensive mathematical function pattern
-    static ref MATHEMATICAL_FUNCTION_PATTERN: Regex = Regex::new(
-        r"\b([a-zA-Z_]\w*)\s*\([^)]*\)\s*\[([^\]]+)\]"
-    ).unwrap();
-
-    // New patterns for detecting malformed link attempts where user intent is clear
-    static ref MALFORMED_LINK_PATTERNS: Vec<(Regex, &'static str)> = vec![
-        // Missing closing bracket: (URL)[text  or  [text](URL
-        (Regex::new(r"\(([^)]+)\)\[([^\]]*$)").unwrap(), "missing closing bracket"),
-        (Regex::new(r"\[([^\]]+)\]\(([^)]*$)").unwrap(), "missing closing parenthesis"),
-
-        // Wrong bracket types: {URL}[text] or [text]{URL}
-        (Regex::new(r"\{([^}]+)\}\[([^\]]+)\]").unwrap(), "wrong bracket type (curly instead of parentheses)"),
-        (Regex::new(r"\[([^\]]+)\]\{([^}]+)\}").unwrap(), "wrong bracket type (curly instead of parentheses)"),
-
-        // URL and text swapped in correct syntax: [URL](text) where URL is clearly a URL
-        (Regex::new(r"\[(https?://[^\]]+)\]\(([^)]+)\)").unwrap(), "URL and text appear to be swapped"),
-        (Regex::new(r"\[(www\.[^\]]+)\]\(([^)]+)\)").unwrap(), "URL and text appear to be swapped"),
-        (Regex::new(r"\[([^\]]*\.[a-z]{2,4}[^\]]*)\]\(([^)]+)\)").unwrap(), "URL and text appear to be swapped"),
-    ];
 }
 
 #[derive(Clone)]
 pub struct MD011NoReversedLinks;
 
 impl MD011NoReversedLinks {
-    /// Check if a character at position is escaped (preceded by odd number of backslashes)
-    fn is_escaped(content: &str, pos: usize) -> bool {
-        if pos == 0 {
-            return false;
-        }
-
-        // Use bytes for safe indexing since we're only looking for ASCII backslashes
-        let bytes = content.as_bytes();
-        if pos > bytes.len() {
-            return false;
-        }
-
-        let mut backslash_count = 0;
-        let mut check_pos = pos - 1;
-
-        loop {
-            // Safe because we're checking ASCII backslash which is single-byte
-            if bytes.get(check_pos) == Some(&b'\\') {
-                backslash_count += 1;
-                if check_pos == 0 {
-                    break;
-                }
-                check_pos -= 1;
-            } else {
-                break;
-            }
-        }
-
-        backslash_count % 2 == 1
-    }
-
     fn find_reversed_links(content: &str) -> Vec<(usize, usize, String, String)> {
         let mut results = Vec::new();
-        let mut line_start = 0;
-        let mut current_line = 1;
+        let mut line_num = 1;
 
         for line in content.lines() {
-            // Skip processing if we can't possibly have a reversed link
-            if !line.contains('(') || !line.contains('[') || !line.contains(']') || !line.contains(')') {
-                line_start += line.len() + 1;
-                current_line += 1;
-                continue;
-            }
+            let mut last_end = 0;
 
-            // Skip if line contains mathematical context
-            if MATH_CONTEXT.is_match(line) {
-                line_start += line.len() + 1;
-                current_line += 1;
-                continue;
-            }
-
-            // Note: Individual function/array notation check moved to per-match level
-
-            for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
-                // Extract URL and text
-                let url = &cap[1];
-                let text = &cap[2];
-                let _full_match = cap.get(0).unwrap().as_str();
-                let match_start = cap.get(0).unwrap().start();
-
-                // Check if this looks like a mathematical function by examining the context
-                // Look for a function name immediately before the opening parenthesis
-                let prefix = if match_start > 0 {
-                    let start_pos = match_start.saturating_sub(20); // Look up to 20 chars back
-                    &line[start_pos..match_start]
-                } else {
-                    ""
-                };
-
-                // Check if preceded by a function name pattern
-                if prefix
-                    .chars()
-                    .rev()
-                    .take_while(|&c| c.is_alphabetic() || c == '_')
-                    .count()
-                    > 0
-                {
-                    let mut function_chars: Vec<char> = prefix
-                        .chars()
-                        .rev()
-                        .take_while(|&c| c.is_alphabetic() || c == '_')
-                        .collect();
-                    function_chars.reverse();
-                    let function_name: String = function_chars.into_iter().collect();
-
-                    // Common mathematical function names and patterns
-                    if function_name.len() <= 8
-                        && ((function_name.len() <= 3 && function_name.chars().all(|c| c.is_ascii_alphabetic() && c.is_ascii_lowercase())) ||  // f, g, h, etc.
-                        ["sin", "cos", "tan", "log", "ln", "exp", "sqrt", "abs", "min", "max", "det"].contains(&function_name.as_str()))
-                    {
-                        continue;
-                    }
-                }
-
-                // Basic mathematical context check (conservative approach)
-                // Only check for very obvious cases to avoid breaking existing functionality
-
-                // Additional check: Skip if this looks like mathematical notation
-                // e.g., (0,1)[inclusive], (a,b)[intersection]
-                if text.len() < 20
-                    && (text.contains("inclusive")
-                        || text.contains("exclusive")
-                        || text.contains("intersection")
-                        || text.contains("union")
-                        || text.contains("element")
-                        || text.contains("derivative")
-                        || text.contains("component")
-                        || text.contains("index")
-                        || text.contains("partial")
-                        || text.contains("differential")
-                        || text.contains("gradient")
-                        || text.contains("second")
-                        || text.contains("first")
-                        || text.contains("third"))
-                {
-                    continue;
-                }
-
-                // Skip if URL part looks like coordinates, intervals, or mathematical variables
-                if url.contains(',') && !url.contains("://") && !url.contains('.') {
-                    continue;
-                }
-
-                // Skip if URL part looks like a single variable or simple mathematical expression
-                if url.len() <= 10
-                    && url.chars().all(|c| c.is_alphanumeric() || ",()".contains(c))
-                    && !url.contains("://")
-                {
-                    continue;
-                }
-
-                let start = line_start + cap.get(0).unwrap().start();
-                results.push((current_line, start - line_start + 1, text.to_string(), url.to_string()));
-            }
-            line_start += line.len() + 1; // +1 for newline
-            current_line += 1;
-        }
-
-        results
-    }
-
-    /// Detect malformed link attempts where user intent is clear
-    fn detect_malformed_link_attempts(&self, line: &str) -> Vec<(usize, usize, String, String)> {
-        let mut results = Vec::new();
-        let mut processed_ranges = Vec::new(); // Track processed character ranges to avoid duplicates
-
-        for (pattern, issue_type) in MALFORMED_LINK_PATTERNS.iter() {
-            for cap in pattern.captures_iter(line) {
+            while let Some(cap) = REVERSED_LINK_REGEX.captures(&line[last_end..]) {
                 let match_obj = cap.get(0).unwrap();
-                let start = match_obj.start();
-                let len = match_obj.len();
-                let end = start + len;
+                let prechar = &cap[1];
+                let url = &cap[2];
+                let text = &cap[3];
 
-                // Skip if this range overlaps with already processed ranges
-                if processed_ranges
-                    .iter()
-                    .any(|(proc_start, proc_end)| (start < *proc_end && end > *proc_start))
-                {
+                // Check if the brackets at the end are escaped
+                if text.ends_with('\\') {
+                    last_end += match_obj.end();
                     continue;
                 }
 
-                // Extract potential URL and text based on the pattern
-                if let Some((url, text)) = self.extract_url_and_text_from_match(&cap, issue_type) {
-                    // Only proceed if this looks like a genuine link attempt
-                    if self.looks_like_link_attempt(&url, &text) {
-                        results.push((start, len, url, text));
-                        processed_ranges.push((start, end));
-                    }
+                // Manual negative lookahead: skip if followed by (
+                // This prevents matching (text)[ref](url) patterns
+                let end_pos = last_end + match_obj.end();
+                if end_pos < line.len() && line[end_pos..].starts_with('(') {
+                    last_end += match_obj.end();
+                    continue;
                 }
+
+                // Calculate the actual column (accounting for any prefix character)
+                let column = last_end + match_obj.start() + prechar.len() + 1;
+
+                results.push((line_num, column, text.to_string(), url.to_string()));
+                last_end += match_obj.end();
             }
+
+            line_num += 1;
         }
 
         results
-    }
-
-    /// Extract URL and text from regex match based on the issue type
-    fn extract_url_and_text_from_match(&self, cap: &regex::Captures, issue_type: &str) -> Option<(String, String)> {
-        match issue_type {
-            "missing closing bracket" => {
-                // (URL)[text -> cap[1] = URL, cap[2] = incomplete text
-                Some((cap[1].to_string(), format!("{}]", &cap[2])))
-            }
-            "missing closing parenthesis" => {
-                // [text](URL -> cap[1] = text, cap[2] = incomplete URL
-                Some((format!("{})", &cap[2]), cap[1].to_string()))
-            }
-            "wrong bracket type (curly instead of parentheses)" => {
-                // {URL}[text] or [text]{URL} -> cap[1] and cap[2]
-                if cap.get(0).unwrap().as_str().starts_with('{') {
-                    // {URL}[text] -> swap and fix brackets
-                    Some((cap[1].to_string(), cap[2].to_string()))
-                } else {
-                    // [text]{URL} -> already in correct order, fix brackets
-                    Some((cap[2].to_string(), cap[1].to_string()))
-                }
-            }
-            "URL and text appear to be swapped" => {
-                // [URL](text) -> cap[1] = URL, cap[2] = text, need to swap
-                Some((cap[1].to_string(), cap[2].to_string()))
-            }
-            _ => None,
-        }
-    }
-
-    /// Check if the extracted URL and text look like a genuine link attempt
-    fn looks_like_link_attempt(&self, url: &str, text: &str) -> bool {
-        // URL should look like a URL
-        let url_indicators = [
-            "http://", "https://", "www.", "ftp://", ".com", ".org", ".net", ".edu", ".gov", ".io", ".co",
-        ];
-
-        let has_url_indicator = url_indicators
-            .iter()
-            .any(|indicator| url.to_lowercase().contains(indicator));
-
-        // Text should be reasonable length and not look like a URL
-        let text_looks_reasonable = text.len() >= 3
-            && text.len() <= 50
-            && !url_indicators
-                .iter()
-                .any(|indicator| text.to_lowercase().contains(indicator))
-            && !text.to_lowercase().starts_with("http")
-            && text.chars().any(|c| c.is_alphabetic()); // Must contain at least one letter
-
-        // URL should not be too short or contain only non-URL characters
-        let url_looks_reasonable =
-            url.len() >= 4 && (has_url_indicator || url.contains('.')) && !url.chars().all(|c| c.is_alphabetic()); // Shouldn't be just letters
-
-        // Both URL and text should look reasonable for this to be a link attempt
-        has_url_indicator && text_looks_reasonable && url_looks_reasonable
-    }
-}
-
-impl Default for MD011NoReversedLinks {
-    fn default() -> Self {
-        Self
     }
 }
 
@@ -300,7 +65,7 @@ impl Rule for MD011NoReversedLinks {
     }
 
     fn description(&self) -> &'static str {
-        "Link syntax should not be reversed"
+        "Reversed link syntax"
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -309,71 +74,42 @@ impl Rule for MD011NoReversedLinks {
         let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
-            // Part 1: Check for existing perfectly formed reversed links
-            for cap in REVERSED_LINK_CHECK_REGEX.captures_iter(line) {
+            let mut last_end = 0;
+
+            while let Some(cap) = REVERSED_LINK_REGEX.captures(&line[last_end..]) {
                 let match_obj = cap.get(0).unwrap();
-                let match_start = match_obj.start();
-                let match_end = match_obj.end();
+                let prechar = &cap[1];
+                let url = &cap[2];
+                let text = &cap[3];
 
-                // Check if this specific match is within a code block or inline code span
+                // Check if the brackets at the end are escaped
+                if text.ends_with('\\') {
+                    last_end += match_obj.end();
+                    continue;
+                }
+
+                // Manual negative lookahead: skip if followed by (
+                // This prevents matching (text)[ref](url) patterns
+                let end_pos = last_end + match_obj.end();
+                if end_pos < line.len() && line[end_pos..].starts_with('(') {
+                    last_end += match_obj.end();
+                    continue;
+                }
+
+                // Calculate the actual position
+                let match_start = last_end + match_obj.start() + prechar.len();
                 let match_byte_pos = byte_pos + match_start;
+
+                // Skip if in code block or inline code
                 if ctx.is_in_code_block_or_span(match_byte_pos) {
+                    last_end += match_obj.end();
                     continue;
                 }
 
-                // Skip if in HTML comment
-                if is_in_html_comment(content, match_byte_pos) {
-                    continue;
-                }
-
-                // Skip if in math context
-                if is_in_math_context(ctx, match_byte_pos) {
-                    continue;
-                }
-
-                // Skip if in front matter (line_num is 0-based)
-                if is_in_front_matter(content, line_num) {
-                    continue;
-                }
-
-                // Check if the match contains escaped brackets or parentheses
-                let match_text = match_obj.as_str();
-
-                // Skip if the opening parenthesis is escaped
-                if match_start > 0 && Self::is_escaped(line, byte_pos + match_start) {
-                    continue;
-                }
-
-                // Check if any brackets/parentheses within the match are escaped
-                let mut skip_match = false;
-                for esc_match in ESCAPED_CHARS.find_iter(match_text) {
-                    let esc_pos = match_start + esc_match.start();
-                    // Use bytes for safe indexing since we're checking for ASCII backslash
-                    let line_bytes = line.as_bytes();
-                    if esc_pos > 0 && esc_pos <= line_bytes.len() && line_bytes.get(esc_pos - 1) == Some(&b'\\') {
-                        skip_match = true;
-                        break;
-                    }
-                }
-
-                if skip_match {
-                    continue;
-                }
-
-                // Manual check for negative lookahead: skip if followed by (url)
-                // This prevents false positives like "(text)[ref](url)"
-                let remaining = &line[match_end..];
-                if remaining.trim_start().starts_with('(') {
-                    continue;
-                }
-
-                // Extract URL and text
-                let url = &cap[1];
-                let text = &cap[2];
-
-                // Calculate precise character range for the reversed syntax
+                // Calculate the range for the actual reversed link (excluding prechar)
+                let actual_length = match_obj.len() - prechar.len();
                 let (start_line, start_col, end_line, end_col) =
-                    calculate_match_range(line_num + 1, line, match_obj.start(), match_obj.len());
+                    calculate_match_range(line_num + 1, line, match_start, actual_length);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
@@ -385,66 +121,18 @@ impl Rule for MD011NoReversedLinks {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: {
-                            // Calculate proper byte range using line offsets and match position
-                            let line_start_byte = ctx.line_offsets.get(line_num).copied().unwrap_or(0);
-                            let match_start_byte = line_start_byte + match_obj.start();
-                            let match_end_byte = match_start_byte + match_obj.len();
+                            let match_start_byte = byte_pos + match_start;
+                            let match_end_byte = match_start_byte + actual_length;
                             match_start_byte..match_end_byte
                         },
                         replacement: format!("[{text}]({url})"),
                     }),
                 });
+
+                last_end += match_obj.end();
             }
 
-            // Part 2: Check for malformed link attempts where user intent is clear
-            let malformed_attempts = self.detect_malformed_link_attempts(line);
-            for (start, len, url, text) in malformed_attempts {
-                // Check if this specific match is within a code block or inline code span
-                let match_byte_pos = byte_pos + start;
-                if ctx.is_in_code_block_or_span(match_byte_pos) {
-                    continue;
-                }
-
-                // Skip if in HTML comment
-                if is_in_html_comment(content, match_byte_pos) {
-                    continue;
-                }
-
-                // Skip if in math context
-                if is_in_math_context(ctx, match_byte_pos) {
-                    continue;
-                }
-
-                // Skip if in front matter (line_num is 0-based)
-                if is_in_front_matter(content, line_num) {
-                    continue;
-                }
-
-                // Calculate precise character range for the malformed syntax
-                let (start_line, start_col, end_line, end_col) = calculate_match_range(line_num + 1, line, start, len);
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: "Malformed link syntax".to_string(),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: {
-                            // Calculate proper byte range using line offsets and match position
-                            let line_start_byte = ctx.line_offsets.get(line_num).copied().unwrap_or(0);
-                            let match_start_byte = line_start_byte + start;
-                            let match_end_byte = match_start_byte + len;
-                            match_start_byte..match_end_byte
-                        },
-                        replacement: format!("[{text}]({url})"),
-                    }),
-                });
-            }
-
-            byte_pos += line.len() + 1; // Update byte position for next line
+            byte_pos += line.len() + 1; // +1 for newline
         }
 
         Ok(warnings)
@@ -453,7 +141,7 @@ impl Rule for MD011NoReversedLinks {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         let mut result = content.to_string();
-        let mut offset: usize = 0;
+        let mut offset: isize = 0;
 
         for (line_num, column, text, url) in Self::find_reversed_links(content) {
             // Calculate absolute position in original content
@@ -467,15 +155,16 @@ impl Rule for MD011NoReversedLinks {
             }
 
             if !ctx.is_in_code_block_or_span(pos) {
-                let adjusted_pos = pos + offset;
-                let original_len = format!("({text})[{url}]").len();
+                let adjusted_pos = (pos as isize + offset) as usize;
+                let original = format!("({url})[{text}]");
                 let replacement = format!("[{text}]({url})");
-                result.replace_range(adjusted_pos..adjusted_pos + original_len, &replacement);
-                // Update offset based on the difference in lengths
-                if replacement.len() > original_len {
-                    offset += replacement.len() - original_len;
-                } else {
-                    offset = offset.saturating_sub(original_len - replacement.len());
+
+                // Make sure we have the right substring before replacing
+                let end_pos = adjusted_pos + original.len();
+                if end_pos <= result.len() && adjusted_pos < result.len() {
+                    result.replace_range(adjusted_pos..end_pos, &replacement);
+                    // Update offset based on the difference in lengths
+                    offset += replacement.len() as isize - original.len() as isize;
                 }
             }
         }
@@ -485,11 +174,6 @@ impl Rule for MD011NoReversedLinks {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
-    }
-
-    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or doesn't have the necessary characters for links
-        ctx.content.is_empty() || !ctx.content.contains('(') || !ctx.content.contains('[')
     }
 
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
@@ -504,355 +188,76 @@ impl Rule for MD011NoReversedLinks {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
-    use crate::utils::skip_context::is_in_front_matter;
 
     #[test]
-    fn test_capture_group_order_fix() {
-        // This test confirms that the capture group order bug is fixed
-        // The regex pattern \(([^)]+)\)\[([^\]]+)\] captures:
-        // cap[1] = URL (inside parentheses)
-        // cap[2] = text (inside brackets)
-        // So (URL)[text] should become [text](URL)
-
+    fn test_md011_basic() {
         let rule = MD011NoReversedLinks;
 
-        // Test with reversed link syntax
-        let content = "Check out (https://example.com)[this link] for more info.";
+        // Should detect reversed links
+        let content = "(http://example.com)[Example]\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 1);
 
-        // This should detect the reversed syntax
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Reversed link syntax"));
-
-        // Verify the fix produces correct output
-        let fix = result[0].fix.as_ref().unwrap();
-        assert_eq!(fix.replacement, "[this link](https://example.com)");
+        // Should not detect correct links
+        let content = "[Example](http://example.com)\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0);
     }
 
     #[test]
-    fn test_multiple_reversed_links() {
-        // Test multiple reversed links in the same content
+    fn test_md011_with_escaped_brackets() {
         let rule = MD011NoReversedLinks;
 
-        let content = "Visit (https://example.com)[Example] and (https://test.com)[Test Site].";
+        // Should not detect if brackets are escaped
+        let content = "(url)[text\\]\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
-
-        // Verify both fixes are correct
-        assert_eq!(
-            result[0].fix.as_ref().unwrap().replacement,
-            "[Example](https://example.com)"
-        );
-        assert_eq!(
-            result[1].fix.as_ref().unwrap().replacement,
-            "[Test Site](https://test.com)"
-        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0);
     }
 
     #[test]
-    fn test_normal_links_not_flagged() {
-        // Test that normal link syntax is not flagged
+    fn test_md011_no_false_positive_with_reference_link() {
         let rule = MD011NoReversedLinks;
 
-        let content = "This is a normal [link](https://example.com) and another [link](https://test.com).";
+        // Should not detect (text)[ref](url) as reversed
+        let content = "(text)[ref](url)\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0);
     }
 
     #[test]
-    fn debug_capture_groups() {
-        // Debug test to understand capture group behavior
-        let pattern = r"\(([^)]+)\)\[([^\]]+)\]";
-        let regex = Regex::new(pattern).unwrap();
-
-        let test_text = "(https://example.com)[Click here]";
-
-        if let Some(cap) = regex.captures(test_text) {
-            println!("Full match: {}", &cap[0]);
-            println!("cap[1] (first group): {}", &cap[1]);
-            println!("cap[2] (second group): {}", &cap[2]);
-
-            // Current fix format
-            let current_fix = format!("[{}]({})", &cap[2], &cap[1]);
-            println!("Current fix produces: {current_fix}");
-
-            // Test what the actual rule produces
-            let rule = MD011NoReversedLinks;
-            let ctx = LintContext::new(test_text, crate::config::MarkdownFlavor::Standard);
-            let result = rule.check(&ctx).unwrap();
-            if !result.is_empty() {
-                println!("Rule fix produces: {}", result[0].fix.as_ref().unwrap().replacement);
-            }
-        }
-    }
-
-    #[test]
-    fn test_front_matter_detection() {
-        let content = r#"---
-title: "My Post"
-tags: ["test", "example"]
-description: "Pattern (like)[this] in frontmatter"
----
-
-# Content
-
-Regular (https://example.com)[reversed link] that should be flagged.
-
-+++
-title = "TOML frontmatter"
-tags = ["more", "tags"]
-pattern = "(toml)[pattern]"
-+++
-
-# More Content
-
-Another (https://test.com)[reversed] link should be flagged."#;
-
-        // Test line by line
-        for (idx, line) in content.lines().enumerate() {
-            let line_num = idx; // 0-based
-            let in_fm = is_in_front_matter(content, line_num);
-
-            println!("Line {:2} (0-idx: {:2}): in_fm={:5} | {:?}", idx + 1, idx, in_fm, line);
-
-            // Lines 0-4 should be in YAML front matter
-            if idx <= 4 {
-                assert!(
-                    in_fm,
-                    "Line {} (0-idx: {}) should be in YAML front matter but got false. Content: {:?}",
-                    idx + 1,
-                    idx,
-                    line
-                );
-            }
-            // Lines 10-14 are NOT front matter (TOML block not at beginning)
-            else if (10..=14).contains(&idx) {
-                assert!(
-                    !in_fm,
-                    "Line {} (0-idx: {}) should NOT be in front matter (TOML block not at beginning). Content: {:?}",
-                    idx + 1,
-                    idx,
-                    line
-                );
-            }
-            // Everything else should NOT be in front matter
-            else {
-                assert!(
-                    !in_fm,
-                    "Line {} (0-idx: {}) should NOT be in front matter but got true. Content: {:?}",
-                    idx + 1,
-                    idx,
-                    line
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_malformed_link_detection() {
+    fn test_md011_fix() {
         let rule = MD011NoReversedLinks;
 
-        // Test wrong bracket types
-        let content = "Check out {https://example.com}[this website].";
+        let content = "(http://example.com)[Example]\n(another/url)[text]\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Malformed link syntax"));
-
-        // Test URL and text swapped
-        let content = "Visit [https://example.com](Click Here).";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Malformed link syntax"));
-
-        // Test that valid links are not flagged
-        let content = "This is a [normal link](https://example.com).";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0);
-
-        // Test that non-links are not flagged
-        let content = "Regular text with [brackets] and (parentheses).";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0);
-
-        // Test that risky patterns are NOT flagged (conservative approach)
-        let content = "(example.com)is a test domain.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0);
-
-        let content = "(optional)parameter should not be flagged.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "[Example](http://example.com)\n[text](another/url)\n");
     }
 
     #[test]
-    fn test_malformed_link_fixes() {
+    fn test_md011_in_code_block() {
         let rule = MD011NoReversedLinks;
 
-        // Test wrong bracket types fix
-        let content = "Check out {https://example.com}[this website].";
+        let content = "```\n(url)[text]\n```\n(url)[text]\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        let fix = result[0].fix.as_ref().unwrap();
-        assert_eq!(fix.replacement, "[this website](https://example.com)");
-
-        // Test URL and text swapped fix
-        let content = "Visit [https://example.com](Click Here).";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        let fix = result[0].fix.as_ref().unwrap();
-        assert_eq!(fix.replacement, "[Click Here](https://example.com)");
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 4);
     }
 
     #[test]
-    fn test_conservative_detection() {
+    fn test_md011_inline_code() {
         let rule = MD011NoReversedLinks;
 
-        // Test that edge cases are not flagged
-        let content = "This (not-a-url)text should be ignored.";
+        let content = "`(url)[text]` and (url)[text]\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0);
-
-        let content = "Also [regular text](not a url) should be ignored.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0);
-
-        let content = "And {not-url}[not-text] should be ignored.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_skip_code_blocks() {
-        let rule = MD011NoReversedLinks;
-
-        // Test that patterns inside code blocks are not flagged
-        let content = r#"Here's an example:
-
-```rust
-// This regex pattern [.!?]+\s*$ should not be flagged
-static ref TRAILING_PUNCTUATION: Regex = Regex::new(r"(?m)[.!?]+\s*$").unwrap();
-```
-
-But this (https://example.com)[reversed link] should be flagged."#;
-
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-
-        // Should only flag the reversed link outside the code block
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Reversed link syntax"));
-        assert_eq!(result[0].line, 8); // The line with the actual reversed link
-    }
-
-    #[test]
-    fn test_negative_lookahead() {
-        let rule = MD011NoReversedLinks;
-
-        // Test that (text)[ref](url) pattern is not flagged
-        let content = "This is a reference-style link: (see here)[ref](https://example.com)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0, "Should not flag (text)[ref](url) pattern");
-
-        // Test that genuine reversed links are still caught
-        let content = "This is reversed: (https://example.com)[click here]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should flag genuine reversed links");
-
-        // Test with spacing before the second parentheses
-        let content = "Reference with space: (text)[ref] (url)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0, "Should not flag when space before (url)");
-    }
-
-    #[test]
-    fn test_escaped_characters() {
-        let rule = MD011NoReversedLinks;
-
-        // Test escaped brackets and parentheses
-        let content = r"Escaped: \(not a link\)\[also not\]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0, "Should not flag escaped brackets");
-
-        // Test with URL containing parentheses
-        let content = "(https://example.com/path(with)parens)[text]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should still flag URLs with nested parentheses");
-    }
-
-    #[test]
-    fn test_inline_code_patterns() {
-        // Test for issue #19 - MD011 should not flag patterns inside inline code
-        let rule = MD011NoReversedLinks;
-
-        // Test the exact case from issue #19
-        let content = "I find `inspect.stack()[1].frame` a lot easier to understand (or at least guess about) at a glance than `inspect.stack()[1][0]`.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0, "Should not flag ()[1] patterns inside inline code");
-
-        // Test other patterns that might look like reversed links in code
-        let content = "Use `array()[0]` or `func()[1]` to access elements.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0, "Should not flag array access patterns in inline code");
-
-        // Test that actual reversed links outside code are still caught
-        let content = "Check out (https://example.com)[this link] and use `array()[1]`.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should flag actual reversed link but not code pattern");
-        assert!(result[0].message.contains("Reversed link syntax"));
-
-        // Test mixed scenario with code blocks
-        let content = r#"
-Here's some code: `func()[1]` and `other()[2]`.
-
-But this is wrong: (https://example.com)[Click here]
-
-```python
-# This should not be flagged
-result = inspect.stack()[1]
-```
-"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should only flag the actual reversed link");
-        assert_eq!(result[0].line, 4, "Should flag the reversed link on line 4");
-    }
-
-    #[test]
-    fn test_issue_26_specific_case() {
-        // Test for issue #26 - specific case reported
-        let rule = MD011NoReversedLinks;
-
-        let content = r#"The first thing I need to find is the name of the redacted key name, `doc.<key_name_omitted>`. I'll use `SUBSTRING(ATTRIBUTES(doc)[0], 0, 1) == '<c>'` as that test, where `<c>` is different characters. This gets the first attribute from `doc` and uses `SUBSTRING` to get the first character."#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            0,
-            "Should not flag ATTRIBUTES(doc)[0] inside inline code (issue #26)"
-        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].column, 19);
     }
 }

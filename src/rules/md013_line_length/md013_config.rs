@@ -9,15 +9,15 @@ pub struct MD013Config {
     #[serde(default = "default_line_length")]
     pub line_length: usize,
 
-    /// Exempt code blocks from line length check (default: true)
+    /// Check code blocks for line length (default: true)
     #[serde(default = "default_code_blocks")]
     pub code_blocks: bool,
 
-    /// Exempt tables from line length check (default: true)
+    /// Check tables for line length (default: true)
     #[serde(default = "default_tables")]
     pub tables: bool,
 
-    /// Exempt headings from line length check (default: true)
+    /// Check headings for line length (default: true)
     #[serde(default = "default_headings")]
     pub headings: bool,
 
