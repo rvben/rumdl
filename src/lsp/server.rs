@@ -186,15 +186,71 @@ impl RumdlLanguageServer {
         match crate::lint(text, &filtered_rules, false, flavor) {
             Ok(warnings) => {
                 let mut actions = Vec::new();
+                let mut fixable_count = 0;
 
-                for warning in warnings {
+                for warning in &warnings {
                     // Check if warning is within the requested range
                     let warning_line = (warning.line.saturating_sub(1)) as u32;
                     if warning_line >= range.start.line
                         && warning_line <= range.end.line
-                        && let Some(action) = warning_to_code_action(&warning, uri, text)
+                        && let Some(action) = warning_to_code_action(warning, uri, text)
                     {
                         actions.push(action);
+                        if warning.fix.is_some() {
+                            fixable_count += 1;
+                        }
+                    }
+                }
+
+                // Add "Fix all" action if there are multiple fixable issues in range
+                if fixable_count > 1 {
+                    // Count total fixable issues in the document
+                    let total_fixable = warnings.iter().filter(|w| w.fix.is_some()).count();
+
+                    if let Ok(fixed_content) = crate::utils::fix_utils::apply_warning_fixes(text, &warnings)
+                        && fixed_content != text
+                    {
+                        // Calculate proper end position
+                        let mut line = 0u32;
+                        let mut character = 0u32;
+                        for ch in text.chars() {
+                            if ch == '\n' {
+                                line += 1;
+                                character = 0;
+                            } else {
+                                character += 1;
+                            }
+                        }
+
+                        let fix_all_action = CodeAction {
+                            title: format!("Fix all rumdl issues ({total_fixable} fixable)"),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(Vec::new()),
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(
+                                    [(
+                                        uri.clone(),
+                                        vec![TextEdit {
+                                            range: Range {
+                                                start: Position { line: 0, character: 0 },
+                                                end: Position { line, character },
+                                            },
+                                            new_text: fixed_content,
+                                        }],
+                                    )]
+                                    .into_iter()
+                                    .collect(),
+                                ),
+                                ..Default::default()
+                            }),
+                            command: None,
+                            is_preferred: Some(true),
+                            disabled: None,
+                            data: None,
+                        };
+
+                        // Insert at the beginning to make it prominent
+                        actions.insert(0, fix_all_action);
                     }
                 }
 
