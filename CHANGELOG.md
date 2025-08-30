@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **LSP**: Added "Fix all rumdl issues" code action for bulk fixes when multiple fixable diagnostics are present
+
 ## [0.0.131] - 2025-08-28
 
 ### Fixed
