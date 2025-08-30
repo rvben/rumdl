@@ -126,11 +126,12 @@ fn test_md009_accepts_empty_blockquote_without_space() {
 fn test_md009_flags_multiple_trailing_spaces_in_blockquote() {
     let md009 = MD009TrailingSpaces::default();
 
-    // Empty blockquote lines with multiple trailing spaces should be flagged
+    // MD009 allows 1-2 trailing spaces (br_spaces default is 2) but flags more
     let test_cases = vec![
-        (">  \n", 1, "Two spaces after >"),
-        (">>   \n", 1, "Three spaces after >>"),
-        ("> Text  \n", 1, "Two spaces after text in blockquote"),
+        (">  \n", 0, "Two spaces after > (allowed as line break)"),
+        (">>   \n", 1, "Three spaces after >> (exceeds br_spaces)"),
+        ("> Text  \n", 0, "Two spaces after text (allowed as line break)"),
+        ("> Text   \n", 1, "Three spaces after text (exceeds br_spaces)"),
     ];
 
     for (content, expected_warnings, description) in test_cases {
@@ -268,11 +269,15 @@ fn test_blockquote_with_tabs() {
     let content = ">\t\n>  \t  \n> text\t";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
-    // MD009 should only flag trailing spaces, not tabs
+    // MD009 should handle tabs and spaces in blockquotes
     let md009_result = md009.check(&ctx).unwrap();
-    // Line 2 has "  \t  " - MD009 should flag the two trailing spaces before the tab
-    assert_eq!(md009_result.len(), 1, "MD009 should flag trailing spaces on line 2");
-    assert_eq!(md009_result[0].line, 2, "Should flag line 2 which has trailing spaces");
+    // Line 2 (">  \t  ") has 2 trailing spaces after the tab
+    // But MD009 allows empty blockquote lines with tabs/spaces per our fix for #66
+    assert_eq!(
+        md009_result.len(),
+        0,
+        "MD009 should not flag empty blockquote lines even with tabs/spaces"
+    );
 
     // MD028 shouldn't be triggered as these have content after >
     let md028_result = md028.check(&ctx).unwrap();

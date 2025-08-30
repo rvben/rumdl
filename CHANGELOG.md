@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **MD028/MD009**: Complete fix for rule conflict where MD028 and MD009 were "fighting each other" (fixes #66)
+  - MD028 now only flags truly blank lines inside blockquotes, not `>` or `> ` lines
+  - MD009 simplified to remove special cases for empty blockquote lines
+  - Both rules now correctly follow CommonMark specifications
+
 ## [0.0.132] - 2025-08-30
 
 ### Added
