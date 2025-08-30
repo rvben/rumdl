@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 
-/// Configuration for the rumdl LSP server
+/// Configuration for the rumdl LSP server (from initialization options)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RumdlLspConfig {
@@ -16,6 +16,11 @@ pub struct RumdlLspConfig {
     pub enable_linting: bool,
     /// Enable/disable auto-fixing on save
     pub enable_auto_fix: bool,
+    /// Rules to enable (overrides config file)
+    /// If specified, only these rules will be active
+    pub enable_rules: Option<Vec<String>>,
+    /// Rules to disable (overrides config file)
+    pub disable_rules: Option<Vec<String>>,
 }
 
 impl Default for RumdlLspConfig {
@@ -24,6 +29,8 @@ impl Default for RumdlLspConfig {
             config_path: None,
             enable_linting: true,
             enable_auto_fix: false,
+            enable_rules: None,
+            disable_rules: None,
         }
     }
 }
@@ -170,6 +177,8 @@ mod tests {
             config_path: Some("/path/to/config.toml".to_string()),
             enable_linting: false,
             enable_auto_fix: true,
+            enable_rules: None,
+            disable_rules: None,
         };
 
         // Test serialization

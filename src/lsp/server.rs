@@ -14,6 +14,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::config::Config;
 use crate::lsp::types::{RumdlLspConfig, warning_to_code_action, warning_to_diagnostic};
+use crate::rule::Rule;
 use crate::rules;
 
 /// Main LSP server for rumdl
@@ -44,6 +45,31 @@ impl RumdlLanguageServer {
         }
     }
 
+    /// Apply LSP config overrides to the filtered rules
+    fn apply_lsp_config_overrides(
+        &self,
+        mut filtered_rules: Vec<Box<dyn Rule>>,
+        lsp_config: &RumdlLspConfig,
+    ) -> Vec<Box<dyn Rule>> {
+        // Apply enable_rules override from LSP config (if specified, only these rules are active)
+        if let Some(enable) = &lsp_config.enable_rules
+            && !enable.is_empty()
+        {
+            let enable_set: std::collections::HashSet<String> = enable.iter().cloned().collect();
+            filtered_rules.retain(|rule| enable_set.contains(rule.name()));
+        }
+
+        // Apply disable_rules override from LSP config
+        if let Some(disable) = &lsp_config.disable_rules
+            && !disable.is_empty()
+        {
+            let disable_set: std::collections::HashSet<String> = disable.iter().cloned().collect();
+            filtered_rules.retain(|rule| !disable_set.contains(rule.name()));
+        }
+
+        filtered_rules
+    }
+
     /// Lint a document and return diagnostics
     async fn lint_document(&self, uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
         let config_guard = self.config.read().await;
@@ -53,6 +79,7 @@ impl RumdlLanguageServer {
             return Ok(Vec::new());
         }
 
+        let lsp_config = config_guard.clone();
         drop(config_guard); // Release config lock early
 
         // Get rumdl configuration
@@ -61,8 +88,11 @@ impl RumdlLanguageServer {
         let flavor = rumdl_config.markdown_flavor();
 
         // Use the standard filter_rules function which respects config's disabled rules
-        let filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
+        let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
         drop(rumdl_config); // Release config lock early
+
+        // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
+        filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
         // Run rumdl linting with the configured flavor
         match crate::lint(text, &filtered_rules, false, flavor) {
@@ -91,13 +121,20 @@ impl RumdlLanguageServer {
 
     /// Apply all available fixes to a document
     async fn apply_all_fixes(&self, _uri: &Url, text: &str) -> Result<Option<String>> {
+        let config_guard = self.config.read().await;
+        let lsp_config = config_guard.clone();
+        drop(config_guard);
+
         let rumdl_config = self.rumdl_config.read().await;
         let all_rules = rules::all_rules(&rumdl_config);
         let flavor = rumdl_config.markdown_flavor();
 
         // Use the standard filter_rules function which respects config's disabled rules
-        let filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
+        let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
         drop(rumdl_config);
+
+        // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
+        filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
         // Apply fixes sequentially for each rule
         let mut fixed_text = text.to_string();
@@ -131,13 +168,20 @@ impl RumdlLanguageServer {
 
     /// Get code actions for diagnostics at a position
     async fn get_code_actions(&self, uri: &Url, text: &str, range: Range) -> Result<Vec<CodeAction>> {
+        let config_guard = self.config.read().await;
+        let lsp_config = config_guard.clone();
+        drop(config_guard);
+
         let rumdl_config = self.rumdl_config.read().await;
         let all_rules = rules::all_rules(&rumdl_config);
         let flavor = rumdl_config.markdown_flavor();
 
         // Use the standard filter_rules function which respects config's disabled rules
-        let filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
+        let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
         drop(rumdl_config);
+
+        // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
+        filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
         match crate::lint(text, &filtered_rules, false, flavor) {
             Ok(warnings) => {

@@ -33,6 +33,8 @@ fn test_rumdl_lsp_config_serde() {
         config_path: Some("/path/to/config.toml".to_string()),
         enable_linting: true,
         enable_auto_fix: false,
+        enable_rules: None,
+        disable_rules: None,
     };
 
     // Test serialization
@@ -209,6 +211,8 @@ async fn test_lsp_server_initialization_with_config() {
         config_path: Some("/custom/path/.rumdl.toml".to_string()),
         enable_linting: true,
         enable_auto_fix: true,
+        enable_rules: None,
+        disable_rules: None,
     };
 
     let init_params = InitializeParams {

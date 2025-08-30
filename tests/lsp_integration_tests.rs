@@ -92,6 +92,8 @@ async fn test_configuration_handling() {
         config_path: Some("/custom/path/.rumdl.toml".to_string()),
         enable_linting: true,
         enable_auto_fix: true,
+        enable_rules: None,
+        disable_rules: None,
     };
 
     // Test serialization/deserialization

@@ -274,6 +274,8 @@ async fn test_formatting_respects_config_disabled_rules() {
         config_path: None,
         enable_linting: true,
         enable_auto_fix: true,
+        enable_rules: None,
+        disable_rules: None,
     };
 
     let init_params = InitializeParams {
