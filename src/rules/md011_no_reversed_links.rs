@@ -3,7 +3,7 @@
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
-use crate::utils::skip_context::{is_in_front_matter, is_in_html_comment, is_in_math_context};
+use crate::utils::skip_context::{is_in_html_comment, is_in_math_context};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -75,8 +75,8 @@ impl Rule for MD011NoReversedLinks {
         let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
-            // Skip if in front matter
-            if is_in_front_matter(content, line_num) {
+            // Skip lines that are in front matter (use pre-computed info from LintContext)
+            if ctx.line_info(line_num).is_some_and(|info| info.in_front_matter) {
                 byte_pos += line.len() + 1; // +1 for newline
                 continue;
             }
@@ -154,8 +154,8 @@ impl Rule for MD011NoReversedLinks {
         let mut offset: isize = 0;
 
         for (line_num, column, text, url) in Self::find_reversed_links(content) {
-            // Skip if in front matter
-            if is_in_front_matter(content, line_num - 1) {
+            // Skip if in front matter (line_num is 1-based from find_reversed_links)
+            if line_num > 0 && ctx.line_info(line_num - 1).is_some_and(|info| info.in_front_matter) {
                 continue;
             }
 
