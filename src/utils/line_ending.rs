@@ -42,14 +42,24 @@ pub fn normalize_line_ending(content: &str, target: LineEnding) -> String {
 pub fn ensure_consistent_line_endings(original: &str, modified: &str) -> String {
     let original_ending = detect_line_ending_enum(original);
 
-    if original_ending == LineEnding::Mixed {
-        return modified.to_string();
-    }
+    // For mixed line endings, normalize to the most common one (like detect_line_ending does)
+    let target_ending = if original_ending == LineEnding::Mixed {
+        // Use the same logic as detect_line_ending: prefer the more common one
+        let crlf_count = original.matches("\r\n").count();
+        let lf_count = original.matches('\n').count() - crlf_count;
+        if crlf_count > lf_count {
+            LineEnding::Crlf
+        } else {
+            LineEnding::Lf
+        }
+    } else {
+        original_ending
+    };
 
     let modified_ending = detect_line_ending_enum(modified);
 
-    if original_ending != modified_ending {
-        normalize_line_ending(modified, original_ending)
+    if target_ending != modified_ending {
+        normalize_line_ending(modified, target_ending)
     } else {
         modified.to_string()
     }

@@ -3,6 +3,7 @@
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
+use crate::utils::skip_context::{is_in_front_matter, is_in_html_comment, is_in_math_context};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -74,6 +75,12 @@ impl Rule for MD011NoReversedLinks {
         let mut byte_pos = 0;
 
         for (line_num, line) in content.lines().enumerate() {
+            // Skip if in front matter
+            if is_in_front_matter(content, line_num) {
+                byte_pos += line.len() + 1; // +1 for newline
+                continue;
+            }
+
             let mut last_end = 0;
 
             while let Some(cap) = REVERSED_LINK_REGEX.captures(&line[last_end..]) {
@@ -100,8 +107,11 @@ impl Rule for MD011NoReversedLinks {
                 let match_start = last_end + match_obj.start() + prechar.len();
                 let match_byte_pos = byte_pos + match_start;
 
-                // Skip if in code block or inline code
-                if ctx.is_in_code_block_or_span(match_byte_pos) {
+                // Skip if in code block, inline code, HTML comments, or math contexts
+                if ctx.is_in_code_block_or_span(match_byte_pos)
+                    || is_in_html_comment(content, match_byte_pos)
+                    || is_in_math_context(ctx, match_byte_pos)
+                {
                     last_end += match_obj.end();
                     continue;
                 }
@@ -144,6 +154,11 @@ impl Rule for MD011NoReversedLinks {
         let mut offset: isize = 0;
 
         for (line_num, column, text, url) in Self::find_reversed_links(content) {
+            // Skip if in front matter
+            if is_in_front_matter(content, line_num - 1) {
+                continue;
+            }
+
             // Calculate absolute position in original content
             let mut pos = 0;
             for (i, line) in content.lines().enumerate() {
@@ -154,7 +169,9 @@ impl Rule for MD011NoReversedLinks {
                 pos += line.len() + 1;
             }
 
-            if !ctx.is_in_code_block_or_span(pos) {
+            // Skip if in any skip context
+            if !ctx.is_in_code_block_or_span(pos) && !is_in_html_comment(content, pos) && !is_in_math_context(ctx, pos)
+            {
                 let adjusted_pos = (pos as isize + offset) as usize;
                 let original = format!("({url})[{text}]");
                 let replacement = format!("[{text}]({url})");

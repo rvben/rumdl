@@ -203,13 +203,11 @@ impl Rule for MD013LineLength {
         // Create a quick lookup set for heading lines
         let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
 
-        // Pre-compute table lines for efficiency instead of calling is_in_table for each line
-        // Always compute table lines so we know which lines are tables
+        // Pre-compute table lines using the same logic as is_in_table function
         let table_lines_set: std::collections::HashSet<usize> = {
             let mut table_lines = std::collections::HashSet::new();
-            let mut in_table = false;
 
-            for (i, line) in lines.iter().enumerate() {
+            for (i, _line) in lines.iter().enumerate() {
                 let line_number = i + 1;
 
                 // Quick check if in code block using pre-computed blocks from context or structure
@@ -221,12 +219,7 @@ impl Rule for MD013LineLength {
                     structure.is_in_code_block(line_number)
                 };
 
-                if !in_code && line.contains('|') {
-                    in_table = true;
-                    table_lines.insert(line_number);
-                } else if in_table && line.trim().is_empty() {
-                    in_table = false;
-                } else if in_table {
+                if !in_code && Self::is_in_table(&lines, i) {
                     table_lines.insert(line_number);
                 }
             }

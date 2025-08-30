@@ -1463,7 +1463,36 @@ impl SourcedConfig {
 
         // Only perform auto-discovery if not skipped AND no explicit config path provided
         if !skip_auto_discovery && config_path.is_none() {
-            // Use upward directory traversal to find config files
+            // Step 1: Load user configuration first (as a base)
+            if let Some(user_config_path) = Self::user_configuration_path() {
+                let path_str = user_config_path.display().to_string();
+                let filename = user_config_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+                log::debug!("[rumdl-config] Loading user configuration file: {path_str}");
+
+                if filename == "pyproject.toml" {
+                    let content = std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
+                        source: e,
+                        path: path_str.clone(),
+                    })?;
+                    if let Some(fragment) = parse_pyproject_toml(&content, &path_str)? {
+                        sourced_config.merge(fragment);
+                        sourced_config.loaded_files.push(path_str);
+                    }
+                } else {
+                    let content = std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
+                        source: e,
+                        path: path_str.clone(),
+                    })?;
+                    let fragment = parse_rumdl_toml(&content, &path_str)?;
+                    sourced_config.merge(fragment);
+                    sourced_config.loaded_files.push(path_str);
+                }
+            } else {
+                log::debug!("[rumdl-config] No user configuration file found");
+            }
+
+            // Step 2: Look for project configuration files (override user config)
             if let Some(config_file) = Self::discover_config_upward() {
                 let path_str = config_file.display().to_string();
                 let filename = config_file.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -1491,7 +1520,7 @@ impl SourcedConfig {
             } else {
                 log::debug!("[rumdl-config] No configuration file found via upward traversal");
 
-                // Fallback to markdownlint config in current directory only
+                // Step 3: If no project config found, fallback to markdownlint config in current directory
                 let mut found_markdownlint = false;
                 for filename in MARKDOWNLINT_CONFIG_FILES {
                     if std::path::Path::new(filename).exists() {
@@ -1509,37 +1538,8 @@ impl SourcedConfig {
                     }
                 }
 
-                // If no markdownlint config found, check for user configuration
                 if !found_markdownlint {
-                    if let Some(user_config_path) = Self::user_configuration_path() {
-                        let path_str = user_config_path.display().to_string();
-                        let filename = user_config_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                        log::debug!("[rumdl-config] Loading user configuration file: {path_str}");
-
-                        if filename == "pyproject.toml" {
-                            let content =
-                                std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
-                                    source: e,
-                                    path: path_str.clone(),
-                                })?;
-                            if let Some(fragment) = parse_pyproject_toml(&content, &path_str)? {
-                                sourced_config.merge(fragment);
-                                sourced_config.loaded_files.push(path_str);
-                            }
-                        } else {
-                            let content =
-                                std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
-                                    source: e,
-                                    path: path_str.clone(),
-                                })?;
-                            let fragment = parse_rumdl_toml(&content, &path_str)?;
-                            sourced_config.merge(fragment);
-                            sourced_config.loaded_files.push(path_str);
-                        }
-                    } else {
-                        log::debug!("[rumdl-config] No user configuration file found");
-                    }
+                    log::debug!("[rumdl-config] No markdownlint configuration file found");
                 }
             }
         }
@@ -1828,120 +1828,133 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
     let source = ConfigSource::PyprojectToml;
     let file = Some(path.to_string());
 
-    // 1. Handle [tool.rumdl] as before
+    // 1. Handle [tool.rumdl] and [tool.rumdl.global] sections
     if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl"))
         && let Some(rumdl_table) = rumdl_config.as_table()
     {
-        // --- Extract global options ---
-        if let Some(enable) = rumdl_table.get("enable")
-            && let Ok(values) = Vec::<String>::deserialize(enable.clone())
-        {
-            // Normalize rule names in the list
-            let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
-            fragment
-                .global
-                .enable
-                .push_override(normalized_values, source, file.clone(), None);
-        }
-        if let Some(disable) = rumdl_table.get("disable")
-            && let Ok(values) = Vec::<String>::deserialize(disable.clone())
-        {
-            // Re-enable normalization
-            let normalized_values: Vec<String> = values.into_iter().map(|s| normalize_key(&s)).collect();
-            fragment
-                .global
-                .disable
-                .push_override(normalized_values, source, file.clone(), None);
-        }
-        if let Some(include) = rumdl_table.get("include")
-            && let Ok(values) = Vec::<String>::deserialize(include.clone())
-        {
-            fragment
-                .global
-                .include
-                .push_override(values, source, file.clone(), None);
-        }
-        if let Some(exclude) = rumdl_table.get("exclude")
-            && let Ok(values) = Vec::<String>::deserialize(exclude.clone())
-        {
-            fragment
-                .global
-                .exclude
-                .push_override(values, source, file.clone(), None);
-        }
-        if let Some(respect_gitignore) = rumdl_table
-            .get("respect-gitignore")
-            .or_else(|| rumdl_table.get("respect_gitignore"))
-            && let Ok(value) = bool::deserialize(respect_gitignore.clone())
-        {
-            fragment
-                .global
-                .respect_gitignore
-                .push_override(value, source, file.clone(), None);
-        }
-        if let Some(output_format) = rumdl_table
-            .get("output-format")
-            .or_else(|| rumdl_table.get("output_format"))
-            && let Ok(value) = String::deserialize(output_format.clone())
-        {
-            if fragment.global.output_format.is_none() {
-                fragment.global.output_format = Some(SourcedValue::new(value.clone(), source));
-            } else {
+        // Helper function to extract global config from a table
+        let extract_global_config = |fragment: &mut SourcedConfigFragment, table: &toml::value::Table| {
+            // Extract global options from the given table
+            if let Some(enable) = table.get("enable")
+                && let Ok(values) = Vec::<String>::deserialize(enable.clone())
+            {
+                // Normalize rule names in the list
+                let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
                 fragment
                     .global
-                    .output_format
-                    .as_mut()
-                    .unwrap()
+                    .enable
+                    .push_override(normalized_values, source, file.clone(), None);
+            }
+
+            if let Some(disable) = table.get("disable")
+                && let Ok(values) = Vec::<String>::deserialize(disable.clone())
+            {
+                // Re-enable normalization
+                let normalized_values: Vec<String> = values.into_iter().map(|s| normalize_key(&s)).collect();
+                fragment
+                    .global
+                    .disable
+                    .push_override(normalized_values, source, file.clone(), None);
+            }
+
+            if let Some(include) = table.get("include")
+                && let Ok(values) = Vec::<String>::deserialize(include.clone())
+            {
+                fragment
+                    .global
+                    .include
+                    .push_override(values, source, file.clone(), None);
+            }
+
+            if let Some(exclude) = table.get("exclude")
+                && let Ok(values) = Vec::<String>::deserialize(exclude.clone())
+            {
+                fragment
+                    .global
+                    .exclude
+                    .push_override(values, source, file.clone(), None);
+            }
+
+            if let Some(respect_gitignore) = table
+                .get("respect-gitignore")
+                .or_else(|| table.get("respect_gitignore"))
+                && let Ok(value) = bool::deserialize(respect_gitignore.clone())
+            {
+                fragment
+                    .global
+                    .respect_gitignore
                     .push_override(value, source, file.clone(), None);
             }
-        }
-        if let Some(fixable) = rumdl_table.get("fixable")
-            && let Ok(values) = Vec::<String>::deserialize(fixable.clone())
-        {
-            let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
-            fragment
-                .global
-                .fixable
-                .push_override(normalized_values, source, file.clone(), None);
-        }
-        if let Some(unfixable) = rumdl_table.get("unfixable")
-            && let Ok(values) = Vec::<String>::deserialize(unfixable.clone())
-        {
-            let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
-            fragment
-                .global
-                .unfixable
-                .push_override(normalized_values, source, file.clone(), None);
-        }
-        if let Some(flavor) = rumdl_table.get("flavor")
-            && let Ok(value) = MarkdownFlavor::deserialize(flavor.clone())
-        {
-            fragment.global.flavor.push_override(value, source, file.clone(), None);
-        }
 
-        // --- Re-introduce special line-length handling ---
-        let mut found_line_length_val: Option<toml::Value> = None;
-        for key in ["line-length", "line_length"].iter() {
-            if let Some(val) = rumdl_table.get(*key) {
-                // Ensure the value is actually an integer before cloning
-                if val.is_integer() {
-                    found_line_length_val = Some(val.clone());
-                    break;
+            if let Some(output_format) = table.get("output-format").or_else(|| table.get("output_format"))
+                && let Ok(value) = String::deserialize(output_format.clone())
+            {
+                if fragment.global.output_format.is_none() {
+                    fragment.global.output_format = Some(SourcedValue::new(value.clone(), source));
                 } else {
-                    // Optional: Warn about wrong type for line-length?
+                    fragment
+                        .global
+                        .output_format
+                        .as_mut()
+                        .unwrap()
+                        .push_override(value, source, file.clone(), None);
                 }
             }
+
+            if let Some(fixable) = table.get("fixable")
+                && let Ok(values) = Vec::<String>::deserialize(fixable.clone())
+            {
+                let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+                fragment
+                    .global
+                    .fixable
+                    .push_override(normalized_values, source, file.clone(), None);
+            }
+
+            if let Some(unfixable) = table.get("unfixable")
+                && let Ok(values) = Vec::<String>::deserialize(unfixable.clone())
+            {
+                let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+                fragment
+                    .global
+                    .unfixable
+                    .push_override(normalized_values, source, file.clone(), None);
+            }
+
+            if let Some(flavor) = table.get("flavor")
+                && let Ok(value) = MarkdownFlavor::deserialize(flavor.clone())
+            {
+                fragment.global.flavor.push_override(value, source, file.clone(), None);
+            }
+
+            // Handle line-length special case - this should set the global line_length
+            if let Some(line_length) = table.get("line-length").or_else(|| table.get("line_length"))
+                && let Ok(value) = u64::deserialize(line_length.clone())
+            {
+                fragment
+                    .global
+                    .line_length
+                    .push_override(value, source, file.clone(), None);
+
+                // Also add to MD013 rule config for backward compatibility
+                let norm_md013_key = normalize_key("MD013");
+                let rule_entry = fragment.rules.entry(norm_md013_key).or_default();
+                let norm_line_length_key = normalize_key("line-length");
+                let sv = rule_entry
+                    .values
+                    .entry(norm_line_length_key)
+                    .or_insert_with(|| SourcedValue::new(line_length.clone(), ConfigSource::Default));
+                sv.push_override(line_length.clone(), source, file.clone(), None);
+            }
+        };
+
+        // First, check for [tool.rumdl.global] section
+        if let Some(global_table) = rumdl_table.get("global").and_then(|g| g.as_table()) {
+            extract_global_config(&mut fragment, global_table);
         }
-        if let Some(line_length_val) = found_line_length_val {
-            let norm_md013_key = normalize_key("MD013"); // Normalize to "md013"
-            let rule_entry = fragment.rules.entry(norm_md013_key).or_default();
-            let norm_line_length_key = normalize_key("line-length"); // Ensure "line-length"
-            let sv = rule_entry
-                .values
-                .entry(norm_line_length_key)
-                .or_insert_with(|| SourcedValue::new(line_length_val.clone(), ConfigSource::Default));
-            sv.push_override(line_length_val, source, file.clone(), None);
-        }
+
+        // Also extract global options from [tool.rumdl] directly (for flat structure)
+        extract_global_config(&mut fragment, rumdl_table);
 
         // --- Extract rule-specific configurations ---
         for (key, value) in rumdl_table {

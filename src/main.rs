@@ -2490,9 +2490,19 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     }
 
     // 1. Determine the directory for config discovery
-    // Always use current directory for discovery to ensure config files are found
+    // Use the first target path for config discovery if it's a directory
+    // Otherwise use current directory to ensure config files are found
     // when pre-commit or other tools pass relative file paths
-    let discovery_dir = None;
+    let discovery_dir = if !args.paths.is_empty() {
+        let first_path = std::path::Path::new(&args.paths[0]);
+        if first_path.is_dir() {
+            Some(first_path)
+        } else {
+            first_path.parent().filter(|&parent| parent.is_dir())
+        }
+    } else {
+        None
+    };
 
     // 2. Load sourced config (for provenance and validation)
     let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
