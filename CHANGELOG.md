@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.133] - 2025-08-30
+
 ### Fixed
 - **MD028/MD009**: Complete fix for rule conflict where MD028 and MD009 were "fighting each other" (fixes #66)
   - MD028 now only flags truly blank lines inside blockquotes, not `>` or `> ` lines
@@ -525,7 +527,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.132...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.133...HEAD
+[0.0.133]: https://github.com/rvben/rumdl/compare/v0.0.132...v0.0.133
 [0.0.132]: https://github.com/rvben/rumdl/compare/v0.0.131...v0.0.132
 [0.0.131]: https://github.com/rvben/rumdl/compare/v0.0.130...v0.0.131
 [0.0.130]: https://github.com/rvben/rumdl/compare/v0.0.129...v0.0.130
