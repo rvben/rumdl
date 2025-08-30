@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.132] - 2025-08-30
+
 ### Added
 - **LSP**: Added "Fix all rumdl issues" code action for bulk fixes when multiple fixable diagnostics are present
 
@@ -517,7 +519,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.131...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.132...HEAD
+[0.0.132]: https://github.com/rvben/rumdl/compare/v0.0.131...v0.0.132
 [0.0.131]: https://github.com/rvben/rumdl/compare/v0.0.130...v0.0.131
 [0.0.130]: https://github.com/rvben/rumdl/compare/v0.0.129...v0.0.130
 [0.0.129]: https://github.com/rvben/rumdl/compare/v0.0.128...v0.0.129
