@@ -36,7 +36,7 @@ This is a code block line that is very very very very very very very long and sh
 
 #[test]
 fn test_tables() {
-    let rule = MD013LineLength::new(50, false, false, true, false);
+    let rule = MD013LineLength::new(50, false, true, true, false);
     let content = "| This is a very long table cell that should be flagged |\n| This is another long cell |";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -121,14 +121,15 @@ fn test_setext_headings() {
     let content = "This is a very long setext heading\n==========================\nThis is another long heading.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
-    assert_eq!(result[0].line, 1);
-    assert_eq!(result[1].line, 3);
+    // With headings = false, setext headings (line 1) should be skipped
+    // Line 3 is regular text, should be flagged
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 3);
 }
 
 #[test]
 fn test_table_alignment() {
-    let rule = MD013LineLength::new(20, false, false, true, false);
+    let rule = MD013LineLength::new(20, false, true, true, false);
     let content = "| This is a long cell |\n| Another long cell |\n| Yet another long cell |";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -194,7 +195,7 @@ fn test_parity_code_blocks_checked() {
 
 #[test]
 fn test_parity_headings_skipped() {
-    let rule = MD013LineLength::new(80, true, true, true, false);
+    let rule = MD013LineLength::new(80, true, true, false, false);
     let content = "# This is a very long heading that should not be flagged by MD013 even if it is over the limit";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -443,9 +444,9 @@ fn test_heading_line_length_config() {
     // Create a config with standard settings (no longer supporting separate heading limits)
     let config = MD013Config {
         line_length: 50,
-        code_blocks: false, // Don't check code blocks
-        tables: false,      // Don't check tables
-        headings: true,     // Skip headings
+        code_blocks: false, // false = skip code blocks
+        tables: false,      // false = skip tables
+        headings: false,    // false = skip headings (don't check them)
         strict: false,
         reflow: false,
     };
@@ -467,9 +468,9 @@ fn test_code_block_line_length_config() {
     // Create a config with standard settings (no longer supporting separate code block limits)
     let config = MD013Config {
         line_length: 50,
-        code_blocks: true, // Skip code blocks
-        tables: false,     // Don't skip tables
-        headings: false,   // Don't skip headings
+        code_blocks: false, // false = skip code blocks (don't check them)
+        tables: true,       // true = check tables
+        headings: true,     // true = check headings
         strict: false,
         reflow: false,
     };
@@ -514,9 +515,9 @@ fn test_combined_heading_and_code_block_limits() {
     // Simplified configuration - using single line length for all content
     let config = MD013Config {
         line_length: 40,
-        code_blocks: true, // Skip code blocks
-        tables: false,     // Don't skip tables
-        headings: true,    // Skip headings
+        code_blocks: false, // false = skip code blocks
+        tables: true,       // true = check tables
+        headings: false,    // false = skip headings
         strict: false,
         reflow: false,
     };
