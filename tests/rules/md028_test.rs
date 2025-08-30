@@ -12,9 +12,20 @@ fn test_md028_valid() {
 }
 
 #[test]
-fn test_md028_invalid() {
+fn test_md028_lines_with_marker_are_valid() {
     let rule = MD028NoBlanksBlockquote;
+    // Lines with just > should NOT be flagged
     let content = "> Quote\n> Another line\n>\n> Still same quote\n> Another line\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Lines with > marker should not be flagged");
+}
+
+#[test]
+fn test_md028_invalid_blank_line() {
+    let rule = MD028NoBlanksBlockquote;
+    // Truly blank line (no >) should be flagged
+    let content = "> Quote\n> Another line\n\n> Still same quote\n> Another line\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -24,7 +35,8 @@ fn test_md028_invalid() {
 #[test]
 fn test_md028_multiple_blanks() {
     let rule = MD028NoBlanksBlockquote;
-    let content = "> Quote\n> Another line\n>\n>\n> Still same quote\n";
+    // Multiple truly blank lines
+    let content = "> Quote\n> Another line\n\n\n> Still same quote\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
@@ -35,19 +47,31 @@ fn test_md028_multiple_blanks() {
 #[test]
 fn test_md028_fix() {
     let rule = MD028NoBlanksBlockquote;
-    let content = "> Quote\n> Another line\n>\n> Still same quote\n> Another line\n";
+    // Fix truly blank line
+    let content = "> Quote\n> Another line\n\n> Still same quote\n> Another line\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result,
-        "> Quote\n> Another line\n> \n> Still same quote\n> Another line\n"
+        "> Quote\n> Another line\n>\n> Still same quote\n> Another line\n"
     );
 }
 
 #[test]
-fn test_md028_nested_blockquotes() {
+fn test_md028_nested_blockquotes_with_marker() {
     let rule = MD028NoBlanksBlockquote;
+    // Lines with >> should NOT be flagged
     let content = "> Outer quote\n>> Nested quote\n>>\n>> Still nested\n> Back to outer\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Lines with >> marker should not be flagged");
+}
+
+#[test]
+fn test_md028_nested_blockquotes_blank() {
+    let rule = MD028NoBlanksBlockquote;
+    // Truly blank line in nested blockquote
+    let content = "> Outer quote\n>> Nested quote\n\n>> Still nested\n> Back to outer\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -58,14 +82,15 @@ fn test_md028_nested_blockquotes() {
     assert!(fixed_result.is_empty());
     assert_eq!(
         fixed,
-        "> Outer quote\n>> Nested quote\n>> \n>> Still nested\n> Back to outer\n"
+        "> Outer quote\n>> Nested quote\n>>\n>> Still nested\n> Back to outer\n"
     );
 }
 
 #[test]
 fn test_md028_indented_blockquotes() {
     let rule = MD028NoBlanksBlockquote;
-    let content = "  > Indented quote\n  > Another line\n  >\n  > Still same quote\n";
+    // Truly blank line in indented blockquote
+    let content = "  > Indented quote\n  > Another line\n\n  > Still same quote\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -76,14 +101,15 @@ fn test_md028_indented_blockquotes() {
     assert!(fixed_result.is_empty());
     assert_eq!(
         fixed,
-        "  > Indented quote\n  > Another line\n  > \n  > Still same quote\n"
+        "  > Indented quote\n  > Another line\n  >\n  > Still same quote\n"
     );
 }
 
 #[test]
 fn test_md028_multi_blockquotes() {
     let rule = MD028NoBlanksBlockquote;
-    let content = "> First quote\n> Another line\n\n> Second quote\n> Another line\n>\n> Still second quote\n";
+    // Truly blank line in second blockquote
+    let content = "> First quote\n> Another line\n\n> Second quote\n> Another line\n\n> Still second quote\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
@@ -94,6 +120,6 @@ fn test_md028_multi_blockquotes() {
     assert!(fixed_result.is_empty());
     assert_eq!(
         fixed,
-        "> First quote\n> Another line\n\n> Second quote\n> Another line\n> \n> Still second quote\n"
+        "> First quote\n> Another line\n\n> Second quote\n> Another line\n>\n> Still second quote\n"
     );
 }

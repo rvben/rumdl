@@ -91,10 +91,12 @@ mod heading_edge_cases_test;
 mod inline_content_edge_cases_test;
 mod link_edge_cases_test;
 mod list_rules_integration_test;
+mod md028_md009_interaction_test;
 mod mkdocs_admonitions_test;
 mod mkdocs_edge_cases_test;
 mod mkdocs_extensions_test;
 mod mkdocs_snippets_test;
+mod rule_interaction_test;
 
 // Test cases for MD003 - Heading Style
 #[test]

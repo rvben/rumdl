@@ -83,17 +83,6 @@ impl Rule for MD009TrailingSpaces {
                         continue;
                     }
 
-                    // Check if this is an empty blockquote line (like "> " or ">> ")
-                    // These are allowed to have a single trailing space by MD028
-                    let trimmed_line = line.trim_end();
-                    if trimmed_line.chars().all(|c| c == '>' || c == ' ' || c == '\t')
-                        && trimmed_line.contains('>')
-                        && trailing_spaces == 1
-                    {
-                        // This is an empty blockquote line with single trailing space - allowed
-                        continue;
-                    }
-
                     // Calculate precise character range for all trailing spaces on empty line
                     let (start_line, start_col, end_line, end_col) = calculate_trailing_range(line_num + 1, line, 0);
 
