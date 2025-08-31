@@ -1601,3 +1601,197 @@ Links to test:
         result.iter().map(|r| &r.message).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_html_anchor_tags() {
+    // Test HTML anchor tags with id attribute
+    let content = r#"# Regular Heading
+
+## Heading with anchor<a id="custom-id"></a>
+
+## Another heading<a name="old-style"></a>
+
+Links to test:
+- [Regular heading](#regular-heading) - should work
+- [Custom ID](#custom-id) - should work
+- [Old style name](#old-style) - should work
+- [Missing anchor](#missing) - should fail
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only have 1 error for #missing
+    assert_eq!(result.len(), 1, "Should only flag missing anchor");
+    assert!(result[0].message.contains("#missing"));
+}
+
+#[test]
+fn test_html_span_div_anchors() {
+    // Test various HTML elements with id attributes
+    let content = r#"# Document Title
+
+## Section with span <span id="span-anchor">text</span>
+
+<div id="div-anchor">
+Some content in a div
+</div>
+
+<section id="section-anchor">
+A section element
+</section>
+
+<h3 id="h3-anchor">HTML heading</h3>
+
+Links to test:
+- [Span anchor](#span-anchor) - should work
+- [Div anchor](#div-anchor) - should work
+- [Section anchor](#section-anchor) - should work
+- [H3 anchor](#h3-anchor) - should work
+- [Non-existent](#does-not-exist) - should fail
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only have 1 error for #does-not-exist
+    assert_eq!(result.len(), 1, "Should only flag non-existent anchor");
+    assert!(result[0].message.contains("#does-not-exist"));
+}
+
+#[test]
+fn test_html_anchors_in_code_blocks() {
+    // HTML anchors in code blocks should be ignored
+    let content = r#"# Test Document
+
+```html
+<a id="code-anchor">This is in a code block</a>
+```
+
+Links to test:
+- [Code anchor](#code-anchor) - should fail (anchor is in code block)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have 1 error - anchors in code blocks don't count
+    assert_eq!(result.len(), 1, "Anchors in code blocks should be ignored");
+}
+
+#[test]
+fn test_multiple_ids_on_same_element() {
+    // Test edge case: multiple id attributes (only first should be used per HTML spec)
+    let content = r#"# Test Document
+
+<div id="first-id" id="second-id">Content</div>
+
+Links to test:
+- [First ID](#first-id) - should work
+- [Second ID](#second-id) - should fail (HTML only uses first id)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have 1 error for second-id
+    assert_eq!(result.len(), 1, "Only first id attribute should be recognized");
+    assert!(result[0].message.contains("#second-id"));
+}
+
+#[test]
+fn test_mixed_markdown_and_html_anchors() {
+    // Test document with both Markdown headings and HTML anchors
+    let content = r#"# Main Title
+
+## Regular Markdown Heading
+
+## Heading with custom ID {#custom-markdown-id}
+
+## Heading with HTML anchor<a id="html-anchor"></a>
+
+<div id="standalone-div">Content</div>
+
+Links to test:
+- [Main title](#main-title) - Markdown auto-generated
+- [Regular heading](#regular-markdown-heading) - Markdown auto-generated
+- [Custom Markdown ID](#custom-markdown-id) - Markdown custom ID
+- [HTML anchor](#html-anchor) - HTML anchor on heading
+- [Div anchor](#standalone-div) - Standalone HTML element
+- [Wrong link](#wrong) - Should fail
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only have 1 error for #wrong
+    assert_eq!(result.len(), 1, "Should support both Markdown and HTML anchors");
+    assert!(result[0].message.contains("#wrong"));
+}
+
+#[test]
+fn test_case_sensitivity_html_anchors() {
+    // HTML id attributes are case-sensitive, links should match exactly
+    let content = r#"# Test Document
+
+<div id="CamelCase">Content</div>
+<span id="lowercase">Content</span>
+
+Links to test:
+- [Exact match CamelCase](#CamelCase) - should work
+- [Wrong case camelcase](#camelcase) - should fail
+- [Exact match lowercase](#lowercase) - should work
+- [Wrong case LOWERCASE](#LOWERCASE) - should fail
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have 2 errors for wrong case
+    assert_eq!(result.len(), 2, "HTML anchors should be case-sensitive");
+}
+
+#[test]
+fn test_html_anchors_parity_with_markdownlint() {
+    // This test ensures parity with markdownlint-cli behavior
+    // Based on actual test case from ruff repository
+    let content = r#"# Getting Started<a id="getting-started"></a>
+
+## Configuration<a id="configuration"></a>
+
+## Rules<a id="rules"></a>
+
+## Contributing<a id="contributing"></a>
+
+## Support<a id="support"></a>
+
+## Acknowledgements<a id="acknowledgements"></a>
+
+## Who's Using Ruff?<a id="whos-using-ruff"></a>
+
+## License<a id="license"></a>
+
+Table of contents:
+1. [Getting Started](#getting-started)
+1. [Configuration](#configuration)
+1. [Rules](#rules)
+1. [Contributing](#contributing)
+1. [Support](#support)
+1. [Acknowledgements](#acknowledgements)
+1. [Who's Using Ruff?](#whos-using-ruff)
+1. [License](#license)
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // All links should be valid - no errors
+    assert_eq!(result.len(), 0, "All HTML anchor links should be valid");
+}

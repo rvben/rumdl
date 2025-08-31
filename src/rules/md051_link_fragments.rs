@@ -14,7 +14,8 @@ lazy_static! {
     static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|\[([^\]]+)\]\[[^\]]*\]").unwrap();
     static ref TOC_SECTION_START: Regex = Regex::new(r"(?i)^#+\s*(table\s+of\s+contents?|contents?|toc)\s*$").unwrap();
     // HTML tags with id or name attributes (supports any HTML element, not just <a>)
-    static ref HTML_ANCHOR_PATTERN: Regex = Regex::new(r#"<\w+\s+(?:[^>]*?\s+)?(?:id|name)\s*=\s*["']([^"']+)["'][^>]*>"#).unwrap();
+    // This pattern only captures the first id/name attribute in a tag
+    static ref HTML_ANCHOR_PATTERN: Regex = Regex::new(r#"\b(?:id|name)\s*=\s*["']([^"']+)["']"#).unwrap();
 }
 
 /// Rule MD051: Link fragments
@@ -48,8 +49,11 @@ impl MD051LinkFragments {
     }
 
     /// Extract headings from cached LintContext information
-    fn extract_headings_from_context(&self, ctx: &crate::lint_context::LintContext) -> HashSet<String> {
-        let mut headings = HashSet::with_capacity(32);
+    /// Returns (markdown_anchors, html_anchors) where markdown_anchors are case-insensitive
+    /// and html_anchors are case-sensitive
+    fn extract_headings_from_context(&self, ctx: &crate::lint_context::LintContext) -> (HashSet<String>, HashSet<String>) {
+        let mut markdown_headings = HashSet::with_capacity(32);
+        let mut html_anchors = HashSet::with_capacity(16);
         let mut fragment_counts = std::collections::HashMap::new();
         let mut in_toc = false;
 
@@ -62,12 +66,40 @@ impl MD051LinkFragments {
 
             // Extract HTML anchor tags with id/name attributes
             if !line_info.in_code_block {
-                for cap in HTML_ANCHOR_PATTERN.captures_iter(&line_info.content) {
-                    if let Some(id_match) = cap.get(1) {
-                        let id = id_match.as_str();
-                        if !id.is_empty() {
-                            headings.insert(id.to_string());
+                // First, we need to handle multiple id attributes on same element
+                // HTML spec says only the first id attribute is used
+                // So we need to extract element by element, not all ids at once
+                let content = &line_info.content;
+                let mut pos = 0;
+                while pos < content.len() {
+                    // Find next HTML element
+                    if let Some(start) = content[pos..].find('<') {
+                        let tag_start = pos + start;
+                        if let Some(end) = content[tag_start..].find('>') {
+                            let tag_end = tag_start + end + 1;
+                            let tag = &content[tag_start..tag_end];
+                            
+                            // Extract only the FIRST id or name attribute from this tag
+                            // Use find() instead of captures_iter() to get only the first match
+                            if let Some(caps) = HTML_ANCHOR_PATTERN.find(tag) {
+                                // Now extract the actual id value from the first match
+                                let matched_text = caps.as_str();
+                                if let Some(caps) = HTML_ANCHOR_PATTERN.captures(matched_text) {
+                                    if let Some(id_match) = caps.get(1) {
+                                        let id = id_match.as_str();
+                                        if !id.is_empty() {
+                                            // HTML anchors are case-sensitive
+                                            html_anchors.insert(id.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                            pos = tag_end;
+                        } else {
+                            break;
                         }
+                    } else {
+                        break;
                     }
                 }
             }
@@ -90,7 +122,7 @@ impl MD051LinkFragments {
 
                 // If heading has a custom ID, add it as a valid anchor
                 if let Some(custom_id) = &heading.custom_id {
-                    headings.insert(custom_id.clone());
+                    markdown_headings.insert(custom_id.clone());
                 }
 
                 // ALWAYS generate the normal anchor too (for backward compatibility)
@@ -107,7 +139,7 @@ impl MD051LinkFragments {
                         fragment_counts.insert(fragment.clone(), 1);
                         fragment
                     };
-                    headings.insert(final_fragment);
+                    markdown_headings.insert(final_fragment);
                 }
 
                 // After processing the TOC heading, mark that we're in a TOC section
@@ -117,7 +149,7 @@ impl MD051LinkFragments {
             }
         }
 
-        headings
+        (markdown_headings, html_anchors)
     }
 
     /// Fragment generation using GitHub.com's ACTUAL algorithm (verified against GitHub Gists)
@@ -572,8 +604,8 @@ impl Rule for MD051LinkFragments {
             return Ok(warnings);
         }
 
-        // Extract all valid heading anchors
-        let valid_headings = self.extract_headings_from_context(ctx);
+        // Extract all valid heading anchors (markdown and HTML)
+        let (markdown_headings, html_anchors) = self.extract_headings_from_context(ctx);
 
         // Find all links with fragments
         let link_regex = get_cached_regex(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
@@ -639,9 +671,16 @@ impl Rule for MD051LinkFragments {
                                 continue;
                             }
 
-                            // Check if fragment exists in document (case-insensitive)
-                            let fragment_lower = fragment.to_lowercase();
-                            let found = valid_headings.iter().any(|h| h.to_lowercase() == fragment_lower);
+                            // Check if fragment exists in document
+                            // HTML anchors are case-sensitive, Markdown anchors are case-insensitive
+                            let found = if html_anchors.contains(fragment) {
+                                // Found as case-sensitive HTML anchor
+                                true
+                            } else {
+                                // Check case-insensitive for Markdown anchors
+                                let fragment_lower = fragment.to_lowercase();
+                                markdown_headings.iter().any(|h| h.to_lowercase() == fragment_lower)
+                            };
                             if !found {
                                 let column = full_match.start() + 1; // Point to start of entire link
 
