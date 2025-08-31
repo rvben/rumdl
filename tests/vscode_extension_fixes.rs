@@ -80,7 +80,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         )),
         "MD005" => Some((
             "* Item 1\n   * Item with 3 spaces (should be 2)",
-            Box::new(MD005ListIndent),
+            Box::new(MD005ListIndent::default()),
         )),
         "MD006" => Some((
             "  * Indented list item that should trigger MD006",
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_md005_vscode_fix_no_duplication() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "* Item 1\n   * Item with 3 spaces (should be 2)\n* Item 3";
 
         let result = simulate_vscode_fix(content, &rule);

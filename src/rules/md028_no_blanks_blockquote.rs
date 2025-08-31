@@ -1,5 +1,8 @@
 /// Rule MD028: No blank lines inside blockquotes
 ///
+/// This rule flags blank lines that appear to be inside a blockquote but lack the > marker.
+/// It uses heuristics to distinguish between paragraph breaks within a blockquote
+/// and intentional separators between distinct blockquotes.
 /// See [docs/md028.md](../../docs/md028.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
@@ -37,57 +40,125 @@ impl MD028NoBlanksBlockquote {
         let total_len = line.len();
         &line[..total_len - trimmed_len]
     }
+    
+    /// Check if there's substantive content between two blockquote sections
+    /// This helps distinguish between paragraph breaks and separate blockquotes
+    fn has_content_between(lines: &[&str], start: usize, end: usize) -> bool {
+        for i in start..end {
+            let line = lines[i].trim();
+            // If there's any non-blank, non-blockquote content, these are separate quotes
+            if !line.is_empty() && !line.starts_with('>') {
+                return true;
+            }
+        }
+        false
+    }
+    
+    /// Analyze context to determine if quotes are likely the same or different
+    fn are_likely_same_blockquote(lines: &[&str], blank_idx: usize) -> bool {
+        // Look for patterns that suggest these are the same blockquote:
+        // 1. Only one blank line between them (multiple blanks suggest separation)
+        // 2. Same indentation level
+        // 3. No content between them
+        // 4. Similar blockquote levels
+        
+        // Check if there are multiple consecutive blank lines
+        // Multiple blank lines strongly suggest the author wants separate blockquotes
+        let mut has_multiple_blanks = false;
+        
+        // Check if the next line is also blank (making this part of multiple blank lines)
+        if blank_idx + 1 < lines.len() && lines[blank_idx + 1].trim().is_empty() {
+            has_multiple_blanks = true;
+        }
+        
+        // Check if the previous line is also blank
+        if blank_idx > 0 && lines[blank_idx - 1].trim().is_empty() {
+            has_multiple_blanks = true;
+        }
+        
+        if has_multiple_blanks {
+            return false;
+        }
+        
+        // Find previous and next blockquote lines
+        let mut prev_quote_idx = None;
+        let mut next_quote_idx = None;
+        
+        for i in (0..blank_idx).rev() {
+            if Self::is_blockquote_line(lines[i]) {
+                prev_quote_idx = Some(i);
+                break;
+            }
+        }
+        
+        for i in (blank_idx + 1)..lines.len() {
+            if Self::is_blockquote_line(lines[i]) {
+                next_quote_idx = Some(i);
+                break;
+            }
+        }
+        
+        let (prev_idx, next_idx) = match (prev_quote_idx, next_quote_idx) {
+            (Some(p), Some(n)) => (p, n),
+            _ => return false,
+        };
+        
+        // Check for content between blockquotes
+        if Self::has_content_between(lines, prev_idx + 1, next_idx) {
+            return false;
+        }
+        
+        // Check if levels match
+        let prev_level = Self::get_blockquote_level(lines[prev_idx]);
+        let next_level = Self::get_blockquote_level(lines[next_idx]);
+        
+        // Different levels suggest different contexts
+        // But next_level > prev_level could be nested continuation
+        if next_level < prev_level {
+            return false;
+        }
+        
+        // Check indentation consistency
+        let prev_indent = Self::get_leading_whitespace(lines[prev_idx]);
+        let next_indent = Self::get_leading_whitespace(lines[next_idx]);
+        
+        // Different indentation might suggest different blockquotes
+        // But be lenient here as formatting can vary
+        
+        // Default to true if we can't determine otherwise
+        // This errs on the side of not flagging ambiguous cases
+        true
+    }
 
-    /// Check if a blank line is inside a blockquote context
-    fn is_blank_line_in_blockquote(lines: &[&str], index: usize) -> Option<(usize, String)> {
+    /// Check if a blank line is problematic (inside a blockquote)
+    fn is_problematic_blank_line(lines: &[&str], index: usize) -> Option<(usize, String)> {
         let current_line = lines[index];
 
-        // Must be a truly blank line (no blockquote markers)
+        // Must be a blank line (no content, no > markers)
         if !current_line.trim().is_empty() || Self::is_blockquote_line(current_line) {
             return None;
         }
-
-        // Look backward for a blockquote line
-        let mut prev_blockquote_level = None;
-        let mut prev_indent = "";
-
+        
+        // Use heuristics to determine if this blank line is inside a blockquote
+        // or if it's an intentional separator between blockquotes
+        if !Self::are_likely_same_blockquote(lines, index) {
+            return None;
+        }
+        
+        // This blank line appears to be inside a blockquote
+        // Find the appropriate fix
         for i in (0..index).rev() {
-            let line = lines[i];
-            if Self::is_blockquote_line(line) {
-                prev_blockquote_level = Some(Self::get_blockquote_level(line));
-                prev_indent = Self::get_leading_whitespace(line);
-                break;
-            }
-            // If we hit a non-blank, non-blockquote line, stop
-            if !line.trim().is_empty() {
-                return None;
-            }
-        }
-
-        // No previous blockquote found
-        let level = prev_blockquote_level?;
-
-        // Look forward for a blockquote line
-        for line in lines.iter().skip(index + 1) {
-            if Self::is_blockquote_line(line) {
-                let next_level = Self::get_blockquote_level(line);
-                // The blank line is inside a blockquote if the next blockquote has the same or higher level
-                if next_level >= level {
-                    // Generate the fix: add appropriate blockquote markers
-                    let mut fix = prev_indent.to_string();
-                    for _ in 0..level {
-                        fix.push('>');
-                    }
-                    return Some((level, fix));
+            if Self::is_blockquote_line(lines[i]) {
+                let level = Self::get_blockquote_level(lines[i]);
+                let indent = Self::get_leading_whitespace(lines[i]);
+                let mut fix = indent.to_string();
+                for _ in 0..level {
+                    fix.push('>');
                 }
-                return None;
-            }
-            // If we hit a non-blank, non-blockquote line, stop
-            if !line.trim().is_empty() {
-                return None;
+                return Some((level, fix));
             }
         }
-
+        
         None
     }
 }
@@ -132,8 +203,8 @@ impl Rule for MD028NoBlanksBlockquote {
                 continue;
             }
 
-            // Check if this is a blank line inside a blockquote
-            if let Some((level, fix_content)) = Self::is_blank_line_in_blockquote(&lines, line_idx) {
+            // Check if this is a problematic blank line inside a blockquote
+            if let Some((level, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx) {
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
 
                 warnings.push(LintWarning {
@@ -171,7 +242,7 @@ impl Rule for MD028NoBlanksBlockquote {
 
         for (line_idx, line) in lines.iter().enumerate() {
             // Check if this blank line needs fixing
-            if let Some((_, fix_content)) = Self::is_blank_line_in_blockquote(&lines, line_idx) {
+            if let Some((_, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx) {
                 result.push(fix_content);
             } else {
                 result.push(line.to_string());
@@ -333,8 +404,8 @@ mod tests {
         let content = "> Level 1\n\n>> Level 2\n\n> Level 1 again";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Line 2 is a blank between > and >>, should be flagged as level 1
-        // Line 4 is a blank between >> and >, NOT inside blockquote (different context)
+        // Line 2 is a blank between > and >>, level 1 to level 2, considered inside level 1
+        // Line 4 is a blank between >> and >, level 2 to level 1, NOT inside blockquote
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
     }

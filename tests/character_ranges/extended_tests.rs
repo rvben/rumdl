@@ -86,8 +86,8 @@ fn test_md027_multiple_space_blockquote() {
 fn test_md028_no_blank_line_blockquote() {
     let test = simple_test(
         "MD028",
-        "> First line\n>\n> Second line",
-        ExpectedWarning::new(2, 1, 2, 2, ">"),
+        "> First line\n\n> Second line",
+        ExpectedWarning::new(2, 1, 2, 1, ""),
     );
     test_character_ranges(test);
 }

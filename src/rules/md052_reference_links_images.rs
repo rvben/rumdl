@@ -49,6 +49,48 @@ impl MD052ReferenceLinkImages {
     pub fn new() -> Self {
         Self {}
     }
+    
+    /// Check if a pattern is likely NOT a markdown reference
+    /// Returns true if this pattern should be skipped
+    fn is_likely_not_reference(text: &str) -> bool {
+        // Skip numeric patterns (array indices, ranges)
+        if text.chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+        
+        // Skip numeric ranges like [1:3], [0:10], etc.
+        if text.contains(':') && text.chars().all(|c| c.is_ascii_digit() || c == ':') {
+            return true;
+        }
+        
+        // Skip patterns that look like config sections [tool.something], [section.subsection]
+        if text.contains('.') && !text.contains(' ') {
+            // Config sections typically have dots and no spaces
+            return true;
+        }
+        
+        // Skip glob/wildcard patterns like [*], [...], [**]
+        if text == "*" || text == "..." || text == "**" {
+            return true;
+        }
+        
+        // Skip patterns that look like file paths [dir/file], [src/utils]
+        if text.contains('/') && !text.contains(' ') && !text.starts_with("http") {
+            return true;
+        }
+        
+        // Skip patterns that are just punctuation or operators
+        if text.chars().all(|c| !c.is_alphanumeric() && c != ' ') {
+            return true;
+        }
+        
+        // Skip very short non-word patterns (likely operators or syntax)
+        if text.len() <= 2 && !text.chars().all(|c| c.is_alphabetic()) {
+            return true;
+        }
+        
+        false
+    }
 
     /// Check if a position is inside any code span
     fn is_in_code_span(line: usize, col: usize, code_spans: &[crate::lint_context::CodeSpan]) -> bool {
@@ -393,6 +435,11 @@ impl MD052ReferenceLinkImages {
 
                         let reference = ref_match.as_str();
                         let reference_lower = reference.to_lowercase();
+                        
+                        // Skip patterns that are likely not markdown references
+                        if Self::is_likely_not_reference(reference) {
+                            continue;
+                        }
 
                         // Skip GitHub alerts (including extended types)
                         if let Some(alert_type) = reference.strip_prefix('!')

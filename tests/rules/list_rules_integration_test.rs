@@ -11,7 +11,7 @@ use rumdl_lib::rules::{MD004UnorderedListStyle, MD005ListIndent, MD007ULIndent, 
 fn test_mixed_unordered_list_style_and_indentation() {
     // Test MD004 (unordered list style) + MD005 (list indentation) + MD007 (unordered list indentation)
     let md004 = MD004UnorderedListStyle::default(); // Consistent marker style
-    let md005 = MD005ListIndent; // Consistent indentation
+    let md005 = MD005ListIndent::default(); // Consistent indentation
     let md007 = MD007ULIndent::default(); // Proper nested indentation
 
     let content = "\
@@ -56,7 +56,7 @@ fn test_mixed_unordered_list_style_and_indentation() {
 fn test_ordered_list_style_and_indentation() {
     // Test MD029 (ordered list prefix) + MD005 (list indentation)
     let md029 = MD029OrderedListPrefix::default(); // Sequential numbering
-    let md005 = MD005ListIndent; // Consistent indentation
+    let md005 = MD005ListIndent::default(); // Consistent indentation
 
     let content = "\
 1. First item
@@ -93,7 +93,7 @@ fn test_ordered_list_style_and_indentation() {
 fn test_complex_nested_mixed_lists() {
     // Test all list rules together with complex nesting
     let md004 = MD004UnorderedListStyle::default();
-    let md005 = MD005ListIndent;
+    let md005 = MD005ListIndent::default();
     let md007 = MD007ULIndent::default();
     let md029 = MD029OrderedListPrefix::default();
 
@@ -154,7 +154,7 @@ fn test_complex_nested_mixed_lists() {
 #[test]
 fn test_deep_nesting_with_multiple_list_types() {
     // Test how rules handle deeply nested lists with multiple types
-    let md005 = MD005ListIndent;
+    let md005 = MD005ListIndent::default();
     let md007 = MD007ULIndent::default();
     let md029 = MD029OrderedListPrefix::default();
 
@@ -187,7 +187,7 @@ fn test_deep_nesting_with_multiple_list_types() {
 #[test]
 fn test_list_rules_with_code_blocks() {
     // Test that list rules handle code blocks correctly without interference
-    let md005 = MD005ListIndent;
+    let md005 = MD005ListIndent::default();
     let md029 = MD029OrderedListPrefix::default();
 
     let content = "\
@@ -221,7 +221,7 @@ fn test_list_rules_with_code_blocks() {
 #[test]
 fn test_list_rules_with_blockquotes() {
     // Test that list rules work correctly inside blockquotes
-    let md005 = MD005ListIndent;
+    let md005 = MD005ListIndent::default();
     let md029 = MD029OrderedListPrefix::default();
 
     let content = "\
@@ -254,7 +254,7 @@ fn test_list_rules_with_blockquotes() {
 fn test_list_continuation_across_rules() {
     // Test that list continuation works across different rule fixes
     let md004 = MD004UnorderedListStyle::default();
-    let md005 = MD005ListIndent;
+    let md005 = MD005ListIndent::default();
 
     let content = "\
 * First item
@@ -303,7 +303,7 @@ fn test_list_continuation_across_rules() {
 fn test_empty_lines_between_list_items() {
     // Test that empty lines between list items don't interfere with rules
     let md004 = MD004UnorderedListStyle::default();
-    let md005 = MD005ListIndent;
+    let md005 = MD005ListIndent::default();
     let md029 = MD029OrderedListPrefix::default();
 
     let content = "\
@@ -343,7 +343,7 @@ fn test_empty_lines_between_list_items() {
 fn test_performance_with_large_mixed_lists() {
     // Test performance and correctness with larger list structures
     let md004 = MD004UnorderedListStyle::default();
-    let md005 = MD005ListIndent;
+    let md005 = MD005ListIndent::default();
     let md007 = MD007ULIndent::default();
     let md029 = MD029OrderedListPrefix::default();
 

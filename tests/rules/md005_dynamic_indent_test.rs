@@ -5,7 +5,7 @@ use rumdl_lib::rules::MD005ListIndent;
 #[test]
 fn test_four_space_indent_detection() {
     // Test that MD005 detects and respects 4-space indentation pattern
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Item 1
     * Nested with 4 spaces
@@ -24,7 +24,7 @@ fn test_four_space_indent_detection() {
 #[test]
 fn test_four_space_indent_inconsistent() {
     // Test that MD005 flags inconsistent indentation when 4-space pattern is established
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Item 1
     * Nested with 4 spaces
@@ -40,7 +40,7 @@ fn test_four_space_indent_inconsistent() {
 #[test]
 fn test_three_space_indent_detection() {
     // Test that MD005 detects and respects 3-space indentation pattern
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Item 1
    * Nested with 3 spaces
@@ -59,7 +59,7 @@ fn test_three_space_indent_detection() {
 #[test]
 fn test_mixed_ordered_unordered_with_four_spaces() {
     // Test mixed lists with 4-space indentation
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 1. Ordered item
     * Unordered with 4 spaces
@@ -79,7 +79,7 @@ fn test_mixed_ordered_unordered_with_four_spaces() {
 #[test]
 fn test_deep_nesting_with_four_spaces() {
     // Test deeply nested lists with 4-space indentation
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * L1
     * L2 (4 spaces)
@@ -97,7 +97,7 @@ fn test_deep_nesting_with_four_spaces() {
 #[test]
 fn test_fix_with_detected_four_space_pattern() {
     // Test that fixes use the detected 4-space pattern
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Item 1
     * Correctly indented with 4
@@ -115,7 +115,7 @@ fn test_fix_with_detected_four_space_pattern() {
 #[test]
 fn test_issue_64_scenario() {
     // Test the exact scenario from issue #64
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Top level item
     * Sub item with 4 spaces (as configured in MD007)
@@ -137,7 +137,7 @@ fn test_issue_64_scenario() {
 #[test]
 fn test_ruff_example_from_issue() {
     // Test with a pattern similar to ruff's markdown
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 ## Features
 
@@ -162,7 +162,7 @@ fn test_ruff_example_from_issue() {
 fn test_dynamic_detection_with_multiple_blocks() {
     // Test detection within each list block independently
     // Each list can have its own indentation pattern
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
 
     // First list uses 4-space indentation consistently
     let content1 = "\

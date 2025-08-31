@@ -4,7 +4,7 @@ use rumdl_lib::rules::MD005ListIndent;
 
 #[test]
 fn test_unicode_list_items_valid() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Item with Unicode café
 * Item with emoji 🔥
@@ -21,7 +21,7 @@ fn test_unicode_list_items_valid() {
 
 #[test]
 fn test_unicode_list_items_invalid() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Item with Unicode café
  * Item with emoji 🔥 (wrong indent)
@@ -50,7 +50,7 @@ fn test_unicode_list_items_invalid() {
 
 #[test]
 fn test_unicode_mixed_list_types() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Unicode café item
   1. Ordered item with 汉字
@@ -68,7 +68,7 @@ fn test_unicode_mixed_list_types() {
 
 #[test]
 fn test_unicode_complex_nesting() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Level 1 with 汉字 café 🔥
   * Level 2 with مرحبا こんにちは
@@ -85,7 +85,7 @@ fn test_unicode_complex_nesting() {
 
 #[test]
 fn test_unicode_complex_nesting_invalid() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Level 1 with 汉字 café 🔥
    * Level 2 with مرحبا (wrong indent - 3 spaces)
@@ -104,7 +104,7 @@ fn test_unicode_complex_nesting_invalid() {
 
 #[test]
 fn test_unicode_fix_functionality() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Item with Unicode café
  * Wrong indent with 🔥
@@ -120,7 +120,7 @@ fn test_unicode_fix_functionality() {
 
 #[test]
 fn test_unicode_in_blockquotes() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 > List in blockquote with Unicode:
 > * Item with café
@@ -137,7 +137,7 @@ fn test_unicode_in_blockquotes() {
 
 #[test]
 fn test_unicode_with_continuation_text() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Item with Unicode café
   This is continuation text with 汉字
@@ -155,7 +155,7 @@ fn test_unicode_with_continuation_text() {
 
 #[test]
 fn test_unicode_edge_cases() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
 
     // Test with Unicode that might affect character counting
     let content = "\
@@ -174,7 +174,7 @@ fn test_unicode_edge_cases() {
 
 #[test]
 fn test_unicode_rtl_content() {
-    let rule = MD005ListIndent;
+    let rule = MD005ListIndent::default();
     let content = "\
 * Hebrew text: שלום עולם
   * Nested Hebrew: עוד טקסט עברי

@@ -71,6 +71,12 @@ impl MD006StartBullets {
                     if list_item.is_ordered {
                         continue;
                     }
+                    
+                    // Skip list items inside blockquotes - they're supposed to be indented
+                    if line_info.blockquote.is_some() {
+                        continue;
+                    }
+                    
                     let line_idx = item_line - 1;
                     let indent = list_item.marker_column;
                     let line = &lines[line_idx];

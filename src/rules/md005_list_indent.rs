@@ -13,7 +13,10 @@ use toml;
 
 /// Rule MD005: Inconsistent indentation for list items at the same level
 #[derive(Clone)]
-pub struct MD005ListIndent;
+pub struct MD005ListIndent {
+    /// Expected indentation for top-level lists (from MD007 config)
+    top_level_indent: usize,
+}
 
 impl MD005ListIndent {
     /// Group related list blocks that should be treated as one logical list structure
@@ -193,11 +196,11 @@ impl MD005ListIndent {
             // Check if all items at this level have the same indentation
             let indents: std::collections::HashSet<usize> = group.iter().map(|(_, indent, _)| *indent).collect();
 
-            // For level 1, check if any item has non-zero indentation
+            // For level 1, check if any item doesn't match expected top-level indentation
             // For other levels, check for inconsistent indentation
             let has_issue = if level == 1 {
-                // Top-level items should start at column 0
-                indents.iter().any(|&indent| indent != 0)
+                // Top-level items should have the configured indentation
+                indents.iter().any(|&indent| indent != self.top_level_indent)
             } else {
                 // Other levels need consistency
                 indents.len() > 1
@@ -207,10 +210,10 @@ impl MD005ListIndent {
                 // Inconsistent indentation at this level!
                 // Determine what the correct indentation should be
 
-                // For level 1, it should be 0
+                // For level 1, it should be the configured top-level indent
                 // For other levels, we need to look at parent alignment or use the most common indent
                 let expected_indent = if level == 1 {
-                    0
+                    self.top_level_indent
                 } else {
                     // For non-top-level items, determine the expected indent
                     // Prefer common patterns (2, 3, 4 spaces) and the most frequent indent
@@ -334,7 +337,9 @@ impl MD005ListIndent {
 
 impl Default for MD005ListIndent {
     fn default() -> Self {
-        Self
+        Self {
+            top_level_indent: 0,
+        }
     }
 }
 
@@ -413,11 +418,50 @@ impl Rule for MD005ListIndent {
         None
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD005ListIndent)
+        // Check MD007 configuration to understand expected list indentation
+        let mut top_level_indent = 0;
+        
+        // Try to get MD007 configuration
+        if let Some(md007_config) = config.rules.get("MD007") {
+            // Check for start_indented setting
+            if let Some(start_indented) = md007_config.values.get("start-indented") {
+                if let Some(start_indented_bool) = start_indented.as_bool() {
+                    if start_indented_bool {
+                        // If start_indented is true, check for start_indent value
+                        if let Some(start_indent) = md007_config.values.get("start-indent") {
+                            if let Some(indent_value) = start_indent.as_integer() {
+                                top_level_indent = indent_value as usize;
+                            }
+                        } else {
+                            // Default start_indent when start_indented is true
+                            top_level_indent = 2;
+                        }
+                    }
+                }
+            }
+            
+            // Also check 'indent' setting as that's what's commonly configured
+            if let Some(indent) = md007_config.values.get("indent") {
+                if let Some(indent_value) = indent.as_integer() {
+                    // If top-level lists should be indented and indent is specified,
+                    // this might be the expected top-level indent
+                    // Only use this if start_indented was not explicitly set
+                    if top_level_indent == 0 && indent_value > 0 {
+                        // Check if this is meant for top-level lists
+                        // For now, we'll only use it if explicitly enabled via start_indented
+                        // to avoid false positives
+                    }
+                }
+            }
+        }
+        
+        Box::new(MD005ListIndent {
+            top_level_indent,
+        })
     }
 }
 
@@ -439,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_valid_unordered_list() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
 * Item 2
@@ -453,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_valid_ordered_list() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 1. Item 1
 2. Item 2
@@ -469,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_invalid_unordered_indent() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
  * Item 2
@@ -485,7 +529,7 @@ mod tests {
 
     #[test]
     fn test_invalid_ordered_indent() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 1. Item 1
  2. Item 2
@@ -502,7 +546,7 @@ mod tests {
 
     #[test]
     fn test_mixed_list_types() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
   1. Nested ordered
@@ -515,7 +559,7 @@ mod tests {
 
     #[test]
     fn test_multiple_levels() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Level 1
    * Level 2
@@ -528,7 +572,7 @@ mod tests {
 
     #[test]
     fn test_empty_lines() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
 
@@ -542,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_no_lists() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 Just some text
 More text
@@ -554,7 +598,7 @@ Even more text";
 
     #[test]
     fn test_complex_nesting() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Level 1
   * Level 2
@@ -570,7 +614,7 @@ Even more text";
 
     #[test]
     fn test_invalid_complex_nesting() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Level 1
    * Level 2
@@ -591,7 +635,7 @@ Even more text";
 
     #[test]
     fn test_with_document_structure() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
 
         // Test with consistent list indentation
         let content = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
@@ -618,7 +662,7 @@ Even more text";
     // Additional comprehensive tests
     #[test]
     fn test_list_with_continuations() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
   This is a continuation
@@ -633,7 +677,7 @@ Even more text";
 
     #[test]
     fn test_list_in_blockquote() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 > * Item 1
 >   * Nested 1
@@ -651,7 +695,7 @@ Even more text";
 
     #[test]
     fn test_list_with_code_blocks() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
   ```
@@ -666,7 +710,7 @@ Even more text";
 
     #[test]
     fn test_list_with_tabs() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "* Item 1\n\t* Tab indented\n  * Space indented";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
@@ -676,7 +720,7 @@ Even more text";
 
     #[test]
     fn test_inconsistent_at_same_level() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
   * Nested 1
@@ -692,7 +736,7 @@ Even more text";
 
     #[test]
     fn test_zero_indent_top_level() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         // Use concat to preserve the leading space
         let content = concat!(" * Wrong indent\n", "* Correct\n", "  * Nested");
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
@@ -705,7 +749,7 @@ Even more text";
 
     #[test]
     fn test_fix_preserves_content() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item with **bold** and *italic*
  * Wrong indent with `code`
@@ -720,7 +764,7 @@ Even more text";
 
     #[test]
     fn test_deeply_nested_lists() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * L1
   * L2
@@ -735,7 +779,7 @@ Even more text";
 
     #[test]
     fn test_fix_multiple_issues() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
  * Wrong 1
@@ -754,7 +798,7 @@ Even more text";
 
     #[test]
     fn test_performance_large_document() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let mut content = String::new();
         for i in 0..100 {
             content.push_str(&format!("* Item {i}\n"));
@@ -767,7 +811,7 @@ Even more text";
 
     #[test]
     fn test_column_positions() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = " * Wrong indent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
@@ -782,7 +826,7 @@ Even more text";
 
     #[test]
     fn test_should_skip() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
 
         // Empty content should skip
         let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
@@ -802,7 +846,7 @@ Even more text";
 
     #[test]
     fn test_has_relevant_elements() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "* List item";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let doc_structure = DocumentStructure::new(content);
@@ -816,7 +860,7 @@ Even more text";
 
     #[test]
     fn test_edge_case_single_space_indent() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
  * Single space - wrong
@@ -831,7 +875,7 @@ Even more text";
 
     #[test]
     fn test_edge_case_three_space_indent() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
    * Three spaces - wrong
@@ -845,7 +889,7 @@ Even more text";
 
     #[test]
     fn test_nested_bullets_under_numbered_items() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 1. **Active Directory/LDAP**
    - User authentication and directory services
@@ -865,7 +909,7 @@ Even more text";
 
     #[test]
     fn test_nested_bullets_under_numbered_items_wrong_indent() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 1. **Active Directory/LDAP**
   - Wrong: only 2 spaces
@@ -891,7 +935,7 @@ Even more text";
 
     #[test]
     fn test_regular_nested_bullets_still_work() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Top level
   * Second level (2 spaces is correct for bullets under bullets)
@@ -907,7 +951,7 @@ Even more text";
 
     #[test]
     fn test_fix_range_accuracy() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = " * Wrong indent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
@@ -920,7 +964,7 @@ Even more text";
 
     #[test]
     fn test_four_space_indent_pattern() {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
     * Item 2 with 4 spaces
@@ -939,7 +983,7 @@ Even more text";
     #[test]
     fn test_issue_64_scenario() {
         // Test the exact scenario from issue #64
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         let content = "\
 * Top level item
     * Sub item with 4 spaces (as configured in MD007)

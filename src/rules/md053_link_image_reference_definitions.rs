@@ -130,6 +130,48 @@ impl MD053LinkImageReferenceDefinitions {
         Self { config }
     }
 
+    /// Check if a pattern is likely NOT a markdown reference
+    /// Returns true if this pattern should be skipped
+    fn is_likely_not_reference(text: &str) -> bool {
+        // Skip numeric patterns (array indices, ranges)
+        if text.chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+        
+        // Skip numeric ranges like [1:3], [0:10], etc.
+        if text.contains(':') && text.chars().all(|c| c.is_ascii_digit() || c == ':') {
+            return true;
+        }
+        
+        // Skip patterns that look like config sections [tool.something], [section.subsection]
+        if text.contains('.') && !text.contains(' ') {
+            // Config sections typically have dots and no spaces
+            return true;
+        }
+        
+        // Skip glob/wildcard patterns like [*], [...], [**]
+        if text == "*" || text == "..." || text == "**" {
+            return true;
+        }
+        
+        // Skip patterns that look like file paths [dir/file], [src/utils]
+        if text.contains('/') && !text.contains(' ') && !text.starts_with("http") {
+            return true;
+        }
+        
+        // Skip patterns that are just punctuation or operators
+        if text.chars().all(|c| !c.is_alphanumeric() && c != ' ') {
+            return true;
+        }
+        
+        // Skip very short non-word patterns (likely operators or syntax)
+        if text.len() <= 2 && !text.chars().all(|c| c.is_alphabetic()) {
+            return true;
+        }
+        
+        false
+    }
+    
     /// Unescape a reference string by removing backslashes before special characters.
     ///
     /// This allows matching references like `[example\-reference]` with definitions like
@@ -261,8 +303,12 @@ impl MD053LinkImageReferenceDefinitions {
 
                     if !in_code_span {
                         let ref_id = ref_id_match.as_str().trim();
-                        let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
-                        usages.insert(normalized_id);
+                        
+                        // Skip patterns that are likely not markdown references
+                        if !Self::is_likely_not_reference(ref_id) {
+                            let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
+                            usages.insert(normalized_id);
+                        }
                     }
                 }
             }

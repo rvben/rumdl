@@ -61,7 +61,7 @@ fn test_md004_md030_list_style_and_spacing() {
 
 #[test]
 fn test_md005_md007_list_indentation_conflict() {
-    let md005 = MD005ListIndent;
+    let md005 = MD005ListIndent::default();
     let md007 = MD007ULIndent::default();
 
     // Nested list with various indentation issues

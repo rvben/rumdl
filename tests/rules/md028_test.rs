@@ -8,6 +8,12 @@ fn test_md028_valid() {
     let content = "> Quote\n> Another line\n\n> New quote\n> Another line\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
+    if !result.is_empty() {
+        eprintln!("Unexpected warnings:");
+        for warning in &result {
+            eprintln!("  Line {}: {}", warning.line, warning.message);
+        }
+    }
     assert!(result.is_empty());
 }
 
