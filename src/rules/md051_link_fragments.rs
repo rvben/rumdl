@@ -13,6 +13,8 @@ lazy_static! {
     static ref CODE_PATTERN: Regex = Regex::new(r"`([^`]+)`").unwrap();
     static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|\[([^\]]+)\]\[[^\]]*\]").unwrap();
     static ref TOC_SECTION_START: Regex = Regex::new(r"(?i)^#+\s*(table\s+of\s+contents?|contents?|toc)\s*$").unwrap();
+    // HTML tags with id or name attributes (supports any HTML element, not just <a>)
+    static ref HTML_ANCHOR_PATTERN: Regex = Regex::new(r#"<\w+\s+(?:[^>]*?\s+)?(?:id|name)\s*=\s*["']([^"']+)["'][^>]*>"#).unwrap();
 }
 
 /// Rule MD051: Link fragments
@@ -56,6 +58,18 @@ impl MD051LinkFragments {
             // Skip front matter
             if line_info.in_front_matter {
                 continue;
+            }
+
+            // Extract HTML anchor tags with id/name attributes
+            if !line_info.in_code_block {
+                for cap in HTML_ANCHOR_PATTERN.captures_iter(&line_info.content) {
+                    if let Some(id_match) = cap.get(1) {
+                        let id = id_match.as_str();
+                        if !id.is_empty() {
+                            headings.insert(id.to_string());
+                        }
+                    }
+                }
             }
 
             if let Some(heading) = &line_info.heading {
