@@ -53,6 +53,174 @@ impl MD005ListIndent {
         groups
     }
 
+    /// Check if a list item is continuation content of a parent list item
+    fn is_continuation_content(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        list_line: usize,
+        list_indent: usize,
+    ) -> bool {
+        // Look backward to find the true parent list item (not just immediate previous)
+        for line_num in (1..list_line).rev() {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                if let Some(parent_list_item) = &line_info.list_item {
+                    let parent_marker_column = parent_list_item.marker_column;
+                    let parent_content_column = parent_list_item.content_column;
+                    
+                    // Skip list items at the same or greater indentation - we want the true parent
+                    if parent_marker_column >= list_indent {
+                        continue;
+                    }
+                    
+                    // Found a potential parent list item at a shallower indentation
+                    // Check if there are continuation lines between parent and current list
+                    let continuation_indent = self.find_continuation_indent_between(
+                        ctx, 
+                        line_num + 1, 
+                        list_line - 1, 
+                        parent_content_column
+                    );
+                    
+                    if let Some(cont_indent) = continuation_indent {
+                        // If the current list's indent matches the continuation content indent,
+                        // OR if it's at the standard continuation list indentation (parent_content + 2),
+                        // it's continuation content
+                        let is_standard_continuation = list_indent == parent_content_column + 2;
+                        let matches_content_indent = list_indent == cont_indent;
+                        
+                        if matches_content_indent || is_standard_continuation {
+                            return true;
+                        }
+                    }
+                    
+                    // Special case: if this list item is at the same indentation as previous
+                    // continuation lists, it might be part of the same continuation block
+                    if list_indent > parent_marker_column {
+                        // Check if previous list items at this indentation are also continuation
+                        if self.has_continuation_list_at_indent(ctx, line_num, list_line, list_indent, parent_content_column) {
+                            return true;
+                        }
+                        
+                        // Also check if there are any continuation text blocks between the parent
+                        // and this list (even if there are other lists in between)
+                        if self.has_any_continuation_content_after_parent(ctx, line_num, list_line, parent_content_column) {
+                            return true;
+                        }
+                    }
+                    
+                    // If no continuation lines, this might still be a child list
+                    // but not continuation content, so continue looking for a parent
+                } else if !line_info.content.trim().is_empty() {
+                    // Found non-list content - only stop if it's at the left margin
+                    // (which would indicate we've moved out of any potential parent structure)
+                    let content = line_info.content.trim_start();
+                    let line_indent = line_info.content.len() - content.len();
+                    
+                    if line_indent == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        false
+    }
+    
+    /// Check if there are continuation lists at the same indentation after a parent
+    fn has_continuation_list_at_indent(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        parent_line: usize,
+        current_line: usize,
+        list_indent: usize,
+        parent_content_column: usize,
+    ) -> bool {
+        // Look for list items between parent and current that are at the same indentation
+        // and are part of continuation content
+        for line_num in (parent_line + 1)..current_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                if let Some(list_item) = &line_info.list_item {
+                    if list_item.marker_column == list_indent {
+                        // Found a list at same indentation - check if it has continuation content before it
+                        if self.find_continuation_indent_between(ctx, parent_line + 1, line_num - 1, parent_content_column).is_some() {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+    
+    /// Check if there are any continuation content blocks after a parent (anywhere between parent and current)
+    fn has_any_continuation_content_after_parent(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        parent_line: usize,
+        current_line: usize,
+        parent_content_column: usize,
+    ) -> bool {
+        // Look for any continuation content between parent and current line
+        for line_num in (parent_line + 1)..current_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                let content = line_info.content.trim_start();
+                
+                // Skip empty lines and list items
+                if content.is_empty() || line_info.list_item.is_some() {
+                    continue;
+                }
+                
+                // Calculate indentation of this line
+                let line_indent = line_info.content.len() - content.len();
+                
+                // If this line is indented more than the parent's content column,
+                // it's continuation content
+                if line_indent > parent_content_column {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    
+    /// Find the indentation level used for continuation content between two line numbers
+    fn find_continuation_indent_between(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        start_line: usize,
+        end_line: usize,
+        parent_content_column: usize,
+    ) -> Option<usize> {
+        if start_line > end_line {
+            return None;
+        }
+        
+        for line_num in start_line..=end_line {
+            if let Some(line_info) = ctx.line_info(line_num) {
+                let content = line_info.content.trim_start();
+                
+                // Skip empty lines
+                if content.is_empty() {
+                    continue;
+                }
+                
+                // Skip list items
+                if line_info.list_item.is_some() {
+                    continue;
+                }
+                
+                // Calculate indentation of this line
+                let line_indent = line_info.content.len() - content.len();
+                
+                // If this line is indented more than the parent's content column,
+                // it's continuation content - return its indentation level
+                if line_indent > parent_content_column {
+                    return Some(line_indent);
+                }
+            }
+        }
+        None
+    }
+
     /// Check a group of related list blocks as one logical list structure
     fn check_list_block_group(
         &self,
@@ -78,6 +246,11 @@ impl MD005ListIndent {
                         // For normal lists, use the marker column directly
                         list_item.marker_column
                     };
+
+                    // Skip list items that are continuation content
+                    if self.is_continuation_content(ctx, item_line, effective_indent) {
+                        continue;
+                    }
 
                     all_list_items.push((item_line, effective_indent, line_info, list_item));
                 }
@@ -337,9 +510,7 @@ impl MD005ListIndent {
 
 impl Default for MD005ListIndent {
     fn default() -> Self {
-        Self {
-            top_level_indent: 0,
-        }
+        Self { top_level_indent: 0 }
     }
 }
 
@@ -424,7 +595,7 @@ impl Rule for MD005ListIndent {
     {
         // Check MD007 configuration to understand expected list indentation
         let mut top_level_indent = 0;
-        
+
         // Try to get MD007 configuration
         if let Some(md007_config) = config.rules.get("MD007") {
             // Check for start_indented setting
@@ -443,7 +614,7 @@ impl Rule for MD005ListIndent {
                     }
                 }
             }
-            
+
             // Also check 'indent' setting as that's what's commonly configured
             if let Some(indent) = md007_config.values.get("indent") {
                 if let Some(indent_value) = indent.as_integer() {
@@ -458,10 +629,8 @@ impl Rule for MD005ListIndent {
                 }
             }
         }
-        
-        Box::new(MD005ListIndent {
-            top_level_indent,
-        })
+
+        Box::new(MD005ListIndent { top_level_indent })
     }
 }
 
@@ -999,6 +1168,60 @@ Even more text";
             result.is_empty(),
             "MD005 should accept 4-space indentation when that's the pattern being used. Got {} warnings",
             result.len()
+        );
+    }
+
+    #[test]
+    fn test_continuation_content_scenario() {
+        let rule = MD005ListIndent::default();
+        let content = "\
+- **Changes to how the Python version is inferred** ([#16319](example))
+
+    In previous versions of Ruff, you could specify your Python version with:
+
+    - The `target-version` option in a `ruff.toml` file
+    - The `project.requires-python` field in a `pyproject.toml` file";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag continuation content lists as inconsistent
+        assert!(
+            result.is_empty(),
+            "MD005 should not flag continuation content lists, got {} warnings: {:?}",
+            result.len(),
+            result
+        );
+    }
+
+    #[test]
+    fn test_multiple_continuation_lists_scenario() {
+        let rule = MD005ListIndent::default();
+        let content = "\
+- **Changes to how the Python version is inferred** ([#16319](example))
+
+    In previous versions of Ruff, you could specify your Python version with:
+
+    - The `target-version` option in a `ruff.toml` file
+    - The `project.requires-python` field in a `pyproject.toml` file
+
+    In v0.10, config discovery has been updated to address this issue:
+
+    - If Ruff finds a `ruff.toml` file without a `target-version`, it will check
+    - If Ruff finds a user-level configuration, the `requires-python` field will take precedence
+    - If there is no config file, Ruff will search for the closest `pyproject.toml`";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag continuation content lists as inconsistent
+        assert!(
+            result.is_empty(),
+            "MD005 should not flag continuation content lists, got {} warnings: {:?}",
+            result.len(),
+            result
         );
     }
 }

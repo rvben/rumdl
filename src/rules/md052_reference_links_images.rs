@@ -16,7 +16,7 @@ lazy_static! {
     static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^\s*[-*+]\s+(?:\[[xX\s]\]\s+)?").unwrap();
 
     // Pattern for code blocks (standard regex is fine)
-    static ref FENCED_CODE_START: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
+    static ref FENCED_CODE_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
 
     // Pattern for output example sections (standard regex is fine)
     static ref OUTPUT_EXAMPLE_START: Regex = Regex::new(r"^#+\s*(?:Output|Example|Output Style|Output Format)\s*$").unwrap();
@@ -49,7 +49,7 @@ impl MD052ReferenceLinkImages {
     pub fn new() -> Self {
         Self {}
     }
-    
+
     /// Check if a pattern is likely NOT a markdown reference
     /// Returns true if this pattern should be skipped
     fn is_likely_not_reference(text: &str) -> bool {
@@ -57,38 +57,76 @@ impl MD052ReferenceLinkImages {
         if text.chars().all(|c| c.is_ascii_digit()) {
             return true;
         }
-        
+
         // Skip numeric ranges like [1:3], [0:10], etc.
         if text.contains(':') && text.chars().all(|c| c.is_ascii_digit() || c == ':') {
             return true;
         }
-        
+
         // Skip patterns that look like config sections [tool.something], [section.subsection]
-        if text.contains('.') && !text.contains(' ') {
-            // Config sections typically have dots and no spaces
+        // But not if they contain other non-alphanumeric chars like hyphens or underscores
+        if text.contains('.') && !text.contains(' ') && !text.contains('-') && !text.contains('_') {
+            // Config sections typically have dots, no spaces, and only alphanumeric + dots
             return true;
         }
-        
+
         // Skip glob/wildcard patterns like [*], [...], [**]
         if text == "*" || text == "..." || text == "**" {
             return true;
         }
-        
+
         // Skip patterns that look like file paths [dir/file], [src/utils]
         if text.contains('/') && !text.contains(' ') && !text.starts_with("http") {
             return true;
         }
-        
+
         // Skip patterns that are just punctuation or operators
         if text.chars().all(|c| !c.is_alphanumeric() && c != ' ') {
             return true;
         }
-        
+
         // Skip very short non-word patterns (likely operators or syntax)
         if text.len() <= 2 && !text.chars().all(|c| c.is_alphabetic()) {
             return true;
         }
+
+        // Skip quoted patterns like ["E501"], ["ALL"], ["E", "F"]
+        if (text.starts_with('"') && text.ends_with('"')) 
+            || (text.starts_with('\'') && text.ends_with('\''))
+            || text.contains('"') || text.contains('\'') {
+            return true;
+        }
+
+        // Skip descriptive patterns with colon like [default: the project root]
+        // But allow simple numeric ranges which are handled above
+        if text.contains(':') && text.contains(' ') {
+            return true;
+        }
+
+        // Skip alert/admonition patterns like [!WARN], [!NOTE], etc.
+        if text.starts_with('!') {
+            return true;
+        }
+
+        // Skip single uppercase letters (likely type parameters) like [T], [U], [K], [V]
+        if text.len() == 1 && text.chars().all(|c| c.is_ascii_uppercase()) {
+            return true;
+        }
+
+        // Skip common programming type names and short identifiers
+        // that are likely not markdown references
+        let common_non_refs = [
+            "object", "Object", "any", "Any", "inv",
+            "void", "bool", "int", "float", "str", "char",
+            "i8", "i16", "i32", "i64", "i128", "isize",
+            "u8", "u16", "u32", "u64", "u128", "usize",
+            "f32", "f64",
+        ];
         
+        if common_non_refs.contains(&text) {
+            return true;
+        }
+
         false
     }
 
@@ -142,14 +180,23 @@ impl MD052ReferenceLinkImages {
             }
             // Handle code block boundaries
             if let Some(cap) = FENCED_CODE_START.captures(line) {
-                if let Some(marker) = cap.get(0) {
-                    let marker_str = marker.as_str().to_string();
+                if let Some(fence) = cap.get(2) {
+                    // Get the fence marker (``` or ~~~) without the indentation
+                    let fence_str = fence.as_str();
                     if !in_code_block {
                         in_code_block = true;
-                        code_fence_marker = marker_str;
-                    } else if line.trim().starts_with(&code_fence_marker) {
-                        in_code_block = false;
-                        code_fence_marker.clear();
+                        code_fence_marker = fence_str.to_string();
+                    } else if line.trim_start().starts_with(&code_fence_marker) {
+                        // Check if this could be a closing fence
+                        let trimmed = line.trim_start();
+                        // A closing fence should be just the fence characters, possibly with trailing whitespace
+                        if trimmed.starts_with(&code_fence_marker) {
+                            let after_fence = &trimmed[code_fence_marker.len()..];
+                            if after_fence.trim().is_empty() {
+                                in_code_block = false;
+                                code_fence_marker.clear();
+                            }
+                        }
                     }
                 }
                 continue;
@@ -348,14 +395,23 @@ impl MD052ReferenceLinkImages {
 
             // Handle code blocks
             if let Some(cap) = FENCED_CODE_START.captures(line) {
-                if let Some(marker) = cap.get(0) {
-                    let marker_str = marker.as_str().to_string();
+                if let Some(fence) = cap.get(2) {
+                    // Get the fence marker (``` or ~~~) without the indentation
+                    let fence_str = fence.as_str();
                     if !in_code_block {
                         in_code_block = true;
-                        code_fence_marker = marker_str;
-                    } else if line.trim().starts_with(&code_fence_marker) {
-                        in_code_block = false;
-                        code_fence_marker.clear();
+                        code_fence_marker = fence_str.to_string();
+                    } else if line.trim_start().starts_with(&code_fence_marker) {
+                        // Check if this could be a closing fence
+                        let trimmed = line.trim_start();
+                        // A closing fence should be just the fence characters, possibly with trailing whitespace
+                        if trimmed.starts_with(&code_fence_marker) {
+                            let after_fence = &trimmed[code_fence_marker.len()..];
+                            if after_fence.trim().is_empty() {
+                                in_code_block = false;
+                                code_fence_marker.clear();
+                            }
+                        }
                     }
                 }
                 continue;
@@ -435,7 +491,7 @@ impl MD052ReferenceLinkImages {
 
                         let reference = ref_match.as_str();
                         let reference_lower = reference.to_lowercase();
-                        
+
                         // Skip patterns that are likely not markdown references
                         if Self::is_likely_not_reference(reference) {
                             continue;

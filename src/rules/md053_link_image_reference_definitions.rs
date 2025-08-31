@@ -31,9 +31,9 @@ lazy_static! {
     // Multi-line reference definition continuation pattern
     static ref CONTINUATION_REGEX: Regex = Regex::new(r"^\s+(.+)$").unwrap();
 
-    // Code block regex
-    static ref CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^```").unwrap();
-    static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^```\s*$").unwrap();
+    // Code block regex - support indented code blocks for MkDocs tabs
+    static ref CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
+    static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
 }
 
 /// Configuration for MD053 rule
@@ -137,41 +137,79 @@ impl MD053LinkImageReferenceDefinitions {
         if text.chars().all(|c| c.is_ascii_digit()) {
             return true;
         }
-        
+
         // Skip numeric ranges like [1:3], [0:10], etc.
         if text.contains(':') && text.chars().all(|c| c.is_ascii_digit() || c == ':') {
             return true;
         }
-        
+
         // Skip patterns that look like config sections [tool.something], [section.subsection]
-        if text.contains('.') && !text.contains(' ') {
-            // Config sections typically have dots and no spaces
+        // But not if they contain other non-alphanumeric chars like hyphens or underscores
+        if text.contains('.') && !text.contains(' ') && !text.contains('-') && !text.contains('_') {
+            // Config sections typically have dots, no spaces, and only alphanumeric + dots
             return true;
         }
-        
+
         // Skip glob/wildcard patterns like [*], [...], [**]
         if text == "*" || text == "..." || text == "**" {
             return true;
         }
-        
+
         // Skip patterns that look like file paths [dir/file], [src/utils]
         if text.contains('/') && !text.contains(' ') && !text.starts_with("http") {
             return true;
         }
-        
+
         // Skip patterns that are just punctuation or operators
         if text.chars().all(|c| !c.is_alphanumeric() && c != ' ') {
             return true;
         }
-        
+
         // Skip very short non-word patterns (likely operators or syntax)
         if text.len() <= 2 && !text.chars().all(|c| c.is_alphabetic()) {
             return true;
         }
+
+        // Skip quoted patterns like ["E501"], ["ALL"], ["E", "F"]
+        if (text.starts_with('"') && text.ends_with('"')) 
+            || (text.starts_with('\'') && text.ends_with('\''))
+            || text.contains('"') || text.contains('\'') {
+            return true;
+        }
+
+        // Skip descriptive patterns with colon like [default: the project root]
+        // But allow simple numeric ranges which are handled above
+        if text.contains(':') && text.contains(' ') {
+            return true;
+        }
+
+        // Skip alert/admonition patterns like [!WARN], [!NOTE], etc.
+        if text.starts_with('!') {
+            return true;
+        }
+
+        // Skip single uppercase letters (likely type parameters) like [T], [U], [K], [V]
+        if text.len() == 1 && text.chars().all(|c| c.is_ascii_uppercase()) {
+            return true;
+        }
+
+        // Skip common programming type names and short identifiers
+        // that are likely not markdown references
+        let common_non_refs = [
+            "object", "Object", "any", "Any", "inv",
+            "void", "bool", "int", "float", "str", "char",
+            "i8", "i16", "i32", "i64", "i128", "isize",
+            "u8", "u16", "u32", "u64", "u128", "usize",
+            "f32", "f64",
+        ];
         
+        if common_non_refs.contains(&text) {
+            return true;
+        }
+
         false
     }
-    
+
     /// Unescape a reference string by removing backslashes before special characters.
     ///
     /// This allows matching references like `[example\-reference]` with definitions like
@@ -303,7 +341,7 @@ impl MD053LinkImageReferenceDefinitions {
 
                     if !in_code_span {
                         let ref_id = ref_id_match.as_str().trim();
-                        
+
                         // Skip patterns that are likely not markdown references
                         if !Self::is_likely_not_reference(ref_id) {
                             let normalized_id = Self::unescape_reference(ref_id).to_lowercase();

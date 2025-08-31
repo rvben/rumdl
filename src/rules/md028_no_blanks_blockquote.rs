@@ -40,7 +40,7 @@ impl MD028NoBlanksBlockquote {
         let total_len = line.len();
         &line[..total_len - trimmed_len]
     }
-    
+
     /// Check if there's substantive content between two blockquote sections
     /// This helps distinguish between paragraph breaks and separate blockquotes
     fn has_content_between(lines: &[&str], start: usize, end: usize) -> bool {
@@ -53,7 +53,7 @@ impl MD028NoBlanksBlockquote {
         }
         false
     }
-    
+
     /// Analyze context to determine if quotes are likely the same or different
     fn are_likely_same_blockquote(lines: &[&str], blank_idx: usize) -> bool {
         // Look for patterns that suggest these are the same blockquote:
@@ -61,70 +61,70 @@ impl MD028NoBlanksBlockquote {
         // 2. Same indentation level
         // 3. No content between them
         // 4. Similar blockquote levels
-        
+
         // Check if there are multiple consecutive blank lines
         // Multiple blank lines strongly suggest the author wants separate blockquotes
         let mut has_multiple_blanks = false;
-        
+
         // Check if the next line is also blank (making this part of multiple blank lines)
         if blank_idx + 1 < lines.len() && lines[blank_idx + 1].trim().is_empty() {
             has_multiple_blanks = true;
         }
-        
+
         // Check if the previous line is also blank
         if blank_idx > 0 && lines[blank_idx - 1].trim().is_empty() {
             has_multiple_blanks = true;
         }
-        
+
         if has_multiple_blanks {
             return false;
         }
-        
+
         // Find previous and next blockquote lines
         let mut prev_quote_idx = None;
         let mut next_quote_idx = None;
-        
+
         for i in (0..blank_idx).rev() {
             if Self::is_blockquote_line(lines[i]) {
                 prev_quote_idx = Some(i);
                 break;
             }
         }
-        
+
         for i in (blank_idx + 1)..lines.len() {
             if Self::is_blockquote_line(lines[i]) {
                 next_quote_idx = Some(i);
                 break;
             }
         }
-        
+
         let (prev_idx, next_idx) = match (prev_quote_idx, next_quote_idx) {
             (Some(p), Some(n)) => (p, n),
             _ => return false,
         };
-        
+
         // Check for content between blockquotes
         if Self::has_content_between(lines, prev_idx + 1, next_idx) {
             return false;
         }
-        
+
         // Check if levels match
         let prev_level = Self::get_blockquote_level(lines[prev_idx]);
         let next_level = Self::get_blockquote_level(lines[next_idx]);
-        
+
         // Different levels suggest different contexts
         // But next_level > prev_level could be nested continuation
         if next_level < prev_level {
             return false;
         }
-        
+
         // Check indentation consistency
         let prev_indent = Self::get_leading_whitespace(lines[prev_idx]);
         let next_indent = Self::get_leading_whitespace(lines[next_idx]);
-        
+
         // Different indentation might suggest different blockquotes
         // But be lenient here as formatting can vary
-        
+
         // Default to true if we can't determine otherwise
         // This errs on the side of not flagging ambiguous cases
         true
@@ -138,13 +138,13 @@ impl MD028NoBlanksBlockquote {
         if !current_line.trim().is_empty() || Self::is_blockquote_line(current_line) {
             return None;
         }
-        
+
         // Use heuristics to determine if this blank line is inside a blockquote
         // or if it's an intentional separator between blockquotes
         if !Self::are_likely_same_blockquote(lines, index) {
             return None;
         }
-        
+
         // This blank line appears to be inside a blockquote
         // Find the appropriate fix
         for i in (0..index).rev() {
@@ -158,7 +158,7 @@ impl MD028NoBlanksBlockquote {
                 return Some((level, fix));
             }
         }
-        
+
         None
     }
 }
