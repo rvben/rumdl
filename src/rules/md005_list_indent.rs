@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use toml;
 
 /// Rule MD005: Inconsistent indentation for list items at the same level
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MD005ListIndent {
     /// Expected indentation for top-level lists (from MD007 config)
     top_level_indent: usize,
@@ -66,48 +66,55 @@ impl MD005ListIndent {
                 if let Some(parent_list_item) = &line_info.list_item {
                     let parent_marker_column = parent_list_item.marker_column;
                     let parent_content_column = parent_list_item.content_column;
-                    
+
                     // Skip list items at the same or greater indentation - we want the true parent
                     if parent_marker_column >= list_indent {
                         continue;
                     }
-                    
+
                     // Found a potential parent list item at a shallower indentation
                     // Check if there are continuation lines between parent and current list
-                    let continuation_indent = self.find_continuation_indent_between(
-                        ctx, 
-                        line_num + 1, 
-                        list_line - 1, 
-                        parent_content_column
-                    );
-                    
+                    let continuation_indent =
+                        self.find_continuation_indent_between(ctx, line_num + 1, list_line - 1, parent_content_column);
+
                     if let Some(cont_indent) = continuation_indent {
                         // If the current list's indent matches the continuation content indent,
                         // OR if it's at the standard continuation list indentation (parent_content + 2),
                         // it's continuation content
                         let is_standard_continuation = list_indent == parent_content_column + 2;
                         let matches_content_indent = list_indent == cont_indent;
-                        
+
                         if matches_content_indent || is_standard_continuation {
                             return true;
                         }
                     }
-                    
+
                     // Special case: if this list item is at the same indentation as previous
                     // continuation lists, it might be part of the same continuation block
                     if list_indent > parent_marker_column {
                         // Check if previous list items at this indentation are also continuation
-                        if self.has_continuation_list_at_indent(ctx, line_num, list_line, list_indent, parent_content_column) {
+                        if self.has_continuation_list_at_indent(
+                            ctx,
+                            line_num,
+                            list_line,
+                            list_indent,
+                            parent_content_column,
+                        ) {
                             return true;
                         }
-                        
+
                         // Also check if there are any continuation text blocks between the parent
                         // and this list (even if there are other lists in between)
-                        if self.has_any_continuation_content_after_parent(ctx, line_num, list_line, parent_content_column) {
+                        if self.has_any_continuation_content_after_parent(
+                            ctx,
+                            line_num,
+                            list_line,
+                            parent_content_column,
+                        ) {
                             return true;
                         }
                     }
-                    
+
                     // If no continuation lines, this might still be a child list
                     // but not continuation content, so continue looking for a parent
                 } else if !line_info.content.trim().is_empty() {
@@ -115,7 +122,7 @@ impl MD005ListIndent {
                     // (which would indicate we've moved out of any potential parent structure)
                     let content = line_info.content.trim_start();
                     let line_indent = line_info.content.len() - content.len();
-                    
+
                     if line_indent == 0 {
                         break;
                     }
@@ -124,7 +131,7 @@ impl MD005ListIndent {
         }
         false
     }
-    
+
     /// Check if there are continuation lists at the same indentation after a parent
     fn has_continuation_list_at_indent(
         &self,
@@ -137,20 +144,22 @@ impl MD005ListIndent {
         // Look for list items between parent and current that are at the same indentation
         // and are part of continuation content
         for line_num in (parent_line + 1)..current_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                if let Some(list_item) = &line_info.list_item {
-                    if list_item.marker_column == list_indent {
-                        // Found a list at same indentation - check if it has continuation content before it
-                        if self.find_continuation_indent_between(ctx, parent_line + 1, line_num - 1, parent_content_column).is_some() {
-                            return true;
-                        }
-                    }
+            if let Some(line_info) = ctx.line_info(line_num)
+                && let Some(list_item) = &line_info.list_item
+                && list_item.marker_column == list_indent
+            {
+                // Found a list at same indentation - check if it has continuation content before it
+                if self
+                    .find_continuation_indent_between(ctx, parent_line + 1, line_num - 1, parent_content_column)
+                    .is_some()
+                {
+                    return true;
                 }
             }
         }
         false
     }
-    
+
     /// Check if there are any continuation content blocks after a parent (anywhere between parent and current)
     fn has_any_continuation_content_after_parent(
         &self,
@@ -163,15 +172,15 @@ impl MD005ListIndent {
         for line_num in (parent_line + 1)..current_line {
             if let Some(line_info) = ctx.line_info(line_num) {
                 let content = line_info.content.trim_start();
-                
+
                 // Skip empty lines and list items
                 if content.is_empty() || line_info.list_item.is_some() {
                     continue;
                 }
-                
+
                 // Calculate indentation of this line
                 let line_indent = line_info.content.len() - content.len();
-                
+
                 // If this line is indented more than the parent's content column,
                 // it's continuation content
                 if line_indent > parent_content_column {
@@ -181,7 +190,7 @@ impl MD005ListIndent {
         }
         false
     }
-    
+
     /// Find the indentation level used for continuation content between two line numbers
     fn find_continuation_indent_between(
         &self,
@@ -193,24 +202,24 @@ impl MD005ListIndent {
         if start_line > end_line {
             return None;
         }
-        
+
         for line_num in start_line..=end_line {
             if let Some(line_info) = ctx.line_info(line_num) {
                 let content = line_info.content.trim_start();
-                
+
                 // Skip empty lines
                 if content.is_empty() {
                     continue;
                 }
-                
+
                 // Skip list items
                 if line_info.list_item.is_some() {
                     continue;
                 }
-                
+
                 // Calculate indentation of this line
                 let line_indent = line_info.content.len() - content.len();
-                
+
                 // If this line is indented more than the parent's content column,
                 // it's continuation content - return its indentation level
                 if line_indent > parent_content_column {
@@ -508,12 +517,6 @@ impl MD005ListIndent {
     }
 }
 
-impl Default for MD005ListIndent {
-    fn default() -> Self {
-        Self { top_level_indent: 0 }
-    }
-}
-
 impl Rule for MD005ListIndent {
     fn name(&self) -> &'static str {
         "MD005"
@@ -599,33 +602,32 @@ impl Rule for MD005ListIndent {
         // Try to get MD007 configuration
         if let Some(md007_config) = config.rules.get("MD007") {
             // Check for start_indented setting
-            if let Some(start_indented) = md007_config.values.get("start-indented") {
-                if let Some(start_indented_bool) = start_indented.as_bool() {
-                    if start_indented_bool {
-                        // If start_indented is true, check for start_indent value
-                        if let Some(start_indent) = md007_config.values.get("start-indent") {
-                            if let Some(indent_value) = start_indent.as_integer() {
-                                top_level_indent = indent_value as usize;
-                            }
-                        } else {
-                            // Default start_indent when start_indented is true
-                            top_level_indent = 2;
-                        }
+            if let Some(start_indented) = md007_config.values.get("start-indented")
+                && let Some(start_indented_bool) = start_indented.as_bool()
+                && start_indented_bool
+            {
+                // If start_indented is true, check for start_indent value
+                if let Some(start_indent) = md007_config.values.get("start-indent") {
+                    if let Some(indent_value) = start_indent.as_integer() {
+                        top_level_indent = indent_value as usize;
                     }
+                } else {
+                    // Default start_indent when start_indented is true
+                    top_level_indent = 2;
                 }
             }
 
             // Also check 'indent' setting as that's what's commonly configured
-            if let Some(indent) = md007_config.values.get("indent") {
-                if let Some(indent_value) = indent.as_integer() {
-                    // If top-level lists should be indented and indent is specified,
-                    // this might be the expected top-level indent
-                    // Only use this if start_indented was not explicitly set
-                    if top_level_indent == 0 && indent_value > 0 {
-                        // Check if this is meant for top-level lists
-                        // For now, we'll only use it if explicitly enabled via start_indented
-                        // to avoid false positives
-                    }
+            if let Some(indent) = md007_config.values.get("indent")
+                && let Some(indent_value) = indent.as_integer()
+            {
+                // If top-level lists should be indented and indent is specified,
+                // this might be the expected top-level indent
+                // Only use this if start_indented was not explicitly set
+                if top_level_indent == 0 && indent_value > 0 {
+                    // Check if this is meant for top-level lists
+                    // For now, we'll only use it if explicitly enabled via start_indented
+                    // to avoid false positives
                 }
             }
         }

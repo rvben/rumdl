@@ -256,7 +256,8 @@ lazy_static! {
     // Pattern for shortcut reference links: [reference]
     // Must not be preceded by ] or ) (to avoid matching second part of [text][ref])
     // Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
-    pub static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[([^\]]+)\](?!\s*[\[\(])").unwrap();
+    // The capturing group handles nested brackets to support cases like [`Union[T, None]`]
+    pub static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\](?!\s*[\[\(])").unwrap();
 
     // Inline link with fancy regex for better escaping handling (used by text_reflow)
     pub static ref INLINE_LINK_FANCY_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();

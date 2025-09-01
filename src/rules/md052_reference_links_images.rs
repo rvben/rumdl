@@ -8,9 +8,10 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 lazy_static! {
-    // Pattern to match reference definitions [ref]: url (standard regex is fine)
+    // Pattern to match reference definitions [ref]: url
     // Note: \S* instead of \S+ to allow empty definitions like [ref]:
-    static ref REF_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s*.*").unwrap();
+    // The capturing group handles nested brackets to support cases like [`union[t, none]`]:
+    static ref REF_REGEX: Regex = Regex::new(r"^\s*\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]:\s*.*").unwrap();
 
     // Pattern for list items to exclude from reference checks (standard regex is fine)
     static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^\s*[-*+]\s+(?:\[[xX\s]\]\s+)?").unwrap();
@@ -91,9 +92,11 @@ impl MD052ReferenceLinkImages {
         }
 
         // Skip quoted patterns like ["E501"], ["ALL"], ["E", "F"]
-        if (text.starts_with('"') && text.ends_with('"')) 
+        if (text.starts_with('"') && text.ends_with('"'))
             || (text.starts_with('\'') && text.ends_with('\''))
-            || text.contains('"') || text.contains('\'') {
+            || text.contains('"')
+            || text.contains('\'')
+        {
             return true;
         }
 
@@ -116,13 +119,10 @@ impl MD052ReferenceLinkImages {
         // Skip common programming type names and short identifiers
         // that are likely not markdown references
         let common_non_refs = [
-            "object", "Object", "any", "Any", "inv",
-            "void", "bool", "int", "float", "str", "char",
-            "i8", "i16", "i32", "i64", "i128", "isize",
-            "u8", "u16", "u32", "u64", "u128", "usize",
-            "f32", "f64",
+            "object", "Object", "any", "Any", "inv", "void", "bool", "int", "float", "str", "char", "i8", "i16", "i32",
+            "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64",
         ];
-        
+
         if common_non_refs.contains(&text) {
             return true;
         }

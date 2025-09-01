@@ -157,3 +157,172 @@ fn test_with_document_structure() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
+
+#[test]
+fn test_case_insensitive_with_backticks() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test case mismatch with backticks
+    let content = "# Test\n\nThis is [`Example`].\n\n[`example`]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Case-insensitive matching should work with backticks"
+    );
+}
+
+#[test]
+fn test_case_insensitive_dotted_references() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test case mismatch with dots in backticks (like dataclasses.InitVar from ruff repo)
+    let content = "From the Python documentation on [`dataclasses.InitVar`]:\n\n[`dataclasses.initvar`]: https://docs.python.org/3/library/dataclasses.html#dataclasses.InitVar\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Case-insensitive matching should work for dotted references in backticks"
+    );
+}
+
+#[test]
+fn test_references_with_apostrophes() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test case mismatch with apostrophes (like De Morgan's)
+    let content = "The [De Morgan's Laws] are important.\n\n[de morgan's laws]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Case-insensitive matching should work with apostrophes"
+    );
+}
+
+#[test]
+fn test_references_with_dots_not_filtered() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test references with dots (previously incorrectly filtered as config sections)
+    let content = "See [tool.ruff] for details.\n\n[tool.ruff]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "References with dots should be recognized");
+}
+
+#[test]
+fn test_references_with_slashes_not_filtered() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test references with forward slashes (previously incorrectly filtered as file paths)
+    let content = "See [docs/api] for details.\n\n[docs/api]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "References with forward slashes should be recognized"
+    );
+}
+
+#[test]
+fn test_single_letter_references() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test single letter references (previously incorrectly filtered)
+    let content = "See [T] for type parameter.\n\n[T]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Single letter references should be recognized");
+}
+
+#[test]
+fn test_common_type_name_references() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test common type name references (previously incorrectly filtered)
+    let content = "The [str] type in Python.\n\n[str]: https://docs.python.org/3/library/stdtypes.html#str\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Common type names as references should be recognized"
+    );
+}
+
+#[test]
+fn test_shortcut_reference_with_colon() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test shortcut reference followed by colon (common in documentation)
+    let content = "As stated in [`reference`]:\n\n[`reference`]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Shortcut reference followed by colon should be recognized"
+    );
+}
+
+#[test]
+fn test_shortcut_reference_with_period() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test shortcut reference followed by period
+    let content = "See [reference].\n\n[reference]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Shortcut reference followed by period should be recognized"
+    );
+}
+
+#[test]
+fn test_numeric_footnote_references() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test numeric references (could be footnotes)
+    let content = "See note [1] for details.\n\n[1]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Numeric references should be recognized");
+}
+
+#[test]
+fn test_patterns_still_skipped() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+
+    // Alert patterns (GitHub alerts) should still be skipped
+    let content = "[!NOTE]\nThis is a note.\n\n[other]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Alert patterns should be skipped");
+
+    // Pure punctuation should still be skipped
+    let content = "Array[...] notation.\n\n[other]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Pure punctuation patterns should be skipped");
+}
+
+#[test]
+fn test_complex_real_world_case() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test a complex case combining multiple features
+    let content = r#"# Documentation
+
+## Python Types
+
+The [`typing.Optional`] type is equivalent to [`Union[T, None]`].
+See also [`dataclasses.InitVar`]: it marks init-only fields.
+
+For file paths, use [`pathlib.Path`] or [os.path] module.
+
+Single type parameters like [T] are common.
+
+[`typing.optional`]: https://docs.python.org/3/library/typing.html#typing.Optional
+[`union[t, none]`]: https://docs.python.org/3/library/typing.html#typing.Union
+[`dataclasses.initvar`]: https://docs.python.org/3/library/dataclasses.html#dataclasses.InitVar
+[`pathlib.path`]: https://docs.python.org/3/library/pathlib.html
+[os.path]: https://docs.python.org/3/library/os.path.html
+[t]: https://docs.python.org/3/library/typing.html#type-variables
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "All references in complex real-world case should be recognized: {result:?}"
+    );
+}

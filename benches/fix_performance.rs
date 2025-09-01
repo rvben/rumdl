@@ -230,7 +230,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD005 - List indentation
     c.bench_function("MD005 fix", |b| {
-        let rule = MD005ListIndent;
+        let rule = MD005ListIndent::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 

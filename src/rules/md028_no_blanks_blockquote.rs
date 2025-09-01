@@ -44,10 +44,10 @@ impl MD028NoBlanksBlockquote {
     /// Check if there's substantive content between two blockquote sections
     /// This helps distinguish between paragraph breaks and separate blockquotes
     fn has_content_between(lines: &[&str], start: usize, end: usize) -> bool {
-        for i in start..end {
-            let line = lines[i].trim();
+        for line in lines.iter().take(end).skip(start) {
+            let trimmed = line.trim();
             // If there's any non-blank, non-blockquote content, these are separate quotes
-            if !line.is_empty() && !line.starts_with('>') {
+            if !trimmed.is_empty() && !trimmed.starts_with('>') {
                 return true;
             }
         }
@@ -62,23 +62,9 @@ impl MD028NoBlanksBlockquote {
         // 3. No content between them
         // 4. Similar blockquote levels
 
-        // Check if there are multiple consecutive blank lines
-        // Multiple blank lines strongly suggest the author wants separate blockquotes
-        let mut has_multiple_blanks = false;
-
-        // Check if the next line is also blank (making this part of multiple blank lines)
-        if blank_idx + 1 < lines.len() && lines[blank_idx + 1].trim().is_empty() {
-            has_multiple_blanks = true;
-        }
-
-        // Check if the previous line is also blank
-        if blank_idx > 0 && lines[blank_idx - 1].trim().is_empty() {
-            has_multiple_blanks = true;
-        }
-
-        if has_multiple_blanks {
-            return false;
-        }
+        // Note: We flag ALL blank lines between blockquotes, matching markdownlint behavior.
+        // Even multiple consecutive blank lines are flagged as they can be ambiguous
+        // (some parsers treat them as one blockquote, others as separate blockquotes).
 
         // Find previous and next blockquote lines
         let mut prev_quote_idx = None;
@@ -91,8 +77,8 @@ impl MD028NoBlanksBlockquote {
             }
         }
 
-        for i in (blank_idx + 1)..lines.len() {
-            if Self::is_blockquote_line(lines[i]) {
+        for (i, line) in lines.iter().enumerate().skip(blank_idx + 1) {
+            if Self::is_blockquote_line(line) {
                 next_quote_idx = Some(i);
                 break;
             }
@@ -122,12 +108,9 @@ impl MD028NoBlanksBlockquote {
         let prev_indent = Self::get_leading_whitespace(lines[prev_idx]);
         let next_indent = Self::get_leading_whitespace(lines[next_idx]);
 
-        // Different indentation might suggest different blockquotes
-        // But be lenient here as formatting can vary
-
-        // Default to true if we can't determine otherwise
-        // This errs on the side of not flagging ambiguous cases
-        true
+        // Different indentation indicates separate blockquote contexts
+        // Same indentation with no content between = same blockquote (blank line inside)
+        prev_indent == next_indent
     }
 
     /// Check if a blank line is problematic (inside a blockquote)
@@ -345,7 +328,8 @@ mod tests {
         let content = "> First\n\n\n> Fourth";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2, "Should flag each blank line separately");
+        // With proper indentation checking, both blank lines are flagged as they're within the same blockquote
+        assert_eq!(result.len(), 2, "Should flag each blank line within the blockquote");
         assert_eq!(result[0].line, 2);
         assert_eq!(result[1].line, 3);
     }

@@ -572,3 +572,63 @@ fn test_output_example_section_ignored() {
     assert!(messages.contains(&"Reference 'example' not found".to_string()));
     assert!(messages.contains(&"Reference 'missing' not found".to_string()));
 }
+
+#[test]
+fn test_shortcut_reference_with_nested_brackets() {
+    let rule = MD052ReferenceLinkImages::new();
+    // Test that shortcut references with nested brackets are handled correctly
+    let content = r#"This is [`Union[T, None]`] text.
+
+[`union[t, none]`]: https://example.com"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should handle nested brackets in shortcut references"
+    );
+}
+
+#[test]
+fn test_reference_definition_with_nested_brackets() {
+    let rule = MD052ReferenceLinkImages::new();
+    // Test that reference definitions with nested brackets are parsed correctly
+    let content = r#"See [`dataclasses.InitVar`] for details.
+
+[`dataclasses.initvar`]: https://docs.python.org/3/library/dataclasses.html#dataclasses.InitVar"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should handle nested brackets in reference definitions"
+    );
+}
+
+#[test]
+fn test_complex_nested_brackets() {
+    let rule = MD052ReferenceLinkImages::new();
+    // Test multiple complex cases with nested brackets
+    let content = r#"The [`typing.Optional[T]`] type is equivalent to [`Union[T, None]`].
+
+For arrays use [`List[int]`] or [`Array[str, 10]`].
+
+[`typing.optional[t]`]: https://example.com/optional
+[`union[t, none]`]: https://example.com/union
+[`list[int]`]: https://example.com/list
+[`array[str, 10]`]: https://example.com/array"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should handle all complex nested bracket cases");
+}
+
+#[test]
+fn test_undefined_reference_with_nested_brackets() {
+    let rule = MD052ReferenceLinkImages::new();
+    // Test that undefined references with nested brackets are still caught
+    let content = r#"This [`Dict[str, Any]`] is undefined.
+
+[`list[int]`]: https://example.com"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].message.contains("`Dict[str, Any]`"));
+}

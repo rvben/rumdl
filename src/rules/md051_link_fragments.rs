@@ -51,7 +51,10 @@ impl MD051LinkFragments {
     /// Extract headings from cached LintContext information
     /// Returns (markdown_anchors, html_anchors) where markdown_anchors are case-insensitive
     /// and html_anchors are case-sensitive
-    fn extract_headings_from_context(&self, ctx: &crate::lint_context::LintContext) -> (HashSet<String>, HashSet<String>) {
+    fn extract_headings_from_context(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+    ) -> (HashSet<String>, HashSet<String>) {
         let mut markdown_headings = HashSet::with_capacity(32);
         let mut html_anchors = HashSet::with_capacity(16);
         let mut fragment_counts = std::collections::HashMap::new();
@@ -78,19 +81,19 @@ impl MD051LinkFragments {
                         if let Some(end) = content[tag_start..].find('>') {
                             let tag_end = tag_start + end + 1;
                             let tag = &content[tag_start..tag_end];
-                            
+
                             // Extract only the FIRST id or name attribute from this tag
                             // Use find() instead of captures_iter() to get only the first match
                             if let Some(caps) = HTML_ANCHOR_PATTERN.find(tag) {
                                 // Now extract the actual id value from the first match
                                 let matched_text = caps.as_str();
-                                if let Some(caps) = HTML_ANCHOR_PATTERN.captures(matched_text) {
-                                    if let Some(id_match) = caps.get(1) {
-                                        let id = id_match.as_str();
-                                        if !id.is_empty() {
-                                            // HTML anchors are case-sensitive
-                                            html_anchors.insert(id.to_string());
-                                        }
+                                if let Some(caps) = HTML_ANCHOR_PATTERN.captures(matched_text)
+                                    && let Some(id_match) = caps.get(1)
+                                {
+                                    let id = id_match.as_str();
+                                    if !id.is_empty() {
+                                        // HTML anchors are case-sensitive
+                                        html_anchors.insert(id.to_string());
                                     }
                                 }
                             }

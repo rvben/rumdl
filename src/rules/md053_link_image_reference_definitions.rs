@@ -15,10 +15,11 @@ lazy_static! {
     // Image reference format: ![text][reference]
     // REMOVED: static ref IMAGE_REFERENCE_REGEX: FancyRegex = FancyRegex::new(r"!\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
 
-    // Shortcut reference links: [reference] - must not be followed by a colon or another bracket to avoid matching definitions
-    // Allow references followed by parentheses (like "[reference] (text)")
+    // Shortcut reference links: [reference] - must not be followed by another bracket
+    // Allow references followed by punctuation like colon, period, comma (e.g., "[reference]:", "[reference].")
+    // Only exclude if followed by ": " (colon with space) which indicates a definition line
     static ref SHORTCUT_REFERENCE_REGEX: FancyRegex =
-        FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!\s*[\[:])").unwrap();
+        FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!:\s|\[)").unwrap();
 
     // REMOVED: Empty reference links: [text][] or ![text][]
     // static ref EMPTY_LINK_REFERENCE_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\s*\[\s*\]").unwrap();
@@ -143,20 +144,8 @@ impl MD053LinkImageReferenceDefinitions {
             return true;
         }
 
-        // Skip patterns that look like config sections [tool.something], [section.subsection]
-        // But not if they contain other non-alphanumeric chars like hyphens or underscores
-        if text.contains('.') && !text.contains(' ') && !text.contains('-') && !text.contains('_') {
-            // Config sections typically have dots, no spaces, and only alphanumeric + dots
-            return true;
-        }
-
         // Skip glob/wildcard patterns like [*], [...], [**]
         if text == "*" || text == "..." || text == "**" {
-            return true;
-        }
-
-        // Skip patterns that look like file paths [dir/file], [src/utils]
-        if text.contains('/') && !text.contains(' ') && !text.starts_with("http") {
             return true;
         }
 
@@ -166,14 +155,8 @@ impl MD053LinkImageReferenceDefinitions {
         }
 
         // Skip very short non-word patterns (likely operators or syntax)
-        if text.len() <= 2 && !text.chars().all(|c| c.is_alphabetic()) {
-            return true;
-        }
-
-        // Skip quoted patterns like ["E501"], ["ALL"], ["E", "F"]
-        if (text.starts_with('"') && text.ends_with('"')) 
-            || (text.starts_with('\'') && text.ends_with('\''))
-            || text.contains('"') || text.contains('\'') {
+        // But allow single digits (could be footnotes) and single letters
+        if text.len() <= 2 && !text.chars().all(|c| c.is_alphanumeric()) {
             return true;
         }
 
@@ -185,25 +168,6 @@ impl MD053LinkImageReferenceDefinitions {
 
         // Skip alert/admonition patterns like [!WARN], [!NOTE], etc.
         if text.starts_with('!') {
-            return true;
-        }
-
-        // Skip single uppercase letters (likely type parameters) like [T], [U], [K], [V]
-        if text.len() == 1 && text.chars().all(|c| c.is_ascii_uppercase()) {
-            return true;
-        }
-
-        // Skip common programming type names and short identifiers
-        // that are likely not markdown references
-        let common_non_refs = [
-            "object", "Object", "any", "Any", "inv",
-            "void", "bool", "int", "float", "str", "char",
-            "i8", "i16", "i32", "i64", "i128", "isize",
-            "u8", "u16", "u32", "u64", "u128", "usize",
-            "f32", "f64",
-        ];
-        
-        if common_non_refs.contains(&text) {
             return true;
         }
 
