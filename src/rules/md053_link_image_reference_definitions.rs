@@ -371,7 +371,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         "Link and image reference definitions should be needed"
     }
 
-    /// Check the content for unused link/image reference definitions.
+    /// Check the content for unused and duplicate link/image reference definitions.
     ///
     /// This implementation uses caching for improved performance on large documents.
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -387,6 +387,75 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         let unused_refs = self.get_unused_references(&definitions, &usages);
 
         let mut warnings = Vec::new();
+
+        // Check for duplicate definitions (case-insensitive per CommonMark spec)
+        let mut seen_definitions: HashMap<String, (String, usize)> = HashMap::new(); // lowercase -> (original, first_line)
+
+        for (definition_id, ranges) in &definitions {
+            // Skip ignored definitions for duplicate checking
+            if self.is_ignored_definition(definition_id) {
+                continue;
+            }
+
+            if ranges.len() > 1 {
+                // Multiple definitions with exact same ID (already lowercase)
+                for (i, &(start_line, _)) in ranges.iter().enumerate() {
+                    if i > 0 {
+                        // Skip the first occurrence, report all others
+                        let line_num = start_line + 1;
+                        let line_content = ctx.lines.get(start_line).map(|l| l.content.as_str()).unwrap_or("");
+                        let (start_line_1idx, start_col, end_line, end_col) =
+                            calculate_line_range(line_num, line_content);
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            line: start_line_1idx,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!("Duplicate link or image reference definition: [{definition_id}]"),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    }
+                }
+            }
+
+            // Track for case-variant duplicates
+            if let Some(&(start_line, _)) = ranges.first() {
+                // Find the original case version from the line
+                if let Some(line_info) = ctx.lines.get(start_line)
+                    && let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(&line_info.content)
+                {
+                    let original_id = caps.get(1).unwrap().as_str().trim();
+                    let lower_id = original_id.to_lowercase();
+
+                    if let Some((first_original, first_line)) = seen_definitions.get(&lower_id) {
+                        // Found a case-variant duplicate
+                        if first_original != original_id {
+                            let line_num = start_line + 1;
+                            let line_content = &line_info.content;
+                            let (start_line_1idx, start_col, end_line, end_col) =
+                                calculate_line_range(line_num, line_content);
+
+                            warnings.push(LintWarning {
+                                    rule_name: Some(self.name()),
+                                    line: start_line_1idx,
+                                    column: start_col,
+                                    end_line,
+                                    end_column: end_col,
+                                    message: format!("Duplicate link or image reference definition: [{}] (conflicts with [{}] on line {})",
+                                                   original_id, first_original, first_line + 1),
+                                    severity: Severity::Warning,
+                                    fix: None,
+                                });
+                        }
+                    } else {
+                        seen_definitions.insert(lower_id, (original_id.to_string(), start_line));
+                    }
+                }
+            }
+        }
 
         // Create warnings for unused references
         for (definition, start, _end) in unused_refs {
@@ -737,5 +806,83 @@ mod tests {
 
         // Should keep everything since MD053 doesn't fix
         assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_duplicate_definitions_exact_case() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[ref]: url1\n[ref]: url2\n[ref]: url3";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have 2 duplicate warnings (for the 2nd and 3rd definitions)
+        // Plus 1 unused warning
+        let duplicate_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Duplicate")).collect();
+        assert_eq!(duplicate_warnings.len(), 2);
+        assert_eq!(duplicate_warnings[0].line, 2);
+        assert_eq!(duplicate_warnings[1].line, 3);
+    }
+
+    #[test]
+    fn test_duplicate_definitions_case_variants() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content =
+            "[method resolution order]: url1\n[Method Resolution Order]: url2\n[METHOD RESOLUTION ORDER]: url3";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have 2 duplicate warnings (for the 2nd and 3rd definitions)
+        let duplicate_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Duplicate")).collect();
+        assert_eq!(duplicate_warnings.len(), 2);
+
+        // Check that the messages mention the conflict
+        assert!(duplicate_warnings[0].message.contains("conflicts with"));
+        assert!(duplicate_warnings[1].message.contains("conflicts with"));
+    }
+
+    #[test]
+    fn test_duplicate_and_unused() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[used]\n[used]: url1\n[used]: url2\n[unused]: url3";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have 1 duplicate warning and 1 unused warning
+        let duplicate_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Duplicate")).collect();
+        let unused_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Unused")).collect();
+
+        assert_eq!(duplicate_warnings.len(), 1);
+        assert_eq!(unused_warnings.len(), 1);
+        assert_eq!(duplicate_warnings[0].line, 3); // Second [used] definition
+        assert_eq!(unused_warnings[0].line, 4); // [unused] definition
+    }
+
+    #[test]
+    fn test_duplicate_with_usage() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        // Even if used, duplicates should still be reported
+        let content = "[ref]\n\n[ref]: url1\n[ref]: url2";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have 1 duplicate warning (no unused since it's referenced)
+        let duplicate_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Duplicate")).collect();
+        let unused_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Unused")).collect();
+
+        assert_eq!(duplicate_warnings.len(), 1);
+        assert_eq!(unused_warnings.len(), 0);
+        assert_eq!(duplicate_warnings[0].line, 4);
+    }
+
+    #[test]
+    fn test_no_duplicate_different_ids() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[ref1]: url1\n[ref2]: url2\n[ref3]: url3";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have no duplicate warnings, only unused warnings
+        let duplicate_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Duplicate")).collect();
+        assert_eq!(duplicate_warnings.len(), 0);
     }
 }

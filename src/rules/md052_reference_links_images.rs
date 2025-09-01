@@ -250,6 +250,11 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
+            // Skip links inside HTML tags
+            if Self::is_in_html_tag(ctx, link.byte_offset) {
+                continue;
+            }
+
             // Skip links inside math contexts
             if is_in_math_context(ctx, link.byte_offset) {
                 continue;
@@ -291,6 +296,12 @@ impl MD052ReferenceLinkImages {
                         if LIST_ITEM_REGEX.is_match(&line_info.content) {
                             continue;
                         }
+
+                        // Skip lines that are HTML content
+                        let trimmed = line_info.content.trim_start();
+                        if trimmed.starts_with('<') {
+                            continue;
+                        }
                     }
 
                     let match_len = link.byte_end - link.byte_offset;
@@ -313,6 +324,11 @@ impl MD052ReferenceLinkImages {
 
             // Skip images inside HTML comments
             if Self::is_in_html_comment(content, image.byte_offset) {
+                continue;
+            }
+
+            // Skip images inside HTML tags
+            if Self::is_in_html_tag(ctx, image.byte_offset) {
                 continue;
             }
 
@@ -355,6 +371,12 @@ impl MD052ReferenceLinkImages {
 
                         // Skip list items
                         if LIST_ITEM_REGEX.is_match(&line_info.content) {
+                            continue;
+                        }
+
+                        // Skip lines that are HTML content
+                        let trimmed = line_info.content.trim_start();
+                        if trimmed.starts_with('<') {
                             continue;
                         }
                     }
@@ -438,6 +460,12 @@ impl MD052ReferenceLinkImages {
 
             // Skip list items
             if LIST_ITEM_REGEX.is_match(line) {
+                continue;
+            }
+
+            // Skip lines that are HTML content
+            let trimmed_line = line.trim_start();
+            if trimmed_line.starts_with('<') {
                 continue;
             }
 
