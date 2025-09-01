@@ -8,17 +8,19 @@ pub enum ListStyle {
     One, // Use '1.' for all items
     #[serde(rename = "one-one", alias = "one_one")]
     OneOne, // All ones (1. 1. 1.)
-    #[default]
     Ordered, // Sequential (1. 2. 3.)
     #[serde(rename = "ordered0")]
     Ordered0, // Zero-based (0. 1. 2.)
+    #[default]
+    #[serde(rename = "one-or-ordered", alias = "one_or_ordered")]
+    OneOrOrdered, // Either all ones OR sequential (markdownlint default)
 }
 
 /// Configuration for MD029 (Ordered list item prefix)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD029Config {
-    /// Style for ordered list numbering (default: "ordered")
+    /// Style for ordered list numbering (default: "one-or-ordered" - matches markdownlint)
     #[serde(default)]
     pub style: ListStyle,
 }

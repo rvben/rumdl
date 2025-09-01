@@ -144,3 +144,143 @@ Another **bold** word here.
     assert!(fixed.contains("`**text**`"));
     assert!(fixed.contains("Use **asterisks** or __underscores__ for bold."));
 }
+
+#[test]
+fn test_md050_html_code_content() {
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+
+    // Test emphasis inside HTML code tags should be skipped
+    let content = r#"# Test MD050 with HTML code tags
+
+This is <code>__pycache__</code> in HTML code.
+
+This is real emphasis: __emphasized text__
+
+More examples: <code>__init__.py</code>, <code>__main__.py</code>
+
+Mixed: __real__ emphasis and <code>__code__</code> together"#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should only flag the real emphasis (lines 5 and 9), not the code content
+    assert_eq!(warnings.len(), 2, "Should only flag real emphasis, not code content");
+    assert_eq!(warnings[0].line, 5);
+    assert_eq!(warnings[0].message, "Strong emphasis should use ** instead of __");
+    assert_eq!(warnings[1].line, 9);
+}
+
+#[test]
+fn test_md050_nested_html_code() {
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+
+    let content = r#"# Nested HTML code tags
+
+<p>Uses patterns like <code>**/__pycache__/**</code> for globbing.</p>
+
+Real emphasis: __should be flagged__"#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should only flag line 5, not the content in code tags on line 3
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].line, 5);
+}
+
+#[test]
+fn test_md050_multiple_code_tags() {
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+
+    let content = r#"# Multiple code tags
+
+The <code>__init__</code> method and <code>__name__</code> variable.
+
+Between tags: __this should be flagged__
+
+After tags <code>__main__</code> more text __also flagged__"#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should flag lines 5 and 7 but not the code content
+    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings[0].line, 5);
+    assert_eq!(warnings[1].line, 7);
+}
+
+#[test]
+fn test_md050_self_closing_code_tag() {
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+
+    let content = r#"# Self-closing code tag
+
+<code /> __should be flagged__
+
+<code/> __also flagged__"#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Both should be flagged as self-closing tags don't have content
+    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings[0].line, 3);
+    assert_eq!(warnings[1].line, 5);
+}
+
+#[test]
+fn test_md050_code_with_attributes() {
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+
+    let content = r#"# Code tags with attributes
+
+<code class="python">__init__.py</code> is a special file.
+
+Regular __emphasis__ here."#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should only flag line 5
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].line, 5);
+}
+
+#[test]
+fn test_md050_fix_preserves_html_code() {
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+
+    let content = r#"# Fix test
+
+Uses <code>__pycache__</code> but __this__ should be fixed."#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Should preserve code content but fix the emphasis
+    assert!(fixed.contains("<code>__pycache__</code>"));
+    assert!(fixed.contains("**this**"));
+    assert!(!fixed.contains(" __this__ "));
+}
+
+#[test]
+fn test_md050_complex_html_structure() {
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+
+    let content = r#"# Complex HTML
+
+<div>
+  <p>Text with <code>__special__</code> names.</p>
+  <p>And __emphasis__ outside code.</p>
+</div>
+
+<span>More <code>__code__</code> content</span> and __emphasis__."#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should flag lines 5 and 8
+    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings[0].line, 5);
+    assert_eq!(warnings[1].line, 8);
+}

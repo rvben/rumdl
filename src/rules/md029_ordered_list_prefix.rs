@@ -38,12 +38,52 @@ impl MD029OrderedListPrefix {
     }
 
     #[inline]
-    fn get_expected_number(&self, index: usize) -> usize {
-        match self.config.style {
-            ListStyle::One => 1,
-            ListStyle::OneOne => 1,
+    fn get_expected_number(&self, index: usize, detected_style: Option<ListStyle>) -> usize {
+        let style = detected_style.unwrap_or(self.config.style.clone());
+        match style {
+            ListStyle::One | ListStyle::OneOne => 1,
             ListStyle::Ordered => index + 1,
             ListStyle::Ordered0 => index,
+            ListStyle::OneOrOrdered => {
+                // This shouldn't be called directly for OneOrOrdered,
+                // as we should have detected the actual style
+                1
+            }
+        }
+    }
+
+    /// Detect the style being used in a list based on the first few items
+    fn detect_list_style(
+        items: &[(
+            usize,
+            &crate::lint_context::LineInfo,
+            &crate::lint_context::ListItemInfo,
+        )],
+    ) -> ListStyle {
+        if items.len() < 2 {
+            // With only one item, we can't determine the style, default to OneOne
+            return ListStyle::OneOne;
+        }
+
+        // Check the first two items to determine the pattern
+        let first_num = Self::parse_marker_number(&items[0].2.marker);
+        let second_num = Self::parse_marker_number(&items[1].2.marker);
+
+        match (first_num, second_num) {
+            (Some(1), Some(1)) => ListStyle::OneOne,   // 1. 1. pattern
+            (Some(0), Some(1)) => ListStyle::Ordered0, // 0. 1. pattern
+            (Some(1), Some(2)) => ListStyle::Ordered,  // 1. 2. pattern
+            _ => {
+                // Check if all items are 1
+                let all_ones = items
+                    .iter()
+                    .all(|(_, _, item)| Self::parse_marker_number(&item.marker) == Some(1));
+                if all_ones {
+                    ListStyle::OneOne
+                } else {
+                    ListStyle::Ordered
+                }
+            }
         }
     }
 }
@@ -574,11 +614,18 @@ impl MD029OrderedListPrefix {
             // Sort by line number to ensure correct order
             group.sort_by_key(|(line_num, _, _)| *line_num);
 
+            // Detect the style for this list group if using OneOrOrdered
+            let detected_style = if self.config.style == ListStyle::OneOrOrdered {
+                Some(Self::detect_list_style(&group))
+            } else {
+                None
+            };
+
             // Check each item in the group for correct sequence
             for (idx, (line_num, line_info, list_item)) in group.iter().enumerate() {
                 // Parse the actual number from the marker (e.g., "1." -> 1)
                 if let Some(actual_num) = Self::parse_marker_number(&list_item.marker) {
-                    let expected_num = self.get_expected_number(idx);
+                    let expected_num = self.get_expected_number(idx, detected_style.clone());
 
                     if actual_num != expected_num {
                         // Calculate byte position for the fix
@@ -699,5 +746,60 @@ mod tests {
         // Verify first and last warnings
         assert!(result[0].message.contains("2 does not match style (expected 1)"));
         assert!(result[99].message.contains("101 does not match style (expected 100)"));
+    }
+
+    #[test]
+    fn test_one_or_ordered_with_all_ones() {
+        // Test OneOrOrdered style with all 1s (should pass)
+        let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
+
+        let content = "1. First item\n1. Second item\n1. Third item";
+        let structure = DocumentStructure::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert!(result.is_empty(), "All ones should be valid in OneOrOrdered mode");
+    }
+
+    #[test]
+    fn test_one_or_ordered_with_sequential() {
+        // Test OneOrOrdered style with sequential numbering (should pass)
+        let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
+
+        let content = "1. First item\n2. Second item\n3. Third item";
+        let structure = DocumentStructure::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert!(
+            result.is_empty(),
+            "Sequential numbering should be valid in OneOrOrdered mode"
+        );
+    }
+
+    #[test]
+    fn test_one_or_ordered_with_mixed_style() {
+        // Test OneOrOrdered style with mixed numbering (should fail)
+        let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
+
+        let content = "1. First item\n2. Second item\n1. Third item";
+        let structure = DocumentStructure::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert_eq!(result.len(), 1, "Mixed style should produce one warning");
+        assert!(result[0].message.contains("1 does not match style (expected 3)"));
+    }
+
+    #[test]
+    fn test_one_or_ordered_separate_lists() {
+        // Test OneOrOrdered with separate lists using different styles (should pass)
+        let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
+
+        let content = "# First list\n\n1. Item A\n1. Item B\n\n# Second list\n\n1. Item X\n2. Item Y\n3. Item Z";
+        let structure = DocumentStructure::new(content);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        assert!(
+            result.is_empty(),
+            "Separate lists can use different styles in OneOrOrdered mode"
+        );
     }
 }

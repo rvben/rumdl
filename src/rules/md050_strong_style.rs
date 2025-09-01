@@ -74,6 +74,40 @@ impl MD050StrongStyle {
         false
     }
 
+    /// Check if a byte position is within HTML code tags (<code>...</code>)
+    /// This is separate from is_in_html_tag because we need to check the content between tags
+    fn is_in_html_code_content(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        let html_tags = ctx.html_tags();
+        let mut open_code_pos: Option<usize> = None;
+
+        for tag in html_tags.iter() {
+            // If we've passed our position, check if we're in an open code block
+            if tag.byte_offset > byte_pos {
+                return open_code_pos.is_some();
+            }
+
+            if tag.tag_name == "code" {
+                if !tag.is_closing && !tag.is_self_closing {
+                    // Opening <code> tag
+                    open_code_pos = Some(tag.byte_end);
+                } else if tag.is_closing && open_code_pos.is_some() {
+                    // Closing </code> tag
+                    if let Some(open_pos) = open_code_pos
+                        && byte_pos >= open_pos
+                        && byte_pos < tag.byte_offset
+                    {
+                        // We're between <code> and </code>
+                        return true;
+                    }
+                    open_code_pos = None;
+                }
+            }
+        }
+
+        // Check if we're still in an unclosed code tag
+        open_code_pos.is_some() && byte_pos >= open_code_pos.unwrap()
+    }
+
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let content = ctx.content;
 
@@ -91,6 +125,7 @@ impl MD050StrongStyle {
                 && !ctx.is_in_code_block_or_span(m.start())
                 && !self.is_in_link(ctx, m.start())
                 && !self.is_in_html_tag(ctx, m.start())
+                && !self.is_in_html_code_content(ctx, m.start())
             {
                 first_asterisk = Some(m);
                 break;
@@ -110,6 +145,7 @@ impl MD050StrongStyle {
                 && !ctx.is_in_code_block_or_span(m.start())
                 && !self.is_in_link(ctx, m.start())
                 && !self.is_in_html_tag(ctx, m.start())
+                && !self.is_in_html_code_content(ctx, m.start())
             {
                 first_underscore = Some(m);
                 break;
@@ -197,10 +233,11 @@ impl Rule for MD050StrongStyle {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
 
-                // Skip if this strong text is inside a code block, code span, link, or HTML tag
+                // Skip if this strong text is inside a code block, code span, link, HTML tag, or HTML code content
                 if ctx.is_in_code_block_or_span(match_byte_pos)
                     || self.is_in_link(ctx, match_byte_pos)
                     || self.is_in_html_tag(ctx, match_byte_pos)
+                    || self.is_in_html_code_content(ctx, match_byte_pos)
                 {
                     continue;
                 }
@@ -285,6 +322,7 @@ impl Rule for MD050StrongStyle {
                 !ctx.is_in_code_block_or_span(m.start())
                     && !self.is_in_link(ctx, m.start())
                     && !self.is_in_html_tag(ctx, m.start())
+                    && !self.is_in_html_code_content(ctx, m.start())
             })
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))

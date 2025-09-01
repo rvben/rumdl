@@ -663,8 +663,8 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // Both definitions are used (Markdown uses the first one)
-        assert_eq!(result.len(), 0);
+        // Should flag the duplicate definition even though it's used (matches markdownlint)
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
@@ -832,12 +832,14 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         // Should have 2 duplicate warnings (for the 2nd and 3rd definitions)
+        // Note: These are treated as exact duplicates since they normalize to the same ID
         let duplicate_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Duplicate")).collect();
         assert_eq!(duplicate_warnings.len(), 2);
 
-        // Check that the messages mention the conflict
-        assert!(duplicate_warnings[0].message.contains("conflicts with"));
-        assert!(duplicate_warnings[1].message.contains("conflicts with"));
+        // The exact duplicate messages don't include "conflicts with"
+        // Only case-variant duplicates with different normalized forms would
+        assert_eq!(duplicate_warnings[0].line, 2);
+        assert_eq!(duplicate_warnings[1].line, 3);
     }
 
     #[test]
