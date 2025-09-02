@@ -5,16 +5,13 @@ use rumdl_lib::rules::MD028NoBlanksBlockquote;
 #[test]
 fn test_md028_valid() {
     let rule = MD028NoBlanksBlockquote;
+    // With recent changes, blank lines between blockquotes are now flagged as ambiguous
     let content = "> Quote\n> Another line\n\n> New quote\n> Another line\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    if !result.is_empty() {
-        eprintln!("Unexpected warnings:");
-        for warning in &result {
-            eprintln!("  Line {}: {}", warning.line, warning.message);
-        }
-    }
-    assert!(result.is_empty());
+    // This should now flag line 3 as ambiguous
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 3);
 }
 
 #[test]
@@ -114,18 +111,20 @@ fn test_md028_indented_blockquotes() {
 #[test]
 fn test_md028_multi_blockquotes() {
     let rule = MD028NoBlanksBlockquote;
-    // Truly blank line in second blockquote
+    // With recent changes, all blank lines between blockquotes are flagged
     let content = "> First quote\n> Another line\n\n> Second quote\n> Another line\n\n> Still second quote\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 6);
+    // Both blank lines (line 3 and line 6) should be flagged
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].line, 3);
+    assert_eq!(result[1].line, 6);
     let fixed = rule.fix(&ctx).unwrap();
     let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed_result = rule.check(&fixed_ctx).unwrap();
     assert!(fixed_result.is_empty());
     assert_eq!(
         fixed,
-        "> First quote\n> Another line\n\n> Second quote\n> Another line\n>\n> Still second quote\n"
+        "> First quote\n> Another line\n>\n> Second quote\n> Another line\n>\n> Still second quote\n"
     );
 }
