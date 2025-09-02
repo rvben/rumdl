@@ -23,6 +23,7 @@ impl MD007ULIndent {
                 indent,
                 start_indented: false,
                 start_indent: 2,
+                style: md007_config::IndentStyle::TextAligned,
             },
         }
     }
@@ -115,22 +116,31 @@ impl Rule for MD007ULIndent {
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent + (item.nesting_level * self.config.indent)
                 } else {
-                    // For any nested item, check if it should align with parent's text content
-                    if item.nesting_level > 0 {
-                        let (has_parent, expected_pos) = self.get_parent_info(ctx, item.line_number, item.indentation);
-                        if has_parent {
-                            if let Some(pos) = expected_pos {
-                                // Align with parent's text content
-                                pos
-                            } else {
-                                // Fallback to standard indentation
-                                item.nesting_level * self.config.indent
-                            }
-                        } else {
+                    match self.config.style {
+                        md007_config::IndentStyle::Fixed => {
+                            // Fixed style: simple multiples of indent
                             item.nesting_level * self.config.indent
                         }
-                    } else {
-                        item.nesting_level * self.config.indent
+                        md007_config::IndentStyle::TextAligned => {
+                            // Text-aligned style: align with parent's text content
+                            if item.nesting_level > 0 {
+                                let (has_parent, expected_pos) =
+                                    self.get_parent_info(ctx, item.line_number, item.indentation);
+                                if has_parent {
+                                    if let Some(pos) = expected_pos {
+                                        // Align with parent's text content
+                                        pos
+                                    } else {
+                                        // Fallback to standard indentation
+                                        item.nesting_level * self.config.indent
+                                    }
+                                } else {
+                                    item.nesting_level * self.config.indent
+                                }
+                            } else {
+                                item.nesting_level * self.config.indent
+                            }
+                        }
                     }
                 };
 
@@ -227,22 +237,31 @@ impl Rule for MD007ULIndent {
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent + (item.nesting_level * self.config.indent)
                 } else {
-                    // For any nested item, check if it should align with parent's text content
-                    if item.nesting_level > 0 {
-                        let (has_parent, expected_pos) = self.get_parent_info(ctx, item.line_number, item.indentation);
-                        if has_parent {
-                            if let Some(pos) = expected_pos {
-                                // Align with parent's text content
-                                pos
-                            } else {
-                                // Fallback to standard indentation
-                                item.nesting_level * self.config.indent
-                            }
-                        } else {
+                    match self.config.style {
+                        md007_config::IndentStyle::Fixed => {
+                            // Fixed style: simple multiples of indent
                             item.nesting_level * self.config.indent
                         }
-                    } else {
-                        item.nesting_level * self.config.indent
+                        md007_config::IndentStyle::TextAligned => {
+                            // Text-aligned style: align with parent's text content
+                            if item.nesting_level > 0 {
+                                let (has_parent, expected_pos) =
+                                    self.get_parent_info(ctx, item.line_number, item.indentation);
+                                if has_parent {
+                                    if let Some(pos) = expected_pos {
+                                        // Align with parent's text content
+                                        pos
+                                    } else {
+                                        // Fallback to standard indentation
+                                        item.nesting_level * self.config.indent
+                                    }
+                                } else {
+                                    item.nesting_level * self.config.indent
+                                }
+                            } else {
+                                item.nesting_level * self.config.indent
+                            }
+                        }
                     }
                 };
 
@@ -770,6 +789,7 @@ tags:
             start_indented: true,
             start_indent: 4,
             indent: 2,
+            style: md007_config::IndentStyle::TextAligned,
         };
         let rule = MD007ULIndent::from_config_struct(config);
 

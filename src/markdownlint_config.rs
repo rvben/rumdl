@@ -118,7 +118,12 @@ impl MarkdownlintConfig {
                 let toml_value = toml_value.map(normalize_toml_table_keys);
                 let rule_config = sourced_config.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
-                    if let toml::Value::Table(table) = tv {
+                    if let toml::Value::Table(mut table) = tv {
+                        // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
+                        if norm_rule_key == "MD007" && !table.contains_key("style") {
+                            table.insert("style".to_string(), toml::Value::String("fixed".to_string()));
+                        }
+
                         for (k, v) in table {
                             let norm_config_key = k; // Already normalized
                             rule_config
@@ -169,6 +174,23 @@ impl MarkdownlintConfig {
                                     line: None,
                                 }],
                             });
+
+                        // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
+                        if norm_rule_key == "MD007" && !rule_config.values.contains_key("style") {
+                            rule_config.values.insert(
+                                "style".to_string(),
+                                SourcedValue {
+                                    value: toml::Value::String("fixed".to_string()),
+                                    source: ConfigSource::Markdownlint,
+                                    overrides: vec![crate::config::ConfigOverride {
+                                        value: toml::Value::String("fixed".to_string()),
+                                        source: ConfigSource::Markdownlint,
+                                        file: file.clone(),
+                                        line: None,
+                                    }],
+                                },
+                            );
+                        }
                     }
                 } else {
                     log::error!(
@@ -228,7 +250,12 @@ impl MarkdownlintConfig {
                 let toml_value = toml_value.map(normalize_toml_table_keys);
                 let rule_config = fragment.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
-                    if let toml::Value::Table(table) = tv {
+                    if let toml::Value::Table(mut table) = tv {
+                        // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
+                        if norm_rule_key == "MD007" && !table.contains_key("style") {
+                            table.insert("style".to_string(), toml::Value::String("fixed".to_string()));
+                        }
+
                         for (rk, rv) in table {
                             let norm_rk = crate::config::normalize_key(&rk);
                             let sv = rule_config.values.entry(norm_rk.clone()).or_insert_with(|| {
@@ -260,6 +287,23 @@ impl MarkdownlintConfig {
                                     line: None,
                                 }],
                             });
+
+                        // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
+                        if norm_rule_key == "MD007" && !rule_config.values.contains_key("style") {
+                            rule_config.values.insert(
+                                "style".to_string(),
+                                crate::config::SourcedValue {
+                                    value: toml::Value::String("fixed".to_string()),
+                                    source: crate::config::ConfigSource::Markdownlint,
+                                    overrides: vec![crate::config::ConfigOverride {
+                                        value: toml::Value::String("fixed".to_string()),
+                                        source: crate::config::ConfigSource::Markdownlint,
+                                        file: file.clone(),
+                                        line: None,
+                                    }],
+                                },
+                            );
+                        }
                     }
                 }
             }

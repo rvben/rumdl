@@ -85,13 +85,92 @@ impl Rule for MD012NoMultipleBlanks {
                 } else if in_front_matter {
                     in_front_matter = false;
                 }
-                // Reset blank count when entering/exiting front matter
+                // Check for excess blanks before resetting
+                if blank_count > self.config.maximum {
+                    let location = if blank_start == 0 {
+                        "at start of file"
+                    } else {
+                        "between content"
+                    };
+                    for i in self.config.maximum..blank_count {
+                        let excess_line_num = blank_start + i;
+                        if lines_to_check.contains(&excess_line_num) {
+                            let excess_line = excess_line_num + 1;
+                            let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
+                            let (start_line, start_col, end_line, end_col) =
+                                calculate_line_range(excess_line, excess_line_content);
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                                    location, self.config.maximum, blank_count
+                                ),
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
+                                fix: Some(Fix {
+                                    range: {
+                                        let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
+                                        let line_end = _line_index
+                                            .get_line_start_byte(excess_line + 1)
+                                            .unwrap_or(line_start + 1);
+                                        line_start..line_end
+                                    },
+                                    replacement: String::new(),
+                                }),
+                            });
+                        }
+                    }
+                }
                 blank_count = 0;
+                lines_to_check.clear();
                 continue;
             }
 
             // Check for code block boundaries
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                // Check for excess blanks before entering/exiting code block
+                if blank_count > self.config.maximum {
+                    let location = if blank_start == 0 {
+                        "at start of file"
+                    } else {
+                        "between content"
+                    };
+                    for i in self.config.maximum..blank_count {
+                        let excess_line_num = blank_start + i;
+                        if lines_to_check.contains(&excess_line_num) {
+                            let excess_line = excess_line_num + 1;
+                            let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
+                            let (start_line, start_col, end_line, end_col) =
+                                calculate_line_range(excess_line, excess_line_content);
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                                    location, self.config.maximum, blank_count
+                                ),
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
+                                fix: Some(Fix {
+                                    range: {
+                                        let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
+                                        let line_end = _line_index
+                                            .get_line_start_byte(excess_line + 1)
+                                            .unwrap_or(line_start + 1);
+                                        line_start..line_end
+                                    },
+                                    replacement: String::new(),
+                                }),
+                            });
+                        }
+                    }
+                }
+
                 if !in_code_block {
                     // Entering code block
                     in_code_block = true;
@@ -101,8 +180,8 @@ impl Rule for MD012NoMultipleBlanks {
                     in_code_block = false;
                     code_fence_marker = "";
                 }
-                // Reset blank count immediately when entering code block
                 blank_count = 0;
+                lines_to_check.clear();
                 continue;
             }
 
@@ -116,7 +195,47 @@ impl Rule for MD012NoMultipleBlanks {
             // Check for indented code blocks (4+ spaces)
             let is_indented_code = line.len() >= 4 && line.starts_with("    ") && !line.trim().is_empty();
             if is_indented_code {
+                // Check for excess blanks before indented code block
+                if blank_count > self.config.maximum {
+                    let location = if blank_start == 0 {
+                        "at start of file"
+                    } else {
+                        "between content"
+                    };
+                    for i in self.config.maximum..blank_count {
+                        let excess_line_num = blank_start + i;
+                        if lines_to_check.contains(&excess_line_num) {
+                            let excess_line = excess_line_num + 1;
+                            let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
+                            let (start_line, start_col, end_line, end_col) =
+                                calculate_line_range(excess_line, excess_line_content);
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name()),
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
+                                    location, self.config.maximum, blank_count
+                                ),
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
+                                fix: Some(Fix {
+                                    range: {
+                                        let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
+                                        let line_end = _line_index
+                                            .get_line_start_byte(excess_line + 1)
+                                            .unwrap_or(line_start + 1);
+                                        line_start..line_end
+                                    },
+                                    replacement: String::new(),
+                                }),
+                            });
+                        }
+                    }
+                }
                 blank_count = 0;
+                lines_to_check.clear();
                 continue;
             }
 

@@ -1,6 +1,19 @@
 use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
+/// Indentation style for unordered lists
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum IndentStyle {
+    /// Text-aligned: Nested items align with parent's text content (rumdl default)
+    #[default]
+    #[serde(rename = "text-aligned", alias = "text_aligned")]
+    TextAligned,
+    /// Fixed: Use fixed multiples of indent size (markdownlint compatible)
+    #[serde(rename = "fixed")]
+    Fixed,
+}
+
 /// Configuration for MD007 (Unordered list indentation)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -16,6 +29,10 @@ pub struct MD007Config {
     /// Number of spaces for first level indent when start_indented is true (default: 2)
     #[serde(default = "default_start_indent")]
     pub start_indent: usize,
+
+    /// Indentation style: text-aligned (default) or fixed (markdownlint compatible)
+    #[serde(default)]
+    pub style: IndentStyle,
 }
 
 fn default_indent() -> usize {
@@ -32,6 +49,7 @@ impl Default for MD007Config {
             indent: default_indent(),
             start_indented: false,
             start_indent: default_start_indent(),
+            style: IndentStyle::default(),
         }
     }
 }
