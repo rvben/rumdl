@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.134] - 2025-09-02
+
+### Added
+- **MD051**: HTML anchor tag support for any element with id/name attributes
+  - Supports `<a>`, `<span>`, `<div>` and any other HTML element with id attribute
+  - Case-sensitive matching for HTML anchors (case-insensitive for Markdown)
+  - Handles multiple id attributes (only first is used per HTML spec)
+
+### Fixed
+- **MD007**: Implemented proper indentation style configuration for markdownlint compatibility
+  - Added IndentStyle enum with TextAligned (default) and Fixed (markdownlint) modes
+  - Auto-configures style="fixed" when loading from .markdownlint.yaml files
+  - Resolves 5-space indentation detection issues (#77)
+- **MD029**: Improved list numbering style compatibility
+  - Added OneOrOrdered style (markdownlint default) accepting either all-ones or sequential
+  - Changed default from Ordered to OneOrOrdered for better compatibility
+- **MD050**: Fixed false positives for emphasis patterns inside HTML `<code>` tags
+  - Patterns like `__pycache__`, `__init__` no longer flagged inside code elements
+- **MD052**: Fixed reference checking to skip HTML content lines
+  - Skip any line starting with '<' to match markdownlint behavior
+  - Fixed regex to properly handle nested brackets in references like `[`Union[T, None]`]`
+- **MD053**: Improved duplicate reference detection
+  - Detect when same reference is defined multiple times
+  - Handle case-insensitive duplicates per CommonMark spec
+  - Remove overly aggressive filters that skip valid references
+- **MD028**: Aligned with markdownlint behavior for blank lines in blockquotes
+  - Flag all blank lines between blockquotes as ambiguous
+  - Better distinguish blockquote separators from internal blank lines
+- **MD005**: Fixed respect for MD007 configuration and nested list handling
+- **MD006**: Skip validation for lists inside blockquotes where indentation is expected
+
 ## [0.0.133] - 2025-08-30
 
 ### Fixed
@@ -527,7 +558,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.133...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.134...HEAD
+[0.0.134]: https://github.com/rvben/rumdl/compare/v0.0.133...v0.0.134
 [0.0.133]: https://github.com/rvben/rumdl/compare/v0.0.132...v0.0.133
 [0.0.132]: https://github.com/rvben/rumdl/compare/v0.0.131...v0.0.132
 [0.0.131]: https://github.com/rvben/rumdl/compare/v0.0.130...v0.0.131
