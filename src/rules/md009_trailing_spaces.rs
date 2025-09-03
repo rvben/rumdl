@@ -153,7 +153,10 @@ impl Rule for MD009TrailingSpaces {
                         trimmed.len() + 1,
                         trailing_spaces,
                     ),
-                    replacement: if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 {
+                    replacement: if !self.config.strict
+                        && !is_truly_last_line
+                        && trailing_spaces == self.config.br_spaces
+                    {
                         " ".repeat(self.config.br_spaces)
                     } else {
                         String::new()
@@ -236,11 +239,15 @@ impl Rule for MD009TrailingSpaces {
                 false
             };
 
-            // In non-strict mode, preserve line breaks by normalizing to br_spaces
+            // In non-strict mode, preserve line breaks ONLY if they have exactly br_spaces
             // BUT: Never preserve trailing spaces in headings or empty blockquotes as they serve no purpose
-            if !self.config.strict && !is_truly_last_line && trailing_spaces > 0 && !is_heading && !is_empty_blockquote
+            if !self.config.strict
+                && !is_truly_last_line
+                && trailing_spaces == self.config.br_spaces
+                && !is_heading
+                && !is_empty_blockquote
             {
-                // Optimize for common case of 2 spaces
+                // Preserve the exact number of spaces for hard line breaks
                 match self.config.br_spaces {
                     0 => {}
                     1 => result.push(' '),
@@ -330,7 +337,10 @@ mod tests {
         let content = "Line with spaces   \nAnother line  \nClean line";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "Line with spaces  \nAnother line  \nClean line");
+        // Line 1: 3 spaces -> removed (doesn't match br_spaces=2)
+        // Line 2: 2 spaces -> kept (matches br_spaces=2)
+        // Line 3: no spaces -> unchanged
+        assert_eq!(fixed, "Line with spaces\nAnother line  \nClean line");
     }
 
     #[test]
@@ -366,19 +376,19 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // br_spaces=2, so lines with exactly 2 spaces are OK
-        // Line 2 has 3 spaces (will be normalized to 2)
+        // Line 2 has 3 spaces (should be removed, not normalized)
         // Line 3 has 1 space and is last line without newline (will be removed)
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 2);
         assert_eq!(result[1].line, 3);
 
         let fixed = rule.fix(&ctx).unwrap();
-        // Line 1: keeps 2 spaces
-        // Line 2: normalized from 3 to 2 spaces
+        // Line 1: keeps 2 spaces (exact match with br_spaces)
+        // Line 2: removes all 3 spaces (doesn't match br_spaces)
         // Line 3: last line without newline, spaces removed
         assert_eq!(
             fixed,
-            "Line with two spaces  \nLine with three spaces  \nLine with one space"
+            "Line with two spaces  \nLine with three spaces\nLine with one space"
         );
     }
 
@@ -586,14 +596,16 @@ mod tests {
         let content = "> > Nested  \n> >   \n> Normal  ";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Line 2 has empty blockquote, line 3 is last line without newline
+        // Line 2 has empty blockquote with 3 spaces, line 3 is last line without newline
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 2);
         assert_eq!(result[1].line, 3);
 
         let fixed = rule.fix(&ctx).unwrap();
-        // The fix adds a single space after empty blockquote markers
-        assert_eq!(fixed, "> > Nested  \n> >  \n> Normal");
+        // Line 1: Keeps 2 spaces (exact match with br_spaces)
+        // Line 2: Empty blockquote with 3 spaces -> removes all (doesn't match br_spaces)
+        // Line 3: Last line without newline -> removes all spaces
+        assert_eq!(fixed, "> > Nested  \n> >\n> Normal");
     }
 
     #[test]
@@ -607,5 +619,66 @@ mod tests {
         // Line 2 is last line without newline, so it's flagged
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
+    fn test_issue_80_no_space_normalization() {
+        // Test for GitHub issue #80 - MD009 should not add spaces when removing trailing spaces
+        let rule = MD009TrailingSpaces::new(2, false); // br_spaces=2
+
+        // Test that 1 trailing space is removed, not normalized to 2
+        let content = "Line with one space \nNext line";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].message, "Trailing space found");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line with one space\nNext line");
+
+        // Test that 3 trailing spaces are removed, not normalized to 2
+        let content = "Line with three spaces   \nNext line";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].message, "3 trailing spaces found");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line with three spaces\nNext line");
+
+        // Test that exactly 2 trailing spaces are preserved
+        let content = "Line with two spaces  \nNext line";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0); // Should not flag lines with exact br_spaces
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line with two spaces  \nNext line");
+    }
+
+    #[test]
+    fn test_different_br_spaces_values() {
+        // Test with br_spaces=0 (no trailing spaces allowed)
+        let rule = MD009TrailingSpaces::new(0, false);
+        let content = "Line with one space \nLine with two spaces  ";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2); // Both lines should be flagged
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line with one space\nLine with two spaces");
+
+        // Test with br_spaces=1 (exactly 1 trailing space for line breaks)
+        let rule = MD009TrailingSpaces::new(1, false);
+        let content = "Line with one space \nLine with two spaces  ";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1); // Only line 2 should be flagged
+        assert_eq!(result[0].line, 2);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Line with one space \nLine with two spaces");
     }
 }
