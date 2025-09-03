@@ -5,11 +5,8 @@
 ![rumdl Logo](https://raw.githubusercontent.com/rvben/rumdl/main/assets/logo.png)
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rvben/rumdl/build.yml?branch=main)](https://github.com/rvben/rumdl/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Crates.io](https://img.shields.io/crates/v/rumdl)](https://crates.io/crates/rumdl)
-[![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest)
-[![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Crates.io](https://img.shields.io/crates/v/rumdl)](https://crates.io/crates/rumdl)
+[![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/) [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest) [![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers)
 
 ## A modern Markdown linter and formatter, built for speed with Rust
 
@@ -36,9 +33,8 @@ rumdl init
 
 ## Overview
 
-rumdl is a high-performance Markdown linter and formatter that helps ensure consistency and best practices
-in your Markdown files. Inspired by [ruff](https://github.com/astral-sh/ruff)'s approach to Python linting,
-rumdl brings similar speed and developer experience improvements to the Markdown ecosystem.
+rumdl is a high-performance Markdown linter and formatter that helps ensure consistency and best practices in your Markdown files. Inspired by [ruff](https://github.com/astral-sh/ruff) 's approach to
+Python linting, rumdl brings similar speed and developer experience improvements to the Markdown ecosystem.
 
 It offers:
 
@@ -177,7 +173,8 @@ The extension provides:
 - 📋 Hover tooltips with rule documentation
 - ⚡ Lightning-fast performance with zero lag
 
-The CLI will automatically detect VS Code, Cursor, or Windsurf and install the appropriate extension. See the [VS Code extension documentation](https://github.com/rvben/rumdl/blob/main/docs/vscode-extension.md) for more details.
+The CLI will automatically detect VS Code, Cursor, or Windsurf and install the appropriate extension. See the
+[VS Code extension documentation](https://github.com/rvben/rumdl/blob/main/docs/vscode-extension.md) for more details.
 
 ## Usage
 
@@ -223,6 +220,9 @@ rumdl check --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 
 # Don't respect gitignore files (note: --respect-gitignore defaults to true)
 rumdl check --respect-gitignore=false .
+
+# Force exclude patterns even for explicitly specified files (useful for pre-commit)
+rumdl check excluded.md --force-exclude  # Will respect exclude patterns in config
 ```
 
 ### Stdin/Stdout Formatting
@@ -284,6 +284,33 @@ repos:
 
 When you run `pre-commit install` or `pre-commit run`, pre-commit will automatically install `rumdl` in an isolated Python environment using pip. You do **not** need to install rumdl manually.
 
+### Excluding Files in Pre-commit
+
+By default, when pre-commit passes files explicitly to rumdl, the exclude patterns in your `.rumdl.toml` configuration file are ignored. This is intentional behavior - if you explicitly specify a
+file, it gets checked.
+
+However, for pre-commit workflows where you want to exclude certain files even when they're passed explicitly, you have two options:
+
+1. **Use `force_exclude` in your configuration file:**
+
+   ```toml
+   # .rumdl.toml
+   [global]
+   exclude = ["generated/*.md", "vendor/**"]
+   force_exclude = true  # Enforce excludes even for explicitly provided files
+   ```
+
+2. **Use the `--force-exclude` flag in your pre-commit config:**
+
+   ```yaml
+   repos:
+     - repo: https://github.com/rvben/rumdl-pre-commit
+       rev: v0.0.99
+       hooks:
+         - id: rumdl
+           args: [--force-exclude]  # Respect exclude patterns from config
+   ```
+
 ## CI/CD Integration
 
 ### GitHub Actions
@@ -344,6 +371,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
 - `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
 - `--respect-gitignore`: Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)
+- `--force-exclude`: Enforce exclude patterns even for explicitly specified files (useful for pre-commit hooks)
 - `-v, --verbose`: Show detailed output
 - `--profile`: Show profiling information
 - `--statistics`: Show rule violation statistics summary
@@ -540,9 +568,8 @@ rumdl can be configured in several ways:
 
 ### Configuration Discovery
 
-rumdl automatically searches for configuration files by traversing up the directory tree from the current
-working directory, similar to tools like `git`, `ruff`, and `eslint`. This means you can run rumdl from any
-subdirectory of your project and it will find the configuration file at the project root.
+rumdl automatically searches for configuration files by traversing up the directory tree from the current working directory, similar to tools like `git` , `ruff` , and `eslint` . This means you can
+run rumdl from any subdirectory of your project and it will find the configuration file at the project root.
 
 The search follows these rules:
 - Searches upward for `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml` (with `[tool.rumdl]` section)
@@ -595,13 +622,13 @@ indent = 2
 
 rumdl provides seamless compatibility with existing markdownlint configurations:
 
-**Automatic Discovery**: rumdl automatically detects and loads markdownlint config files:
+** Automatic Discovery**: rumdl automatically detects and loads markdownlint config files:
 
 - `.markdownlint.json` / `.markdownlint.jsonc`
 - `.markdownlint.yaml` / `.markdownlint.yml`
 - `markdownlint.json` / `markdownlint.yaml`
 
-**Explicit Import**: Convert markdownlint configs to rumdl format:
+** Explicit Import**: Convert markdownlint configs to rumdl format:
 
 ```bash
 # Convert to .rumdl.toml
@@ -689,8 +716,8 @@ Both kebab-case (`line-length`, `ignore-gitignore`) and snake_case (`line_length
 
 #### Effective Configuration (`rumdl config`)
 
-The `rumdl config` command prints the **full effective configuration** (defaults + all overrides), showing every key and its value, annotated with the source of each value.
-The output is colorized and the `[from ...]` annotation is globally aligned for easy scanning.
+The `rumdl config` command prints the **full effective configuration** (defaults + all overrides), showing every key and its value, annotated with the source of each value. The output is colorized and
+the `[from ...]` annotation is globally aligned for easy scanning.
 
 #### Example output
 
@@ -707,7 +734,7 @@ The output is colorized and the `[from ...]` annotation is globally aligned for 
   ...
 ```
 
-- **Keys** are cyan, **values** are yellow, and the `[from ...]` annotation is colored by source:
+- ** Keys** are cyan, **values** are yellow, and the `[from ...]` annotation is colored by source:
   - Green: CLI
   - Blue: `.rumdl.toml`
   - Magenta: `pyproject.toml`
@@ -725,6 +752,7 @@ disable = []
 exclude = []
 include = []
 respect_gitignore = true
+force_exclude = false  # Set to true to exclude files even when explicitly specified
 
 [MD013]
 line_length = 80

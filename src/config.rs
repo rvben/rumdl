@@ -174,6 +174,13 @@ pub struct GlobalConfig {
     /// When set, adjusts parsing and validation rules for that specific Markdown variant
     #[serde(default)]
     pub flavor: MarkdownFlavor,
+
+    /// Whether to enforce exclude and extend-exclude patterns even for paths that are passed explicitly.
+    /// By default (false), rumdl will lint any paths passed in directly, even if they would typically be excluded.
+    /// Setting this to true will cause rumdl to respect exclusions unequivocally.
+    /// This is useful for pre-commit, which explicitly passes all changed files.
+    #[serde(default)]
+    pub force_exclude: bool,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -198,6 +205,7 @@ impl Default for GlobalConfig {
             fixable: Vec::new(),
             unfixable: Vec::new(),
             flavor: MarkdownFlavor::default(),
+            force_exclude: false,
         }
     }
 }
@@ -1115,6 +1123,7 @@ pub struct SourcedGlobalConfig {
     pub fixable: SourcedValue<Vec<String>>,
     pub unfixable: SourcedValue<Vec<String>>,
     pub flavor: SourcedValue<MarkdownFlavor>,
+    pub force_exclude: SourcedValue<bool>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -1130,6 +1139,7 @@ impl Default for SourcedGlobalConfig {
             fixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             unfixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             flavor: SourcedValue::new(MarkdownFlavor::default(), ConfigSource::Default),
+            force_exclude: SourcedValue::new(false, ConfigSource::Default),
         }
     }
 }
@@ -1226,6 +1236,19 @@ impl SourcedConfig {
             fragment.global.flavor.source,
             fragment.global.flavor.overrides.first().and_then(|o| o.file.clone()),
             fragment.global.flavor.overrides.first().and_then(|o| o.line),
+        );
+
+        // Merge force_exclude
+        self.global.force_exclude.merge_override(
+            fragment.global.force_exclude.value,
+            fragment.global.force_exclude.source,
+            fragment
+                .global
+                .force_exclude
+                .overrides
+                .first()
+                .and_then(|o| o.file.clone()),
+            fragment.global.force_exclude.overrides.first().and_then(|o| o.line),
         );
 
         // Merge output_format if present
@@ -1608,6 +1631,7 @@ impl From<SourcedConfig> for Config {
             fixable: sourced.global.fixable.value,
             unfixable: sourced.global.unfixable.value,
             flavor: sourced.global.flavor.value,
+            force_exclude: sourced.global.force_exclude.value,
         };
         Config { global, rules }
     }
@@ -1886,6 +1910,15 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                     .push_override(value, source, file.clone(), None);
             }
 
+            if let Some(force_exclude) = table.get("force-exclude").or_else(|| table.get("force_exclude"))
+                && let Ok(value) = bool::deserialize(force_exclude.clone())
+            {
+                fragment
+                    .global
+                    .force_exclude
+                    .push_override(value, source, file.clone(), None);
+            }
+
             if let Some(output_format) = table.get("output-format").or_else(|| table.get("output_format"))
                 && let Ok(value) = String::deserialize(output_format.clone())
             {
@@ -1968,6 +2001,8 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 "exclude",
                 "respect_gitignore",
                 "respect-gitignore", // Added kebab-case here too
+                "force_exclude",
+                "force-exclude",
                 "line_length",
                 "line-length",
                 "output_format",
@@ -2157,6 +2192,23 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                         fragment
                             .global
                             .respect_gitignore
+                            .push_override(val, source, file.clone(), None);
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected boolean for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "force_exclude" | "force-exclude" => {
+                    // Handle both cases
+                    if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
+                        let val = *formatted_bool.value();
+                        fragment
+                            .global
+                            .force_exclude
                             .push_override(val, source, file.clone(), None);
                     } else {
                         log::warn!(

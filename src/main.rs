@@ -300,6 +300,13 @@ struct CheckArgs {
     /// Run in watch mode by re-running whenever files change
     #[arg(short, long, help = "Run in watch mode by re-running whenever files change")]
     watch: bool,
+
+    /// Enforce exclude patterns even for paths that are passed explicitly.
+    /// By default, rumdl will lint any paths passed in directly, even if they would typically be excluded.
+    /// Setting this flag will cause rumdl to respect exclusions unequivocally.
+    /// This is useful for pre-commit, which explicitly passes all changed files.
+    #[arg(long, help = "Enforce exclude patterns even for explicitly specified files")]
+    force_exclude: bool,
 }
 
 // Get a complete set of enabled rules based on CLI options and config
@@ -591,12 +598,15 @@ fn find_markdown_files(
     // --- Pre-check for explicit file paths ---
     // If not in discovery mode, validate that specified paths exist
     if !is_discovery_mode {
+        // Check if we should apply excludes to explicitly provided files
+        let should_force_exclude = args.force_exclude || config.global.force_exclude;
+
         for path_str in paths {
             let path = Path::new(path_str);
             if !path.exists() {
                 return Err(format!("File not found: {path_str}").into());
             }
-            // If it's a file, check if it's a markdown file and add it directly
+            // If it's a file, check if it's a markdown file
             if path.is_file()
                 && let Some(ext) = path.extension()
                 && (ext == "md" || ext == "markdown")
@@ -606,12 +616,37 @@ fn find_markdown_files(
                 } else {
                     path_str.clone()
                 };
-                file_paths.push(cleaned_path);
+
+                // If force_exclude is enabled, check if this file should be excluded
+                if should_force_exclude && !final_exclude_patterns.is_empty() {
+                    let mut should_exclude = false;
+                    for pattern in &final_exclude_patterns {
+                        // Use globset for pattern matching
+                        if let Ok(glob) = globset::Glob::new(pattern) {
+                            let matcher = glob.compile_matcher();
+                            if matcher.is_match(&cleaned_path) {
+                                should_exclude = true;
+                                if args.verbose {
+                                    eprintln!(
+                                        "Excluding explicitly provided file due to force_exclude: {cleaned_path}"
+                                    );
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if !should_exclude {
+                        file_paths.push(cleaned_path);
+                    }
+                } else {
+                    // Default behavior: add all explicitly provided files
+                    file_paths.push(cleaned_path);
+                }
             }
         }
 
         // If we found files directly, skip the walker
-        if !file_paths.is_empty() {
+        if !file_paths.is_empty() || should_force_exclude {
             file_paths.sort();
             file_paths.dedup();
             return Ok(file_paths);
