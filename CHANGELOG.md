@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.136] - 2025-09-03
+
 ## [0.0.135] - 2025-09-03
 
 ## [0.0.134] - 2025-09-02
@@ -560,7 +562,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.135...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.136...HEAD
+[0.0.136]: https://github.com/rvben/rumdl/compare/v0.0.135...v0.0.136
 [0.0.135]: https://github.com/rvben/rumdl/compare/v0.0.134...v0.0.135
 [0.0.134]: https://github.com/rvben/rumdl/compare/v0.0.133...v0.0.134
 [0.0.133]: https://github.com/rvben/rumdl/compare/v0.0.132...v0.0.133
