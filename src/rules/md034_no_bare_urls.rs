@@ -769,9 +769,12 @@ mod tests {
         );
 
         // Performance assertion - should complete reasonably fast
+        // Note: In debug builds this may take longer, so we use a higher threshold
+        let max_duration_ms = if cfg!(debug_assertions) { 1000 } else { 100 };
         assert!(
-            avg_check_duration.as_millis() < 100,
-            "MD034 check should complete in under 100ms, took {}ms",
+            avg_check_duration.as_millis() < max_duration_ms,
+            "MD034 check should complete in under {}ms, took {}ms",
+            max_duration_ms,
             avg_check_duration.as_millis()
         );
 
