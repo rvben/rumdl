@@ -77,9 +77,13 @@ fn test_md009_fix() {
     let content = "Line with spaces   \nAnother line  \nNo spaces\n  \n```\nCode   \n```\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
+    // Default br_spaces=2, so only lines with exactly 2 spaces are preserved
+    // Line 1: 3 spaces -> removed
+    // Line 2: 2 spaces -> preserved
+    // Line 4: 2 spaces (empty line) -> removed
     assert_eq!(
         result,
-        "Line with spaces  \nAnother line  \nNo spaces\n\n```\nCode   \n```\n"
+        "Line with spaces\nAnother line  \nNo spaces\n\n```\nCode   \n```\n"
     );
 }
 
@@ -157,9 +161,11 @@ fn test_md009_fix_preserves_line_breaks() {
     let content = "Line with one space \nLine with two  \nLine with three   \nLine with four    \n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
+    // Only lines with exactly 2 spaces (br_spaces) are preserved
+    // Lines with 1, 3, or 4 spaces have them removed
     assert_eq!(
         result,
-        "Line with one space  \nLine with two  \nLine with three  \nLine with four  \n"
+        "Line with one space\nLine with two  \nLine with three\nLine with four\n"
     );
 }
 
@@ -297,7 +303,9 @@ fn test_md009_fix_with_crlf() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
     // The fix normalizes to \n line endings
-    assert_eq!(result, "Line one  \nLine two  \n");
+    // Line 1: 2 spaces -> preserved (matches br_spaces=2)
+    // Line 2: 3 spaces -> removed (doesn't match br_spaces=2)
+    assert_eq!(result, "Line one  \nLine two\n");
 }
 
 #[test]
@@ -317,10 +325,12 @@ fn test_md009_fix_complex_document() {
         "# Title   \n\nParagraph  \n\n- List   \n  - Nested  \n\n```\ncode   \n```\n\n> Quote   \n>    \n\nEnd  ";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
-    // Headings should have all trailing spaces removed, regular text preserves 2 spaces for line breaks
+    // Headings should have all trailing spaces removed
+    // Lines with exactly 2 spaces are preserved
+    // Lines with 3 spaces are removed
     assert_eq!(
         result,
-        "# Title\n\nParagraph  \n\n- List  \n  - Nested  \n\n```\ncode   \n```\n\n> Quote  \n>\n\nEnd" // Empty blockquote line trailing spaces removed
+        "# Title\n\nParagraph  \n\n- List\n  - Nested  \n\n```\ncode   \n```\n\n> Quote\n>\n\nEnd" // Empty blockquote line trailing spaces removed
     );
 }
 

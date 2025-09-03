@@ -346,13 +346,15 @@ fn test_code_blocks_configurable() {
 
 #[test]
 fn test_tables_configurable() {
-    let content = "| This is a very long table cell | Another very long table cell that exceeds limit |";
+    // Use a proper table with header and delimiter
+    let content = "| This is a very long table cell | Another very long table cell that exceeds limit |\n|----------------------------------|---------------------------------------------------|";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // With tables = true (check tables - include in line length checking)
     let rule_check = MD013LineLength::new(50, true, true, true, false);
     let result_check = rule_check.check(&ctx).unwrap();
-    assert_eq!(result_check.len(), 1);
+    // Both lines exceed 50 characters
+    assert_eq!(result_check.len(), 2);
 
     // With tables = false (skip tables - exclude from line length checking)
     let rule_skip = MD013LineLength::new(50, true, false, true, false);

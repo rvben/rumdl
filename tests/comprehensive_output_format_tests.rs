@@ -250,11 +250,9 @@ fn test_output_format_with_fix_mode() {
 
     // Verify the file was actually fixed
     let fixed_content = fs::read_to_string(&test_file).unwrap();
-    // In non-strict mode, MD009 normalizes trailing spaces to 2 spaces (for line breaks)
-    assert!(
-        fixed_content.contains("  \n"),
-        "Trailing spaces should be normalized to 2 spaces"
-    );
+    // MD009 removes trailing spaces that don't match br_spaces (default 2)
+    // Since the content had 3 spaces, they should be removed
+    assert!(!fixed_content.contains("   "), "Trailing spaces (3) should be removed");
     assert!(
         fixed_content.contains("\n\n"),
         "Blank line should be added after heading"
