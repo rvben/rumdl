@@ -8,6 +8,7 @@ use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{
     IMAGE_REF_PATTERN, INLINE_LINK_REGEX as MARKDOWN_LINK_PATTERN, LINK_REF_PATTERN, URL_IN_TEXT, URL_PATTERN,
 };
+use crate::utils::table_utils::TableUtils;
 use toml;
 
 pub mod md013_config;
@@ -34,24 +35,6 @@ impl MD013LineLength {
 
     pub fn from_config_struct(config: MD013Config) -> Self {
         Self { config }
-    }
-
-    fn is_in_table(lines: &[&str], current_line: usize) -> bool {
-        // Check if current line is part of a table
-        let current = lines[current_line].trim();
-        if current.starts_with('|') || current.starts_with("|-") {
-            return true;
-        }
-
-        // Check if line is between table markers
-        if current_line > 0 && current_line + 1 < lines.len() {
-            let prev = lines[current_line - 1].trim();
-            let next = lines[current_line + 1].trim();
-            if (prev.starts_with('|') || prev.starts_with("|-")) && (next.starts_with('|') || next.starts_with("|-")) {
-                return true;
-            }
-        }
-        false
     }
 
     fn should_ignore_line(
@@ -203,24 +186,21 @@ impl Rule for MD013LineLength {
         // Create a quick lookup set for heading lines
         let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
 
-        // Pre-compute table lines using the same logic as is_in_table function
+        // Use TableUtils to find all table blocks in the document
+        let table_blocks = TableUtils::find_table_blocks(content, ctx);
+
+        // Pre-compute table lines from the table blocks
         let table_lines_set: std::collections::HashSet<usize> = {
             let mut table_lines = std::collections::HashSet::new();
 
-            for (i, _line) in lines.iter().enumerate() {
-                let line_number = i + 1;
-
-                // Quick check if in code block using pre-computed blocks from context or structure
-                let in_code = if !ctx.code_blocks.is_empty() {
-                    ctx.code_blocks
-                        .iter()
-                        .any(|(start, end)| *start <= line_number && line_number <= *end)
-                } else {
-                    structure.is_in_code_block(line_number)
-                };
-
-                if !in_code && Self::is_in_table(&lines, i) {
-                    table_lines.insert(line_number);
+            for table in &table_blocks {
+                // Add header line
+                table_lines.insert(table.header_line + 1); // Convert 0-indexed to 1-indexed
+                // Add delimiter line
+                table_lines.insert(table.delimiter_line + 1);
+                // Add all content lines
+                for &line in &table.content_lines {
+                    table_lines.insert(line + 1); // Convert 0-indexed to 1-indexed
                 }
             }
             table_lines
@@ -393,7 +373,8 @@ impl MD013LineLength {
         }
 
         // Skip tables (they have complex formatting)
-        if Self::is_in_table(&[line], 0) {
+        // Check if line looks like a table row
+        if TableUtils::is_potential_table_row(line) {
             return true;
         }
 
@@ -569,19 +550,6 @@ mod tests {
     }
 
     #[test]
-    fn test_table_detection() {
-        let lines = vec![
-            "| Column 1 | Column 2 |",
-            "|----------|----------|",
-            "| Value 1  | Value 2  |",
-        ];
-
-        assert!(MD013LineLength::is_in_table(&lines, 0));
-        assert!(MD013LineLength::is_in_table(&lines, 1));
-        assert!(MD013LineLength::is_in_table(&lines, 2));
-    }
-
-    #[test]
     fn test_table_checked_when_enabled() {
         let rule = MD013LineLength::new(30, false, true, false, false);
         let content = "| This is a very long table header | Another long column header |\n|-----------------------------------|-------------------------------|";
@@ -589,6 +557,74 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2); // Both table lines exceed limit
+    }
+
+    #[test]
+    fn test_issue_78_tables_after_fenced_code_blocks() {
+        // Test for GitHub issue #78 - tables with tables=false after fenced code blocks
+        let rule = MD013LineLength::new(20, false, false, false, false); // tables=false
+        let content = r#"# heading
+
+```plain
+some code block longer than 20 chars length
+```
+
+this is a very long line
+
+| column A | column B |
+| -------- | -------- |
+| `var` | `val` |
+| value 1 | value 2 |
+
+correct length line"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag line 7 ("this is a very long line"), not the table lines
+        assert_eq!(result.len(), 1, "Should only flag 1 line (the non-table long line)");
+        assert_eq!(result[0].line, 7, "Should flag line 7");
+        assert!(result[0].message.contains("24 exceeds 20"));
+    }
+
+    #[test]
+    fn test_issue_78_tables_with_inline_code() {
+        // Test that tables with inline code (backticks) are properly detected as tables
+        let rule = MD013LineLength::new(20, false, false, false, false); // tables=false
+        let content = r#"| column A | column B |
+| -------- | -------- |
+| `var with very long name` | `val exceeding limit` |
+| value 1 | value 2 |
+
+This line exceeds limit"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag the last line, not the table lines
+        assert_eq!(result.len(), 1, "Should only flag the non-table line");
+        assert_eq!(result[0].line, 6, "Should flag line 6");
+    }
+
+    #[test]
+    fn test_issue_78_indented_code_blocks() {
+        // Test with indented code blocks instead of fenced
+        let rule = MD013LineLength::new(20, false, false, false, false); // tables=false
+        let content = r#"# heading
+
+    some code block longer than 20 chars length
+
+this is a very long line
+
+| column A | column B |
+| -------- | -------- |
+| value 1 | value 2 |
+
+correct length line"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag line 5 ("this is a very long line"), not the table lines
+        assert_eq!(result.len(), 1, "Should only flag 1 line (the non-table long line)");
+        assert_eq!(result[0].line, 5, "Should flag line 5");
     }
 
     #[test]
