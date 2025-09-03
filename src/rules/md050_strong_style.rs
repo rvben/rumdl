@@ -67,6 +67,8 @@ impl MD050StrongStyle {
     fn is_in_html_tag(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
         // Check HTML tags
         for html_tag in ctx.html_tags().iter() {
+            // Only consider the position inside the tag if it's between the < and >
+            // Don't include positions after the tag ends
             if html_tag.byte_offset <= byte_pos && byte_pos < html_tag.byte_end {
                 return true;
             }
@@ -87,7 +89,10 @@ impl MD050StrongStyle {
             }
 
             if tag.tag_name == "code" {
-                if !tag.is_closing && !tag.is_self_closing {
+                if tag.is_self_closing {
+                    // Self-closing tags don't create a code context
+                    continue;
+                } else if !tag.is_closing {
                     // Opening <code> tag
                     open_code_pos = Some(tag.byte_end);
                 } else if tag.is_closing && open_code_pos.is_some() {
@@ -233,12 +238,25 @@ impl Rule for MD050StrongStyle {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
 
-                // Skip if this strong text is inside a code block, code span, link, HTML tag, or HTML code content
+                // Skip if this strong text is inside a code block, code span, link, or HTML code content
                 if ctx.is_in_code_block_or_span(match_byte_pos)
                     || self.is_in_link(ctx, match_byte_pos)
-                    || self.is_in_html_tag(ctx, match_byte_pos)
                     || self.is_in_html_code_content(ctx, match_byte_pos)
                 {
+                    continue;
+                }
+
+                // Only skip HTML tag content if we're actually inside the tag (between < and >)
+                // not just on the same line as a tag
+                let mut inside_html_tag = false;
+                for tag in ctx.html_tags().iter() {
+                    // The emphasis must start after < and before >
+                    if tag.byte_offset < match_byte_pos && match_byte_pos < tag.byte_end - 1 {
+                        inside_html_tag = true;
+                        break;
+                    }
+                }
+                if inside_html_tag {
                     continue;
                 }
 

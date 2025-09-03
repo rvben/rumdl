@@ -17,9 +17,9 @@ lazy_static! {
 
     // Shortcut reference links: [reference] - must not be followed by another bracket
     // Allow references followed by punctuation like colon, period, comma (e.g., "[reference]:", "[reference].")
-    // Only exclude if followed by ": " (colon with space) which indicates a definition line
+    // Don't exclude references followed by ": " in the middle of a line (only at start of line)
     static ref SHORTCUT_REFERENCE_REGEX: FancyRegex =
-        FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!:\s|\[)").unwrap();
+        FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!\[)").unwrap();
 
     // REMOVED: Empty reference links: [text][] or ![text][]
     // static ref EMPTY_LINK_REFERENCE_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\s*\[\s*\]").unwrap();
@@ -134,12 +134,8 @@ impl MD053LinkImageReferenceDefinitions {
     /// Check if a pattern is likely NOT a markdown reference
     /// Returns true if this pattern should be skipped
     fn is_likely_not_reference(text: &str) -> bool {
-        // Skip numeric patterns (array indices, ranges)
-        if text.chars().all(|c| c.is_ascii_digit()) {
-            return true;
-        }
-
-        // Skip numeric ranges like [1:3], [0:10], etc.
+        // Don't skip pure numeric patterns - they could be footnote references like [1]
+        // Only skip numeric ranges like [1:3], [0:10], etc.
         if text.contains(':') && text.chars().all(|c| c.is_ascii_digit() || c == ':') {
             return true;
         }
@@ -289,6 +285,11 @@ impl MD053LinkImageReferenceDefinitions {
 
             // Skip lines in code blocks or front matter
             if line_info.in_code_block || doc_structure.is_in_front_matter(line_num) {
+                continue;
+            }
+
+            // Skip lines that are reference definitions (start with [ref]: at beginning)
+            if REFERENCE_DEFINITION_REGEX.is_match(&line_info.content) {
                 continue;
             }
 

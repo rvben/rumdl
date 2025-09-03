@@ -213,6 +213,24 @@ After tags <code>__main__</code> more text __also flagged__"#;
 fn test_md050_self_closing_code_tag() {
     let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
 
+    // Test with emphasis on separate lines first
+    let content_separate = r#"# Self-closing code tag
+
+<code />
+__should be flagged__
+
+<code/>
+__also flagged__"#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content_separate, rumdl_lib::config::MarkdownFlavor::Standard);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Self-closing code tags don't create a code context
+    assert_eq!(warnings.len(), 2, "Should detect emphasis on separate lines");
+    assert_eq!(warnings[0].line, 4);
+    assert_eq!(warnings[1].line, 7);
+
+    // Now test with emphasis on same line as self-closing tag
     let content = r#"# Self-closing code tag
 
 <code /> __should be flagged__
@@ -222,8 +240,12 @@ fn test_md050_self_closing_code_tag() {
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Both should be flagged as self-closing tags don't have content
-    assert_eq!(warnings.len(), 2);
+    // These should also be flagged
+    assert_eq!(
+        warnings.len(),
+        2,
+        "Should detect emphasis on same line as self-closing tag"
+    );
     assert_eq!(warnings[0].line, 3);
     assert_eq!(warnings[1].line, 5);
 }

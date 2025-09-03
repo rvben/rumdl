@@ -98,7 +98,7 @@ fn test_duplicate_reference_definitions() {
     let content = "[link][id]\n\n[id]: http://example.com\n[id]: http://another.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0); // Both definitions should be considered used
+    assert_eq!(result.len(), 1); // Duplicate definition should be flagged
 }
 
 #[test]
