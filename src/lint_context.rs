@@ -1890,7 +1890,7 @@ impl<'a> LintContext<'a> {
     fn parse_html_tags(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<HtmlTag> {
         lazy_static! {
             static ref HTML_TAG_REGEX: regex::Regex =
-                regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(/?)>").unwrap();
+                regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap();
         }
 
         let mut html_tags = Vec::with_capacity(content.matches('<').count());
