@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.137] - 2025-09-04
+
 ### Fixed
 - **MD051**: Fixed GitHub anchor generation for headers with arrow patterns (fixes #82)
   - Headers like `WAL->L0 Compaction` now correctly generate `#wal-l0-compaction` anchors
@@ -567,7 +569,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.136...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.137...HEAD
+[0.0.137]: https://github.com/rvben/rumdl/compare/v0.0.136...v0.0.137
 [0.0.136]: https://github.com/rvben/rumdl/compare/v0.0.135...v0.0.136
 [0.0.135]: https://github.com/rvben/rumdl/compare/v0.0.134...v0.0.135
 [0.0.134]: https://github.com/rvben/rumdl/compare/v0.0.133...v0.0.134
