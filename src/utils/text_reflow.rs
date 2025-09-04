@@ -629,18 +629,38 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             let indent = line.len() - line.trim_start().len();
             let indent_str = " ".repeat(indent);
 
-            // Find where the content starts after the marker
-            let content_start = line
-                .find(|c: char| !(c.is_whitespace() || c == '-' || c == '*' || c == '+' || c == '.' || c.is_numeric()))
-                .unwrap_or(line.len());
+            // For numbered lists, find the period and the space after it
+            // For bullet lists, find the marker and the space after it
+            let mut marker_end = indent;
+            let mut content_start = indent;
 
-            let marker = &line[indent..content_start];
-            let content = &line[content_start..].trim_start();
+            if trimmed.chars().next().is_some_and(|c| c.is_numeric()) {
+                // Numbered list: find the period
+                if let Some(period_pos) = line[indent..].find('.') {
+                    marker_end = indent + period_pos + 1; // Include the period
+                    content_start = marker_end;
+                    // Skip any spaces after the period to find content start
+                    while content_start < line.len() && line.chars().nth(content_start) == Some(' ') {
+                        content_start += 1;
+                    }
+                }
+            } else {
+                // Bullet list: marker is single character
+                marker_end = indent + 1; // Just the marker character
+                content_start = marker_end;
+                // Skip any spaces after the marker
+                while content_start < line.len() && line.chars().nth(content_start) == Some(' ') {
+                    content_start += 1;
+                }
+            }
+
+            let marker = &line[indent..marker_end];
+            let content = &line[content_start..];
 
             // Calculate the proper indentation for continuation lines
             // We need to align with the text after the marker
-            let trimmed_marker = marker.trim_end();
-            let continuation_spaces = indent + trimmed_marker.len() + 1; // +1 for the space after marker
+            let trimmed_marker = marker;
+            let continuation_spaces = content_start; // Use the actual content start position
 
             let reflowed = reflow_line(content, options);
             for (j, reflowed_line) in reflowed.iter().enumerate() {
@@ -1062,5 +1082,61 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_reflow_markdown_numbered_lists() {
+        // Test for issue #83: numbered lists with proper formatting
+        let options = ReflowOptions {
+            line_length: 50,
+            ..Default::default()
+        };
+
+        let content = r#"1. List `manifest` to find the manifest with the largest ID. Say it's `00000000000000000002.manifest` in this example.
+2. Short item
+3. Another long item that definitely exceeds the fifty character limit and needs wrapping"#;
+
+        let result = reflow_markdown(content, &options);
+
+        // Define exact expected output
+        let expected = r#"1. List `manifest` to find the manifest with the
+   largest ID. Say it's
+   `00000000000000000002.manifest` in this
+   example.
+2. Short item
+3. Another long item that definitely exceeds the
+   fifty character limit and needs wrapping"#;
+
+        assert_eq!(
+            result, expected,
+            "Numbered lists should be reflowed with proper markers and indentation.\nExpected:\n{expected}\nGot:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_reflow_markdown_bullet_lists() {
+        let options = ReflowOptions {
+            line_length: 40,
+            ..Default::default()
+        };
+
+        let content = r#"- First bullet point with a very long line that needs wrapping
+* Second bullet using asterisk
++ Third bullet using plus sign
+- Short one"#;
+
+        let result = reflow_markdown(content, &options);
+
+        // Define exact expected output - each bullet type preserved with proper indentation
+        let expected = r#"- First bullet point with a very long
+  line that needs wrapping
+* Second bullet using asterisk
++ Third bullet using plus sign
+- Short one"#;
+
+        assert_eq!(
+            result, expected,
+            "Bullet lists should preserve markers and indent continuations with 2 spaces.\nExpected:\n{expected}\nGot:\n{result}"
+        );
     }
 }

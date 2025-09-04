@@ -1028,6 +1028,31 @@ And a bullet list:
     }
 
     #[test]
+    fn test_issue_83_numbered_list_with_backticks() {
+        // Test for issue #83: enable_reflow was incorrectly handling numbered lists
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // The exact case from issue #83
+        let content = "1. List `manifest` to find the manifest with the largest ID. Say it's `00000000000000000002.manifest` in this example.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The expected output: properly wrapped at 100 chars with correct list formatting
+        let expected = "1. List `manifest` to find the manifest with the largest ID. Say it's `00000000000000000002.manifest`\n   in this example.";
+
+        assert_eq!(
+            fixed, expected,
+            "List should be properly reflowed with correct marker and indentation.\nExpected:\n{expected}\nGot:\n{fixed}"
+        );
+    }
+
+    #[test]
     fn test_text_reflow_disabled_by_default() {
         let rule = MD013LineLength::new(30, false, false, false, false);
 
