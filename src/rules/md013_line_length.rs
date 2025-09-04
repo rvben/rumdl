@@ -1044,7 +1044,8 @@ And a bullet list:
         let fixed = rule.fix(&ctx).unwrap();
 
         // The expected output: properly wrapped at 100 chars with correct list formatting
-        let expected = "1. List `manifest` to find the manifest with the largest ID. Say it's `00000000000000000002.manifest`\n   in this example.";
+        // After the fix, it correctly accounts for "1. " (3 chars) leaving 97 for content
+        let expected = "1. List `manifest` to find the manifest with the largest ID. Say it's\n   `00000000000000000002.manifest` in this example.";
 
         assert_eq!(
             fixed, expected,

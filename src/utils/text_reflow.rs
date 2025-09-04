@@ -662,7 +662,19 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             let trimmed_marker = marker;
             let continuation_spaces = content_start; // Use the actual content start position
 
-            let reflowed = reflow_line(content, options);
+            // CRITICAL: Adjust line length to account for list marker and space
+            // For the first line, we need to account for: indent + marker + space
+            // The format is: "{indent_str}{trimmed_marker} {content}"
+            // So available width = line_length - indent - marker_length - 1 (for space)
+            let prefix_length = indent + trimmed_marker.len() + 1; // +1 for space after marker
+
+            // Create adjusted options with reduced line length
+            let adjusted_options = ReflowOptions {
+                line_length: options.line_length.saturating_sub(prefix_length),
+                ..options.clone()
+            };
+
+            let reflowed = reflow_line(content, &adjusted_options);
             for (j, reflowed_line) in reflowed.iter().enumerate() {
                 if j == 0 {
                     result.push(format!("{indent_str}{trimmed_marker} {reflowed_line}"));
