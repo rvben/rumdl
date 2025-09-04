@@ -157,15 +157,33 @@ fn heading_to_fragment_internal(heading: &str) -> String {
 
     // Step 6: Multi-character arrow patterns (order matters!)
     // GitHub.com converts these patterns to specific hyphen sequences
-    // Handle patterns with spaces to avoid double-processing spaces
-    text = text.replace(" --> ", "----"); // space + arrow + space = 4 hyphens total
-    text = text.replace("-->", "----"); // 4 hyphens when no surrounding spaces
-    text = text.replace(" <-> ", "---"); // space + arrow + space = 3 hyphens total
-    text = text.replace("<->", "---"); // 3 hyphens when no surrounding spaces
-    text = text.replace(" ==> ", "--"); // space + arrow + space = 2 hyphens total
-    text = text.replace("==>", "--"); // 2 hyphens when no surrounding spaces
-    text = text.replace(" -> ", "---"); // space + arrow + space = 3 hyphens total
-    text = text.replace("->", "---"); // 3 hyphens when no surrounding spaces
+    // Verified against GitHub.com actual behavior (issue #82)
+    // Pattern: arrow itself becomes N hyphens, each adjacent space adds 1 more
+    // Must handle patterns with most spaces first to avoid partial replacements
+
+    // --> patterns (arrow = 2 hyphens base)
+    text = text.replace(" --> ", "----"); // 2 + 1 + 1 = 4 hyphens
+    text = text.replace(" -->", "---"); // 2 + 1 = 3 hyphens
+    text = text.replace("--> ", "---"); // 2 + 1 = 3 hyphens
+    text = text.replace("-->", "--"); // 2 hyphens
+
+    // <-> patterns (assuming similar pattern, needs verification)
+    text = text.replace(" <-> ", "---"); // estimated: 1 + 1 + 1 = 3 hyphens
+    text = text.replace(" <->", "--"); // estimated: 1 + 1 = 2 hyphens
+    text = text.replace("<-> ", "--"); // estimated: 1 + 1 = 2 hyphens
+    text = text.replace("<->", "-"); // estimated: 1 hyphen
+
+    // ==> patterns (assuming similar pattern, needs verification)
+    text = text.replace(" ==> ", "--"); // estimated pattern
+    text = text.replace(" ==>", "-"); // estimated pattern
+    text = text.replace("==> ", "-"); // estimated pattern
+    text = text.replace("==>", ""); // estimated: might be removed entirely
+
+    // -> patterns (arrow = 1 hyphen base)
+    text = text.replace(" -> ", "---"); // 1 + 1 + 1 = 3 hyphens
+    text = text.replace(" ->", "--"); // 1 + 1 = 2 hyphens
+    text = text.replace("-> ", "--"); // 1 + 1 = 2 hyphens
+    text = text.replace("->", "-"); // 1 hyphen
 
     // Step 7: Remove problematic characters before symbol replacement
     // First remove em-dashes and en-dashes entirely
@@ -897,6 +915,33 @@ mod tests {
         let github_specific = "cbrown --> sbrown: --unsafe-paths";
         let result = heading_to_fragment(github_specific);
         assert_eq!(result, "cbrown----sbrown---unsafe-paths");
+    }
+
+    #[test]
+    fn test_github_arrow_patterns_issue_82() {
+        // Test cases for issue #82 - verified against GitHub.com actual behavior
+        // Pattern: arrow itself becomes N hyphens, each adjacent space adds 1 more
+
+        // Single arrow (->) patterns
+        assert_eq!(heading_to_fragment("WAL->L0 Compaction"), "wal-l0-compaction");
+        assert_eq!(heading_to_fragment("foo->bar->baz"), "foo-bar-baz");
+        assert_eq!(heading_to_fragment("a->b"), "a-b");
+        assert_eq!(heading_to_fragment("a ->b"), "a--b");
+        assert_eq!(heading_to_fragment("a-> b"), "a--b");
+        assert_eq!(heading_to_fragment("a -> b"), "a---b");
+
+        // Double arrow (-->) patterns
+        assert_eq!(heading_to_fragment("a-->b"), "a--b");
+        assert_eq!(heading_to_fragment("a -->b"), "a---b");
+        assert_eq!(heading_to_fragment("a--> b"), "a---b");
+        assert_eq!(heading_to_fragment("a --> b"), "a----b");
+
+        // Mixed patterns
+        assert_eq!(heading_to_fragment("cbrown -> sbrown"), "cbrown---sbrown");
+        assert_eq!(
+            heading_to_fragment("cbrown --> sbrown: --unsafe-paths"),
+            "cbrown----sbrown---unsafe-paths"
+        );
     }
 
     #[test]

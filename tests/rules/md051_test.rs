@@ -1795,3 +1795,38 @@ Table of contents:
     // All links should be valid - no errors
     assert_eq!(result.len(), 0, "All HTML anchor links should be valid");
 }
+
+#[test]
+fn test_issue_82_arrow_patterns() {
+    // Test for issue #82 - headers with arrows should generate correct anchors
+    let content = r#"# Document
+
+## Table of Contents
+- [WAL->L0 Compaction](#wal-l0-compaction)
+- [foo->bar->baz](#foo-bar-baz)
+- [Header->with->Arrows](#header-with-arrows)
+
+## WAL->L0 Compaction
+
+Content about WAL to L0 compaction.
+
+## foo->bar->baz
+
+Content about foo bar baz.
+
+## Header->with->Arrows
+
+Content with arrows.
+"#;
+
+    let rule = MD051LinkFragments::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // All links should be valid with the fixed arrow pattern handling
+    assert_eq!(
+        result.len(),
+        0,
+        "Arrow patterns in headers should generate correct anchors (issue #82)"
+    );
+}

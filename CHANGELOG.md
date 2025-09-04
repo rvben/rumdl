@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **MD051**: Fixed GitHub anchor generation for headers with arrow patterns (fixes #82)
+  - Headers like `WAL->L0 Compaction` now correctly generate `#wal-l0-compaction` anchors
+  - Arrow patterns (`->`, `-->`) now convert to the correct number of hyphens based on surrounding spaces
+
 ## [0.0.136] - 2025-09-03
 
 ## [0.0.135] - 2025-09-03

@@ -632,3 +632,28 @@ fn test_undefined_reference_with_nested_brackets() {
     assert_eq!(result.len(), 1);
     assert!(result[0].message.contains("`Dict[str, Any]`"));
 }
+
+#[test]
+fn test_issue_81_toml_code_block_not_parsed() {
+    // Test for issue #81 - TOML code blocks should not be parsed for references
+    let rule = MD052ReferenceLinkImages::new();
+    let content = r#"## Adding new examples
+
+1. Create a new Rust file under `src`.
+2. Add the binary definition to the `Cargo.toml` file, the list is ordered alphabetically by example name:
+
+    ```toml
+    [[bin]]
+    name = "tracing-subscriber"
+    path = "src/tracing_subscriber.rs"
+    test = false
+    ```
+
+3. Add any required dependencies to the `Cargo.toml` file."#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag [[bin]] in TOML code block as undefined reference (issue #81)"
+    );
+}
