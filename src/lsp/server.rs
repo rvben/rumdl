@@ -160,9 +160,18 @@ impl RumdlLanguageServer {
 
     /// Get the end position of a document
     fn get_end_position(&self, text: &str) -> Position {
-        let lines: Vec<&str> = text.lines().collect();
-        let line = lines.len().saturating_sub(1) as u32;
-        let character = lines.last().map_or(0, |l| l.len() as u32);
+        let mut line = 0u32;
+        let mut character = 0u32;
+
+        for ch in text.chars() {
+            if ch == '\n' {
+                line += 1;
+                character = 0;
+            } else {
+                character += 1;
+            }
+        }
+
         Position { line, character }
     }
 
@@ -331,6 +340,7 @@ impl LanguageServer for RumdlLanguageServer {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                     identifier: Some("rumdl".to_string()),
                     inter_file_dependencies: false,
@@ -489,22 +499,57 @@ impl LanguageServer for RumdlLanguageServer {
         }
     }
 
+    async fn range_formatting(&self, params: DocumentRangeFormattingParams) -> JsonRpcResult<Option<Vec<TextEdit>>> {
+        // For markdown linting, we format the entire document because:
+        // 1. Many markdown rules have document-wide implications (e.g., heading hierarchy, list consistency)
+        // 2. Fixes often need surrounding context to be applied correctly
+        // 3. This approach is common among linters (ESLint, rustfmt, etc. do similar)
+        log::debug!(
+            "Range formatting requested for {:?}, formatting entire document due to rule interdependencies",
+            params.range
+        );
+
+        let formatting_params = DocumentFormattingParams {
+            text_document: params.text_document,
+            options: params.options,
+            work_done_progress_params: params.work_done_progress_params,
+        };
+
+        self.formatting(formatting_params).await
+    }
+
     async fn formatting(&self, params: DocumentFormattingParams) -> JsonRpcResult<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
 
+        log::debug!("Formatting request for: {uri}");
+
         if let Some(text) = self.documents.read().await.get(&uri) {
+            // Get config with LSP overrides
+            let config_guard = self.config.read().await;
+            let lsp_config = config_guard.clone();
+            drop(config_guard);
+
             // Get all rules from config
             let rumdl_config = self.rumdl_config.read().await;
             let all_rules = rules::all_rules(&rumdl_config);
             let flavor = rumdl_config.markdown_flavor();
 
             // Use the standard filter_rules function which respects config's disabled rules
-            let filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
+            let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
             drop(rumdl_config);
+
+            // Apply LSP config overrides
+            filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
             // Lint the document to get all warnings
             match crate::lint(text, &filtered_rules, false, flavor) {
                 Ok(warnings) => {
+                    log::debug!(
+                        "Found {} warnings, {} with fixes",
+                        warnings.len(),
+                        warnings.iter().filter(|w| w.fix.is_some()).count()
+                    );
+
                     // Check if there are any fixable warnings
                     let has_fixes = warnings.iter().any(|w| w.fix.is_some());
 
@@ -514,6 +559,7 @@ impl LanguageServer for RumdlLanguageServer {
                             Ok(fixed_content) => {
                                 // Only return edits if the content actually changed
                                 if fixed_content != *text {
+                                    log::debug!("Returning formatting edits");
                                     // Create a single TextEdit that replaces the entire document
                                     // Calculate proper end position by iterating through all characters
                                     let mut line = 0u32;
@@ -543,18 +589,23 @@ impl LanguageServer for RumdlLanguageServer {
                                 log::error!("Failed to apply fixes: {e}");
                             }
                         }
+                    } else {
+                        log::debug!("No fixes available for formatting");
                     }
 
-                    // No fixes available or applied
-                    Ok(None)
+                    // No fixes available or applied - return empty array
+                    Ok(Some(Vec::new()))
                 }
                 Err(e) => {
                     log::error!("Failed to format document: {e}");
-                    Ok(None)
+                    // Return empty array on error
+                    Ok(Some(Vec::new()))
                 }
             }
         } else {
-            Ok(None)
+            log::warn!("Document not found in cache: {uri}");
+            // Return empty array when document not found
+            Ok(Some(Vec::new()))
         }
     }
 
@@ -826,10 +877,10 @@ mod tests {
         assert_eq!(pos.line, 0);
         assert_eq!(pos.character, 0);
 
-        // Ends with newline - lines() doesn't include the empty line after \n
+        // Ends with newline - position should be at start of next line
         let pos = server.get_end_position("Hello\n");
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 5);
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.character, 0);
     }
 
     #[tokio::test]
