@@ -94,10 +94,10 @@ fn regression_test_historical_patterns() {
         ("A&B", "ab"),
         ("A & B", "a--b"),
         ("A & B & C", "a--b--c"),
-        // Arrow issues - updated to match GitHub behavior (arrows -> multiple hyphens)
-        ("A->B", "a---b"),
-        ("A -> B", "a---b"),
-        ("A --> B", "a----b"),
+        // Arrow issues - updated for issue #82 fix (correct GitHub behavior)
+        ("A->B", "a-b"),       // Fixed: -> now correctly becomes single hyphen
+        ("A -> B", "a---b"),   // Spaces preserved: space+arrow+space = 3 hyphens
+        ("A --> B", "a----b"), // Spaces preserved: space+double-arrow+space = 4 hyphens
         // Colon issues
         ("Title:Subtitle", "titlesubtitle"),
         ("Title: Subtitle", "title-subtitle"),
