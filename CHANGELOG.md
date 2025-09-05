@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.138] - 2025-09-05
+
+### Fixed
+- **LSP**: Fixed formatting to return empty array instead of null when no edits available (fixes #79)
+  - Helix editor now properly receives LSP formatting responses
+  - Added textDocument/rangeFormatting support for better editor compatibility
+  - Fixed critical position calculation bug that could cause incorrect text edit ranges
+
 ## [0.0.137] - 2025-09-04
 
 ### Fixed
@@ -569,7 +577,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.137...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.138...HEAD
+[0.0.138]: https://github.com/rvben/rumdl/compare/v0.0.137...v0.0.138
 [0.0.137]: https://github.com/rvben/rumdl/compare/v0.0.136...v0.0.137
 [0.0.136]: https://github.com/rvben/rumdl/compare/v0.0.135...v0.0.136
 [0.0.135]: https://github.com/rvben/rumdl/compare/v0.0.134...v0.0.135
