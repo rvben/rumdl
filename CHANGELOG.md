@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added detection for ordered lists starting with numbers other than 1
   - Better compliance with CommonMark specification for list formatting
 
+- **Code Block Detection**: Fixed critical bug where lines after code blocks were marked as inside them
+  - Corrected fenced code block end position to include the newline after closing fence
+  - Prevented code span detection from running inside fenced code blocks
+  - Fixed MD051 false positives where headings after code blocks weren't detected
+  - Eliminated invalid overlapping code spans that caused parsing errors
+
 ## [0.0.138] - 2025-09-05
 
 ### Fixed

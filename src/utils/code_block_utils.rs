@@ -59,12 +59,7 @@ impl CodeBlockUtils {
                     opening_fence_len = fence_len;
                 } else if in_code_block && fence_char == opening_fence_char && fence_len >= opening_fence_len {
                     // Closing fence - must match opening fence character and be at least as long
-                    // Add +1 to include the newline after the closing fence
-                    let code_block_end = if i + 1 < lines.len() {
-                        line_start + line.len() + 1
-                    } else {
-                        line_start + line.len()
-                    };
+                    let code_block_end = line_start + line.len();
                     blocks.push((code_block_start, code_block_end));
                     in_code_block = false;
                     opening_fence_char = ' ';
@@ -326,8 +321,8 @@ mod tests {
         // Basic fenced code block with backticks
         let content = "Some text\n```\ncode here\n```\nMore text";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // Should find: 1 fenced block + 1 inline span (the ```)
-        assert_eq!(blocks.len(), 2);
+        // Should find: 1 fenced block only (backticks are part of the fence, not separate spans)
+        assert_eq!(blocks.len(), 1);
 
         // Check that we have the fenced block
         let fenced_block = blocks
@@ -344,8 +339,8 @@ mod tests {
         // Multiple code blocks
         let content = "Text\n```\ncode1\n```\nMiddle\n~~~\ncode2\n~~~\nEnd";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 2 fenced blocks + 1 inline span for the ```
-        assert_eq!(blocks.len(), 3);
+        // 2 fenced blocks only (backticks inside fences are not separate spans)
+        assert_eq!(blocks.len(), 2);
     }
 
     #[test]
@@ -353,8 +348,8 @@ mod tests {
         // Code block with language identifier
         let content = "Text\n```rust\nfn main() {}\n```\nMore";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced block + 1 inline span for ```
-        assert_eq!(blocks.len(), 2);
+        // 1 fenced block only (backticks inside fences are not separate spans)
+        assert_eq!(blocks.len(), 1);
         // Check we have the full fenced block
         let fenced = blocks.iter().find(|(s, e)| content[*s..*e].contains("fn main"));
         assert!(fenced.is_some());
@@ -491,8 +486,8 @@ mod tests {
     fn test_code_block_at_start() {
         let content = "```\ncode\n```\nText after";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced + 1 inline span
-        assert_eq!(blocks.len(), 2);
+        // 1 fenced block only (backticks are part of the fence)
+        assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].0, 0); // Fenced block starts at 0
     }
 
@@ -500,8 +495,8 @@ mod tests {
     fn test_code_block_at_end() {
         let content = "Text before\n```\ncode\n```";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced + 1 inline span
-        assert_eq!(blocks.len(), 2);
+        // 1 fenced block only (backticks are part of the fence)
+        assert_eq!(blocks.len(), 1);
         // Check we have the fenced block
         let fenced = blocks.iter().find(|(s, e)| content[*s..*e].contains("code"));
         assert!(fenced.is_some());
@@ -549,8 +544,8 @@ mod tests {
         // Fenced code blocks with complex info strings
         let content = "```rust,no_run,should_panic\ncode\n```";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced + 1 inline span
-        assert_eq!(blocks.len(), 2);
+        // 1 fenced block only (backticks are part of the fence)
+        assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].0, 0);
     }
 
@@ -559,7 +554,7 @@ mod tests {
         // Indented fence markers should still work as fences
         let content = "Text\n  ```\n  code\n  ```\nAfter";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced + 1 inline span
-        assert_eq!(blocks.len(), 2);
+        // 1 fenced block only (backticks are part of the fence)
+        assert_eq!(blocks.len(), 1);
     }
 }
