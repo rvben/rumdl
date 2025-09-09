@@ -59,7 +59,12 @@ impl CodeBlockUtils {
                     opening_fence_len = fence_len;
                 } else if in_code_block && fence_char == opening_fence_char && fence_len >= opening_fence_len {
                     // Closing fence - must match opening fence character and be at least as long
-                    let code_block_end = line_start + line.len();
+                    // Add +1 to include the newline after the closing fence
+                    let code_block_end = if i + 1 < lines.len() {
+                        line_start + line.len() + 1
+                    } else {
+                        line_start + line.len()
+                    };
                     blocks.push((code_block_start, code_block_end));
                     in_code_block = false;
                     opening_fence_char = ' ';
@@ -127,12 +132,22 @@ impl CodeBlockUtils {
             blocks.push((indented_block_start, content.len()));
         }
 
-        // Find inline code spans
+        // Find inline code spans (but skip those inside fenced code blocks)
         let mut i = 0;
         while i < content.len() {
             if let Some(m) = CODE_SPAN_PATTERN.find_at(content, i) {
                 let backtick_length = m.end() - m.start();
                 let start = m.start();
+
+                // Skip if this backtick is inside a fenced code block
+                let in_fenced_block = blocks
+                    .iter()
+                    .any(|&(block_start, block_end)| start >= block_start && start < block_end);
+
+                if in_fenced_block {
+                    i = m.end();
+                    continue;
+                }
 
                 // Check if these backticks are escaped (preceded by backslash)
                 // In Markdown, \` is an escaped backtick and should not start a code span
@@ -166,8 +181,19 @@ impl CodeBlockUtils {
 
                 if let Some(end_pos) = found_end {
                     let end = m.end() + end_pos + backtick_length;
-                    blocks.push((start, end));
-                    i = end;
+
+                    // Also check if the end would be inside a fenced code block
+                    let end_in_fenced_block = blocks.iter().any(|&(block_start, block_end)| {
+                        (m.end() + end_pos) >= block_start && (m.end() + end_pos) < block_end
+                    });
+
+                    if !end_in_fenced_block {
+                        blocks.push((start, end));
+                        i = end;
+                    } else {
+                        // Skip this potential code span as its end is in a fenced block
+                        i = m.end();
+                    }
                 } else {
                     i = m.end();
                 }
