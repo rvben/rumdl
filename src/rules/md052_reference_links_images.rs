@@ -81,6 +81,33 @@ impl MD052ReferenceLinkImages {
             return true;
         }
 
+        // Skip programming type annotations like [int, str], [Dict[str, Any]]
+        // These typically have commas and/or nested brackets
+        if text.contains(',') || text.contains('[') || text.contains(']') {
+            // Check if it looks like a type annotation pattern
+            return true;
+        }
+
+        // Note: We don't filter out patterns with backticks because backticks in reference names
+        // are valid markdown syntax, e.g., [`dataclasses.InitVar`] is a valid reference name
+
+        // Skip patterns that look like module/class paths ONLY if they don't have backticks
+        // Backticks indicate intentional code formatting in a reference name
+        // e.g., skip [dataclasses.initvar] but allow [`typing.ClassVar`]
+        if !text.contains('`')
+            && text.contains('.')
+            && !text.contains(' ')
+            && !text.contains('-')
+            && !text.contains('_')
+        {
+            return true;
+        }
+
+        // Note: We don't filter based on word count anymore because legitimate references
+        // can have many words, like "python language reference for import statements"
+        // Word count filtering was causing false positives where valid references were
+        // being incorrectly flagged as unused
+
         // Skip patterns that are just punctuation or operators
         if text.chars().all(|c| !c.is_alphanumeric() && c != ' ') {
             return true;
@@ -204,6 +231,12 @@ impl MD052ReferenceLinkImages {
 
             // Skip lines in code blocks
             if in_code_block {
+                continue;
+            }
+
+            // Check for abbreviation syntax (*[ABBR]: Definition) and skip it
+            // Abbreviations are not reference links and should not be tracked
+            if line.trim_start().starts_with("*[") {
                 continue;
             }
 
@@ -471,6 +504,12 @@ impl MD052ReferenceLinkImages {
 
             // Skip GitHub alerts/callouts (e.g., > [!TIP])
             if GITHUB_ALERT_REGEX.is_match(line) {
+                continue;
+            }
+
+            // Skip abbreviation definitions (*[ABBR]: Definition)
+            // These are not reference links and should not be checked
+            if trimmed_line.starts_with("*[") {
                 continue;
             }
 

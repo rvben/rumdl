@@ -8,6 +8,8 @@ use regex::Regex;
 
 lazy_static! {
     static ref BLANK_LINE_RE: Regex = Regex::new(r"^\s*$").unwrap();
+    // Detects ordered list items starting with a number other than 1
+    static ref ORDERED_LIST_NON_ONE_RE: Regex = Regex::new(r"^\s*([2-9]|\d{2,})\.\s").unwrap();
 }
 
 /// Rule MD032: Lists should be surrounded by blank lines
@@ -79,21 +81,12 @@ lazy_static! {
 /// - Fast path checks before applying more expensive regex operations
 /// - Efficient list item detection
 /// - Pre-computation of code block lines to avoid redundant processing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MD032BlanksAroundLists {
     /// Allow lists to follow headings without blank lines
     pub allow_after_headings: bool,
     /// Allow lists to follow content ending with colons without blank lines
     pub allow_after_colons: bool,
-}
-
-impl Default for MD032BlanksAroundLists {
-    fn default() -> Self {
-        Self {
-            allow_after_headings: true, // More lenient by default
-            allow_after_colons: true,
-        }
-    }
 }
 
 impl MD032BlanksAroundLists {
@@ -125,17 +118,17 @@ impl MD032BlanksAroundLists {
             return false;
         }
 
-        // Allow lists after headings if configured
+        // Allow lists after headings if configured (now false by default)
         if self.allow_after_headings && self.is_heading_line_from_context(ctx, prev_line_num - 1) {
             return false;
         }
 
-        // Allow lists after content ending with colons if configured
+        // Allow lists after content ending with colons if configured (now false by default)
         if self.allow_after_colons && trimmed_prev.ends_with(':') {
             return false;
         }
 
-        // Default: require blank line
+        // Default: require blank line (matching markdownlint's stricter behavior)
         true
     }
 
@@ -266,22 +259,16 @@ impl MD032BlanksAroundLists {
                             if line.indent >= 2 {
                                 actual_end = check_line;
                             }
-                            // Include lazy continuation only if it's not a separate paragraph
-                            else if check_line == *end + 1 && !line.is_blank && line.heading.is_none() {
-                                // Check if this looks like list continuation vs new paragraph
-                                // Simple heuristic: if it starts with uppercase and the list item ended with punctuation,
-                                // it's likely a new paragraph
-                                let is_likely_new_paragraph = {
-                                    let first_char = line.content.trim().chars().next();
-                                    first_char.is_some_and(|c| c.is_uppercase())
-                                };
-
-                                if !is_likely_new_paragraph {
-                                    actual_end = check_line;
-                                } else {
-                                    break;
-                                }
+                            // Include lazy continuation lines (multiple consecutive lines without indent)
+                            else if !line.is_blank
+                                && line.heading.is_none()
+                                && !block.item_lines.contains(&check_line)
+                            {
+                                // This is a lazy continuation line - check if we're still in the same paragraph
+                                // Allow multiple consecutive lazy continuation lines
+                                actual_end = check_line;
                             } else if !line.is_blank {
+                                // Non-blank line that's not a continuation - stop here
                                 break;
                             }
                         }
@@ -305,6 +292,54 @@ impl MD032BlanksAroundLists {
     ) -> LintResult {
         let mut warnings = Vec::new();
         let num_lines = lines.len();
+
+        // Check for ordered lists starting with non-1 that aren't recognized as lists
+        // These need blank lines before them to be parsed as lists by CommonMark
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+
+            // Skip if this line is already part of a recognized list
+            let is_in_list = list_blocks
+                .iter()
+                .any(|(start, end, _)| line_num >= *start && line_num <= *end);
+            if is_in_list {
+                continue;
+            }
+
+            // Skip if in code block or front matter
+            if structure.is_in_code_block(line_num) || structure.is_in_front_matter(line_num) {
+                continue;
+            }
+
+            // Check if this line starts with a number other than 1
+            if ORDERED_LIST_NON_ONE_RE.is_match(line) {
+                // Check if there's a blank line before this
+                if line_idx > 0 {
+                    let prev_line = lines[line_idx - 1];
+                    let prev_is_blank = is_blank_in_context(prev_line);
+                    let prev_excluded = structure.is_in_code_block(line_idx) || structure.is_in_front_matter(line_idx);
+
+                    if !prev_is_blank && !prev_excluded {
+                        // This ordered list item starting with non-1 needs a blank line before it
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
+
+                        warnings.push(LintWarning {
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Error,
+                            rule_name: Some(self.name()),
+                            message: "Ordered list starting with non-1 should be preceded by blank line".to_string(),
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
+                                replacement: "\n".to_string(),
+                            }),
+                        });
+                    }
+                }
+            }
+        }
 
         for &(start_line, end_line, ref prefix) in list_blocks {
             if start_line > 1 {
@@ -470,10 +505,10 @@ impl Rule for MD032BlanksAroundLists {
         Self: Sized,
     {
         let allow_after_headings =
-            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_headings").unwrap_or(true); // Default to true for better UX
+            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_headings").unwrap_or(false); // Match markdownlint's stricter behavior
 
         let allow_after_colons =
-            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_colons").unwrap_or(true);
+            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_colons").unwrap_or(false); // Match markdownlint's stricter behavior
 
         Box::new(MD032BlanksAroundLists {
             allow_after_headings,
@@ -985,12 +1020,13 @@ mod tests {
     fn test_fix_complex_nested_blockquote() {
         let content = "> Text before\n> - Item 1\n>   - Nested item\n> - Item 2\n> Text after";
         let warnings = lint(content);
-        // MD032 detects each list item as needing blanks, so we get 6 warnings:
-        // Line 2: preceded + followed, Line 3: preceded + followed, Line 4: preceded + followed
+        // With stricter behavior matching markdownlint, we get 2 warnings:
+        // Line 2: list should be preceded by blank line
+        // Line 4: list should be followed by blank line
         assert_eq!(
             warnings.len(),
-            6,
-            "Should warn for missing blanks around each blockquoted list item"
+            2,
+            "Should warn for missing blanks around the entire list block"
         );
 
         // Test that warnings have fixes
@@ -1000,14 +1036,9 @@ mod tests {
         let expected = "> Text before\n> \n> - Item 1\n>   - Nested item\n> - Item 2\n> \n> Text after";
         assert_eq!(fixed_content, expected, "Fix should preserve blockquote structure");
 
-        // Note: This is a complex edge case where MD032's granular approach to list detection
-        // means that nested lists within blockquotes may not be perfectly handled by the fix.
-        // The fix reduces warnings but may not eliminate all of them due to the nested structure.
+        // With the stricter behavior, the fix now properly eliminates all warnings
         let warnings_after_fix = lint(&fixed_content);
-        assert!(
-            warnings_after_fix.len() < warnings.len(),
-            "Fix should reduce the number of warnings"
-        );
+        assert_eq!(warnings_after_fix.len(), 0, "Fix should eliminate all warnings");
     }
 
     #[test]

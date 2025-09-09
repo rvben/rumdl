@@ -167,6 +167,26 @@ impl MD053LinkImageReferenceDefinitions {
             return true;
         }
 
+        // Note: We don't filter out patterns with backticks because backticks in reference names
+        // are valid markdown syntax, e.g., [`dataclasses.InitVar`] is a valid reference name
+
+        // Skip patterns that look like module/class paths ONLY if they don't have backticks
+        // Backticks indicate intentional code formatting in a reference name
+        // e.g., skip [dataclasses.initvar] but allow [`typing.ClassVar`]
+        if !text.contains('`')
+            && text.contains('.')
+            && !text.contains(' ')
+            && !text.contains('-')
+            && !text.contains('_')
+        {
+            return true;
+        }
+
+        // Note: We don't filter based on word count anymore because legitimate references
+        // can have many words, like "python language reference for import statements"
+        // Word count filtering was causing false positives where valid references were
+        // being incorrectly flagged as unused
+
         false
     }
 
@@ -338,11 +358,16 @@ impl MD053LinkImageReferenceDefinitions {
     ) -> Vec<(String, usize, usize)> {
         let mut unused = Vec::new();
         for (id, ranges) in definitions {
-            // If this id is not used anywhere and is not in the ignored list, all its ranges are unused
+            // If this id is not used anywhere and is not in the ignored list
             if !usages.contains(id) && !self.is_ignored_definition(id) {
-                for (start, end) in ranges {
-                    unused.push((id.clone(), *start, *end));
+                // Only report as unused if there's exactly one definition
+                // Multiple definitions are already reported as duplicates
+                if ranges.len() == 1 {
+                    let (start, end) = ranges[0];
+                    unused.push((id.clone(), start, end));
                 }
+                // If there are multiple definitions (duplicates), don't report them as unused
+                // They're already being reported as duplicate definitions
             }
         }
         unused

@@ -14,6 +14,7 @@
 //! - `<!-- markdownlint-disable-file MD001 MD002 -->` - Disable specific rules for entire file
 //! - `<!-- markdownlint-enable-file MD001 MD002 -->` - Re-enable specific rules for entire file
 //! - `<!-- markdownlint-configure-file { "MD013": { "line_length": 120 } } -->` - Configure rules for entire file
+//! - `<!-- prettier-ignore -->` - Disable all rules for next line (compatibility with prettier)
 //!
 //! Also supports rumdl-specific syntax with same semantics.
 
@@ -167,6 +168,13 @@ impl InlineConfig {
                         line_rules.insert(rule.to_string());
                     }
                 }
+            }
+
+            // Check for prettier-ignore (disables all rules for next line)
+            if line.contains("<!-- prettier-ignore -->") {
+                let next_line = line_num + 1;
+                let line_rules = config.line_disabled_rules.entry(next_line).or_default();
+                line_rules.insert("*".to_string());
             }
 
             // Check for disable-line

@@ -701,3 +701,135 @@ mod parity_with_markdownlint {
         assert_eq!(fixed, expected);
     }
 }
+
+mod excessive_indentation_bug_fix {
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD007ULIndent;
+
+    /// Test MD007 for excessive indentation detection (bug fix for issue #77)
+    /// This was a bug where list items with 5+ spaces were incorrectly detected as code blocks
+    #[test]
+    fn test_md007_excessive_indentation_detection() {
+        // Test case from issue #77 - excessive indentation should be detected
+        let test =
+            "- Formatter:\n     - The stable style changed\n- Language server:\n  - An existing capability is removed";
+
+        let rule = MD007ULIndent::default();
+        let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should have exactly one MD007 warning for line 2 (5 spaces instead of 2)
+        assert_eq!(warnings.len(), 1, "Should detect excessive indentation on line 2");
+        assert_eq!(warnings[0].line, 2);
+        assert!(warnings[0].message.contains("Expected 2 spaces"));
+        assert!(warnings[0].message.contains("found 5"));
+    }
+
+    #[test]
+    fn test_md007_list_items_not_code_blocks() {
+        // Test that list items with 4+ spaces are not incorrectly detected as code blocks
+        // This was the root cause of the bug - DocumentStructure was treating indented list items as code blocks
+        let test = "# Test\n\n- Item 1\n    - Item 2 with 4 spaces\n     - Item 3 with 5 spaces\n      - Item 4 with 6 spaces\n        - Item 5 with 8 spaces";
+
+        let rule = MD007ULIndent::default();
+        let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Line 4: 4 spaces instead of 2
+        // Line 5: 5 spaces instead of 2
+        // Line 6: 6 spaces instead of 4
+        // Line 7: 8 spaces instead of 4
+        assert!(warnings.len() >= 3, "Should detect multiple indentation issues");
+
+        // These should NOT be treated as code blocks - ensure they're detected as list items
+        // (The bug was that they were being treated as code blocks)
+        for warning in &warnings {
+            assert!(
+                warning.message.contains("spaces"),
+                "Should be list indentation warnings"
+            );
+        }
+    }
+
+    #[test]
+    fn test_md007_deeply_nested_lists_vs_code_blocks() {
+        // Test that deeply indented list items are correctly distinguished from actual code blocks
+        let test = "# Document\n\n- Top level list\n        - 8 spaces (should be 2)\n            - 12 spaces (should be 4)\n\nRegular paragraph.\n\n    This is an actual code block (4 spaces, not a list)\n    It continues here";
+
+        let rule = MD007ULIndent::default();
+        let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should detect excessive indentation in list items (lines 4 and 5)
+        assert!(warnings.len() >= 2, "Should detect excessive list indentation");
+
+        // The actual code block (lines 9-10) should NOT trigger MD007
+        assert!(
+            !warnings.iter().any(|w| w.line >= 9),
+            "Actual code blocks should not trigger MD007"
+        );
+    }
+
+    #[test]
+    fn test_md007_with_4_space_config() {
+        // Test with MD007 configured for 4-space indents
+        // Note: MD007ULIndent::new(4) uses TextAligned style with dynamic alignment
+        let test = "- Item 1\n    - Item 2 with 4 spaces\n     - Item 3 with 5 spaces\n      - Item 4 with 6 spaces\n        - Item 5 with 8 spaces";
+
+        let rule = MD007ULIndent::new(4);
+        let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // With TextAligned style and indent=4:
+        // Line 2: 4 spaces - wrong because it should align with Item 1's text (2 spaces)
+        // Line 3: 5 spaces - wrong, should align with Item 2's text
+        // Line 4: 6 spaces - wrong, should align with Item 3's text
+        // Line 5: 8 spaces - wrong, should align with Item 4's text
+
+        // All nested items should have warnings with dynamic alignment
+        assert!(
+            warnings.len() >= 3,
+            "Should detect indentation issues with text-aligned style"
+        );
+
+        // At least lines 2, 3, and 4 should have warnings
+        assert!(warnings.iter().any(|w| w.line == 2), "Line 2 should have warning");
+        assert!(warnings.iter().any(|w| w.line == 3), "Line 3 should have warning");
+        assert!(warnings.iter().any(|w| w.line == 4), "Line 4 should have warning");
+    }
+
+    #[test]
+    fn test_md007_excessive_indentation_fix() {
+        // Test that the fix properly corrects excessive indentation
+        let test = "- Item 1\n     - Item 2 with 5 spaces\n       - Item 3 with 7 spaces";
+
+        let rule = MD007ULIndent::default();
+        let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard);
+
+        // Check warnings are detected
+        let warnings = rule.check(&ctx).unwrap();
+        // Line 2: 5 spaces instead of 2 (depth 1)
+        // Line 3: 7 spaces - this is correct for depth 2 if line 2 is treated as depth 1
+        assert_eq!(warnings.len(), 1, "Should detect excessive indentation on line 2");
+        assert_eq!(warnings[0].line, 2);
+
+        // Check fix works correctly
+        let fixed = rule.fix(&ctx).unwrap();
+        let expected = "- Item 1\n  - Item 2 with 5 spaces\n       - Item 3 with 7 spaces";
+        assert_eq!(fixed, expected, "Should fix excessive indentation to correct levels");
+    }
+
+    #[test]
+    fn test_md007_not_triggered_by_actual_code_blocks() {
+        // Ensure that actual indented code blocks (not list items) don't trigger MD007
+        let test = "Regular paragraph.\n\n    This is a code block\n    with multiple lines\n    all indented with 4 spaces\n\n- List after code block\n  - Properly indented";
+
+        let rule = MD007ULIndent::default();
+        let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should have no MD007 warnings - code blocks are not list items
+        assert!(warnings.is_empty(), "Code blocks should not trigger MD007");
+    }
+}

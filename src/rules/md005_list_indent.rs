@@ -16,6 +16,8 @@ use toml;
 pub struct MD005ListIndent {
     /// Expected indentation for top-level lists (from MD007 config)
     top_level_indent: usize,
+    /// Expected indentation increment for nested lists (from MD007 config)
+    md007_indent: usize,
 }
 
 impl MD005ListIndent {
@@ -398,31 +400,23 @@ impl MD005ListIndent {
                     self.top_level_indent
                 } else {
                     // For non-top-level items, determine the expected indent
-                    // Prefer common patterns (2, 3, 4 spaces) and the most frequent indent
-                    let mut indent_counts: HashMap<usize, usize> = HashMap::new();
-                    for (_, indent, _) in &group {
-                        *indent_counts.entry(*indent).or_insert(0) += 1;
-                    }
-
-                    if indent_counts.len() == 1 {
-                        // All items have the same indent already
-                        *indent_counts.keys().next().unwrap()
+                    // If MD007 is configured with fixed indentation, use that
+                    if self.md007_indent > 0 {
+                        // When MD007 indent is configured, use fixed indentation
+                        // Each level should be indented by md007_indent * (level - 1)
+                        (level - 1) * self.md007_indent
                     } else {
-                        // Multiple indents - pick the best one
-                        // For level 2, prefer common increments (4, 2, 3) in that order
-                        let mut chosen_indent = None;
-                        if level == 2 {
-                            // Check for common patterns in preference order
-                            for &common_indent in &[4, 2, 3] {
-                                if indent_counts.contains_key(&common_indent) {
-                                    chosen_indent = Some(common_indent);
-                                    break;
-                                }
-                            }
+                        // No MD007 config, determine based on existing patterns
+                        let mut indent_counts: HashMap<usize, usize> = HashMap::new();
+                        for (_, indent, _) in &group {
+                            *indent_counts.entry(*indent).or_insert(0) += 1;
                         }
 
-                        // Use the chosen common pattern or fall back to most common indent
-                        chosen_indent.unwrap_or_else(|| {
+                        if indent_counts.len() == 1 {
+                            // All items have the same indent already
+                            *indent_counts.keys().next().unwrap()
+                        } else {
+                            // Multiple indents - pick the most common one
                             // When counts are equal, prefer the smaller indentation
                             // This handles cases where one item has correct indentation and another is wrong
                             indent_counts
@@ -433,7 +427,7 @@ impl MD005ListIndent {
                                 })
                                 .map(|(indent, _)| *indent)
                                 .unwrap()
-                        })
+                        }
                     }
                 };
 
@@ -598,6 +592,7 @@ impl Rule for MD005ListIndent {
     {
         // Check MD007 configuration to understand expected list indentation
         let mut top_level_indent = 0;
+        let mut md007_indent = 2; // Default to 2 if not specified
 
         // Try to get MD007 configuration
         if let Some(md007_config) = config.rules.get("MD007") {
@@ -617,22 +612,18 @@ impl Rule for MD005ListIndent {
                 }
             }
 
-            // Also check 'indent' setting as that's what's commonly configured
+            // Also check 'indent' setting - this is the expected increment for nested lists
             if let Some(indent) = md007_config.values.get("indent")
                 && let Some(indent_value) = indent.as_integer()
             {
-                // If top-level lists should be indented and indent is specified,
-                // this might be the expected top-level indent
-                // Only use this if start_indented was not explicitly set
-                if top_level_indent == 0 && indent_value > 0 {
-                    // Check if this is meant for top-level lists
-                    // For now, we'll only use it if explicitly enabled via start_indented
-                    // to avoid false positives
-                }
+                md007_indent = indent_value as usize;
             }
         }
 
-        Box::new(MD005ListIndent { top_level_indent })
+        Box::new(MD005ListIndent {
+            top_level_indent,
+            md007_indent,
+        })
     }
 }
 

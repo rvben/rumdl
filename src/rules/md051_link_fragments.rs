@@ -130,7 +130,9 @@ impl MD051LinkFragments {
 
                 // ALWAYS generate the normal anchor too (for backward compatibility)
                 // This ensures both the custom ID and the generated anchor work
-                let fragment = self.anchor_style.generate_fragment(&heading.text);
+                // Strip any HTML tags from the heading text first (e.g., <a id="..."></a>)
+                let text_without_html = Self::strip_html_tags(&heading.text);
+                let fragment = self.anchor_style.generate_fragment(&text_without_html);
 
                 if !fragment.is_empty() {
                     // Handle duplicate fragments by appending numbers
@@ -453,6 +455,14 @@ impl MD051LinkFragments {
         } else {
             result
         }
+    }
+
+    /// Strip HTML tags from text
+    fn strip_html_tags(text: &str) -> String {
+        lazy_static! {
+            static ref HTML_TAG_PATTERN: Regex = Regex::new(r"<[^>]+>").unwrap();
+        }
+        HTML_TAG_PATTERN.replace_all(text, "").to_string()
     }
 
     /// Strip markdown formatting from heading text (optimized for common patterns)

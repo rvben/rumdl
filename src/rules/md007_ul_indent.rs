@@ -388,7 +388,21 @@ impl Rule for MD007ULIndent {
     where
         Self: Sized,
     {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD007Config>(config);
+        let mut rule_config = crate::rule_config_serde::load_rule_config::<MD007Config>(config);
+
+        // For markdownlint compatibility: if indent is explicitly configured and style is not,
+        // default to "fixed" style (markdownlint behavior) instead of "text-aligned"
+        if let Some(rule_cfg) = config.rules.get("MD007") {
+            let has_explicit_indent = rule_cfg.values.contains_key("indent");
+            let has_explicit_style = rule_cfg.values.contains_key("style");
+
+            if has_explicit_indent && !has_explicit_style && rule_config.indent != 2 {
+                // User set indent explicitly but not style, and it's not the default value
+                // Use fixed style for markdownlint compatibility
+                rule_config.style = md007_config::IndentStyle::Fixed;
+            }
+        }
+
         Box::new(Self::from_config_struct(rule_config))
     }
 }
@@ -863,6 +877,69 @@ tags:
         let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2, "Deep nesting errors should be detected");
+    }
+
+    #[test]
+    fn test_excessive_indentation_detected() {
+        let rule = MD007ULIndent::default();
+
+        // Test excessive indentation (5 spaces instead of 2)
+        let content = "- Item 1\n     - Item 2 with 5 spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should detect excessive indentation (5 instead of 2)");
+        assert_eq!(result[0].line, 2);
+        assert!(result[0].message.contains("Expected 2 spaces"));
+        assert!(result[0].message.contains("found 5"));
+
+        // Test slightly excessive indentation (3 spaces instead of 2)
+        let content = "- Item 1\n   - Item 2 with 3 spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should detect slightly excessive indentation (3 instead of 2)"
+        );
+        assert_eq!(result[0].line, 2);
+        assert!(result[0].message.contains("Expected 2 spaces"));
+        assert!(result[0].message.contains("found 3"));
+
+        // Test insufficient indentation (1 space instead of 2)
+        let content = "- Item 1\n - Item 2 with 1 space";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should detect insufficient indentation (1 instead of 2)"
+        );
+        assert_eq!(result[0].line, 2);
+        assert!(result[0].message.contains("Expected 2 spaces"));
+        assert!(result[0].message.contains("found 1"));
+    }
+
+    #[test]
+    fn test_excessive_indentation_with_4_space_config() {
+        let rule = MD007ULIndent::new(4);
+
+        // Test excessive indentation (5 spaces instead of 4) - like Ruff's versioning.md
+        let content = "- Formatter:\n     - The stable style changed";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Due to text-aligned style, the expected indent should be 2 (aligning with "Formatter" text)
+        // But with 5 spaces, it's wrong
+        assert!(
+            !result.is_empty(),
+            "Should detect 5 spaces when expecting proper alignment"
+        );
+
+        // Test with correct alignment
+        let correct_content = "- Formatter:\n  - The stable style changed";
+        let ctx = LintContext::new(correct_content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should accept correct text alignment");
     }
 
     #[test]

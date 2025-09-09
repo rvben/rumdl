@@ -326,3 +326,76 @@ Single type parameters like [T] are common.
         "All references in complex real-world case should be recognized: {result:?}"
     );
 }
+
+#[test]
+fn debug_github_issue_77_case() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Reproduce the exact case reported in GitHub issue #77
+    let content = r#"# Test
+
+## Case that reproduces the issue
+This is about the [type annotation grammar].
+
+From the Python documentation on [`dataclasses.InitVar`]:
+
+## Definitions
+[type annotation grammar]: https://docs.python.org/3/reference/grammar.html
+[`dataclasses.InitVar`]: https://docs.python.org/3/library/dataclasses.html#dataclasses.InitVar
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+
+    println!("\n=== PARSED LINKS ===");
+    for (i, link) in ctx.links.iter().enumerate() {
+        println!(
+            "Link {}: line {}, text='{}', is_reference={}, reference_id={:?}",
+            i, link.line, link.text, link.is_reference, link.reference_id
+        );
+    }
+
+    println!("\n=== REFERENCE DEFINITIONS ===");
+    for (i, ref_def) in ctx.reference_defs.iter().enumerate() {
+        println!(
+            "RefDef {}: line {}, id='{}', url='{}'",
+            i, ref_def.line, ref_def.id, ref_def.url
+        );
+    }
+
+    println!("\n=== MD053 CHECK RESULTS ===");
+    let warnings = rule.check(&ctx).unwrap();
+    if warnings.is_empty() {
+        println!("No unused reference warnings (all references found correctly)");
+    } else {
+        for warning in &warnings {
+            println!("Line {}: {}", warning.line, warning.message);
+        }
+    }
+
+    // Both references should be found as used
+    assert!(
+        warnings.is_empty(),
+        "Expected no unused references, but found: {:?}",
+        warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_case_sensitivity_with_backticks() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test case sensitivity issues with backticks
+    let content = r#"# Case Sensitivity Test
+
+From the Python documentation on [`dataclasses.InitVar`]:
+
+[`dataclasses.initvar`]: https://docs.python.org/3/library/dataclasses.html#dataclasses.InitVar
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // This should work due to case-insensitive matching
+    assert!(
+        warnings.is_empty(),
+        "Case-insensitive matching should work for backtick references"
+    );
+}

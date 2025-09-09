@@ -1301,20 +1301,34 @@ impl<'a> LintContext<'a> {
     /// Parse all inline code spans in the content
     fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
         // Pre-size based on content - code spans are fairly common
-        let mut code_spans = Vec::with_capacity(content.matches('`').count() / 2); // Each code span has 2 backticks
+        let mut code_spans = Vec::with_capacity(content.matches('`').count() / 2);
 
         // Quick check - if no backticks, no code spans
         if !content.contains('`') {
             return code_spans;
         }
 
-        let mut pos = 0;
         let bytes = content.as_bytes();
 
+        // First pass: identify which backticks are escaped
+        let mut escaped_positions = Vec::new();
+        for i in 0..bytes.len() {
+            if i > 0 && bytes[i - 1] == b'\\' && bytes[i] == b'`' {
+                escaped_positions.push(i);
+            }
+        }
+
+        let mut pos = 0;
         while pos < bytes.len() {
             // Find the next backtick
             if let Some(backtick_start) = content[pos..].find('`') {
                 let start_pos = pos + backtick_start;
+
+                // Skip if this backtick is escaped
+                if escaped_positions.contains(&start_pos) {
+                    pos = start_pos + 1;
+                    continue;
+                }
 
                 // Skip if this backtick is inside a code block
                 let mut in_code_block = false;
@@ -1332,70 +1346,105 @@ impl<'a> LintContext<'a> {
                     continue;
                 }
 
-                // Count consecutive backticks
+                // Count consecutive non-escaped backticks
                 let mut backtick_count = 0;
                 let mut i = start_pos;
-                while i < bytes.len() && bytes[i] == b'`' {
+                while i < bytes.len() && bytes[i] == b'`' && !escaped_positions.contains(&i) {
                     backtick_count += 1;
                     i += 1;
                 }
 
                 // Look for matching closing backticks
                 let search_start = start_pos + backtick_count;
-                let closing_pattern = &content[start_pos..start_pos + backtick_count];
+                let mut found_closing = false;
+                let mut closing_end = 0;
 
-                if let Some(rel_end) = content[search_start..].find(closing_pattern) {
-                    // Check that the closing backticks are not followed by more backticks
-                    let end_pos = search_start + rel_end;
-                    let check_pos = end_pos + backtick_count;
+                // Search for the exact number of unescaped backticks
+                let mut search_pos = search_start;
+                while search_pos < bytes.len() {
+                    // Look for the first backtick
+                    if let Some(rel_pos) = content[search_pos..].find('`') {
+                        let backtick_pos = search_pos + rel_pos;
 
-                    // Make sure we have exactly the right number of backticks (not more)
-                    if check_pos >= bytes.len() || bytes[check_pos] != b'`' {
-                        // We found a valid code span
-                        let content_start = start_pos + backtick_count;
-                        let content_end = end_pos;
-                        let span_content = content[content_start..content_end].to_string();
+                        // Skip if escaped
+                        if escaped_positions.contains(&backtick_pos) {
+                            search_pos = backtick_pos + 1;
+                            continue;
+                        }
 
-                        // Find which line this code span starts on
-                        let mut line_num = 1;
-                        let mut col_start = start_pos;
-                        for (idx, line_info) in lines.iter().enumerate() {
-                            if start_pos >= line_info.byte_offset {
-                                line_num = idx + 1;
-                                col_start = start_pos - line_info.byte_offset;
-                            } else {
+                        // Count consecutive non-escaped backticks at this position
+                        let mut count = 0;
+                        let mut j = backtick_pos;
+                        while j < bytes.len() && bytes[j] == b'`' && !escaped_positions.contains(&j) {
+                            count += 1;
+                            j += 1;
+                        }
+
+                        // Check if we found the right number of backticks
+                        if count == backtick_count {
+                            // Make sure it's not part of a longer sequence
+                            let before_ok = backtick_pos == 0
+                                || bytes[backtick_pos - 1] != b'`'
+                                || escaped_positions.contains(&(backtick_pos - 1));
+                            let after_ok = j >= bytes.len() || bytes[j] != b'`' || escaped_positions.contains(&j);
+
+                            if before_ok && after_ok {
+                                found_closing = true;
+                                closing_end = j;
                                 break;
                             }
                         }
 
-                        // Find end column
-                        let mut col_end = end_pos + backtick_count;
-                        for line_info in lines.iter() {
-                            if end_pos + backtick_count > line_info.byte_offset {
-                                col_end = end_pos + backtick_count - line_info.byte_offset;
-                            } else {
-                                break;
-                            }
-                        }
-
-                        code_spans.push(CodeSpan {
-                            line: line_num,
-                            start_col: col_start,
-                            end_col: col_end,
-                            byte_offset: start_pos,
-                            byte_end: end_pos + backtick_count,
-                            backtick_count,
-                            content: span_content,
-                        });
-
-                        // Continue searching after this code span
-                        pos = end_pos + backtick_count;
-                        continue;
+                        search_pos = backtick_pos + 1;
+                    } else {
+                        break;
                     }
                 }
 
-                // No matching closing backticks found, move past these opening backticks
-                pos = start_pos + backtick_count;
+                if found_closing {
+                    // We found a valid code span
+                    let content_start = start_pos + backtick_count;
+                    let content_end = closing_end - backtick_count;
+                    let span_content = content[content_start..content_end].to_string();
+
+                    // Find which line this code span starts on
+                    let mut line_num = 1;
+                    let mut col_start = start_pos;
+                    for (idx, line_info) in lines.iter().enumerate() {
+                        if start_pos >= line_info.byte_offset {
+                            line_num = idx + 1;
+                            col_start = start_pos - line_info.byte_offset;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // Find end column
+                    let mut col_end = closing_end;
+                    for line_info in lines.iter() {
+                        if closing_end > line_info.byte_offset {
+                            col_end = closing_end - line_info.byte_offset;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    code_spans.push(CodeSpan {
+                        line: line_num,
+                        start_col: col_start,
+                        end_col: col_end,
+                        byte_offset: start_pos,
+                        byte_end: closing_end,
+                        backtick_count,
+                        content: span_content,
+                    });
+
+                    // Move position after this code span
+                    pos = closing_end;
+                } else {
+                    // No valid closing found, skip these opening backticks
+                    pos = start_pos + backtick_count;
+                }
             } else {
                 // No more backticks found
                 break;
@@ -1482,6 +1531,24 @@ impl<'a> LintContext<'a> {
                         let mut found_non_list = false;
                         // Use the last item from the current block, not the global last_list_item_line
                         let block_last_item_line = block.item_lines.last().copied().unwrap_or(block.end_line);
+
+                        // Debug: Special check for problematic line
+                        if block_last_item_line > 0 && block_last_item_line <= lines.len() {
+                            let last_line = &lines[block_last_item_line - 1];
+                            if last_line.content.contains(r"`sqlalchemy`") && last_line.content.contains(r"\`") {
+                                log::debug!(
+                                    "After problematic line {}: checking lines {} to {} for non-list content",
+                                    block_last_item_line,
+                                    block_last_item_line + 1,
+                                    line_num
+                                );
+                                // If they're consecutive list items, there's no content between
+                                if line_num == block_last_item_line + 1 {
+                                    log::debug!("Lines are consecutive, no content between");
+                                }
+                            }
+                        }
+
                         for check_line in (block_last_item_line + 1)..line_num {
                             let check_idx = check_line - 1;
                             if check_idx < lines.len() {
@@ -1526,7 +1593,12 @@ impl<'a> LintContext<'a> {
                                         || line_content.starts_with("---")
                                         || line_content.starts_with("***")
                                         || line_content.starts_with("___")
-                                        || line_content.contains('|')
+                                        || (line_content.contains('|')
+                                            && !line_content.contains("](")
+                                            && !line_content.contains("http")
+                                            && (line_content.matches('|').count() > 1
+                                                || line_content.starts_with('|')
+                                                || line_content.ends_with('|')))
                                         || line_content.starts_with(">")
                                     {
                                         true
@@ -1571,13 +1643,44 @@ impl<'a> LintContext<'a> {
                     // A list continues if:
                     // 1. It's a nested item (indented more than the parent), OR
                     // 2. It's the same type at the same level with reasonable distance
-                    let continues_list = if is_nested {
+                    let mut continues_list = if is_nested {
                         // Nested items always continue the list if they're in the same context
                         same_context && reasonable_distance && !has_non_list_content
                     } else {
                         // Same-level items need to match type and markers
-                        same_type && same_context && reasonable_distance && marker_compatible && !has_non_list_content
+                        let result = same_type
+                            && same_context
+                            && reasonable_distance
+                            && marker_compatible
+                            && !has_non_list_content;
+
+                        // Debug logging for lines after problematic content
+                        if block.item_lines.last().is_some_and(|&last_line| {
+                            last_line > 0
+                                && last_line <= lines.len()
+                                && lines[last_line - 1].content.contains(r"`sqlalchemy`")
+                                && lines[last_line - 1].content.contains(r"\`")
+                        }) {
+                            log::debug!(
+                                "List continuation check after problematic line at line {line_num}: same_type={same_type}, same_context={same_context}, reasonable_distance={reasonable_distance}, marker_compatible={marker_compatible}, has_non_list_content={has_non_list_content}, continues={result}"
+                            );
+                            if line_num > 0 && line_num <= lines.len() {
+                                log::debug!("Current line content: {:?}", lines[line_num - 1].content);
+                            }
+                        }
+
+                        result
                     };
+
+                    // WORKAROUND: If items are truly consecutive (no blank lines), they MUST be in the same list
+                    // This handles edge cases where content patterns might otherwise split lists incorrectly
+                    if !continues_list && reasonable_distance && line_num > 0 && block.end_line == line_num - 1 {
+                        // Check if the previous line was a list item
+                        if block.item_lines.contains(&(line_num - 1)) {
+                            // They're consecutive list items - force them to be in the same list
+                            continues_list = true;
+                        }
+                    }
 
                     if continues_list {
                         // Extend current block
@@ -1601,6 +1704,7 @@ impl<'a> LintContext<'a> {
                         }
                     } else {
                         // End current block and start a new one
+
                         list_blocks.push(block.clone());
 
                         *block = ListBlock {
@@ -1808,10 +1912,16 @@ impl<'a> LintContext<'a> {
                         || line_content.starts_with("***")
                         || line_content.starts_with("___")
                         || line_content.starts_with(">")
-                        || line_content.contains('|'); // Tables
+                        || (line_content.contains('|')
+                            && !line_content.contains("](")
+                            && !line_content.contains("http")
+                            && (line_content.matches('|').count() > 1
+                                || line_content.starts_with('|')
+                                || line_content.ends_with('|'))); // Tables
 
-                    let is_lazy_continuation = last_list_item_line == line_num - 1
-                        && !is_structural_separator
+                    // Allow lazy continuation if we're still within the same list block
+                    // (not just immediately after a list item)
+                    let is_lazy_continuation = !is_structural_separator
                         && !line_info.is_blank
                         && (line_info.indent == 0 || line_info.indent >= min_required_indent);
 
@@ -2349,9 +2459,17 @@ fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: 
                 return true; // Has meaningful content - horizontal rules separate lists
             }
 
-            // Tables separate lists (lines containing |)
+            // Tables separate lists (lines containing | but not in URLs or code)
+            // Simple heuristic: tables typically have | at start/end or multiple |
             if trimmed.contains('|') && trimmed.len() > 1 {
-                return true; // Has meaningful content - tables separate lists
+                // Don't treat URLs with | as tables
+                if !trimmed.contains("](") && !trimmed.contains("http") {
+                    // More robust check: tables usually have multiple | or | at edges
+                    let pipe_count = trimmed.matches('|').count();
+                    if pipe_count > 1 || trimmed.starts_with('|') || trimmed.ends_with('|') {
+                        return true; // Has meaningful content - tables separate lists
+                    }
+                }
             }
 
             // Blockquotes separate lists

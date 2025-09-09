@@ -531,7 +531,12 @@ mod tests {
 
     #[test]
     fn test_allow_document_sections() {
-        let rule = MD025SingleTitle::default(); // Has allow_document_sections = true
+        // Need to create rule with allow_document_sections = true
+        let config = md025_config::MD025Config {
+            allow_document_sections: true,
+            ..Default::default()
+        };
+        let rule = MD025SingleTitle::from_config_struct(config);
 
         // Test valid document sections that should NOT be flagged
         let valid_cases = vec![
@@ -627,7 +632,12 @@ mod tests {
 
     #[test]
     fn test_horizontal_rule_separators() {
-        let rule = MD025SingleTitle::default(); // Has allow_with_separators = true
+        // Need to create rule with allow_with_separators = true
+        let config = md025_config::MD025Config {
+            allow_with_separators: true,
+            ..Default::default()
+        };
+        let rule = MD025SingleTitle::from_config_struct(config);
 
         // Test that headings separated by horizontal rules are allowed
         let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.\n\n***\n\n# Third Title\n\nFinal content.";

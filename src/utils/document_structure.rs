@@ -501,11 +501,15 @@ impl DocumentStructure {
                     current_language = lang.filter(|l| !l.is_empty());
                 }
                 // Check for indented code block (CommonMark compliant)
-                // But skip if we're inside an HTML block
-                else if Self::is_indented_code_line(line) && !line.trim().is_empty() && !self.is_in_html_block(i + 1)
+                // But skip if we're inside an HTML block OR if it's a list item
+                // According to CommonMark, list items take precedence over indented code blocks
+                else if Self::is_indented_code_line(line)
+                    && !line.trim().is_empty()
+                    && !self.is_in_html_block(i + 1)
+                    && !Self::is_potential_list_item(line)
                 {
                     // According to CommonMark, any content indented by 4+ spaces OR a tab is a code block
-                    // unless it's inside an HTML block
+                    // unless it's inside an HTML block or it's a list item
                     let mut end_line = i;
 
                     // Find the end of this indented code block
@@ -516,8 +520,9 @@ impl DocumentStructure {
                         if Self::is_indented_code_line(next_line)
                             && !next_line.trim().is_empty()
                             && !self.is_in_html_block(end_line + 2)
+                            && !Self::is_potential_list_item(next_line)
                         {
-                            // Found another indented line that's not in HTML, continue the block
+                            // Found another indented line that's not in HTML or a list item, continue the block
                             end_line += 1;
                         } else if next_line.trim().is_empty() {
                             // Found a blank line, check if there are more indented lines after it
@@ -529,6 +534,7 @@ impl DocumentStructure {
                                 if Self::is_indented_code_line(lookahead_line)
                                     && !lookahead_line.trim().is_empty()
                                     && !self.is_in_html_block(lookahead + 1)
+                                    && !Self::is_potential_list_item(lookahead_line)
                                 {
                                     found_indented = true;
                                     break;
@@ -681,6 +687,20 @@ impl DocumentStructure {
         }
 
         space_count >= 4
+    }
+
+    /// Check if a line is potentially a list item
+    /// This is used to prevent list items from being detected as indented code blocks
+    #[inline]
+    fn is_potential_list_item(line: &str) -> bool {
+        lazy_static! {
+            // Simple regex to detect potential list items
+            // Matches lines that start with optional whitespace followed by a list marker
+            static ref LIST_ITEM_PATTERN: Regex = Regex::new(
+                r"^[ \t]*([*+-]|\d+[.)]])[ \t]"
+            ).unwrap();
+        }
+        LIST_ITEM_PATTERN.is_match(line)
     }
 
     /// Get a list of list start indices

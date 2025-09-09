@@ -134,8 +134,37 @@ impl CodeBlockUtils {
                 let backtick_length = m.end() - m.start();
                 let start = m.start();
 
-                // Find matching closing backticks
-                if let Some(end_pos) = content[m.end()..].find(&"`".repeat(backtick_length)) {
+                // Check if these backticks are escaped (preceded by backslash)
+                // In Markdown, \` is an escaped backtick and should not start a code span
+                let is_escaped = start > 0 && content.as_bytes()[start - 1] == b'\\';
+
+                if is_escaped {
+                    // Skip escaped backticks
+                    i = m.end();
+                    continue;
+                }
+
+                // Find matching closing backticks (that are also not escaped)
+                let search_str = &content[m.end()..];
+                let backtick_pattern = "`".repeat(backtick_length);
+
+                // Look for unescaped closing backticks
+                let mut search_pos = 0;
+                let mut found_end = None;
+                while let Some(pos) = search_str[search_pos..].find(&backtick_pattern) {
+                    let absolute_pos = m.end() + search_pos + pos;
+                    // Check if these closing backticks are escaped
+                    if absolute_pos > 0 && content.as_bytes()[absolute_pos - 1] == b'\\' {
+                        // These are escaped, keep searching
+                        search_pos += pos + backtick_length;
+                    } else {
+                        // Found unescaped closing backticks
+                        found_end = Some(search_pos + pos);
+                        break;
+                    }
+                }
+
+                if let Some(end_pos) = found_end {
                     let end = m.end() + end_pos + backtick_length;
                     blocks.push((start, end));
                     i = end;

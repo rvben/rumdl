@@ -37,11 +37,11 @@ fn default_front_matter_title() -> String {
 }
 
 fn default_allow_document_sections() -> bool {
-    true
+    false // Changed to false for markdownlint compatibility
 }
 
 fn default_allow_with_separators() -> bool {
-    true
+    false // Changed to false for markdownlint compatibility
 }
 
 impl RuleConfig for MD025Config {

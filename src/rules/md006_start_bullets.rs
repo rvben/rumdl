@@ -492,8 +492,8 @@ mod tests {
         assert!(!result.is_empty(), "Improperly indented lists should generate warnings");
         assert_eq!(
             result.len(),
-            2,
-            "Should generate warnings for both improperly indented top-level items"
+            3,
+            "Should generate warnings for all improperly indented items (2 top-level + 1 nested)"
         );
 
         // Test with mixed indentation - standard nesting is VALID

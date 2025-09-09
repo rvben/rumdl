@@ -15,10 +15,12 @@ use md036_config::MD036Config;
 
 lazy_static! {
     // Optimize regex patterns with compilation once at startup
-    static ref RE_ASTERISK_SINGLE: Regex = Regex::new(r"^\s*\*([^*\n]+)\*\s*$").unwrap();
-    static ref RE_UNDERSCORE_SINGLE: Regex = Regex::new(r"^\s*_([^_\n]+)_\s*$").unwrap();
-    static ref RE_ASTERISK_DOUBLE: Regex = Regex::new(r"^\s*\*\*([^*\n]+)\*\*\s*$").unwrap();
-    static ref RE_UNDERSCORE_DOUBLE: Regex = Regex::new(r"^\s*__([^_\n]+)__\s*$").unwrap();
+    // Note: The content between emphasis markers should not contain other emphasis markers
+    // to avoid matching nested emphasis like _**text**_ or **_text_**
+    static ref RE_ASTERISK_SINGLE: Regex = Regex::new(r"^\s*\*([^*_\n]+)\*\s*$").unwrap();
+    static ref RE_UNDERSCORE_SINGLE: Regex = Regex::new(r"^\s*_([^*_\n]+)_\s*$").unwrap();
+    static ref RE_ASTERISK_DOUBLE: Regex = Regex::new(r"^\s*\*\*([^*_\n]+)\*\*\s*$").unwrap();
+    static ref RE_UNDERSCORE_DOUBLE: Regex = Regex::new(r"^\s*__([^*_\n]+)__\s*$").unwrap();
     static ref LIST_MARKER: Regex = Regex::new(r"^\s*(?:[*+-]|\d+\.)\s+").unwrap();
     static ref BLOCKQUOTE_MARKER: Regex = Regex::new(r"^\s*>").unwrap();
     static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
@@ -60,6 +62,31 @@ impl MD036NoEmphasisAsHeading {
             .is_some_and(|ch| self.config.punctuation.contains(ch))
     }
 
+    fn contains_link_or_code(&self, text: &str) -> bool {
+        // Check for inline code: `code`
+        // This is simple but effective since we're checking text that's already
+        // been identified as emphasized content
+        if text.contains('`') {
+            return true;
+        }
+
+        // Check for markdown links: [text](url) or [text][ref]
+        // We need both [ and ] for it to be a potential link
+        // and either ( ) for inline links or ][ for reference links
+        if text.contains('[') && text.contains(']') {
+            // Check for inline link pattern [...](...)
+            if text.contains("](") {
+                return true;
+            }
+            // Check for reference link pattern [...][...] or [...][]
+            if text.contains("][") || text.ends_with(']') {
+                return true;
+            }
+        }
+
+        false
+    }
+
     fn is_entire_line_emphasized(
         &self,
         line: &str,
@@ -93,65 +120,49 @@ impl MD036NoEmphasisAsHeading {
             return None;
         }
 
-        // Check specific patterns directly without additional requirements
-        // Check for *emphasis* pattern (entire line)
-        if let Some(caps) = RE_ASTERISK_SINGLE.captures(line) {
-            let text = caps.get(1).unwrap().as_str();
+        // Helper closure to check common conditions for all emphasis patterns
+        let check_emphasis = |text: &str, level: usize, pattern: String| -> Option<(usize, String, usize, usize)> {
             // Check if text ends with punctuation - if so, don't flag it
             if !self.config.punctuation.is_empty() && self.ends_with_punctuation(text) {
                 return None;
             }
-            let _full_match = caps.get(0).unwrap();
+            // Skip if text contains links or inline code (matches markdownlint behavior)
+            // In markdownlint, these would be multiple tokens and thus not flagged
+            if self.contains_link_or_code(text) {
+                return None;
+            }
             // Find position in original line by looking for the emphasis pattern
-            let pattern = format!("*{text}*");
             let start_pos = original_line.find(&pattern).unwrap_or(0);
             let end_pos = start_pos + pattern.len();
-            return Some((1, text.to_string(), start_pos, end_pos));
+            Some((level, text.to_string(), start_pos, end_pos))
+        };
+
+        // Check for *emphasis* pattern (entire line)
+        if let Some(caps) = RE_ASTERISK_SINGLE.captures(line) {
+            let text = caps.get(1).unwrap().as_str();
+            let pattern = format!("*{text}*");
+            return check_emphasis(text, 1, pattern);
         }
 
         // Check for _emphasis_ pattern (entire line)
         if let Some(caps) = RE_UNDERSCORE_SINGLE.captures(line) {
             let text = caps.get(1).unwrap().as_str();
-            // Check if text ends with punctuation - if so, don't flag it
-            if !self.config.punctuation.is_empty() && self.ends_with_punctuation(text) {
-                return None;
-            }
-            let _full_match = caps.get(0).unwrap();
-            // Find position in original line by looking for the emphasis pattern
             let pattern = format!("_{text}_");
-            let start_pos = original_line.find(&pattern).unwrap_or(0);
-            let end_pos = start_pos + pattern.len();
-            return Some((1, text.to_string(), start_pos, end_pos));
+            return check_emphasis(text, 1, pattern);
         }
 
         // Check for **strong** pattern (entire line)
         if let Some(caps) = RE_ASTERISK_DOUBLE.captures(line) {
             let text = caps.get(1).unwrap().as_str();
-            // Check if text ends with punctuation - if so, don't flag it
-            if !self.config.punctuation.is_empty() && self.ends_with_punctuation(text) {
-                return None;
-            }
-            let _full_match = caps.get(0).unwrap();
-            // Find position in original line by looking for the emphasis pattern
             let pattern = format!("**{text}**");
-            let start_pos = original_line.find(&pattern).unwrap_or(0);
-            let end_pos = start_pos + pattern.len();
-            return Some((2, text.to_string(), start_pos, end_pos));
+            return check_emphasis(text, 2, pattern);
         }
 
         // Check for __strong__ pattern (entire line)
         if let Some(caps) = RE_UNDERSCORE_DOUBLE.captures(line) {
             let text = caps.get(1).unwrap().as_str();
-            // Check if text ends with punctuation - if so, don't flag it
-            if !self.config.punctuation.is_empty() && self.ends_with_punctuation(text) {
-                return None;
-            }
-            let _full_match = caps.get(0).unwrap();
-            // Find position in original line by looking for the emphasis pattern
             let pattern = format!("__{text}__");
-            let start_pos = original_line.find(&pattern).unwrap_or(0);
-            let end_pos = start_pos + pattern.len();
-            return Some((2, text.to_string(), start_pos, end_pos));
+            return check_emphasis(text, 2, pattern);
         }
 
         None
