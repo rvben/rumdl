@@ -390,6 +390,7 @@ Format Markdown files (alias for `check --fix`)
 **Options:**
 
 All the same options as `check` are available (except `--fix` which is always enabled), including:
+
 - `--stdin`: Format content from stdin and output to stdout
 - `-d, --disable <rules>`: Disable specific rules during formatting
 - `-e, --enable <rules>`: Format using only specific rules
@@ -572,6 +573,7 @@ rumdl automatically searches for configuration files by traversing up the direct
 run rumdl from any subdirectory of your project and it will find the configuration file at the project root.
 
 The search follows these rules:
+
 - Searches upward for `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml` (with `[tool.rumdl]` section)
 - Stops at the first configuration file found
 - Stops searching when it encounters a `.git` directory (project boundary)

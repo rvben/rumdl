@@ -7,9 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.139] - 2025-09-09
+
+### Fixed
+
+- **UTF-8 Handling**: Fixed panic when processing files with multi-byte UTF-8 characters (fixes #85)
+  - Added proper character boundary checking in code block detection
+  - Prevents string slicing panics with German umlauts (ä, ö, ü) and other multi-byte characters
+  - Added comprehensive test coverage for various international scripts
+
+- **MD038**: Fixed false positives caused by escaped backticks (fixes #77)
+  - Escaped backticks (`\``) no longer create phantom code spans
+  - Implemented two-pass algorithm to properly handle escaped characters
+  - Reduced false positive count from 179 to 0 in affected documents
+
+- **MD032**: Improved markdownlint compatibility and edge case detection (fixes #77)
+  - Changed default configuration to match markdownlint (no blank lines around lists in blockquotes)
+  - Added detection for ordered lists starting with numbers other than 1
+  - Better compliance with CommonMark specification for list formatting
+
 ## [0.0.138] - 2025-09-05
 
 ### Fixed
+
 - **LSP**: Fixed formatting to return empty array instead of null when no edits available (fixes #79)
   - Helix editor now properly receives LSP formatting responses
   - Added textDocument/rangeFormatting support for better editor compatibility
@@ -18,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.137] - 2025-09-04
 
 ### Fixed
+
 - **MD051**: Fixed GitHub anchor generation for headers with arrow patterns (fixes #82)
   - Headers like `WAL->L0 Compaction` now correctly generate `#wal-l0-compaction` anchors
   - Arrow patterns (`->`, `-->`) now convert to the correct number of hyphens based on surrounding spaces
@@ -29,12 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.134] - 2025-09-02
 
 ### Added
+
 - **MD051**: HTML anchor tag support for any element with id/name attributes
   - Supports `<a>`, `<span>`, `<div>` and any other HTML element with id attribute
   - Case-sensitive matching for HTML anchors (case-insensitive for Markdown)
   - Handles multiple id attributes (only first is used per HTML spec)
 
 ### Fixed
+
 - **MD007**: Implemented proper indentation style configuration for markdownlint compatibility
   - Added IndentStyle enum with TextAligned (default) and Fixed (markdownlint) modes
   - Auto-configures style="fixed" when loading from .markdownlint.yaml files
@@ -60,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.133] - 2025-08-30
 
 ### Fixed
+
 - **MD028/MD009**: Complete fix for rule conflict where MD028 and MD009 were "fighting each other" (fixes #66)
   - MD028 now only flags truly blank lines inside blockquotes, not `>` or `> ` lines
   - MD009 simplified to remove special cases for empty blockquote lines
@@ -68,17 +92,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.132] - 2025-08-30
 
 ### Added
+
 - **LSP**: Added "Fix all rumdl issues" code action for bulk fixes when multiple fixable diagnostics are present
 
 ## [0.0.131] - 2025-08-28
 
 ### Fixed
+
 - **MD002**: Implemented markdownlint compatibility - MD002 no longer triggers when first heading is on the first line, regardless of level (fixes #65)
 - **MD034**: Added support for multi-line MkDocs snippet blocks where markers appear on separate lines (fixes #70)
 
 ## [0.0.130] - 2025-08-27
 
 ### Fixed
+
 - **MD052**: Fixed false positives with IPv6 URLs containing brackets (e.g., `http://[::1]:8080/path[0]`)
 - **MD053**: Made rule warning-only, removed automatic fixes to prevent accidental removal of intentionally kept references (fixes #69)
 - **MD009/MD028**: Resolved formatting loop between trailing spaces and blank blockquote lines
@@ -89,6 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.129] - 2025-08-26
 
 ### Added
+
 - **MkDocs Extended Support**: Enhanced MkDocs compatibility with PyMdown Extensions
   - Snippets syntax (`--8<--`) support (fixes #62)
   - Admonitions (`!!!`, `???`, `???+`) for collapsible note blocks
@@ -97,17 +125,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Cross-references and auto-doc blocks
 
 ### Fixed
+
 - **MkDocs Validation**: Made validation more lenient to detect malformed syntax
 - **Configuration Migration**: Fixed migration of multiple disabled rules from markdownlint config
 
 ## [0.0.128] - 2025-08-25
 
 ### Fixed
+
 - **MD042/MD052**: Added support for simple identifiers in MkDocs auto-references
 
 ## [0.0.127] - 2025-08-25
 
 ### Added
+
 - **MkDocs Support**: Added MkDocs markdown flavor (closes #63)
   - New `flavor = "mkdocs"` configuration option
   - MkDocs auto-references (e.g., `[class.Name][]`, `[module.function][]`) are no longer flagged as errors
@@ -115,21 +146,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Type-safe enum implementation for better extensibility
 
 ### Fixed
+
 - **MD005**: Dynamic indent detection to respect user's chosen pattern (fixes #64)
   - Analyzes existing document to detect 2-space vs 4-space indentation
   - Preserves user's indentation style instead of forcing a default
 
 ### Changed
+
 - **Configuration**: Renamed MD013 'enable_reflow' to 'reflow' with backwards compatibility
 
 ## [0.0.126] - 2025-08-23
 
 ### Fixed
+
 - **Build**: Fixed output filename collision warning during `cargo install` (#61)
 
 ## [0.0.125] - 2025-08-22
 
 ### Added
+
 - **CLI**: Added `--stdin-filename` flag for better stdin processing
   - Specify filename when reading from stdin for better error messages
   - Enables MD057 (relative link checking) to work correctly with stdin
@@ -137,6 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improves editor integration capabilities
 
 ### Fixed
+
 - **CLI**: Fixed `rumdl fmt -` to output original content when no issues found
   - Previously incorrectly output "No issues found in stdin" message
   - Now correctly outputs the original content unchanged
@@ -145,12 +181,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Better markdownlint compatibility
 
 ### Changed
+
 - **Build**: Added mise version validation to pre-release checks
   - Prevents CI failures from non-existent mise versions
 
 ## [0.0.124] - 2025-08-22
 
 ### Added
+
 - **Formatting**: Added stdin/stdout formatting support (closes #59)
   - `rumdl fmt` command for formatting markdown files (alias for `check --fix`)
   - `--stdin` with `--fix` now outputs formatted content to stdout
@@ -159,6 +197,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Documentation updated with formatting examples
 
 ### Fixed
+
 - **MD052**: Don't flag GitHub alerts as undefined references (closes #60)
   - GitHub alert syntax (`[!NOTE]`, `[!TIP]`, `[!WARNING]`, `[!IMPORTANT]`, `[!CAUTION]`) no longer flagged
   - Improved compatibility with GitHub-flavored markdown
@@ -170,11 +209,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.123] - 2025-08-21
 
 ### Added
+
 - **MD013**: Comprehensive markdown pattern preservation during text reflow
   - Preserves reference links, footnotes, math formulas, wiki links, and more
   - Centralized regex patterns for better maintainability
 
 ### Fixed
+
 - **CLI**: Correct unfixable rules status display and fix counts (closes #56)
   - Rules marked as unfixable now show `[unfixable]` in yellow instead of `[fixed]`
   - Fix count now correctly excludes unfixable rules (e.g., "3 of 6" instead of "6 of 6")
@@ -185,6 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tests**: Mark kramdown definition list doctest as text to fix test failures
 
 ### Changed
+
 - **Internal**: Centralized markdown pattern regexes and extended reflow support
   - Improved code organization and reduced duplication
   - Better performance through shared regex compilation
@@ -192,8 +234,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.122] - 2025-08-19
 
 ### Added
+
 - **Configuration Discovery**: Automatic upward directory traversal to find configuration files (closes #58)
-  - Searches parent directories for `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml` 
+  - Searches parent directories for `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml`
   - Similar behavior to `git`, `ruff`, and `eslint`
   - Stops at `.git` directory boundaries
 - **--isolated flag**: New flag to disable all configuration discovery (Ruff-compatible)
@@ -202,6 +245,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.121] - 2025-08-19
 
 ### Fixed
+
 - **MD051**: Resolved remaining Issue #39 edge cases for link fragment validation
   - Fixed ampersand handling at boundaries: "& text" → "--text", "text &" → "text-"
   - Fixed cross-file link detection to properly ignore absolute paths (e.g., `/tags#anchor`)
@@ -210,6 +254,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Verified Jekyll/kramdown GFM underscore handling works correctly for technical identifiers
 
 ### Improved
+
 - **MD051**: Enhanced anchor generation accuracy and security
   - Added comprehensive security hardening (Unicode normalization, RTL/LTR override prevention)
   - Improved emoji detection and boundary handling
@@ -219,17 +264,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.120] - 2025-08-16
 
 ### Performance
+
 - Incremental improvements to various rule implementations
 
 ## [0.0.119] - 2025-08-15
 
 ### Fixed
+
 - **MD051**: Fixed GitHub anchor generation algorithm to correctly handle consecutive spaces
   - "Test & Heading!" now correctly generates "test--heading" instead of "test-heading"
   - Improved compliance with GitHub's official anchor generation behavior
   - Fixed whitespace normalization bug that was collapsing multiple spaces to single spaces
 
 ### Improved
+
 - **Code Quality**: Removed all `#[allow(dead_code)]` violations in codebase
   - Removed unused `InternalCodeBlockState` enum from document_structure.rs
   - Removed unused `extract_url_from_link` function from md057_existing_relative_links.rs
@@ -238,11 +286,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.118] - 2025-08-14
 
 ### Performance
+
 - Incremental improvements to various rule implementations
 
 ## [0.0.117] - 2025-08-14
 
 ### Fixed
+
 - MD037: Fixed false positive with asterisks in inline code spans (issue #49)
   - Inline code content is now properly masked before emphasis detection
 - MD011: Fixed false positive with array access patterns in link titles (issue #50)
@@ -254,6 +304,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.116] - 2025-08-13
 
 ### Added
+
 - Kramdown-style custom header IDs support (#44)
   - Headers can now have custom IDs using the `{#custom-id}` syntax
   - Custom IDs are preserved when fixing MD051 (link fragments)
@@ -262,37 +313,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Rejects problematic characters like spaces, quotes, brackets, and HTML/CSS special chars
 
 ### Fixed
+
 - Pre-release script now correctly handles dynamic versioning in pyproject.toml
 - Added Cargo.lock validation and `cargo publish --dry-run` checks to prevent release failures
 
 ## [0.0.115] - 2025-08-12
 
 ### Fixed
+
 - Various bug fixes and improvements
 
 ## [0.0.114] - 2025-08-09
 
 ### Fixed
+
 - Various bug fixes and improvements
 
 ## [0.0.113] - 2025-08-09
 
 ### Fixed
+
 - Various bug fixes and improvements
 
 ## [0.0.112] - 2025-08-08
 
 ### Fixed
+
 - Various bug fixes and improvements
 
 ## [0.0.110] - 2025-08-08
 
 ### Changed
+
 - Various bug fixes and improvements
 
 ## [0.0.107] - 2025-08-06
 
 ### Fixed
+
 - MD036: Remove automatic fix to prevent document corruption when bold/italic text is used as image captions, labels, or warnings (#23)
 - MD011: No longer flags patterns like `()[1]` inside inline code as reversed links (#19)
 - MD052: No longer flags reference patterns inside HTML comments as undefined references (#20)
@@ -300,6 +358,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.106] - 2025-08-05
 
 ### Changed
+
 - Moved benchmark binaries from Python package distribution
   - Benchmark tools are now in `benchmark/bin/` directory
   - Added `build-benchmarks` feature flag to explicitly build benchmarks
@@ -309,6 +368,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.105] - 2025-08-05
 
 ### Fixed
+
 - MD029: Fixed list continuation detection to properly handle variable marker widths (fixes #16)
   - List items with double-digit markers (e.g., "10. ") now correctly require 4+ spaces for continuation
   - List items with triple-digit markers (e.g., "100. ") now correctly require 5+ spaces for continuation
@@ -317,23 +377,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Installation: Improved update experience for Cursor/Windsurf editors
 
 ### Added
+
 - `--update` flag to check for newer versions and update if available
 - Version checking with update notifications
 - Marketplace-aware installation for VS Code forks
 - Comprehensive tests for MD029 with large number markers (triple and quadruple digits)
 
 ### Changed
+
 - Clarified `--force` flag behavior in help text
 
 ## [0.0.104] - 2025-08-02
 
 ### Added
+
 - File-wide inline configuration support with `disable-file`, `enable-file`, and `configure-file` comments
 - Support for JSON configuration within inline comments to customize rule behavior per file
 - Enhanced inline configuration to handle edge cases with multiple comments on the same line
 - Support for enabling specific rules when all rules are disabled
 
 ### Fixed
+
 - Process inline configuration comments in order of appearance on the same line
 - Skip processing inline configuration comments inside code blocks
 
@@ -344,6 +408,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.100] - 2025-07-22
 
 ### Performance Improvements
+
 - **MD032**: Eliminated redundant DocumentStructure creation through optimization interface delegation
   - Refactored check() method to delegate to check_with_structure() for shared parsing
   - Added fix_with_structure() helper method for optimized fixing operations
@@ -357,6 +422,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added memory stress testing to prevent performance regressions
 
 ### Code Quality
+
 - Improved separation of concerns in list processing logic
 - Enhanced code maintainability through better structured algorithms
 - Added comprehensive test coverage for pathological markdown structures
@@ -364,6 +430,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.99] - 2025-07-22
 
 ### Fixed
+
 - MD034: Added support for `ftps://` URLs
 - MD034: Fixed detection of URLs in HTML comments (now properly ignored)
 - MD039: Fixed escaped character handling in link text
@@ -375,6 +442,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.98] - 2025-07-18
 
 ### Added
+
 - Homebrew tap support for easy installation on macOS and Linux
   - Created `homebrew-rumdl` tap repository
   - Added automatic archive creation for macOS builds in release workflow
@@ -383,12 +451,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Homebrew installation instructions in README
 
 ### Changed
+
 - Enhanced release workflow to create platform-specific tar.gz archives
 - Added repository dispatch to notify homebrew-rumdl on new releases
 
 ## [0.0.97] - 2025-07-17
 
 ### Changed
+
 - Updated exit code handling for consistency:
   - Configuration errors now return exit code 2 (was 1)
   - File not found errors now return exit code 2 (was 1)
@@ -398,12 +468,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Exit code 2: Tool errors (config parse errors, file not found, invalid arguments)
 
 ### Fixed
+
 - Improved consistency in exit code handling across the entire codebase
 - Updated all tests to expect correct exit codes for different error scenarios
 
 ## [0.0.96] - 2025-07-16
 
 ### Added
+
 - MD013: Text reflow/wrapping functionality for automatic line breaking (fixes #13)
   - New `enable_reflow` configuration option (disabled by default)
   - Intelligently wraps long lines while preserving Markdown formatting
@@ -415,14 +487,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive test coverage for text reflow functionality
 
 ### Changed
+
 - MD013: Enhanced fix functionality with optional text reflow (opt-in feature)
 
 ### Fixed
+
 - MD013: Fixed list indentation to properly align continuation lines with the text content
 
 ## [0.0.95] - 2025-07-15
 
 ### Added
+
 - Implemented 3-tier exit code system following Ruff's convention:
   - Exit code 0: Success (no issues found)
   - Exit code 1: Linting violations found
@@ -430,16 +505,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added exit_codes module for cleaner exit code management
 
 ### Changed
+
 - Updated all error handlers to use appropriate exit codes
 - CI/CD systems can now distinguish between markdown issues (exit 1) and tool failures (exit 2)
 
 ### Documentation
+
 - Updated README with exit code documentation
 - Added exit codes section to CLI reference
 
 ## [0.0.94] - 2025-07-04
 
 ### Performance Improvements
+
 - Implemented lazy code span loading - 3.8x speedup for 94% of rules that don't use code spans
 - MD013: 34.5% faster check operations through aggressive early returns
 - MD038: 14% faster by leveraging lazy code span loading
@@ -449,6 +527,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Overall LintContext creation improved by 11.7%
 
 ### Fixed
+
 - MD053: Fixed escaped character handling in reference definitions
 
 ## [0.0.93] - 2025-07-03
