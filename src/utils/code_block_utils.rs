@@ -127,21 +127,22 @@ impl CodeBlockUtils {
             blocks.push((indented_block_start, content.len()));
         }
 
-        // Find inline code spans (but skip those inside fenced code blocks)
+        // Find inline code spans
         let mut i = 0;
         while i < content.len() {
             if let Some(m) = CODE_SPAN_PATTERN.find_at(content, i) {
                 let backtick_length = m.end() - m.start();
                 let start = m.start();
 
-                // Skip if this backtick is inside a fenced code block
-                let in_fenced_block = blocks
-                    .iter()
-                    .any(|&(block_start, block_end)| start >= block_start && start < block_end);
-
-                if in_fenced_block {
-                    i = m.end();
-                    continue;
+                // Check if this is a fence marker (3+ backticks at start of line)
+                if backtick_length >= 3 {
+                    // Check if it's at the start of a line
+                    let at_line_start = start == 0 || content.as_bytes()[start - 1] == b'\n';
+                    if at_line_start {
+                        // This is a fence, not an inline code span - skip it
+                        i = m.end();
+                        continue;
+                    }
                 }
 
                 // Check if these backticks are escaped (preceded by backslash)
@@ -176,19 +177,8 @@ impl CodeBlockUtils {
 
                 if let Some(end_pos) = found_end {
                     let end = m.end() + end_pos + backtick_length;
-
-                    // Also check if the end would be inside a fenced code block
-                    let end_in_fenced_block = blocks.iter().any(|&(block_start, block_end)| {
-                        (m.end() + end_pos) >= block_start && (m.end() + end_pos) < block_end
-                    });
-
-                    if !end_in_fenced_block {
-                        blocks.push((start, end));
-                        i = end;
-                    } else {
-                        // Skip this potential code span as its end is in a fenced block
-                        i = m.end();
-                    }
+                    blocks.push((start, end));
+                    i = end;
                 } else {
                     i = m.end();
                 }
@@ -315,13 +305,13 @@ mod tests {
 
     #[test]
     fn test_detect_fenced_code_blocks() {
-        // The function detects BOTH fenced blocks and inline code spans
-        // Fenced blocks with backticks also get picked up as inline spans due to the backticks
+        // The function detects fenced blocks and inline code spans
+        // Fence markers (``` at line start) are now skipped in inline span detection
 
         // Basic fenced code block with backticks
         let content = "Some text\n```\ncode here\n```\nMore text";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // Should find: 1 fenced block only (backticks are part of the fence, not separate spans)
+        // Should find: 1 fenced block (fences are no longer detected as inline spans)
         assert_eq!(blocks.len(), 1);
 
         // Check that we have the fenced block
@@ -339,7 +329,7 @@ mod tests {
         // Multiple code blocks
         let content = "Text\n```\ncode1\n```\nMiddle\n~~~\ncode2\n~~~\nEnd";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 2 fenced blocks only (backticks inside fences are not separate spans)
+        // 2 fenced blocks (fence markers no longer detected as inline spans)
         assert_eq!(blocks.len(), 2);
     }
 
@@ -348,7 +338,7 @@ mod tests {
         // Code block with language identifier
         let content = "Text\n```rust\nfn main() {}\n```\nMore";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced block only (backticks inside fences are not separate spans)
+        // 1 fenced block (fence markers no longer detected as inline spans)
         assert_eq!(blocks.len(), 1);
         // Check we have the full fenced block
         let fenced = blocks.iter().find(|(s, e)| content[*s..*e].contains("fn main"));
@@ -486,7 +476,7 @@ mod tests {
     fn test_code_block_at_start() {
         let content = "```\ncode\n```\nText after";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced block only (backticks are part of the fence)
+        // 1 fenced block (fence markers no longer detected as inline spans)
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].0, 0); // Fenced block starts at 0
     }
@@ -495,7 +485,7 @@ mod tests {
     fn test_code_block_at_end() {
         let content = "Text before\n```\ncode\n```";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced block only (backticks are part of the fence)
+        // 1 fenced block (fence markers no longer detected as inline spans)
         assert_eq!(blocks.len(), 1);
         // Check we have the fenced block
         let fenced = blocks.iter().find(|(s, e)| content[*s..*e].contains("code"));
@@ -544,7 +534,7 @@ mod tests {
         // Fenced code blocks with complex info strings
         let content = "```rust,no_run,should_panic\ncode\n```";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced block only (backticks are part of the fence)
+        // 1 fenced block (fence markers no longer detected as inline spans)
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].0, 0);
     }
@@ -554,7 +544,7 @@ mod tests {
         // Indented fence markers should still work as fences
         let content = "Text\n  ```\n  code\n  ```\nAfter";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced block only (backticks are part of the fence)
-        assert_eq!(blocks.len(), 1);
+        // 1 fenced + 1 inline span
+        assert_eq!(blocks.len(), 2);
     }
 }
