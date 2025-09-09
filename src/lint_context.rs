@@ -969,7 +969,31 @@ impl<'a> LintContext<'a> {
             let in_code_block = code_blocks.iter().any(|&(start, end)| {
                 // Only consider ranges that span multiple lines (code blocks)
                 // Inline code spans are typically on a single line
-                let block_content = &content[start..end];
+
+                // Ensure we're at valid UTF-8 boundaries
+                let safe_start = if start > 0 && !content.is_char_boundary(start) {
+                    // Find the nearest valid boundary before start
+                    let mut boundary = start;
+                    while boundary > 0 && !content.is_char_boundary(boundary) {
+                        boundary -= 1;
+                    }
+                    boundary
+                } else {
+                    start
+                };
+
+                let safe_end = if end < content.len() && !content.is_char_boundary(end) {
+                    // Find the nearest valid boundary after end
+                    let mut boundary = end;
+                    while boundary < content.len() && !content.is_char_boundary(boundary) {
+                        boundary += 1;
+                    }
+                    boundary
+                } else {
+                    end.min(content.len())
+                };
+
+                let block_content = &content[safe_start..safe_end];
                 let is_multiline = block_content.contains('\n');
                 let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
                 let is_indented = !is_fenced
