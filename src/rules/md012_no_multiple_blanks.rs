@@ -57,7 +57,10 @@ impl Rule for MD012NoMultipleBlanks {
             .windows(2)
             .any(|pair| pair[0].trim().is_empty() && pair[1].trim().is_empty());
 
-        if !has_potential_blanks {
+        // Also check for blanks at EOF (markdownlint behavior)
+        let ends_with_multiple_newlines = content.ends_with("\n\n") || content.ends_with("\r\n\r\n");
+
+        if !has_potential_blanks && !ends_with_multiple_newlines {
             return Ok(Vec::new());
         }
 
@@ -102,10 +105,7 @@ impl Rule for MD012NoMultipleBlanks {
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name()),
                                 severity: Severity::Warning,
-                                message: format!(
-                                    "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                                    location, self.config.maximum, blank_count
-                                ),
+                                message: format!("Multiple consecutive blank lines {location}"),
                                 line: start_line,
                                 column: start_col,
                                 end_line,
@@ -148,10 +148,7 @@ impl Rule for MD012NoMultipleBlanks {
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name()),
                                 severity: Severity::Warning,
-                                message: format!(
-                                    "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                                    location, self.config.maximum, blank_count
-                                ),
+                                message: format!("Multiple consecutive blank lines {location}"),
                                 line: start_line,
                                 column: start_col,
                                 end_line,
@@ -212,10 +209,7 @@ impl Rule for MD012NoMultipleBlanks {
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name()),
                                 severity: Severity::Warning,
-                                message: format!(
-                                    "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                                    location, self.config.maximum, blank_count
-                                ),
+                                message: format!("Multiple consecutive blank lines {location}"),
                                 line: start_line,
                                 column: start_col,
                                 end_line,
@@ -271,10 +265,7 @@ impl Rule for MD012NoMultipleBlanks {
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name()),
                                 severity: Severity::Warning,
-                                message: format!(
-                                    "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                                    location, self.config.maximum, blank_count
-                                ),
+                                message: format!("Multiple consecutive blank lines {location}"),
                                 line: start_line,
                                 column: start_col,
                                 end_line,
@@ -300,43 +291,56 @@ impl Rule for MD012NoMultipleBlanks {
         }
 
         // Check for trailing blank lines
-        if blank_count > self.config.maximum {
-            let location = "at end of file";
-            for i in self.config.maximum..blank_count {
-                let excess_line_num = blank_start + i;
-                if lines_to_check.contains(&excess_line_num) {
-                    let excess_line = excess_line_num + 1;
-                    let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
+        // Special handling: lines() doesn't create an empty string for a final trailing newline
+        // So we need to check the raw content for multiple trailing newlines
 
-                    // Calculate precise character range for the entire blank line
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(excess_line, excess_line_content);
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        severity: Severity::Warning,
-                        message: format!(
-                            "Multiple consecutive blank lines {} (Expected: {}; Actual: {})",
-                            location, self.config.maximum, blank_count
-                        ),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        fix: Some(Fix {
-                            range: {
-                                // Remove entire line including newline
-                                let line_start = _line_index.get_line_start_byte(excess_line).unwrap_or(0);
-                                let line_end = _line_index
-                                    .get_line_start_byte(excess_line + 1)
-                                    .unwrap_or(line_start + 1);
-                                line_start..line_end
-                            },
-                            replacement: String::new(),
-                        }),
-                    });
-                }
+        // Count consecutive newlines at the end of the file
+        let mut consecutive_newlines_at_end: usize = 0;
+        for ch in content.chars().rev() {
+            if ch == '\n' {
+                consecutive_newlines_at_end += 1;
+            } else if ch == '\r' {
+                // Skip carriage returns in CRLF
+                continue;
+            } else {
+                break;
             }
+        }
+
+        // Markdownlint treats ANY blank lines at EOF as a violation
+        // A file ending with \n\n has 1 blank line but markdownlint reports it
+        // as "multiple consecutive blank lines" with "Actual: 2"
+        // This suggests it counts blank lines at EOF specially
+        let blank_lines_at_eof = consecutive_newlines_at_end.saturating_sub(1);
+
+        // At EOF, ANY blank lines violate the rule (markdownlint behavior)
+        // This is different from the middle of the file where 1 blank is allowed
+        if blank_lines_at_eof > 0 {
+            let location = "at end of file";
+
+            // Report on the line after the last content line
+            let report_line = lines.len() + 1;
+
+            // Report one warning for the excess blank lines at EOF
+            warnings.push(LintWarning {
+                rule_name: Some(self.name()),
+                severity: Severity::Warning,
+                message: format!("Multiple consecutive blank lines {location}"),
+                line: report_line,
+                column: 1,
+                end_line: report_line,
+                end_column: 1,
+                fix: Some(Fix {
+                    range: {
+                        // Remove excess trailing newlines
+                        // Keep content up to where excess newlines start
+                        let excess_newlines = blank_lines_at_eof - self.config.maximum;
+                        let keep_chars = content.len() - excess_newlines;
+                        keep_chars..content.len()
+                    },
+                    replacement: String::new(),
+                }),
+            });
         }
 
         Ok(warnings)
@@ -569,6 +573,17 @@ mod tests {
     }
 
     #[test]
+    fn test_single_blank_at_eof_flagged() {
+        // Markdownlint behavior: ANY blank lines at EOF are flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Content\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("at end of file"));
+    }
+
+    #[test]
     fn test_whitespace_only_lines() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Line 1\n  \n\t\nLine 2";
@@ -677,6 +692,8 @@ mod tests {
         let content = "\n\n\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2); // Two excessive blank lines
+        // With the new EOF handling, we report once at EOF
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("at end of file"));
     }
 }
