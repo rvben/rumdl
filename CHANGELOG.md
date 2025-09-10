@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.140] - 2025-09-10
+
+### Fixed
+
+- **LSP**: Support formatting documents without textDocument/didOpen (related to #79)
+  - Added lazy loading with disk fallback for unopened documents
+  - Editors like Helix can now format files without opening them first
+  - Implemented DocumentEntry structure to track document source and version
+  - Added intelligent caching for disk-loaded documents
+  - Maintains full compatibility with traditional LSP clients (VS Code)
+
+- **Documentation**: Added comprehensive inline configuration documentation
+  - Created detailed guide for rumdl-disable/enable comment syntax
+  - Documented all supported inline configuration formats
+  - Added examples for disabling rules per line, block, and file
+
+- **Fix Counting**: Corrected issue where unfixable warnings were counted as fixed
+  - MD013 warnings in table cells now correctly reported as unfixable
+  - Fix count now reflects actual fixes applied, not total warnings
+
 ## [0.0.139] - 2025-09-09
 
 ### Fixed
@@ -662,7 +682,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.138...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.140...HEAD
+[0.0.140]: https://github.com/rvben/rumdl/compare/v0.0.139...v0.0.140
 [0.0.138]: https://github.com/rvben/rumdl/compare/v0.0.137...v0.0.138
 [0.0.137]: https://github.com/rvben/rumdl/compare/v0.0.136...v0.0.137
 [0.0.136]: https://github.com/rvben/rumdl/compare/v0.0.135...v0.0.136
