@@ -460,7 +460,12 @@ impl MD051LinkFragments {
     /// Strip HTML tags from text
     fn strip_html_tags(text: &str) -> String {
         lazy_static! {
-            static ref HTML_TAG_PATTERN: Regex = Regex::new(r"<[^>]+>").unwrap();
+            // More precise HTML tag pattern that won't match arrow patterns like <->
+            // Matches: opening tags, closing tags, and self-closing tags
+            // But not: arrow patterns like <->, <--, etc.
+            static ref HTML_TAG_PATTERN: Regex = Regex::new(
+                r"</?[a-zA-Z][^>]*>|<[a-zA-Z][^>]*/>"
+            ).unwrap();
         }
         HTML_TAG_PATTERN.replace_all(text, "").to_string()
     }

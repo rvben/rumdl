@@ -623,14 +623,19 @@ For arrays use [`List[int]`] or [`Array[str, 10]`].
 #[test]
 fn test_undefined_reference_with_nested_brackets() {
     let rule = MD052ReferenceLinkImages::new();
-    // Test that undefined references with nested brackets are still caught
+    // Type annotations like Dict[str, Any] and list[int] are now skipped
+    // to avoid false positives for programming type annotations
     let content = r#"This [`Dict[str, Any]`] is undefined.
 
 [`list[int]`]: https://example.com"#;
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert!(result[0].message.contains("`Dict[str, Any]`"));
+    // Should not flag type annotations as undefined references
+    assert_eq!(
+        result.len(),
+        0,
+        "Type annotations should not be flagged as undefined references"
+    );
 }
 
 #[test]

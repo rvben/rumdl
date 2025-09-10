@@ -105,10 +105,10 @@ fn test_fix_with_detected_four_space_pattern() {
       * Nested under wrong item";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    // Should fix to use 4-space pattern
+    // MD005 now consistently uses 2-space indentation by default (markdownlint compatibility)
     assert!(
-        fixed.contains("    * Wrong: only 2 spaces") || fixed.contains("    * Correctly indented with 4"),
-        "Fix should maintain the detected 4-space pattern"
+        fixed.contains("  * Wrong: only 2 spaces") && fixed.contains("  * Correctly indented with 4"),
+        "Fix should use consistent 2-space indentation. Got:\n{fixed}"
     );
 }
 

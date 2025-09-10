@@ -162,15 +162,21 @@ impl CodeBlockUtils {
                 // Look for unescaped closing backticks
                 let mut search_pos = 0;
                 let mut found_end = None;
-                while let Some(pos) = search_str[search_pos..].find(&backtick_pattern) {
-                    let absolute_pos = m.end() + search_pos + pos;
-                    // Check if these closing backticks are escaped
-                    if absolute_pos > 0 && content.as_bytes()[absolute_pos - 1] == b'\\' {
-                        // These are escaped, keep searching
-                        search_pos += pos + backtick_length;
+                while search_pos < search_str.len() {
+                    if let Some(pos) = search_str[search_pos..].find(&backtick_pattern) {
+                        let absolute_pos = m.end() + search_pos + pos;
+                        // Check if these closing backticks are escaped
+                        if absolute_pos > 0 && content.as_bytes()[absolute_pos - 1] == b'\\' {
+                            // These are escaped, keep searching
+                            // Advance past the escaped backticks, but at least by 1
+                            let advance = (pos + backtick_length).max(1);
+                            search_pos += advance;
+                        } else {
+                            // Found unescaped closing backticks
+                            found_end = Some(search_pos + pos);
+                            break;
+                        }
                     } else {
-                        // Found unescaped closing backticks
-                        found_end = Some(search_pos + pos);
                         break;
                     }
                 }

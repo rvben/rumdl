@@ -31,6 +31,11 @@ mod tests {
         let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
+        // Debug output to see what's happening
+        if !result.is_empty() {
+            eprintln!("DEBUG: Heading '{heading}' expected fragment '{expected}' but got warnings: {result:?}");
+        }
+
         assert_eq!(
             result.len(),
             0,

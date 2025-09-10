@@ -391,7 +391,11 @@ fn test_list_followed_by_blank_then_code_block_valid() {
 
 #[test]
 fn test_allow_list_after_heading() {
-    let rule = MD032BlanksAroundLists::default(); // Has allow_after_headings = true
+    // Default is now strict (false) to match markdownlint
+    let rule = MD032BlanksAroundLists {
+        allow_after_headings: true,
+        ..Default::default()
+    };
 
     // Test cases that should NOT be flagged with lenient settings
     let valid_cases = vec![
@@ -409,7 +413,11 @@ fn test_allow_list_after_heading() {
 
 #[test]
 fn test_allow_list_after_colon() {
-    let rule = MD032BlanksAroundLists::default(); // Has allow_after_colons = true
+    // Default is now strict (false) to match markdownlint
+    let rule = MD032BlanksAroundLists {
+        allow_after_colons: true,
+        ..Default::default()
+    };
 
     // Test cases that should NOT be flagged with lenient settings
     let valid_cases = vec![
