@@ -17,6 +17,17 @@ use crate::lsp::types::{RumdlLspConfig, warning_to_code_action, warning_to_diagn
 use crate::rule::Rule;
 use crate::rules;
 
+/// Represents a document in the LSP server's cache
+#[derive(Clone, Debug, PartialEq)]
+struct DocumentEntry {
+    /// The document content
+    content: String,
+    /// Version number from the editor (None for disk-loaded documents)
+    version: Option<i32>,
+    /// Whether the document was loaded from disk (true) or opened in editor (false)
+    from_disk: bool,
+}
+
 /// Main LSP server for rumdl
 ///
 /// Following Ruff's pattern, this server provides:
@@ -31,8 +42,8 @@ pub struct RumdlLanguageServer {
     config: Arc<RwLock<RumdlLspConfig>>,
     /// Rumdl core configuration
     rumdl_config: Arc<RwLock<Config>>,
-    /// Document store for open files
-    documents: Arc<RwLock<HashMap<Url, String>>>,
+    /// Document store for open files and cached disk files
+    documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
 }
 
 impl RumdlLanguageServer {
@@ -43,6 +54,43 @@ impl RumdlLanguageServer {
             rumdl_config: Arc::new(RwLock::new(Config::default())),
             documents: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Get document content, either from cache or by reading from disk
+    ///
+    /// This method first checks if the document is in the cache (opened in editor).
+    /// If not found, it attempts to read the file from disk and caches it for
+    /// future requests.
+    async fn get_document_content(&self, uri: &Url) -> Option<String> {
+        // First check the cache
+        {
+            let docs = self.documents.read().await;
+            if let Some(entry) = docs.get(uri) {
+                return Some(entry.content.clone());
+            }
+        }
+
+        // If not in cache and it's a file URI, try to read from disk
+        if let Ok(path) = uri.to_file_path() {
+            if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                // Cache the document for future requests
+                let entry = DocumentEntry {
+                    content: content.clone(),
+                    version: None,
+                    from_disk: true,
+                };
+
+                let mut docs = self.documents.write().await;
+                docs.insert(uri.clone(), entry);
+
+                log::debug!("Loaded document from disk and cached: {uri}");
+                return Some(content);
+            } else {
+                log::debug!("Failed to read file from disk: {uri}");
+            }
+        }
+
+        None
     }
 
     /// Apply LSP config overrides to the filtered rules
@@ -384,9 +432,15 @@ impl LanguageServer for RumdlLanguageServer {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
+        let version = params.text_document.version;
 
-        // Store document
-        self.documents.write().await.insert(uri.clone(), text.clone());
+        // Store document with version information
+        let entry = DocumentEntry {
+            content: text.clone(),
+            version: Some(version),
+            from_disk: false,
+        };
+        self.documents.write().await.insert(uri.clone(), entry);
 
         // Update diagnostics
         self.update_diagnostics(uri, text).await;
@@ -394,13 +448,19 @@ impl LanguageServer for RumdlLanguageServer {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
+        let version = params.text_document.version;
 
         // Apply changes (we're using FULL sync, so just take the full text)
         if let Some(change) = params.content_changes.into_iter().next() {
             let text = change.text;
 
-            // Update stored document
-            self.documents.write().await.insert(uri.clone(), text.clone());
+            // Update stored document with new version
+            let entry = DocumentEntry {
+                content: text.clone(),
+                version: Some(version),
+                from_disk: false,
+            };
+            self.documents.write().await.insert(uri.clone(), entry);
 
             // Update diagnostics
             self.update_diagnostics(uri, text).await;
@@ -413,7 +473,8 @@ impl LanguageServer for RumdlLanguageServer {
         drop(config_guard);
 
         // Auto-fix on save if enabled
-        if enable_auto_fix && let Some(text) = self.documents.read().await.get(&params.text_document.uri) {
+        if enable_auto_fix && let Some(entry) = self.documents.read().await.get(&params.text_document.uri) {
+            let text = &entry.content;
             match self.apply_all_fixes(&params.text_document.uri, text).await {
                 Ok(Some(fixed_text)) => {
                     // Create a workspace edit to apply the fixes
@@ -440,10 +501,15 @@ impl LanguageServer for RumdlLanguageServer {
                             if response.applied {
                                 log::info!("Auto-fix applied successfully");
                                 // Update our stored version
+                                let entry = DocumentEntry {
+                                    content: fixed_text,
+                                    version: None, // Will be updated by the next didChange from client
+                                    from_disk: false,
+                                };
                                 self.documents
                                     .write()
                                     .await
-                                    .insert(params.text_document.uri.clone(), fixed_text);
+                                    .insert(params.text_document.uri.clone(), entry);
                             } else {
                                 log::warn!("Auto-fix was not applied: {:?}", response.failure_reason);
                             }
@@ -463,8 +529,9 @@ impl LanguageServer for RumdlLanguageServer {
         }
 
         // Re-lint the document
-        if let Some(text) = self.documents.read().await.get(&params.text_document.uri) {
-            self.update_diagnostics(params.text_document.uri, text.clone()).await;
+        if let Some(entry) = self.documents.read().await.get(&params.text_document.uri) {
+            self.update_diagnostics(params.text_document.uri, entry.content.clone())
+                .await;
         }
     }
 
@@ -482,8 +549,8 @@ impl LanguageServer for RumdlLanguageServer {
         let uri = params.text_document.uri;
         let range = params.range;
 
-        if let Some(text) = self.documents.read().await.get(&uri) {
-            match self.get_code_actions(&uri, text, range).await {
+        if let Some(text) = self.get_document_content(&uri).await {
+            match self.get_code_actions(&uri, &text, range).await {
                 Ok(actions) => {
                     let response: Vec<CodeActionOrCommand> =
                         actions.into_iter().map(CodeActionOrCommand::CodeAction).collect();
@@ -523,7 +590,7 @@ impl LanguageServer for RumdlLanguageServer {
 
         log::debug!("Formatting request for: {uri}");
 
-        if let Some(text) = self.documents.read().await.get(&uri) {
+        if let Some(text) = self.get_document_content(&uri).await {
             // Get config with LSP overrides
             let config_guard = self.config.read().await;
             let lsp_config = config_guard.clone();
@@ -542,7 +609,7 @@ impl LanguageServer for RumdlLanguageServer {
             filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
             // Lint the document to get all warnings
-            match crate::lint(text, &filtered_rules, false, flavor) {
+            match crate::lint(&text, &filtered_rules, false, flavor) {
                 Ok(warnings) => {
                     log::debug!(
                         "Found {} warnings, {} with fixes",
@@ -555,10 +622,10 @@ impl LanguageServer for RumdlLanguageServer {
 
                     if has_fixes {
                         // Apply fixes using the fix_utils function
-                        match crate::utils::fix_utils::apply_warning_fixes(text, &warnings) {
+                        match crate::utils::fix_utils::apply_warning_fixes(&text, &warnings) {
                             Ok(fixed_content) => {
                                 // Only return edits if the content actually changed
-                                if fixed_content != *text {
+                                if fixed_content != text {
                                     log::debug!("Returning formatting edits");
                                     // Create a single TextEdit that replaces the entire document
                                     // Calculate proper end position by iterating through all characters
@@ -612,8 +679,8 @@ impl LanguageServer for RumdlLanguageServer {
     async fn diagnostic(&self, params: DocumentDiagnosticParams) -> JsonRpcResult<DocumentDiagnosticReportResult> {
         let uri = params.text_document.uri;
 
-        if let Some(text) = self.documents.read().await.get(&uri) {
-            match self.lint_document(&uri, text).await {
+        if let Some(text) = self.get_document_content(&uri).await {
+            match self.lint_document(&uri, &text).await {
                 Ok(diagnostics) => Ok(DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
                     RelatedFullDocumentDiagnosticReport {
                         related_documents: None,
@@ -749,10 +816,15 @@ mod tests {
         let text = "# Test Document";
 
         // Store document
-        server.documents.write().await.insert(uri.clone(), text.to_string());
+        let entry = DocumentEntry {
+            content: text.to_string(),
+            version: Some(1),
+            from_disk: false,
+        };
+        server.documents.write().await.insert(uri.clone(), entry);
 
         // Verify storage
-        let stored = server.documents.read().await.get(&uri).cloned();
+        let stored = server.documents.read().await.get(&uri).map(|e| e.content.clone());
         assert_eq!(stored, Some(text.to_string()));
 
         // Remove document
@@ -825,15 +897,25 @@ mod tests {
         // Store multiple documents
         {
             let mut docs = server.documents.write().await;
-            docs.insert(uri1.clone(), text1.to_string());
-            docs.insert(uri2.clone(), text2.to_string());
+            let entry1 = DocumentEntry {
+                content: text1.to_string(),
+                version: Some(1),
+                from_disk: false,
+            };
+            let entry2 = DocumentEntry {
+                content: text2.to_string(),
+                version: Some(1),
+                from_disk: false,
+            };
+            docs.insert(uri1.clone(), entry1);
+            docs.insert(uri2.clone(), entry2);
         }
 
         // Verify both are stored
         let docs = server.documents.read().await;
         assert_eq!(docs.len(), 2);
-        assert_eq!(docs.get(&uri1).map(|s| s.as_str()), Some(text1));
-        assert_eq!(docs.get(&uri2).map(|s| s.as_str()), Some(text2));
+        assert_eq!(docs.get(&uri1).map(|s| s.content.as_str()), Some(text1));
+        assert_eq!(docs.get(&uri2).map(|s| s.content.as_str()), Some(text2));
     }
 
     #[tokio::test]
@@ -850,7 +932,12 @@ mod tests {
         let text = "#Heading without space"; // MD018 violation
 
         // Store document
-        server.documents.write().await.insert(uri.clone(), text.to_string());
+        let entry = DocumentEntry {
+            content: text.to_string(),
+            version: Some(1),
+            from_disk: false,
+        };
+        server.documents.write().await.insert(uri.clone(), entry);
 
         // Test apply_all_fixes
         let fixed = server.apply_all_fixes(&uri, text).await.unwrap();
@@ -927,7 +1014,12 @@ mod tests {
         let text = "# Test\n\nThis is a test  \nWith trailing spaces  ";
 
         // Store document
-        server.documents.write().await.insert(uri.clone(), text.to_string());
+        let entry = DocumentEntry {
+            content: text.to_string(),
+            version: Some(1),
+            from_disk: false,
+        };
+        server.documents.write().await.insert(uri.clone(), entry);
 
         // Create formatting params
         let params = DocumentFormattingParams {
