@@ -3083,7 +3083,13 @@ fn apply_fixes(
     quiet: bool,
     config: &rumdl_config::Config,
 ) -> usize {
-    let mut warnings_fixed = 0;
+    // Store the original warning count by rule
+    let mut original_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for warning in all_warnings {
+        if let Some(rule_name) = warning.rule_name {
+            *original_counts.entry(rule_name).or_insert(0) += 1;
+        }
+    }
 
     // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
     for rule in rules {
@@ -3128,8 +3134,6 @@ fn apply_fixes(
                     Ok(fixed_content) => {
                         if fixed_content != *content {
                             *content = fixed_content;
-                            // Apply fixes for this rule - we consider all warnings for the rule fixed
-                            warnings_fixed += rule_warnings.len();
                         }
                     }
                     Err(err) => {
@@ -3147,6 +3151,27 @@ fn apply_fixes(
         }
     }
 
+    // Now re-check all rules to see what warnings remain
+    let ctx_after_fixes = LintContext::new(content, config.markdown_flavor());
+    let mut remaining_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+
+    for rule in rules {
+        if let Ok(remaining_warnings) = rule.check(&ctx_after_fixes) {
+            for warning in remaining_warnings {
+                if let Some(rule_name) = warning.rule_name {
+                    *remaining_counts.entry(rule_name).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    // Calculate the actual number of warnings fixed
+    let mut warnings_fixed = 0;
+    for (rule_name, original_count) in original_counts {
+        let remaining = remaining_counts.get(rule_name).copied().unwrap_or(0);
+        warnings_fixed += original_count.saturating_sub(remaining);
+    }
+
     warnings_fixed
 }
 
@@ -3158,7 +3183,13 @@ fn apply_fixes_stdin(
     quiet: bool,
     config: &rumdl_config::Config,
 ) -> usize {
-    let mut warnings_fixed = 0;
+    // Store the original warning count by rule
+    let mut original_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for warning in all_warnings {
+        if let Some(rule_name) = warning.rule_name {
+            *original_counts.entry(rule_name).or_insert(0) += 1;
+        }
+    }
 
     // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
     for rule in rules {
@@ -3203,8 +3234,6 @@ fn apply_fixes_stdin(
                     Ok(fixed_content) => {
                         if fixed_content != *content {
                             *content = fixed_content;
-                            // Apply fixes for this rule - we consider all warnings for the rule fixed
-                            warnings_fixed += rule_warnings.len();
                         }
                     }
                     Err(err) => {
@@ -3220,6 +3249,27 @@ fn apply_fixes_stdin(
                 }
             }
         }
+    }
+
+    // Now re-check all rules to see what warnings remain
+    let ctx_after_fixes = LintContext::new(content, config.markdown_flavor());
+    let mut remaining_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+
+    for rule in rules {
+        if let Ok(remaining_warnings) = rule.check(&ctx_after_fixes) {
+            for warning in remaining_warnings {
+                if let Some(rule_name) = warning.rule_name {
+                    *remaining_counts.entry(rule_name).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    // Calculate the actual number of warnings fixed
+    let mut warnings_fixed = 0;
+    for (rule_name, original_count) in original_counts {
+        let remaining = remaining_counts.get(rule_name).copied().unwrap_or(0);
+        warnings_fixed += original_count.saturating_sub(remaining);
     }
 
     warnings_fixed
