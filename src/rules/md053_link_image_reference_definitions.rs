@@ -170,17 +170,8 @@ impl MD053LinkImageReferenceDefinitions {
         // Note: We don't filter out patterns with backticks because backticks in reference names
         // are valid markdown syntax, e.g., [`dataclasses.InitVar`] is a valid reference name
 
-        // Skip patterns that look like module/class paths ONLY if they don't have backticks
-        // Backticks indicate intentional code formatting in a reference name
-        // e.g., skip [dataclasses.initvar] but allow [`typing.ClassVar`]
-        if !text.contains('`')
-            && text.contains('.')
-            && !text.contains(' ')
-            && !text.contains('-')
-            && !text.contains('_')
-        {
-            return true;
-        }
+        // Also don't filter out references with dots - these are legitimate reference names
+        // like [tool.ruff] or [os.path] which are valid markdown references
 
         // Note: We don't filter based on word count anymore because legitimate references
         // can have many words, like "python language reference for import statements"
