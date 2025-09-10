@@ -645,6 +645,20 @@ rumdl import --dry-run .markdownlint.json
 
 For comprehensive documentation on global settings (file selection, rule enablement, etc.), see our [Global Settings Reference](docs/global-settings.md).
 
+### Inline Configuration
+
+rumdl supports inline HTML comments to disable or configure rules for specific sections of your Markdown files. This is useful for making exceptions without changing global configuration:
+
+```markdown
+<!-- rumdl-disable MD013 -->
+This line can be as long as needed without triggering the line length rule.
+<!-- rumdl-enable MD013 -->
+```
+
+Note: `markdownlint-disable`/`markdownlint-enable` comments are also supported for compatibility with existing markdownlint configurations.
+
+For complete documentation on inline configuration options, see our [Inline Configuration Reference](docs/inline-configuration.md).
+
 ### Configuration File Example
 
 Here's an example `.rumdl.toml` configuration file:
