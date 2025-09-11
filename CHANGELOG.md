@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.140] - 2025-09-10
+## [0.0.140] - 2025-09-11
 
 ### Fixed
 
@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented DocumentEntry structure to track document source and version
   - Added intelligent caching for disk-loaded documents
   - Maintains full compatibility with traditional LSP clients (VS Code)
+
+- **MD051**: Fixed false positives in large documents with multiline inline code spans
+  - Multiline inline code spans were incorrectly treated as code blocks
+  - This caused headings after line ~600 to not be detected properly
+  - Removed incorrect TOC detection logic that was causing issues
+
+- **MD032**: Fixed false positive for sequential ordered list continuations
+  - Sequential ordered list items (1., 2., 3.) no longer incorrectly flagged
+  - Added proper detection for list continuations vs separate lists
+  - Improved handling of lists interrupted by code blocks
+
+- **MD052**: Fixed false positive for literal brackets in backticks
+  - Text like `[from ...]` in inline code no longer flagged as broken reference
+  - Added workaround for multiline code span detection issues
+  - Properly distinguishes between literal text and reference links
 
 - **Documentation**: Added comprehensive inline configuration documentation
   - Created detailed guide for rumdl-disable/enable comment syntax

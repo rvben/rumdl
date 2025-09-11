@@ -206,10 +206,11 @@ impl Rule for MD038NoSpaceInCode {
                 continue;
             }
 
-            // Early check: if no leading/trailing whitespace, skip trimming
-            if !code_content.chars().next().is_some_and(|c| c.is_whitespace())
-                && !code_content.chars().last().is_some_and(|c| c.is_whitespace())
-            {
+            // Early check: if no leading/trailing whitespace, skip
+            let has_leading_space = code_content.chars().next().is_some_and(|c| c.is_whitespace());
+            let has_trailing_space = code_content.chars().last().is_some_and(|c| c.is_whitespace());
+
+            if !has_leading_space && !has_trailing_space {
                 continue;
             }
 
@@ -359,6 +360,29 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD038NoSp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_md038_readme_false_positives() {
+        // These are the exact cases from README.md that are incorrectly flagged
+        let rule = MD038NoSpaceInCode::new();
+        let valid_cases = vec![
+            "3. `pyproject.toml` (must contain `[tool.rumdl]` section)",
+            "#### Effective Configuration (`rumdl config`)",
+            "- Blue: `.rumdl.toml`",
+            "### Defaults Only (`rumdl config --defaults`)",
+        ];
+
+        for case in valid_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Should not flag code spans without leading/trailing spaces: '{}'. Got {} warnings",
+                case,
+                result.len()
+            );
+        }
+    }
 
     #[test]
     fn test_md038_valid() {
