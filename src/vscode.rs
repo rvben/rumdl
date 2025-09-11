@@ -26,24 +26,33 @@ impl VsCodeExtension {
         }
     }
 
-    /// Check if a command exists and works
-    fn command_exists(cmd: &str) -> bool {
+    /// Check if a command exists and works, returning the working command name
+    fn find_working_command(cmd: &str) -> Option<String> {
         // First, try to run the command directly with --version
         // This is more reliable than using which/where
         if let Ok(output) = Command::new(cmd).arg("--version").output()
             && output.status.success()
         {
-            return true;
+            return Some(cmd.to_string());
         }
 
-        // Fallback: use platform-appropriate command lookup
-        let lookup_cmd = if cfg!(windows) { "where" } else { "which" };
+        // On Windows (including Git Bash), try with .cmd extension
+        // Git Bash requires the .cmd extension for batch files
+        if cfg!(windows) {
+            let cmd_with_ext = format!("{cmd}.cmd");
+            if let Ok(output) = Command::new(&cmd_with_ext).arg("--version").output()
+                && output.status.success()
+            {
+                return Some(cmd_with_ext);
+            }
+        }
 
-        Command::new(lookup_cmd)
-            .arg(cmd)
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+        None
+    }
+
+    /// Check if a command exists and works
+    fn command_exists(cmd: &str) -> bool {
+        Self::find_working_command(cmd).is_some()
     }
 
     fn find_code_command() -> Result<String, String> {
@@ -67,9 +76,11 @@ impl VsCodeExtension {
                 _ => "",
             };
 
-            // Verify the preferred command exists and works
-            if !preferred_cmd.is_empty() && Self::command_exists(preferred_cmd) {
-                return Ok(preferred_cmd.to_string());
+            // Verify the preferred command exists and works, return the working version
+            if !preferred_cmd.is_empty()
+                && let Some(working_cmd) = Self::find_working_command(preferred_cmd)
+            {
+                return Ok(working_cmd);
             }
         }
 
@@ -77,8 +88,8 @@ impl VsCodeExtension {
         let commands = ["code", "cursor", "windsurf", "codium", "vscodium"];
 
         for cmd in &commands {
-            if Self::command_exists(cmd) {
-                return Ok(cmd.to_string());
+            if let Some(working_cmd) = Self::find_working_command(cmd) {
+                return Ok(working_cmd);
             }
         }
 
