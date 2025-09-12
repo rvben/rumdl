@@ -660,19 +660,19 @@ impl LanguageServer for RumdlLanguageServer {
                         log::debug!("No fixes available for formatting");
                     }
 
-                    // No fixes available or applied - return empty array
-                    Ok(Some(Vec::new()))
+                    // No fixes available or applied - return None (null in JSON)
+                    Ok(None)
                 }
                 Err(e) => {
                     log::error!("Failed to format document: {e}");
-                    // Return empty array on error
-                    Ok(Some(Vec::new()))
+                    // Return None (null in JSON) on error
+                    Ok(None)
                 }
             }
         } else {
             log::warn!("Document not found in cache: {uri}");
-            // Return empty array when document not found
-            Ok(Some(Vec::new()))
+            // Return None (null in JSON) when document not found
+            Ok(None)
         }
     }
 
