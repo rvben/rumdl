@@ -318,8 +318,8 @@ impl Rule for MD012NoMultipleBlanks {
         if blank_lines_at_eof > 0 {
             let location = "at end of file";
 
-            // Report on the line after the last content line
-            let report_line = lines.len() + 1;
+            // Report on the last line (which is blank)
+            let report_line = lines.len();
 
             // Report one warning for the excess blank lines at EOF
             warnings.push(LintWarning {
