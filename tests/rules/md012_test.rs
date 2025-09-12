@@ -19,20 +19,11 @@ fn test_md012_invalid() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 3);
-    assert_eq!(
-        result[0].message,
-        "Multiple consecutive blank lines between content (Expected: 1; Actual: 2)"
-    );
+    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
     assert_eq!(result[1].line, 6);
-    assert_eq!(
-        result[1].message,
-        "Multiple consecutive blank lines between content (Expected: 1; Actual: 3)"
-    );
+    assert_eq!(result[1].message, "Multiple consecutive blank lines between content");
     assert_eq!(result[2].line, 7);
-    assert_eq!(
-        result[2].message,
-        "Multiple consecutive blank lines between content (Expected: 1; Actual: 3)"
-    );
+    assert_eq!(result[2].message, "Multiple consecutive blank lines between content");
 }
 
 #[test]
@@ -43,15 +34,9 @@ fn test_md012_start_end() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
-    assert_eq!(
-        result[0].message,
-        "Multiple consecutive blank lines at start of file (Expected: 1; Actual: 2)"
-    );
+    assert_eq!(result[0].message, "Multiple consecutive blank lines at start of file");
     assert_eq!(result[1].line, 6);
-    assert_eq!(
-        result[1].message,
-        "Multiple consecutive blank lines at end of file (Expected: 1; Actual: 2)"
-    );
+    assert_eq!(result[1].message, "Multiple consecutive blank lines at end of file");
 }
 
 #[test]
@@ -81,10 +66,7 @@ fn test_md012_custom_maximum() {
     // Only the second group (3 blanks > maximum 2) is invalid, reporting 1 excess line
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 7); // The third blank line in the second sequence
-    assert_eq!(
-        result[0].message,
-        "Multiple consecutive blank lines between content (Expected: 2; Actual: 3)"
-    );
+    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
 }
 
 #[test]
@@ -123,10 +105,7 @@ fn test_md012_whitespace_lines() {
     // Expects 1 warning for the excess whitespace line
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3); // The second whitespace line is excess
-    assert_eq!(
-        result[0].message,
-        "Multiple consecutive blank lines between content (Expected: 1; Actual: 2)"
-    );
+    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
 }
 
 #[test]

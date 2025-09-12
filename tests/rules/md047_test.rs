@@ -26,7 +26,9 @@ fn test_multiple_file_end_newlines() {
     let content = "Some text\nMore text\n\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert!(!result.is_empty());
+    // MD047 only checks for presence of trailing newline, not multiple
+    // MD012 handles multiple consecutive blank lines
+    assert!(result.is_empty());
 }
 
 #[test]
