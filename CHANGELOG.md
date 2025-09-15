@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.141] - 2025-09-15
+
+### Added
+
+- **MD013**: New normalize mode for combining short lines in paragraphs (related to #76)
+  - Added `reflow_mode` configuration with "default" and "normalize" options
+  - Normalize mode combines short lines to use the full configured line length
+  - Enables bulk removal of manual line breaks by setting high line_length with normalize mode
+  - Preserves markdown structure (lists, code blocks, tables, hard breaks)
+
+### Fixed
+
+- **MD013**: Fixed multi-line list item handling to avoid extra spaces when combining
+- **MD012**: Fixed line number reporting for EOF blank lines
+- **LSP**: Return null instead of empty array when no formatting available (related to #79)
+- **MD038**: Resolved false positives and added regression tests
+
 ## [0.0.140] - 2025-09-11
 
 ### Fixed
