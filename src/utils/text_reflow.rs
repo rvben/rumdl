@@ -765,8 +765,9 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 // Check if this line is indented (continuation of list item)
                 let next_indent = next_line.len() - next_line.trim_start().len();
                 if next_indent >= content_start {
-                    // This is a continuation line - add its content (trimmed)
-                    list_content.push(next_trimmed.to_string());
+                    // This is a continuation line - add its content (trim only leading space)
+                    // We need to preserve trailing spaces for hard breaks
+                    list_content.push(next_line.trim_start().to_string());
                     i += 1;
                 } else {
                     // Not indented enough, not part of this list item
@@ -864,8 +865,20 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         // If preserve_breaks is true, treat each line separately
         if options.preserve_breaks {
             // Don't collect consecutive lines - just reflow this single line
+            let has_hard_break = line.ends_with("  ");
             let reflowed = reflow_line(line, options);
-            result.extend(reflowed);
+
+            // Preserve hard breaks (two trailing spaces)
+            if has_hard_break && !reflowed.is_empty() {
+                let mut reflowed_with_break = reflowed;
+                let last_idx = reflowed_with_break.len() - 1;
+                if !reflowed_with_break[last_idx].ends_with("  ") {
+                    reflowed_with_break[last_idx].push_str("  ");
+                }
+                result.extend(reflowed_with_break);
+            } else {
+                result.extend(reflowed);
+            }
         } else {
             // Original behavior: collect consecutive lines into a paragraph
             while i < lines.len() {

@@ -190,7 +190,5 @@ async fn test_formatting_nonexistent_file() {
 
     assert!(result.is_ok(), "Should not error on non-existent file");
     let edits = result.unwrap();
-    assert!(edits.is_some(), "Should return Some(empty array)");
-    let edits = edits.unwrap();
-    assert!(edits.is_empty(), "Should return empty array for non-existent file");
+    assert!(edits.is_none(), "Should return None for non-existent file per LSP spec");
 }
