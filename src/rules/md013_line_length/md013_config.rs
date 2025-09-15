@@ -1,6 +1,17 @@
 use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
+/// Reflow mode for MD013
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReflowMode {
+    /// Only reflow lines that exceed the line length limit (default behavior)
+    #[default]
+    Default,
+    /// Normalize all paragraphs to use the full line length
+    Normalize,
+}
+
 /// Configuration for MD013 (Line length)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -28,6 +39,10 @@ pub struct MD013Config {
     /// Enable text reflow to wrap long lines (default: false)
     #[serde(default, rename = "reflow", alias = "enable_reflow")]
     pub reflow: bool,
+
+    /// Reflow mode - how to handle reflowing (default: "long-lines")
+    #[serde(default)]
+    pub reflow_mode: ReflowMode,
 }
 
 fn default_line_length() -> usize {
@@ -55,6 +70,7 @@ impl Default for MD013Config {
             headings: default_headings(),
             strict: false,
             reflow: false,
+            reflow_mode: ReflowMode::default(),
         }
     }
 }

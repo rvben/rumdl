@@ -451,6 +451,7 @@ fn test_heading_line_length_config() {
         headings: false,    // false = skip headings (don't check them)
         strict: false,
         reflow: false,
+        ..Default::default()
     };
 
     let rule = MD013LineLength::from_config_struct(config);
@@ -475,6 +476,7 @@ fn test_code_block_line_length_config() {
         headings: true,     // true = check headings
         strict: false,
         reflow: false,
+        ..Default::default()
     };
 
     let rule = MD013LineLength::from_config_struct(config);
@@ -499,6 +501,7 @@ fn test_stern_mode() {
         headings: false,    // Don't skip headings
         strict: true,       // Strict mode: no URL exceptions
         reflow: false,
+        ..Default::default()
     };
 
     let rule = MD013LineLength::from_config_struct(config);
@@ -522,6 +525,7 @@ fn test_combined_heading_and_code_block_limits() {
         headings: false,    // false = skip headings
         strict: false,
         reflow: false,
+        ..Default::default()
     };
 
     let rule = MD013LineLength::from_config_struct(config);

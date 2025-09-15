@@ -29,6 +29,58 @@ impl Default for ReflowOptions {
     }
 }
 
+/// Check if a line is a horizontal rule (---, ___, ***)
+fn is_horizontal_rule(line: &str) -> bool {
+    if line.len() < 3 {
+        return false;
+    }
+
+    // Check if line consists only of -, _, or * characters (at least 3)
+    let chars: Vec<char> = line.chars().collect();
+    if chars.is_empty() {
+        return false;
+    }
+
+    let first_char = chars[0];
+    if first_char != '-' && first_char != '_' && first_char != '*' {
+        return false;
+    }
+
+    // All characters should be the same (allowing spaces between)
+    for c in &chars {
+        if *c != first_char && *c != ' ' {
+            return false;
+        }
+    }
+
+    // Count non-space characters
+    let non_space_count = chars.iter().filter(|c| **c != ' ').count();
+    non_space_count >= 3
+}
+
+/// Check if a line is a numbered list item (e.g., "1. ", "10. ")
+fn is_numbered_list_item(line: &str) -> bool {
+    let mut chars = line.chars();
+
+    // Must start with a digit
+    if !chars.next().is_some_and(|c| c.is_numeric()) {
+        return false;
+    }
+
+    // Can have more digits
+    while let Some(c) = chars.next() {
+        if c == '.' {
+            // After period, must have a space or be end of line
+            return chars.next().is_none_or(|c| c == ' ');
+        }
+        if !c.is_numeric() {
+            return false;
+        }
+    }
+
+    false
+}
+
 /// Reflow a single line of markdown text to fit within the specified line length
 pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     // Quick check: if line is already short enough, return as-is
@@ -590,7 +642,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             continue;
         }
 
-        // Preserve code blocks
+        // Preserve fenced code blocks
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
             result.push(line.to_string());
             i += 1;
@@ -602,6 +654,24 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     break;
                 }
                 i += 1;
+            }
+            continue;
+        }
+
+        // Preserve indented code blocks (4+ spaces or 1+ tab)
+        if line.starts_with("    ") || line.starts_with("\t") {
+            // Collect all consecutive indented lines
+            result.push(line.to_string());
+            i += 1;
+            while i < lines.len() {
+                let next_line = lines[i];
+                // Continue if next line is also indented or empty (empty lines in code blocks are ok)
+                if next_line.starts_with("    ") || next_line.starts_with("\t") || next_line.trim().is_empty() {
+                    result.push(next_line.to_string());
+                    i += 1;
+                } else {
+                    break;
+                }
             }
             continue;
         }
@@ -619,11 +689,18 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             continue;
         }
 
-        // Preserve lists
-        if trimmed.starts_with('-')
-            || trimmed.starts_with('*')
+        // Preserve horizontal rules first (before checking for lists)
+        if is_horizontal_rule(trimmed) {
+            result.push(line.to_string());
+            i += 1;
+            continue;
+        }
+
+        // Preserve lists (but not horizontal rules)
+        if (trimmed.starts_with('-') && !is_horizontal_rule(trimmed))
+            || (trimmed.starts_with('*') && !is_horizontal_rule(trimmed))
             || trimmed.starts_with('+')
-            || trimmed.chars().next().is_some_and(|c| c.is_numeric())
+            || is_numbered_list_item(trimmed)
         {
             // Find the list marker and preserve indentation
             let indent = line.len() - line.trim_start().len();
@@ -655,18 +732,61 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             }
 
             let marker = &line[indent..marker_end];
-            let content = &line[content_start..];
+
+            // Collect all content for this list item (including continuation lines)
+            let mut list_content = vec![line[content_start..].to_string()];
+            i += 1;
+
+            // Collect continuation lines (indented lines that are part of this list item)
+            while i < lines.len() {
+                let next_line = lines[i];
+                let next_trimmed = next_line.trim();
+
+                // Stop if we hit an empty line or another list item or special block
+                if next_trimmed.is_empty()
+                    || next_trimmed.starts_with('#')
+                    || next_trimmed.starts_with("```")
+                    || next_trimmed.starts_with("~~~")
+                    || next_trimmed.starts_with('>')
+                    || next_trimmed.starts_with('|')
+                    || (next_trimmed.starts_with('[') && next_line.contains("]:"))
+                    || is_horizontal_rule(next_trimmed)
+                    || (next_trimmed.starts_with('-')
+                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                    || (next_trimmed.starts_with('*')
+                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                    || (next_trimmed.starts_with('+')
+                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                    || is_numbered_list_item(next_trimmed)
+                {
+                    break;
+                }
+
+                // Check if this line is indented (continuation of list item)
+                let next_indent = next_line.len() - next_line.trim_start().len();
+                if next_indent >= content_start {
+                    // This is a continuation line - add its content (trimmed)
+                    list_content.push(next_trimmed.to_string());
+                    i += 1;
+                } else {
+                    // Not indented enough, not part of this list item
+                    break;
+                }
+            }
+
+            // Join all the content with spaces (if preserve_breaks is false)
+            let combined_content = if options.preserve_breaks {
+                list_content[0].clone()
+            } else {
+                list_content.join(" ")
+            };
 
             // Calculate the proper indentation for continuation lines
-            // We need to align with the text after the marker
             let trimmed_marker = marker;
-            let continuation_spaces = content_start; // Use the actual content start position
+            let continuation_spaces = content_start;
 
-            // CRITICAL: Adjust line length to account for list marker and space
-            // For the first line, we need to account for: indent + marker + space
-            // The format is: "{indent_str}{trimmed_marker} {content}"
-            // So available width = line_length - indent - marker_length - 1 (for space)
-            let prefix_length = indent + trimmed_marker.len() + 1; // +1 for space after marker
+            // Adjust line length to account for list marker and space
+            let prefix_length = indent + trimmed_marker.len() + 1;
 
             // Create adjusted options with reduced line length
             let adjusted_options = ReflowOptions {
@@ -674,7 +794,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 ..options.clone()
             };
 
-            let reflowed = reflow_line(content, &adjusted_options);
+            let reflowed = reflow_line(&combined_content, &adjusted_options);
             for (j, reflowed_line) in reflowed.iter().enumerate() {
                 if j == 0 {
                     result.push(format!("{indent_str}{trimmed_marker} {reflowed_line}"));
@@ -684,7 +804,6 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     result.push(format!("{continuation_indent}{reflowed_line}"));
                 }
             }
-            i += 1;
             continue;
         }
 
@@ -715,10 +834,16 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 && !next_trimmed.starts_with('>')
                 && !next_trimmed.starts_with('|')
                 && !(next_trimmed.starts_with('[') && next_line.contains("]:"))
-                && !next_trimmed.starts_with('-')
-                && !next_trimmed.starts_with('*')
-                && !next_trimmed.starts_with('+')
-                && !next_trimmed.chars().next().is_some_and(|c| c.is_numeric())
+                && !is_horizontal_rule(next_trimmed)
+                && !(next_trimmed.starts_with('-')
+                    && !is_horizontal_rule(next_trimmed)
+                    && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                && !(next_trimmed.starts_with('*')
+                    && !is_horizontal_rule(next_trimmed)
+                    && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                && !(next_trimmed.starts_with('+')
+                    && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                && !is_numbered_list_item(next_trimmed)
             {
                 is_single_line_paragraph = false;
             }
@@ -736,62 +861,76 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         let mut current_part = vec![line];
         i += 1;
 
-        while i < lines.len() {
-            let prev_line = if !current_part.is_empty() {
-                current_part.last().unwrap()
-            } else {
-                ""
-            };
-            let next_line = lines[i];
-            let next_trimmed = next_line.trim();
-
-            // Stop at empty lines or special blocks
-            if next_trimmed.is_empty()
-                || next_trimmed.starts_with('#')
-                || next_trimmed.starts_with("```")
-                || next_trimmed.starts_with("~~~")
-                || next_trimmed.starts_with('>')
-                || next_trimmed.starts_with('|')
-                || (next_trimmed.starts_with('[') && next_line.contains("]:"))
-                || next_trimmed.starts_with('-')
-                || next_trimmed.starts_with('*')
-                || next_trimmed.starts_with('+')
-                || next_trimmed.chars().next().is_some_and(|c| c.is_numeric())
-            {
-                break;
-            }
-
-            // Check if previous line ends with hard break (two spaces)
-            if prev_line.ends_with("  ") {
-                // Start a new part after hard break
-                paragraph_parts.push(current_part.join(" "));
-                current_part = vec![next_line];
-            } else {
-                current_part.push(next_line);
-            }
-            i += 1;
-        }
-
-        // Add the last part
-        if !current_part.is_empty() {
-            if current_part.len() == 1 {
-                // Single line, don't add trailing space
-                paragraph_parts.push(current_part[0].to_string());
-            } else {
-                paragraph_parts.push(current_part.join(" "));
-            }
-        }
-
-        // Reflow each part separately, preserving hard breaks
-        for (j, part) in paragraph_parts.iter().enumerate() {
-            let reflowed = reflow_line(part, options);
+        // If preserve_breaks is true, treat each line separately
+        if options.preserve_breaks {
+            // Don't collect consecutive lines - just reflow this single line
+            let reflowed = reflow_line(line, options);
             result.extend(reflowed);
+        } else {
+            // Original behavior: collect consecutive lines into a paragraph
+            while i < lines.len() {
+                let prev_line = if !current_part.is_empty() {
+                    current_part.last().unwrap()
+                } else {
+                    ""
+                };
+                let next_line = lines[i];
+                let next_trimmed = next_line.trim();
 
-            // Preserve hard break by ensuring last line of part ends with two spaces
-            if j < paragraph_parts.len() - 1 && !result.is_empty() {
-                let last_idx = result.len() - 1;
-                if !result[last_idx].ends_with("  ") {
-                    result[last_idx].push_str("  ");
+                // Stop at empty lines or special blocks
+                if next_trimmed.is_empty()
+                    || next_trimmed.starts_with('#')
+                    || next_trimmed.starts_with("```")
+                    || next_trimmed.starts_with("~~~")
+                    || next_trimmed.starts_with('>')
+                    || next_trimmed.starts_with('|')
+                    || (next_trimmed.starts_with('[') && next_line.contains("]:"))
+                    || is_horizontal_rule(next_trimmed)
+                    || (next_trimmed.starts_with('-')
+                        && !is_horizontal_rule(next_trimmed)
+                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                    || (next_trimmed.starts_with('*')
+                        && !is_horizontal_rule(next_trimmed)
+                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                    || (next_trimmed.starts_with('+')
+                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+                    || is_numbered_list_item(next_trimmed)
+                {
+                    break;
+                }
+
+                // Check if previous line ends with hard break (two spaces)
+                if prev_line.ends_with("  ") {
+                    // Start a new part after hard break
+                    paragraph_parts.push(current_part.join(" "));
+                    current_part = vec![next_line];
+                } else {
+                    current_part.push(next_line);
+                }
+                i += 1;
+            }
+
+            // Add the last part
+            if !current_part.is_empty() {
+                if current_part.len() == 1 {
+                    // Single line, don't add trailing space
+                    paragraph_parts.push(current_part[0].to_string());
+                } else {
+                    paragraph_parts.push(current_part.join(" "));
+                }
+            }
+
+            // Reflow each part separately, preserving hard breaks
+            for (j, part) in paragraph_parts.iter().enumerate() {
+                let reflowed = reflow_line(part, options);
+                result.extend(reflowed);
+
+                // Preserve hard break by ensuring last line of part ends with two spaces
+                if j < paragraph_parts.len() - 1 && !result.is_empty() {
+                    let last_idx = result.len() - 1;
+                    if !result[last_idx].ends_with("  ") {
+                        result[last_idx].push_str("  ");
+                    }
                 }
             }
         }

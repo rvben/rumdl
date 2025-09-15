@@ -12,7 +12,7 @@ use crate::utils::table_utils::TableUtils;
 use toml;
 
 pub mod md013_config;
-use md013_config::MD013Config;
+use md013_config::{MD013Config, ReflowMode};
 
 #[derive(Clone, Default)]
 pub struct MD013LineLength {
@@ -29,6 +29,7 @@ impl MD013LineLength {
                 headings,
                 strict,
                 reflow: false,
+                reflow_mode: ReflowMode::default(),
             },
         }
     }
@@ -97,7 +98,10 @@ impl Rule for MD013LineLength {
         }
 
         // Quick check: if total content is shorter than line limit, definitely no violations
-        if content.len() <= self.config.line_length {
+        // BUT: in normalize mode with reflow, we still want to check for multi-line paragraphs
+        if content.len() <= self.config.line_length
+            && !(self.config.reflow && self.config.reflow_mode == ReflowMode::Normalize)
+        {
             return Ok(Vec::new());
         }
 
@@ -122,7 +126,8 @@ impl Rule for MD013LineLength {
             max_line_len > self.config.line_length
         };
 
-        if !has_long_lines {
+        // In normalize mode, we want to continue even if no long lines
+        if !(has_long_lines || self.config.reflow && self.config.reflow_mode == ReflowMode::Normalize) {
             return Ok(Vec::new());
         }
 
@@ -167,6 +172,13 @@ impl Rule for MD013LineLength {
                 }
                 if let Some(reflow) = obj.get("reflow").and_then(|v| v.as_bool()) {
                     config.reflow = reflow;
+                }
+                if let Some(reflow_mode) = obj.get("reflow_mode").and_then(|v| v.as_str()) {
+                    config.reflow_mode = match reflow_mode {
+                        "default" => ReflowMode::Default,
+                        "normalize" => ReflowMode::Normalize,
+                        _ => ReflowMode::default(),
+                    };
                 }
                 config
             } else {
@@ -246,7 +258,7 @@ impl Rule for MD013LineLength {
             }
 
             // Only provide a fix if reflow is enabled
-            let fix = if self.config.reflow && !self.should_skip_line_for_fix(line, line_num, structure) {
+            let fix = if effective_config.reflow && !self.should_skip_line_for_fix(line, line_num, structure) {
                 // Provide a placeholder fix to indicate that reflow will happen
                 // The actual reflow is done in the fix() method
                 Some(crate::rule::Fix {
@@ -273,16 +285,70 @@ impl Rule for MD013LineLength {
                 fix,
             });
         }
+
+        // In normalize mode with reflow enabled, also flag paragraphs that could be better reflowed
+        if effective_config.reflow && effective_config.reflow_mode == ReflowMode::Normalize {
+            // Find paragraph blocks that could benefit from normalization
+            let normalize_warnings = self.find_normalizable_paragraphs(ctx, structure, &effective_config);
+            for warning in normalize_warnings {
+                if !warnings.iter().any(|w| w.line == warning.line) {
+                    warnings.push(warning);
+                }
+            }
+        }
+
         Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        // Check for inline configuration overrides (same as in check())
+        let inline_config = crate::inline_config::InlineConfig::from_content(ctx.content);
+        let config_override = inline_config.get_rule_config("MD013");
+
+        // Apply configuration override if present
+        let effective_config = if let Some(json_config) = config_override {
+            if let Some(obj) = json_config.as_object() {
+                let mut config = self.config.clone();
+                if let Some(line_length) = obj.get("line_length").and_then(|v| v.as_u64()) {
+                    config.line_length = line_length as usize;
+                }
+                if let Some(reflow) = obj.get("reflow").and_then(|v| v.as_bool()) {
+                    config.reflow = reflow;
+                }
+                if let Some(reflow_mode) = obj.get("reflow_mode").and_then(|v| v.as_str()) {
+                    config.reflow_mode = match reflow_mode {
+                        "default" => ReflowMode::Default,
+                        "normalize" => ReflowMode::Normalize,
+                        _ => ReflowMode::default(),
+                    };
+                }
+                config
+            } else {
+                self.config.clone()
+            }
+        } else {
+            self.config.clone()
+        };
+
         // Only fix if reflow is enabled
-        if self.config.reflow {
+        if effective_config.reflow {
+            // In default mode, only reflow if there are actual violations
+            if effective_config.reflow_mode == ReflowMode::Default {
+                // Check if there are any violations that need fixing
+                let warnings = self.check(ctx)?;
+                if warnings.is_empty() {
+                    // No violations, don't change anything
+                    return Ok(ctx.content.to_string());
+                }
+            }
+
+            // In normalize mode, set preserve_breaks to false to allow combining short lines
+            let preserve_breaks = effective_config.reflow_mode != ReflowMode::Normalize;
+
             let reflow_options = crate::utils::text_reflow::ReflowOptions {
-                line_length: self.config.line_length,
+                line_length: effective_config.line_length,
                 break_on_sentences: true,
-                preserve_breaks: false,
+                preserve_breaks,
             };
 
             return Ok(crate::utils::text_reflow::reflow_markdown(ctx.content, &reflow_options));
@@ -358,6 +424,97 @@ impl Rule for MD013LineLength {
 }
 
 impl MD013LineLength {
+    /// Find paragraphs that could benefit from normalization
+    fn find_normalizable_paragraphs(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        structure: &DocumentStructure,
+        config: &MD013Config,
+    ) -> Vec<LintWarning> {
+        let mut warnings = Vec::new();
+        let lines: Vec<&str> = if !ctx.lines.is_empty() {
+            ctx.lines.iter().map(|l| l.content.as_str()).collect()
+        } else {
+            ctx.content.lines().collect()
+        };
+
+        let mut i = 0;
+        while i < lines.len() {
+            let line_num = i + 1;
+
+            // Skip if in code block, table, or other special structures
+            if structure.is_in_code_block(line_num)
+                || structure.is_in_html_block(line_num)
+                || structure.is_in_blockquote(line_num)
+                || TableUtils::is_potential_table_row(lines[i])
+            {
+                i += 1;
+                continue;
+            }
+
+            // Skip headings
+            if lines[i].trim().starts_with('#') || structure.heading_lines.contains(&line_num) {
+                i += 1;
+                continue;
+            }
+
+            // Skip empty lines
+            if lines[i].trim().is_empty() {
+                i += 1;
+                continue;
+            }
+
+            // Check if this is the start of a paragraph that could be normalized
+            let mut paragraph_end = i;
+            while paragraph_end < lines.len() {
+                let next_line_num = paragraph_end + 1;
+
+                // Stop at empty lines
+                if paragraph_end >= lines.len() || lines[paragraph_end].trim().is_empty() {
+                    break;
+                }
+
+                // Stop at special structures
+                if structure.is_in_code_block(next_line_num)
+                    || structure.is_in_html_block(next_line_num)
+                    || structure.is_in_blockquote(next_line_num)
+                    || (lines[paragraph_end].trim().starts_with('#'))
+                    || TableUtils::is_potential_table_row(lines[paragraph_end])
+                {
+                    break;
+                }
+
+                paragraph_end += 1;
+            }
+
+            // Check if paragraph has multiple lines that could be combined
+            if paragraph_end - i > 1 {
+                // Multiple lines in paragraph - always flag in normalize mode
+                // (user explicitly wants to normalize paragraphs to use full line length)
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message: format!(
+                        "Paragraph could be normalized to use line length of {} characters",
+                        config.line_length
+                    ),
+                    line: line_num,
+                    column: 1,
+                    end_line: paragraph_end,
+                    end_column: lines[paragraph_end - 1].len() + 1,
+                    severity: Severity::Warning,
+                    fix: Some(crate::rule::Fix {
+                        range: 0..0,
+                        replacement: String::new(),
+                    }),
+                });
+            }
+
+            i = paragraph_end;
+        }
+
+        warnings
+    }
+
     /// Check if a line should be skipped for fixing
     fn should_skip_line_for_fix(&self, line: &str, line_num: usize, structure: &DocumentStructure) -> bool {
         let line_number = line_num + 1; // 1-based
@@ -1231,5 +1388,678 @@ And a bullet list:
 
         // Image should remain intact
         assert!(fixed.contains("![image alt text](https://example.com/image.png)"));
+    }
+
+    #[test]
+    fn test_normalize_mode_flags_short_lines() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Content with short lines that could be combined
+        let content = "This is a short line.\nAnother short line.\nA third short line that could be combined.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should flag the paragraph as needing normalization
+        assert!(!warnings.is_empty(), "Should flag paragraph for normalization");
+        assert!(warnings[0].message.contains("normalized"));
+    }
+
+    #[test]
+    fn test_normalize_mode_combines_short_lines() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Content with short lines that should be combined
+        let content =
+            "This is a line with\nmanual line breaks at\n80 characters that should\nbe combined into longer lines.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should combine into a single line since it's under 100 chars total
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(lines.len(), 1, "Should combine into single line");
+        assert!(lines[0].len() > 80, "Should use more of the 100 char limit");
+    }
+
+    #[test]
+    fn test_normalize_mode_preserves_paragraph_breaks() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "First paragraph with\nshort lines.\n\nSecond paragraph with\nshort lines too.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should preserve paragraph breaks (empty lines)
+        assert!(fixed.contains("\n\n"), "Should preserve paragraph breaks");
+
+        let paragraphs: Vec<&str> = fixed.split("\n\n").collect();
+        assert_eq!(paragraphs.len(), 2, "Should have two paragraphs");
+    }
+
+    #[test]
+    fn test_default_mode_only_fixes_violations() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Default, // Default mode
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Content with short lines that are NOT violations
+        let content = "This is a short line.\nAnother short line.\nA third short line.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should NOT flag anything in default mode
+        assert!(warnings.is_empty(), "Should not flag short lines in default mode");
+
+        // Fix should preserve the short lines
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed.lines().count(), 3, "Should preserve line breaks in default mode");
+    }
+
+    #[test]
+    fn test_normalize_mode_with_lists() {
+        let config = MD013Config {
+            line_length: 80,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = r#"A paragraph with
+short lines.
+
+1. List item with
+   short lines
+2. Another item"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should normalize the paragraph but preserve list structure
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert!(lines[0].len() > 20, "First paragraph should be normalized");
+        assert!(fixed.contains("1. "), "Should preserve list markers");
+        assert!(fixed.contains("2. "), "Should preserve list markers");
+    }
+
+    #[test]
+    fn test_normalize_mode_with_code_blocks() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = r#"A paragraph with
+short lines.
+
+```
+code block should not be normalized
+even with short lines
+```
+
+Another paragraph with
+short lines."#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Code block should be preserved as-is
+        assert!(fixed.contains("code block should not be normalized\neven with short lines"));
+        // But paragraphs should be normalized
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert!(lines[0].len() > 20, "First paragraph should be normalized");
+    }
+
+    #[test]
+    fn test_issue_76_use_case() {
+        // This tests the exact use case from issue #76
+        let config = MD013Config {
+            line_length: 999999, // Set absurdly high
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Content with manual line breaks at 80 characters (typical markdown)
+        let content = "We've decided to eliminate line-breaks in paragraphs. The obvious solution is\nto disable MD013, and call it good. However, that doesn't deal with the\nexisting content's line-breaks. My initial thought was to set line_length to\n999999 and enable_reflow, but realised after doing so, that it never triggers\nthe error, so nothing happens.";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        // Should flag for normalization even though no lines exceed limit
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(!warnings.is_empty(), "Should flag paragraph for normalization");
+
+        // Should combine into a single line
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(lines.len(), 1, "Should combine into single line with high limit");
+        assert!(!fixed.contains("\n"), "Should remove all line breaks within paragraph");
+    }
+
+    #[test]
+    fn test_normalize_mode_single_line_unchanged() {
+        // Single lines should not be flagged or changed
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "This is a single line that should not be changed.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(warnings.is_empty(), "Single line should not be flagged");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Single line should remain unchanged");
+    }
+
+    #[test]
+    fn test_normalize_mode_with_inline_code() {
+        let config = MD013Config {
+            line_length: 80,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content =
+            "This paragraph has `inline code` and\nshould still be normalized properly\nwithout breaking the code.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(!warnings.is_empty(), "Multi-line paragraph should be flagged");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("`inline code`"), "Inline code should be preserved");
+        assert!(fixed.lines().count() < 3, "Lines should be combined");
+    }
+
+    #[test]
+    fn test_normalize_mode_with_emphasis() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "This has **bold** and\n*italic* text that\nshould be preserved.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("**bold**"), "Bold should be preserved");
+        assert!(fixed.contains("*italic*"), "Italic should be preserved");
+        assert_eq!(fixed.lines().count(), 1, "Should be combined into one line");
+    }
+
+    #[test]
+    fn test_normalize_mode_respects_hard_breaks() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Two spaces at end of line = hard break
+        let content = "First line with hard break  \nSecond line after break\nThird line";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        // Hard break should be preserved
+        assert!(fixed.contains("  \n"), "Hard break should be preserved");
+        // But lines without hard break should be combined
+        assert!(
+            fixed.contains("Second line after break Third line"),
+            "Lines without hard break should combine"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_with_links() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content =
+            "This has a [link](https://example.com) that\nshould be preserved when\nnormalizing the paragraph.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("[link](https://example.com)"),
+            "Link should be preserved"
+        );
+        assert_eq!(fixed.lines().count(), 1, "Should be combined into one line");
+    }
+
+    #[test]
+    fn test_normalize_mode_empty_lines_between_paragraphs() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "First paragraph\nwith multiple lines.\n\n\nSecond paragraph\nwith multiple lines.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        // Multiple empty lines should be preserved
+        assert!(fixed.contains("\n\n\n"), "Multiple empty lines should be preserved");
+        // Each paragraph should be normalized
+        let parts: Vec<&str> = fixed.split("\n\n\n").collect();
+        assert_eq!(parts.len(), 2, "Should have two parts");
+        assert_eq!(parts[0].lines().count(), 1, "First paragraph should be one line");
+        assert_eq!(parts[1].lines().count(), 1, "Second paragraph should be one line");
+    }
+
+    #[test]
+    fn test_normalize_mode_mixed_list_types() {
+        let config = MD013Config {
+            line_length: 80,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = r#"Paragraph before list
+with multiple lines.
+
+- Bullet item
+* Another bullet
++ Plus bullet
+
+1. Numbered item
+2. Another number
+
+Paragraph after list
+with multiple lines."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Lists should be preserved
+        assert!(fixed.contains("- Bullet item"), "Dash list should be preserved");
+        assert!(fixed.contains("* Another bullet"), "Star list should be preserved");
+        assert!(fixed.contains("+ Plus bullet"), "Plus list should be preserved");
+        assert!(fixed.contains("1. Numbered item"), "Numbered list should be preserved");
+
+        // But paragraphs should be normalized
+        assert!(
+            fixed.starts_with("Paragraph before list with multiple lines."),
+            "First paragraph should be normalized"
+        );
+        assert!(
+            fixed.ends_with("Paragraph after list with multiple lines."),
+            "Last paragraph should be normalized"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_with_horizontal_rules() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "Paragraph before\nhorizontal rule.\n\n---\n\nParagraph after\nhorizontal rule.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("---"), "Horizontal rule should be preserved");
+        assert!(
+            fixed.contains("Paragraph before horizontal rule."),
+            "First paragraph normalized"
+        );
+        assert!(
+            fixed.contains("Paragraph after horizontal rule."),
+            "Second paragraph normalized"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_with_indented_code() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "Paragraph before\nindented code.\n\n    This is indented code\n    Should not be normalized\n\nParagraph after\nindented code.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("    This is indented code\n    Should not be normalized"),
+            "Indented code preserved"
+        );
+        assert!(
+            fixed.contains("Paragraph before indented code."),
+            "First paragraph normalized"
+        );
+        assert!(
+            fixed.contains("Paragraph after indented code."),
+            "Second paragraph normalized"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_disabled_without_reflow() {
+        // Normalize mode should have no effect if reflow is disabled
+        let config = MD013Config {
+            line_length: 100,
+            reflow: false, // Disabled
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "This is a line\nwith breaks that\nshould not be changed.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(warnings.is_empty(), "Should not flag when reflow is disabled");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Content should be unchanged when reflow is disabled");
+    }
+
+    #[test]
+    fn test_default_mode_with_long_lines() {
+        // Default mode should only fix lines that exceed limit
+        let config = MD013Config {
+            line_length: 50,
+            reflow: true,
+            reflow_mode: ReflowMode::Default,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "Short line.\nThis is a very long line that definitely exceeds the fifty character limit and needs wrapping.\nAnother short line.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Should only flag the long line");
+        assert_eq!(warnings[0].line, 2, "Should flag line 2");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+        // Should have more than 3 lines after wrapping the long one
+        assert!(lines.len() > 3, "Long line should be wrapped");
+        assert_eq!(lines[0], "Short line.", "First short line unchanged");
+    }
+
+    #[test]
+    fn test_normalize_vs_default_mode_same_content() {
+        let content = "This is a paragraph\nwith multiple lines\nthat could be combined.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        // Test default mode
+        let default_config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Default,
+            ..Default::default()
+        };
+        let default_rule = MD013LineLength::from_config_struct(default_config);
+        let default_warnings = default_rule.check(&ctx).unwrap();
+        let default_fixed = default_rule.fix(&ctx).unwrap();
+
+        // Test normalize mode
+        let normalize_config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let normalize_rule = MD013LineLength::from_config_struct(normalize_config);
+        let normalize_warnings = normalize_rule.check(&ctx).unwrap();
+        let normalize_fixed = normalize_rule.fix(&ctx).unwrap();
+
+        // Verify different behavior
+        assert!(default_warnings.is_empty(), "Default mode should not flag short lines");
+        assert!(
+            !normalize_warnings.is_empty(),
+            "Normalize mode should flag multi-line paragraphs"
+        );
+
+        assert_eq!(
+            default_fixed, content,
+            "Default mode should not change content without violations"
+        );
+        assert_ne!(
+            normalize_fixed, content,
+            "Normalize mode should change multi-line paragraphs"
+        );
+        assert_eq!(
+            normalize_fixed.lines().count(),
+            1,
+            "Normalize should combine into single line"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_with_reference_definitions() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content =
+            "This paragraph uses\na reference [link][ref]\nacross multiple lines.\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("[link][ref]"), "Reference link should be preserved");
+        assert!(
+            fixed.contains("[ref]: https://example.com"),
+            "Reference definition should be preserved"
+        );
+        assert!(
+            fixed.starts_with("This paragraph uses a reference [link][ref] across multiple lines."),
+            "Paragraph should be normalized"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_with_html_comments() {
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "Paragraph before\nHTML comment.\n\n<!-- This is a comment -->\n\nParagraph after\nHTML comment.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("<!-- This is a comment -->"),
+            "HTML comment should be preserved"
+        );
+        assert!(
+            fixed.contains("Paragraph before HTML comment."),
+            "First paragraph normalized"
+        );
+        assert!(
+            fixed.contains("Paragraph after HTML comment."),
+            "Second paragraph normalized"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_line_starting_with_number() {
+        // Regression test for the bug we fixed where "80 characters" was treated as a list
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "This line mentions\n80 characters which\nshould not break the paragraph.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed.lines().count(), 1, "Should be combined into single line");
+        assert!(
+            fixed.contains("80 characters"),
+            "Number at start of line should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_default_mode_preserves_list_structure() {
+        // In default mode, list continuation lines should be preserved
+        let config = MD013Config {
+            line_length: 80,
+            reflow: true,
+            reflow_mode: ReflowMode::Default,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = r#"- This is a bullet point that has
+  some text on multiple lines
+  that should stay separate
+
+1. Numbered list item with
+   multiple lines that should
+   also stay separate"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // In default mode, the structure should be preserved
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(
+            lines[0], "- This is a bullet point that has",
+            "First line should be unchanged"
+        );
+        assert_eq!(
+            lines[1], "  some text on multiple lines",
+            "Continuation should be preserved"
+        );
+        assert_eq!(
+            lines[2], "  that should stay separate",
+            "Second continuation should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_multi_line_list_items_no_extra_spaces() {
+        // Test that multi-line list items don't get extra spaces when normalized
+        let config = MD013Config {
+            line_length: 80,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = r#"- This is a bullet point that has
+  some text on multiple lines
+  that should be combined
+
+1. Numbered list item with
+   multiple lines that need
+   to be properly combined
+2. Second item"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Check that there are no extra spaces in the combined list items
+        assert!(
+            !fixed.contains("lines  that"),
+            "Should not have double spaces in bullet list"
+        );
+        assert!(
+            !fixed.contains("need  to"),
+            "Should not have double spaces in numbered list"
+        );
+
+        // Check that the list items are properly combined
+        assert!(
+            fixed.contains("- This is a bullet point that has some text on multiple lines that should be"),
+            "Bullet list should be properly combined"
+        );
+        assert!(
+            fixed.contains("1. Numbered list item with multiple lines that need to be properly combined"),
+            "Numbered list should be properly combined"
+        );
+    }
+
+    #[test]
+    fn test_normalize_mode_actual_numbered_list() {
+        // Ensure actual numbered lists are still detected correctly
+        let config = MD013Config {
+            line_length: 100,
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "Paragraph before list\nwith multiple lines.\n\n1. First item\n2. Second item\n10. Tenth item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("1. First item"), "Numbered list 1 should be preserved");
+        assert!(fixed.contains("2. Second item"), "Numbered list 2 should be preserved");
+        assert!(fixed.contains("10. Tenth item"), "Numbered list 10 should be preserved");
+        assert!(
+            fixed.starts_with("Paragraph before list with multiple lines."),
+            "Paragraph should be normalized"
+        );
     }
 }

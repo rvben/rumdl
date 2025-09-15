@@ -33,6 +33,7 @@ Another very very very very very very very very very very very very very very ve
         headings: true,
         strict: false,
         reflow: true, // Enable reflow
+        ..Default::default()
     };
 
     let rule = MD013LineLength::from_config_struct(config);
@@ -96,6 +97,7 @@ fn test_mixed_rules_fix_counting() {
         headings: true,
         strict: false,
         reflow: true,
+        ..Default::default()
     };
 
     let md013 = MD013LineLength::from_config_struct(md013_config);
