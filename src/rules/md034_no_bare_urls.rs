@@ -206,6 +206,19 @@ impl MD034NoBareUrls {
                 if start_in_line > 0 {
                     // Look back to see if this is part of a custom protocol URL
                     let prefix_start = start_in_line.saturating_sub(20); // Look back up to 20 chars
+
+                    // Ensure we're on a character boundary
+                    let prefix_start = if prefix_start == 0 {
+                        0
+                    } else {
+                        // Find the nearest character boundary at or after prefix_start
+                        let mut adjusted_start = prefix_start;
+                        while adjusted_start < start_in_line && !line_content.is_char_boundary(adjusted_start) {
+                            adjusted_start += 1;
+                        }
+                        adjusted_start
+                    };
+
                     let prefix = &line_content[prefix_start..start_in_line];
                     if CUSTOM_PROTOCOL_PATTERN.is_match(prefix) {
                         continue;
