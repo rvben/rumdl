@@ -603,12 +603,13 @@ impl LanguageServer for RumdlLanguageServer {
 
             // Use the standard filter_rules function which respects config's disabled rules
             let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
+
             drop(rumdl_config);
 
             // Apply LSP config overrides
             filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
-            // Lint the document to get all warnings
+            // Use warning fixes for all rules
             match crate::lint(&text, &filtered_rules, false, flavor) {
                 Ok(warnings) => {
                     log::debug!(
@@ -617,38 +618,20 @@ impl LanguageServer for RumdlLanguageServer {
                         warnings.iter().filter(|w| w.fix.is_some()).count()
                     );
 
-                    // Check if there are any fixable warnings
                     let has_fixes = warnings.iter().any(|w| w.fix.is_some());
-
                     if has_fixes {
-                        // Apply fixes using the fix_utils function
                         match crate::utils::fix_utils::apply_warning_fixes(&text, &warnings) {
                             Ok(fixed_content) => {
-                                // Only return edits if the content actually changed
                                 if fixed_content != text {
                                     log::debug!("Returning formatting edits");
-                                    // Create a single TextEdit that replaces the entire document
-                                    // Calculate proper end position by iterating through all characters
-                                    let mut line = 0u32;
-                                    let mut character = 0u32;
-
-                                    for ch in text.chars() {
-                                        if ch == '\n' {
-                                            line += 1;
-                                            character = 0;
-                                        } else {
-                                            character += 1;
-                                        }
-                                    }
-
+                                    let end_position = self.get_end_position(&text);
                                     let edit = TextEdit {
                                         range: Range {
                                             start: Position { line: 0, character: 0 },
-                                            end: Position { line, character },
+                                            end: end_position,
                                         },
                                         new_text: fixed_content,
                                     };
-
                                     return Ok(Some(vec![edit]));
                                 }
                             }
@@ -656,23 +639,17 @@ impl LanguageServer for RumdlLanguageServer {
                                 log::error!("Failed to apply fixes: {e}");
                             }
                         }
-                    } else {
-                        log::debug!("No fixes available for formatting");
                     }
-
-                    // No fixes available or applied - return None (null in JSON)
-                    Ok(None)
+                    Ok(Some(Vec::new()))
                 }
                 Err(e) => {
                     log::error!("Failed to format document: {e}");
-                    // Return None (null in JSON) on error
-                    Ok(None)
+                    Ok(Some(Vec::new()))
                 }
             }
         } else {
             log::warn!("Document not found in cache: {uri}");
-            // Return None (null in JSON) when document not found
-            Ok(None)
+            Ok(Some(Vec::new()))
         }
     }
 

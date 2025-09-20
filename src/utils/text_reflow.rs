@@ -949,7 +949,13 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
     }
 
-    result.join("\n")
+    // Preserve trailing newline if the original content had one
+    let result_text = result.join("\n");
+    if content.ends_with('\n') && !result_text.ends_with('\n') {
+        format!("{result_text}\n")
+    } else {
+        result_text
+    }
 }
 
 #[cfg(test)]

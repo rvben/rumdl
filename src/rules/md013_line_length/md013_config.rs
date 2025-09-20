@@ -37,7 +37,7 @@ pub struct MD013Config {
     pub strict: bool,
 
     /// Enable text reflow to wrap long lines (default: false)
-    #[serde(default, rename = "reflow", alias = "enable_reflow")]
+    #[serde(default, alias = "enable_reflow", alias = "enable-reflow")]
     pub reflow: bool,
 
     /// Reflow mode - how to handle reflowing (default: "long-lines")

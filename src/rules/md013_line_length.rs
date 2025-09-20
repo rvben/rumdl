@@ -4,6 +4,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
+use crate::utils::range_utils::LineIndex;
 use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{
     IMAGE_REF_PATTERN, INLINE_LINK_REGEX as MARKDOWN_LINK_PATTERN, LINK_REF_PATTERN, URL_IN_TEXT, URL_PATTERN,
@@ -16,7 +17,7 @@ use md013_config::{MD013Config, ReflowMode};
 
 #[derive(Clone, Default)]
 pub struct MD013LineLength {
-    config: MD013Config,
+    pub(crate) config: MD013Config,
 }
 
 impl MD013LineLength {
@@ -257,17 +258,9 @@ impl Rule for MD013LineLength {
                 }
             }
 
-            // Only provide a fix if reflow is enabled
-            let fix = if effective_config.reflow && !self.should_skip_line_for_fix(line, line_num, structure) {
-                // Provide a placeholder fix to indicate that reflow will happen
-                // The actual reflow is done in the fix() method
-                Some(crate::rule::Fix {
-                    range: 0..0,                // Placeholder range
-                    replacement: String::new(), // Placeholder replacement
-                })
-            } else {
-                None
-            };
+            // Don't provide fix for individual lines when reflow is enabled
+            // Paragraph-based fixes will be handled separately
+            let fix = None;
 
             let message = format!("Line length {effective_length} exceeds {line_limit} characters");
 
@@ -286,14 +279,14 @@ impl Rule for MD013LineLength {
             });
         }
 
-        // In normalize mode with reflow enabled, also flag paragraphs that could be better reflowed
-        if effective_config.reflow && effective_config.reflow_mode == ReflowMode::Normalize {
-            // Find paragraph blocks that could benefit from normalization
-            let normalize_warnings = self.find_normalizable_paragraphs(ctx, structure, &effective_config);
-            for warning in normalize_warnings {
-                if !warnings.iter().any(|w| w.line == warning.line) {
-                    warnings.push(warning);
-                }
+        // If reflow is enabled, generate paragraph-based fixes
+        if effective_config.reflow {
+            let paragraph_warnings = self.generate_paragraph_fixes(ctx, structure, &effective_config, &lines);
+            // Merge paragraph warnings with line warnings, removing duplicates
+            for pw in paragraph_warnings {
+                // Remove any line warnings that overlap with this paragraph
+                warnings.retain(|w| w.line < pw.line || w.line > pw.end_line);
+                warnings.push(pw);
             }
         }
 
@@ -301,61 +294,18 @@ impl Rule for MD013LineLength {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // Check for inline configuration overrides (same as in check())
-        let inline_config = crate::inline_config::InlineConfig::from_content(ctx.content);
-        let config_override = inline_config.get_rule_config("MD013");
+        // For CLI usage, apply fixes from warnings
+        // LSP will use the warning-based fixes directly
+        let warnings = self.check(ctx)?;
 
-        // Apply configuration override if present
-        let effective_config = if let Some(json_config) = config_override {
-            if let Some(obj) = json_config.as_object() {
-                let mut config = self.config.clone();
-                if let Some(line_length) = obj.get("line_length").and_then(|v| v.as_u64()) {
-                    config.line_length = line_length as usize;
-                }
-                if let Some(reflow) = obj.get("reflow").and_then(|v| v.as_bool()) {
-                    config.reflow = reflow;
-                }
-                if let Some(reflow_mode) = obj.get("reflow_mode").and_then(|v| v.as_str()) {
-                    config.reflow_mode = match reflow_mode {
-                        "default" => ReflowMode::Default,
-                        "normalize" => ReflowMode::Normalize,
-                        _ => ReflowMode::default(),
-                    };
-                }
-                config
-            } else {
-                self.config.clone()
-            }
-        } else {
-            self.config.clone()
-        };
-
-        // Only fix if reflow is enabled
-        if effective_config.reflow {
-            // In default mode, only reflow if there are actual violations
-            if effective_config.reflow_mode == ReflowMode::Default {
-                // Check if there are any violations that need fixing
-                let warnings = self.check(ctx)?;
-                if warnings.is_empty() {
-                    // No violations, don't change anything
-                    return Ok(ctx.content.to_string());
-                }
-            }
-
-            // In normalize mode, set preserve_breaks to false to allow combining short lines
-            let preserve_breaks = effective_config.reflow_mode != ReflowMode::Normalize;
-
-            let reflow_options = crate::utils::text_reflow::ReflowOptions {
-                line_length: effective_config.line_length,
-                break_on_sentences: true,
-                preserve_breaks,
-            };
-
-            return Ok(crate::utils::text_reflow::reflow_markdown(ctx.content, &reflow_options));
+        // If there are no fixes, return content unchanged
+        if !warnings.iter().any(|w| w.fix.is_some()) {
+            return Ok(ctx.content.to_string());
         }
 
-        // Without reflow, MD013 has no fixes available
-        Ok(ctx.content.to_string())
+        // Apply warning-based fixes
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(|e| LintError::FixFailed(format!("Failed to apply fixes: {e}")))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -424,128 +374,252 @@ impl Rule for MD013LineLength {
 }
 
 impl MD013LineLength {
-    /// Find paragraphs that could benefit from normalization
-    fn find_normalizable_paragraphs(
+    /// Generate paragraph-based fixes
+    fn generate_paragraph_fixes(
         &self,
         ctx: &crate::lint_context::LintContext,
         structure: &DocumentStructure,
         config: &MD013Config,
+        lines: &[&str],
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = if !ctx.lines.is_empty() {
-            ctx.lines.iter().map(|l| l.content.as_str()).collect()
-        } else {
-            ctx.content.lines().collect()
-        };
+        let line_index = LineIndex::new(ctx.content.to_string());
 
         let mut i = 0;
         while i < lines.len() {
             let line_num = i + 1;
 
-            // Skip if in code block, table, or other special structures
+            // Skip special structures
             if structure.is_in_code_block(line_num)
                 || structure.is_in_html_block(line_num)
                 || structure.is_in_blockquote(line_num)
+                || lines[i].trim().starts_with('#')
                 || TableUtils::is_potential_table_row(lines[i])
+                || lines[i].trim().is_empty()
+                || is_horizontal_rule(lines[i].trim())
             {
                 i += 1;
                 continue;
             }
 
-            // Skip headings
-            if lines[i].trim().starts_with('#') || structure.heading_lines.contains(&line_num) {
+            // Check if this is a list item - handle it specially
+            let trimmed = lines[i].trim();
+            if is_list_item(trimmed) {
+                // Collect the entire list item including continuation lines
+                let list_start = i;
+                let (marker, first_content) = extract_list_marker_and_content(lines[i]);
+                let indent_size = marker.len();
+                let expected_indent = " ".repeat(indent_size);
+
+                let mut list_item_lines = vec![first_content];
                 i += 1;
-                continue;
-            }
 
-            // Skip empty lines
-            if lines[i].trim().is_empty() {
-                i += 1;
-                continue;
-            }
-
-            // Check if this is the start of a paragraph that could be normalized
-            let mut paragraph_end = i;
-            while paragraph_end < lines.len() {
-                let next_line_num = paragraph_end + 1;
-
-                // Stop at empty lines
-                if paragraph_end >= lines.len() || lines[paragraph_end].trim().is_empty() {
-                    break;
+                // Collect continuation lines (lines that are indented to match the list marker)
+                while i < lines.len() {
+                    let line = lines[i];
+                    // Check if this line is indented as a continuation
+                    if line.starts_with(&expected_indent) && !line.trim().is_empty() {
+                        // This is a continuation line
+                        let content = line[indent_size..].to_string();
+                        list_item_lines.push(content);
+                        i += 1;
+                    } else if line.trim().is_empty() {
+                        // Empty line might be part of the list item
+                        // Check if the next line is also indented
+                        if i + 1 < lines.len() && lines[i + 1].starts_with(&expected_indent) {
+                            list_item_lines.push(String::new());
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
                 }
 
-                // Stop at special structures
-                if structure.is_in_code_block(next_line_num)
+                // Now check if this list item needs reflowing
+                let combined_content = list_item_lines.join(" ").trim().to_string();
+                let full_line = format!("{marker}{combined_content}");
+
+                if self.calculate_effective_length(&full_line) > config.line_length
+                    || (config.reflow_mode == ReflowMode::Normalize && list_item_lines.len() > 1)
+                {
+                    let start_range = line_index.whole_line_range(list_start + 1);
+                    let end_line = i - 1;
+                    let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
+                        line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+                    } else {
+                        line_index.whole_line_range(end_line + 1)
+                    };
+                    let byte_range = start_range.start..end_range.end;
+
+                    // Reflow the content part
+                    let reflow_options = crate::utils::text_reflow::ReflowOptions {
+                        line_length: config.line_length - indent_size,
+                        break_on_sentences: true,
+                        preserve_breaks: false,
+                    };
+                    let reflowed = crate::utils::text_reflow::reflow_line(&combined_content, &reflow_options);
+
+                    // Rebuild with proper indentation
+                    let mut result = vec![format!("{marker}{}", reflowed[0])];
+                    for line in reflowed.iter().skip(1) {
+                        result.push(format!("{expected_indent}{line}"));
+                    }
+                    let reflowed_text = result.join("\n");
+
+                    // Preserve trailing newline
+                    let replacement = if end_line < lines.len() - 1 || ctx.content.ends_with('\n') {
+                        format!("{reflowed_text}\n")
+                    } else {
+                        reflowed_text
+                    };
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: format!(
+                            "Line length exceeds {} characters and can be reflowed",
+                            config.line_length
+                        ),
+                        line: list_start + 1,
+                        column: 1,
+                        end_line: end_line + 1,
+                        end_column: lines[end_line].len() + 1,
+                        severity: Severity::Warning,
+                        fix: Some(crate::rule::Fix {
+                            range: byte_range,
+                            replacement,
+                        }),
+                    });
+                }
+                continue;
+            }
+
+            // Found start of a paragraph - collect all lines in it
+            let paragraph_start = i;
+            let mut paragraph_lines = vec![lines[i]];
+            i += 1;
+
+            while i < lines.len() {
+                let next_line = lines[i];
+                let next_line_num = i + 1;
+                let next_trimmed = next_line.trim();
+
+                // Stop at paragraph boundaries
+                if next_trimmed.is_empty()
+                    || structure.is_in_code_block(next_line_num)
                     || structure.is_in_html_block(next_line_num)
                     || structure.is_in_blockquote(next_line_num)
-                    || (lines[paragraph_end].trim().starts_with('#'))
-                    || TableUtils::is_potential_table_row(lines[paragraph_end])
+                    || next_trimmed.starts_with('#')
+                    || TableUtils::is_potential_table_row(next_line)
+                    || is_list_item(next_trimmed)
+                    || is_horizontal_rule(next_trimmed)
+                    || (next_trimmed.starts_with('[') && next_line.contains("]:"))
                 {
                     break;
                 }
 
-                paragraph_end += 1;
+                // Check if the previous line ends with a hard break (2+ spaces)
+                if i > 0 && lines[i - 1].ends_with("  ") {
+                    // Don't include lines after hard breaks in the same paragraph
+                    break;
+                }
+
+                paragraph_lines.push(next_line);
+                i += 1;
             }
 
-            // Check if paragraph has multiple lines that could be combined
-            if paragraph_end - i > 1 {
-                // Multiple lines in paragraph - always flag in normalize mode
-                // (user explicitly wants to normalize paragraphs to use full line length)
+            // Check if this paragraph needs reflowing
+            let needs_reflow = if config.reflow_mode == ReflowMode::Normalize {
+                // In normalize mode, reflow multi-line paragraphs
+                paragraph_lines.len() > 1
+            } else {
+                // In default mode, only reflow if lines exceed limit
+                paragraph_lines
+                    .iter()
+                    .any(|line| self.calculate_effective_length(line) > config.line_length)
+            };
+
+            if needs_reflow {
+                // Calculate byte range for this paragraph
+                // Use whole_line_range for each line and combine
+                let start_range = line_index.whole_line_range(paragraph_start + 1);
+                let end_line = paragraph_start + paragraph_lines.len() - 1;
+
+                // For the last line, we want to preserve any trailing newline
+                let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
+                    // Last line without trailing newline - use line_text_range
+                    line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+                } else {
+                    // Not the last line or has trailing newline - use whole_line_range
+                    line_index.whole_line_range(end_line + 1)
+                };
+
+                let byte_range = start_range.start..end_range.end;
+
+                // Combine paragraph lines into a single string for reflowing
+                let paragraph_text = paragraph_lines.join(" ");
+
+                // Reflow the paragraph
+                let reflow_options = crate::utils::text_reflow::ReflowOptions {
+                    line_length: config.line_length,
+                    break_on_sentences: true,
+                    preserve_breaks: false,
+                };
+                let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
+                let reflowed_text = reflowed.join("\n");
+
+                // Preserve trailing newline if the original paragraph had one
+                let replacement = if end_line < lines.len() - 1 || ctx.content.ends_with('\n') {
+                    format!("{reflowed_text}\n")
+                } else {
+                    reflowed_text
+                };
+
+                // Create warning with actual fix
+                // In default mode, report the specific line that violates
+                // In normalize mode, report the whole paragraph
+                let (warning_line, warning_end_line) = if config.reflow_mode == ReflowMode::Normalize {
+                    (paragraph_start + 1, end_line + 1)
+                } else {
+                    // Find the first line that exceeds the limit
+                    let mut violating_line = paragraph_start;
+                    for (idx, line) in paragraph_lines.iter().enumerate() {
+                        if self.calculate_effective_length(line) > config.line_length {
+                            violating_line = paragraph_start + idx;
+                            break;
+                        }
+                    }
+                    (violating_line + 1, violating_line + 1)
+                };
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: format!(
-                        "Paragraph could be normalized to use line length of {} characters",
-                        config.line_length
-                    ),
-                    line: line_num,
+                    message: if config.reflow_mode == ReflowMode::Normalize {
+                        format!(
+                            "Paragraph could be normalized to use line length of {} characters",
+                            config.line_length
+                        )
+                    } else {
+                        format!(
+                            "Line length exceeds {} characters and can be reflowed",
+                            config.line_length
+                        )
+                    },
+                    line: warning_line,
                     column: 1,
-                    end_line: paragraph_end,
-                    end_column: lines[paragraph_end - 1].len() + 1,
+                    end_line: warning_end_line,
+                    end_column: lines[warning_end_line.saturating_sub(1)].len() + 1,
                     severity: Severity::Warning,
                     fix: Some(crate::rule::Fix {
-                        range: 0..0,
-                        replacement: String::new(),
+                        range: byte_range,
+                        replacement,
                     }),
                 });
             }
-
-            i = paragraph_end;
         }
 
         warnings
-    }
-
-    /// Check if a line should be skipped for fixing
-    fn should_skip_line_for_fix(&self, line: &str, line_num: usize, structure: &DocumentStructure) -> bool {
-        let line_number = line_num + 1; // 1-based
-
-        // Skip code blocks
-        if structure.is_in_code_block(line_number) {
-            return true;
-        }
-
-        // Skip HTML blocks
-        if structure.is_in_html_block(line_number) {
-            return true;
-        }
-
-        // Skip tables (they have complex formatting)
-        // Check if line looks like a table row
-        if TableUtils::is_potential_table_row(line) {
-            return true;
-        }
-
-        // Skip lines that are only URLs (can't be wrapped)
-        if line.trim().starts_with("http://") || line.trim().starts_with("https://") {
-            return true;
-        }
-
-        // Skip setext heading underlines
-        if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
-            return true;
-        }
-
-        false
     }
 
     /// Calculate effective line length excluding unbreakable URLs
@@ -603,6 +677,97 @@ impl DocumentStructureExtensions for MD013LineLength {
         // This rule always applies unless content is empty
         !ctx.content.is_empty()
     }
+}
+
+/// Extract list marker and content from a list item
+fn extract_list_marker_and_content(line: &str) -> (String, String) {
+    // Handle bullet lists
+    if let Some(rest) = line.strip_prefix("- ") {
+        return ("- ".to_string(), rest.to_string());
+    }
+    if let Some(rest) = line.strip_prefix("* ") {
+        return ("* ".to_string(), rest.to_string());
+    }
+    if let Some(rest) = line.strip_prefix("+ ") {
+        return ("+ ".to_string(), rest.to_string());
+    }
+
+    // Handle numbered lists
+    let mut chars = line.chars();
+    let mut marker = String::new();
+
+    while let Some(c) = chars.next() {
+        marker.push(c);
+        if c == '.' {
+            // Check if next char is a space
+            if let Some(next) = chars.next()
+                && next == ' '
+            {
+                marker.push(next);
+                let content = chars.as_str().to_string();
+                return (marker, content);
+            }
+            break;
+        }
+    }
+
+    // Fallback - shouldn't happen if is_list_item was correct
+    (String::new(), line.to_string())
+}
+
+// Helper functions
+fn is_horizontal_rule(line: &str) -> bool {
+    if line.len() < 3 {
+        return false;
+    }
+    // Check if line consists only of -, _, or * characters (at least 3)
+    let chars: Vec<char> = line.chars().collect();
+    if chars.is_empty() {
+        return false;
+    }
+    let first_char = chars[0];
+    if first_char != '-' && first_char != '_' && first_char != '*' {
+        return false;
+    }
+    // All characters should be the same (allowing spaces between)
+    for c in &chars {
+        if *c != first_char && *c != ' ' {
+            return false;
+        }
+    }
+    // Must have at least 3 of the marker character
+    chars.iter().filter(|c| **c == first_char).count() >= 3
+}
+
+fn is_numbered_list_item(line: &str) -> bool {
+    let mut chars = line.chars();
+    // Must start with a digit
+    if !chars.next().is_some_and(|c| c.is_numeric()) {
+        return false;
+    }
+    // Can have more digits
+    while let Some(c) = chars.next() {
+        if c == '.' {
+            // After period, must have a space or be end of line
+            return chars.next().is_none_or(|c| c == ' ');
+        }
+        if !c.is_numeric() {
+            return false;
+        }
+    }
+    false
+}
+
+fn is_list_item(line: &str) -> bool {
+    // Bullet lists
+    if (line.starts_with('-') || line.starts_with('*') || line.starts_with('+'))
+        && line.len() > 1
+        && line.chars().nth(1) == Some(' ')
+    {
+        return true;
+    }
+    // Numbered lists
+    is_numbered_list_item(line)
 }
 
 #[cfg(test)]
@@ -1809,7 +1974,8 @@ with multiple lines."#;
 
     #[test]
     fn test_default_mode_with_long_lines() {
-        // Default mode should only fix lines that exceed limit
+        // Default mode should fix paragraphs that contain lines exceeding limit
+        // The paragraph-based approach treats consecutive lines as a unit
         let config = MD013Config {
             line_length: 50,
             reflow: true,
@@ -1822,14 +1988,20 @@ with multiple lines."#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let warnings = rule.check(&ctx).unwrap();
-        assert_eq!(warnings.len(), 1, "Should only flag the long line");
-        assert_eq!(warnings[0].line, 2, "Should flag line 2");
+        assert_eq!(warnings.len(), 1, "Should flag the paragraph with long line");
+        // The warning reports the line that violates in default mode
+        assert_eq!(warnings[0].line, 2, "Should flag line 2 that exceeds limit");
 
         let fixed = rule.fix(&ctx).unwrap();
-        let lines: Vec<&str> = fixed.lines().collect();
-        // Should have more than 3 lines after wrapping the long one
-        assert!(lines.len() > 3, "Long line should be wrapped");
-        assert_eq!(lines[0], "Short line.", "First short line unchanged");
+        // The paragraph gets reflowed as a unit
+        assert!(
+            fixed.contains("Short line. This is"),
+            "Should combine and reflow the paragraph"
+        );
+        assert!(
+            fixed.contains("wrapping. Another short"),
+            "Should include all paragraph content"
+        );
     }
 
     #[test]

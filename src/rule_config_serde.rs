@@ -21,15 +21,8 @@ pub fn load_rule_config<T: RuleConfig>(config: &crate::config::Config) -> T {
             let mut table = toml::map::Map::new();
 
             for (k, v) in rule_config.values.iter() {
-                // Handle backwards compatibility mappings
-                // MD013: enable-reflow -> reflow
-                let mapped_key = if T::RULE_NAME == "MD013" && k == "enable-reflow" {
-                    "reflow".to_string()
-                } else {
-                    k.clone()
-                };
-
-                table.insert(mapped_key, v.clone());
+                // No manual mapping needed - serde aliases handle this
+                table.insert(k.clone(), v.clone());
             }
 
             let toml_table = toml::Value::Table(table);
