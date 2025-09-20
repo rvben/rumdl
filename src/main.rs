@@ -3091,6 +3091,9 @@ fn apply_fixes(
         }
     }
 
+    // Track which rules actually fixed content
+    let mut rules_that_fixed = Vec::new();
+
     // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
     for rule in rules {
         let rule_warnings: Vec<_> = all_warnings
@@ -3134,6 +3137,8 @@ fn apply_fixes(
                     Ok(fixed_content) => {
                         if fixed_content != *content {
                             *content = fixed_content;
+                            // Track that this rule made changes
+                            rules_that_fixed.push(rule_name);
                         }
                     }
                     Err(err) => {
@@ -3151,15 +3156,19 @@ fn apply_fixes(
         }
     }
 
-    // Now re-check all rules to see what warnings remain
+    // OPTIMIZATION: Only re-check rules that actually applied fixes or had warnings
     let ctx_after_fixes = LintContext::new(content, config.markdown_flavor());
     let mut remaining_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
 
     for rule in rules {
-        if let Ok(remaining_warnings) = rule.check(&ctx_after_fixes) {
-            for warning in remaining_warnings {
-                if let Some(rule_name) = warning.rule_name {
-                    *remaining_counts.entry(rule_name).or_insert(0) += 1;
+        let rule_name = rule.name();
+        // Only re-check if this rule made changes OR if we have original warnings for it
+        if rules_that_fixed.contains(&rule_name) || original_counts.contains_key(rule_name) {
+            if let Ok(remaining_warnings) = rule.check(&ctx_after_fixes) {
+                for warning in remaining_warnings {
+                    if let Some(rule_name) = warning.rule_name {
+                        *remaining_counts.entry(rule_name).or_insert(0) += 1;
+                    }
                 }
             }
         }
@@ -3191,6 +3200,9 @@ fn apply_fixes_stdin(
         }
     }
 
+    // Track which rules actually fixed content
+    let mut rules_that_fixed = Vec::new();
+
     // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
     for rule in rules {
         let rule_warnings: Vec<_> = all_warnings
@@ -3234,6 +3246,8 @@ fn apply_fixes_stdin(
                     Ok(fixed_content) => {
                         if fixed_content != *content {
                             *content = fixed_content;
+                            // Track that this rule made changes
+                            rules_that_fixed.push(rule_name);
                         }
                     }
                     Err(err) => {
@@ -3251,15 +3265,19 @@ fn apply_fixes_stdin(
         }
     }
 
-    // Now re-check all rules to see what warnings remain
+    // OPTIMIZATION: Only re-check rules that actually applied fixes or had warnings
     let ctx_after_fixes = LintContext::new(content, config.markdown_flavor());
     let mut remaining_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
 
     for rule in rules {
-        if let Ok(remaining_warnings) = rule.check(&ctx_after_fixes) {
-            for warning in remaining_warnings {
-                if let Some(rule_name) = warning.rule_name {
-                    *remaining_counts.entry(rule_name).or_insert(0) += 1;
+        let rule_name = rule.name();
+        // Only re-check if this rule made changes OR if we have original warnings for it
+        if rules_that_fixed.contains(&rule_name) || original_counts.contains_key(rule_name) {
+            if let Ok(remaining_warnings) = rule.check(&ctx_after_fixes) {
+                for warning in remaining_warnings {
+                    if let Some(rule_name) = warning.rule_name {
+                        *remaining_counts.entry(rule_name).or_insert(0) += 1;
+                    }
                 }
             }
         }
