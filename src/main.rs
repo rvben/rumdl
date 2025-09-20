@@ -3083,6 +3083,7 @@ fn apply_fixes(
     quiet: bool,
     config: &rumdl_config::Config,
 ) -> usize {
+    use std::time::Instant;
     // Store the original warning count by rule
     let mut original_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for warning in all_warnings {
@@ -3093,6 +3094,10 @@ fn apply_fixes(
 
     // Track which rules actually fixed content
     let mut rules_that_fixed = Vec::new();
+
+    let mut total_ctx_time = std::time::Duration::ZERO;
+    let mut total_fix_time = std::time::Duration::ZERO;
+    let mut ctx_creations = 0;
 
     // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
     for rule in rules {
@@ -3132,9 +3137,15 @@ fn apply_fixes(
                     continue;
                 }
 
+                let ctx_start = Instant::now();
                 let ctx = LintContext::new(content, config.markdown_flavor());
+                total_ctx_time += ctx_start.elapsed();
+                ctx_creations += 1;
+
+                let fix_start = Instant::now();
                 match rule.fix(&ctx) {
                     Ok(fixed_content) => {
+                        total_fix_time += fix_start.elapsed();
                         if fixed_content != *content {
                             *content = fixed_content;
                             // Track that this rule made changes
@@ -3142,6 +3153,7 @@ fn apply_fixes(
                         }
                     }
                     Err(err) => {
+                        total_fix_time += fix_start.elapsed();
                         if !quiet {
                             eprintln!(
                                 "{} Failed to apply fix for rule {}: {}",
@@ -3163,12 +3175,12 @@ fn apply_fixes(
     for rule in rules {
         let rule_name = rule.name();
         // Only re-check if this rule made changes OR if we have original warnings for it
-        if rules_that_fixed.contains(&rule_name) || original_counts.contains_key(rule_name) {
-            if let Ok(remaining_warnings) = rule.check(&ctx_after_fixes) {
-                for warning in remaining_warnings {
-                    if let Some(rule_name) = warning.rule_name {
-                        *remaining_counts.entry(rule_name).or_insert(0) += 1;
-                    }
+        if (rules_that_fixed.contains(&rule_name) || original_counts.contains_key(rule_name))
+            && let Ok(remaining_warnings) = rule.check(&ctx_after_fixes)
+        {
+            for warning in remaining_warnings {
+                if let Some(rule_name) = warning.rule_name {
+                    *remaining_counts.entry(rule_name).or_insert(0) += 1;
                 }
             }
         }
@@ -3179,6 +3191,13 @@ fn apply_fixes(
     for (rule_name, original_count) in original_counts {
         let remaining = remaining_counts.get(rule_name).copied().unwrap_or(0);
         warnings_fixed += original_count.saturating_sub(remaining);
+    }
+
+    if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
+        eprintln!("DEBUG: LintContext creations: {ctx_creations}");
+        eprintln!("DEBUG: Total LintContext time: {total_ctx_time:?}");
+        eprintln!("DEBUG: Total fix() time: {total_fix_time:?}");
+        eprintln!("DEBUG: Total time: {:?}", total_ctx_time + total_fix_time);
     }
 
     warnings_fixed
@@ -3192,6 +3211,7 @@ fn apply_fixes_stdin(
     quiet: bool,
     config: &rumdl_config::Config,
 ) -> usize {
+    use std::time::Instant;
     // Store the original warning count by rule
     let mut original_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for warning in all_warnings {
@@ -3202,6 +3222,10 @@ fn apply_fixes_stdin(
 
     // Track which rules actually fixed content
     let mut rules_that_fixed = Vec::new();
+
+    let mut total_ctx_time = std::time::Duration::ZERO;
+    let mut total_fix_time = std::time::Duration::ZERO;
+    let mut ctx_creations = 0;
 
     // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
     for rule in rules {
@@ -3241,9 +3265,15 @@ fn apply_fixes_stdin(
                     continue;
                 }
 
+                let ctx_start = Instant::now();
                 let ctx = LintContext::new(content, config.markdown_flavor());
+                total_ctx_time += ctx_start.elapsed();
+                ctx_creations += 1;
+
+                let fix_start = Instant::now();
                 match rule.fix(&ctx) {
                     Ok(fixed_content) => {
+                        total_fix_time += fix_start.elapsed();
                         if fixed_content != *content {
                             *content = fixed_content;
                             // Track that this rule made changes
@@ -3251,6 +3281,7 @@ fn apply_fixes_stdin(
                         }
                     }
                     Err(err) => {
+                        total_fix_time += fix_start.elapsed();
                         if !quiet {
                             eprintln!(
                                 "{} Failed to apply fix for rule {}: {}",
@@ -3272,12 +3303,12 @@ fn apply_fixes_stdin(
     for rule in rules {
         let rule_name = rule.name();
         // Only re-check if this rule made changes OR if we have original warnings for it
-        if rules_that_fixed.contains(&rule_name) || original_counts.contains_key(rule_name) {
-            if let Ok(remaining_warnings) = rule.check(&ctx_after_fixes) {
-                for warning in remaining_warnings {
-                    if let Some(rule_name) = warning.rule_name {
-                        *remaining_counts.entry(rule_name).or_insert(0) += 1;
-                    }
+        if (rules_that_fixed.contains(&rule_name) || original_counts.contains_key(rule_name))
+            && let Ok(remaining_warnings) = rule.check(&ctx_after_fixes)
+        {
+            for warning in remaining_warnings {
+                if let Some(rule_name) = warning.rule_name {
+                    *remaining_counts.entry(rule_name).or_insert(0) += 1;
                 }
             }
         }
@@ -3288,6 +3319,13 @@ fn apply_fixes_stdin(
     for (rule_name, original_count) in original_counts {
         let remaining = remaining_counts.get(rule_name).copied().unwrap_or(0);
         warnings_fixed += original_count.saturating_sub(remaining);
+    }
+
+    if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
+        eprintln!("DEBUG: LintContext creations: {ctx_creations}");
+        eprintln!("DEBUG: Total LintContext time: {total_ctx_time:?}");
+        eprintln!("DEBUG: Total fix() time: {total_fix_time:?}");
+        eprintln!("DEBUG: Total time: {:?}", total_ctx_time + total_fix_time);
     }
 
     warnings_fixed
