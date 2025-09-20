@@ -419,6 +419,12 @@ impl MD013LineLength {
                     let line = lines[i];
                     // Check if this line is indented as a continuation
                     if line.starts_with(&expected_indent) && !line.trim().is_empty() {
+                        // Check if this is actually a nested list item
+                        let content_after_indent = &line[indent_size..];
+                        if is_list_item(content_after_indent.trim()) {
+                            // This is a nested list item, not a continuation
+                            break;
+                        }
                         // This is a continuation line
                         let content = line[indent_size..].to_string();
                         list_item_lines.push(content);
@@ -560,13 +566,25 @@ impl MD013LineLength {
                 // Combine paragraph lines into a single string for reflowing
                 let paragraph_text = paragraph_lines.join(" ");
 
+                // Check if the paragraph ends with a hard break
+                let has_hard_break = paragraph_lines.last().is_some_and(|l| l.ends_with("  "));
+
                 // Reflow the paragraph
                 let reflow_options = crate::utils::text_reflow::ReflowOptions {
                     line_length: config.line_length,
                     break_on_sentences: true,
                     preserve_breaks: false,
                 };
-                let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
+                let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
+
+                // If the original paragraph ended with a hard break, preserve it
+                if has_hard_break && !reflowed.is_empty() {
+                    let last_idx = reflowed.len() - 1;
+                    if !reflowed[last_idx].ends_with("  ") {
+                        reflowed[last_idx].push_str("  ");
+                    }
+                }
+
                 let reflowed_text = reflowed.join("\n");
 
                 // Preserve trailing newline if the original paragraph had one
@@ -681,31 +699,36 @@ impl DocumentStructureExtensions for MD013LineLength {
 
 /// Extract list marker and content from a list item
 fn extract_list_marker_and_content(line: &str) -> (String, String) {
+    // First, find the leading indentation
+    let indent_len = line.len() - line.trim_start().len();
+    let indent = &line[..indent_len];
+    let trimmed = &line[indent_len..];
+
     // Handle bullet lists
-    if let Some(rest) = line.strip_prefix("- ") {
-        return ("- ".to_string(), rest.to_string());
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        return (format!("{indent}- "), rest.to_string());
     }
-    if let Some(rest) = line.strip_prefix("* ") {
-        return ("* ".to_string(), rest.to_string());
+    if let Some(rest) = trimmed.strip_prefix("* ") {
+        return (format!("{indent}* "), rest.to_string());
     }
-    if let Some(rest) = line.strip_prefix("+ ") {
-        return ("+ ".to_string(), rest.to_string());
+    if let Some(rest) = trimmed.strip_prefix("+ ") {
+        return (format!("{indent}+ "), rest.to_string());
     }
 
-    // Handle numbered lists
-    let mut chars = line.chars();
-    let mut marker = String::new();
+    // Handle numbered lists on trimmed content
+    let mut chars = trimmed.chars();
+    let mut marker_content = String::new();
 
     while let Some(c) = chars.next() {
-        marker.push(c);
+        marker_content.push(c);
         if c == '.' {
             // Check if next char is a space
             if let Some(next) = chars.next()
                 && next == ' '
             {
-                marker.push(next);
+                marker_content.push(next);
                 let content = chars.as_str().to_string();
-                return (marker, content);
+                return (format!("{indent}{marker_content}"), content);
             }
             break;
         }

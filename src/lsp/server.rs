@@ -648,8 +648,8 @@ impl LanguageServer for RumdlLanguageServer {
                 }
             }
         } else {
-            log::warn!("Document not found in cache: {uri}");
-            Ok(Some(Vec::new()))
+            log::warn!("Document not found: {uri}");
+            Ok(None)
         }
     }
 
