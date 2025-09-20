@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.142] - 2025-09-20
+
+### Fixed
+
+- **MD013**: Refactored to emit warning-based fixes for LSP compatibility (#79)
+  - MD013 reflow now works correctly when using LSP formatting in editors like Helix
+  - Generates proper warning-based fixes with byte ranges instead of document transforms
+  - Preserves trailing newlines and handles multi-line list items correctly
+
 ## [0.0.141] - 2025-09-15
 
 ### Added
@@ -714,7 +723,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.140...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.142...HEAD
+[0.0.142]: https://github.com/rvben/rumdl/compare/v0.0.141...v0.0.142
 [0.0.140]: https://github.com/rvben/rumdl/compare/v0.0.139...v0.0.140
 [0.0.138]: https://github.com/rvben/rumdl/compare/v0.0.137...v0.0.138
 [0.0.137]: https://github.com/rvben/rumdl/compare/v0.0.136...v0.0.137
