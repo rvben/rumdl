@@ -165,8 +165,8 @@ impl MD051LinkFragments {
             return String::new();
         }
 
-        // Strip markdown formatting first
-        let text = if QUICK_MARKDOWN_CHECK.is_match(heading) {
+        // Strip markdown formatting first - use faster byte check
+        let text = if heading.as_bytes().iter().any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']')) {
             self.strip_markdown_formatting_fast(heading)
         } else {
             heading.to_string()
@@ -274,8 +274,8 @@ impl MD051LinkFragments {
             return String::new();
         }
 
-        // Strip markdown formatting first
-        let text = if QUICK_MARKDOWN_CHECK.is_match(heading) {
+        // Strip markdown formatting first - use faster byte check
+        let text = if heading.as_bytes().iter().any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']')) {
             self.strip_markdown_formatting_fast(heading)
         } else {
             heading.to_string()
@@ -321,8 +321,8 @@ impl MD051LinkFragments {
             return String::new();
         }
 
-        // Strip markdown formatting first
-        let text = if QUICK_MARKDOWN_CHECK.is_match(heading) {
+        // Strip markdown formatting first - use faster byte check
+        let text = if heading.as_bytes().iter().any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']')) {
             self.strip_markdown_formatting_fast(heading)
         } else {
             heading.to_string()
@@ -472,6 +472,12 @@ impl MD051LinkFragments {
 
     /// Strip markdown formatting from heading text (optimized for common patterns)
     fn strip_markdown_formatting_fast(&self, text: &str) -> String {
+        // Fast path: if no markdown formatting detected, return as-is
+        let bytes = text.as_bytes();
+        if !bytes.contains(&b'*') && !bytes.contains(&b'`') && !bytes.contains(&b'[') {
+            return text.to_string();
+        }
+
         let mut result = text.to_string();
 
         // Strip emphasis (only asterisks, underscores are preserved per GitHub spec)
@@ -610,35 +616,47 @@ impl Rule for MD051LinkFragments {
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if no link fragments present
-        !ctx.content.contains("#")
+        let bytes = ctx.content.as_bytes();
+        !bytes.contains(&b'#') || !bytes.contains(&b'[')
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
         let content = ctx.content;
 
-        // Skip empty content
-        if content.is_empty() {
+        // Skip empty content or content without links or fragments
+        if content.is_empty() || self.should_skip(ctx) {
             return Ok(warnings);
         }
 
         // Extract all valid heading anchors (markdown and HTML)
         let (markdown_headings, html_anchors) = self.extract_headings_from_context(ctx);
 
-        // Find all links with fragments
+        // Pre-filter lines that might contain links with fragments
+        let mut candidate_lines = Vec::new();
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            // Skip front matter and code blocks
+            if line_info.in_front_matter || line_info.in_code_block {
+                continue;
+            }
+
+            let line = &line_info.content;
+            let bytes = line.as_bytes();
+
+            // Fast byte-level check for potential links with fragments
+            if bytes.contains(&b'[') && bytes.contains(&b']') &&
+               bytes.contains(&b'(') && bytes.contains(&b')') &&
+               bytes.contains(&b'#') {
+                candidate_lines.push(line_num);
+            }
+        }
+
+        // Only process candidate lines
         let link_regex = get_cached_regex(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
         let lines: Vec<&str> = content.lines().collect();
 
-        for (line_num, line) in lines.iter().enumerate() {
-            // Skip front matter
-            if ctx.lines[line_num].in_front_matter {
-                continue;
-            }
-
-            // Skip code blocks
-            if ctx.lines[line_num].in_code_block {
-                continue;
-            }
+        for line_num in candidate_lines {
+            let line = lines[line_num];
 
             for cap in link_regex.captures_iter(line) {
                 if let Some(url_match) = cap.get(2) {

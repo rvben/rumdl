@@ -13,32 +13,42 @@ pub struct MD028NoBlanksBlockquote;
 
 impl MD028NoBlanksBlockquote {
     /// Check if a line is a blockquote line (has > markers)
+    #[inline]
     fn is_blockquote_line(line: &str) -> bool {
+        // Fast path: check for '>' character before doing any string operations
+        if !line.as_bytes().contains(&b'>') {
+            return false;
+        }
         line.trim_start().starts_with('>')
     }
 
-    /// Get the blockquote level (number of > markers)
-    fn get_blockquote_level(line: &str) -> usize {
-        let trimmed = line.trim_start();
-        let mut level = 0;
-        let chars = trimmed.chars();
+    /// Get the blockquote level (number of > markers) and leading whitespace
+    /// Returns (level, whitespace_end_idx)
+    fn get_blockquote_info(line: &str) -> (usize, usize) {
+        let bytes = line.as_bytes();
+        let mut i = 0;
 
-        for ch in chars {
-            if ch == '>' {
+        // Skip leading whitespace
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+            i += 1;
+        }
+
+        let whitespace_end = i;
+        let mut level = 0;
+
+        // Count '>' markers
+        while i < bytes.len() {
+            if bytes[i] == b'>' {
                 level += 1;
-            } else if ch != ' ' && ch != '\t' {
+                i += 1;
+            } else if bytes[i] == b' ' || bytes[i] == b'\t' {
+                i += 1;
+            } else {
                 break;
             }
         }
 
-        level
-    }
-
-    /// Get the leading whitespace before the first >
-    fn get_leading_whitespace(line: &str) -> &str {
-        let trimmed_len = line.trim_start().len();
-        let total_len = line.len();
-        &line[..total_len - trimmed_len]
+        (level, whitespace_end)
     }
 
     /// Check if there's substantive content between two blockquote sections
@@ -66,19 +76,24 @@ impl MD028NoBlanksBlockquote {
         // Even multiple consecutive blank lines are flagged as they can be ambiguous
         // (some parsers treat them as one blockquote, others as separate blockquotes).
 
-        // Find previous and next blockquote lines
+        // Find previous and next blockquote lines using fast byte scanning
         let mut prev_quote_idx = None;
         let mut next_quote_idx = None;
 
+        // Scan backwards for previous blockquote
         for i in (0..blank_idx).rev() {
-            if Self::is_blockquote_line(lines[i]) {
+            let line = lines[i];
+            // Fast check: if no '>' character, skip
+            if line.as_bytes().contains(&b'>') && Self::is_blockquote_line(line) {
                 prev_quote_idx = Some(i);
                 break;
             }
         }
 
+        // Scan forwards for next blockquote
         for (i, line) in lines.iter().enumerate().skip(blank_idx + 1) {
-            if Self::is_blockquote_line(line) {
+            // Fast check: if no '>' character, skip
+            if line.as_bytes().contains(&b'>') && Self::is_blockquote_line(line) {
                 next_quote_idx = Some(i);
                 break;
             }
@@ -94,9 +109,9 @@ impl MD028NoBlanksBlockquote {
             return false;
         }
 
-        // Check if levels match
-        let prev_level = Self::get_blockquote_level(lines[prev_idx]);
-        let next_level = Self::get_blockquote_level(lines[next_idx]);
+        // Get blockquote info once per line to avoid repeated parsing
+        let (prev_level, prev_whitespace_end) = Self::get_blockquote_info(lines[prev_idx]);
+        let (next_level, next_whitespace_end) = Self::get_blockquote_info(lines[next_idx]);
 
         // Different levels suggest different contexts
         // But next_level > prev_level could be nested continuation
@@ -104,9 +119,11 @@ impl MD028NoBlanksBlockquote {
             return false;
         }
 
-        // Check indentation consistency
-        let prev_indent = Self::get_leading_whitespace(lines[prev_idx]);
-        let next_indent = Self::get_leading_whitespace(lines[next_idx]);
+        // Check indentation consistency using byte indices
+        let prev_line = lines[prev_idx];
+        let next_line = lines[next_idx];
+        let prev_indent = &prev_line[..prev_whitespace_end];
+        let next_indent = &next_line[..next_whitespace_end];
 
         // Different indentation indicates separate blockquote contexts
         // Same indentation with no content between = same blockquote (blank line inside)
@@ -129,12 +146,15 @@ impl MD028NoBlanksBlockquote {
         }
 
         // This blank line appears to be inside a blockquote
-        // Find the appropriate fix
+        // Find the appropriate fix using optimized parsing
         for i in (0..index).rev() {
-            if Self::is_blockquote_line(lines[i]) {
-                let level = Self::get_blockquote_level(lines[i]);
-                let indent = Self::get_leading_whitespace(lines[i]);
-                let mut fix = indent.to_string();
+            let line = lines[i];
+            // Fast check: if no '>' character, skip
+            if line.as_bytes().contains(&b'>') && Self::is_blockquote_line(line) {
+                let (level, whitespace_end) = Self::get_blockquote_info(line);
+                let indent = &line[..whitespace_end];
+                let mut fix = String::with_capacity(indent.len() + level);
+                fix.push_str(indent);
                 for _ in 0..level {
                     fix.push('>');
                 }
@@ -177,17 +197,35 @@ impl Rule for MD028NoBlanksBlockquote {
         // Get all lines
         let lines: Vec<&str> = ctx.content.lines().collect();
 
-        // Check each line
-        for (line_idx, line) in lines.iter().enumerate() {
-            let line_num = line_idx + 1;
+        // Pre-scan to find blank lines and blockquote lines for faster processing
+        let mut blank_line_indices = Vec::new();
+        let mut has_blockquotes = false;
 
+        for (line_idx, line) in lines.iter().enumerate() {
             // Skip lines in code blocks
             if line_idx < ctx.lines.len() && ctx.lines[line_idx].in_code_block {
                 continue;
             }
 
+            if line.trim().is_empty() {
+                blank_line_indices.push(line_idx);
+            } else if Self::is_blockquote_line(line) {
+                has_blockquotes = true;
+            }
+        }
+
+        // If no blockquotes found, no need to check blank lines
+        if !has_blockquotes {
+            return Ok(Vec::new());
+        }
+
+        // Only check blank lines that could be problematic
+        for &line_idx in &blank_line_indices {
+            let line_num = line_idx + 1;
+
             // Check if this is a problematic blank line inside a blockquote
             if let Some((level, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx) {
+                let line = lines[line_idx];
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
 
                 warnings.push(LintWarning {

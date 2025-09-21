@@ -55,23 +55,33 @@ impl Rule for MD030ListMarkerSpace {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
-        let lines: Vec<String> = ctx.content.lines().map(|l| l.to_string()).collect();
-        let mut in_blockquote = false;
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
 
-            // Skip if in code block
-            if let Some(line_info) = ctx.line_info(line_num)
-                && line_info.in_code_block
-            {
-                continue;
+        // Early return if no list content
+        if self.should_skip(ctx) {
+            return Ok(warnings);
+        }
+
+        // Pre-filter lines that are actually list items
+        let mut list_item_lines = Vec::new();
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if line_info.list_item.is_some() && !line_info.in_code_block {
+                list_item_lines.push(line_num + 1);
             }
+        }
+
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        let mut in_blockquote = false;
+
+        for line_num in list_item_lines {
+            let line = lines[line_num - 1];
+
             // Skip indented code blocks (4+ spaces or tab)
             if line.starts_with("    ") || line.starts_with("\t") {
                 continue;
             }
+
             // Track blockquotes (for now, just skip lines starting with >)
-            let mut l = line.as_str();
+            let mut l = line;
             while l.trim_start().starts_with('>') {
                 l = l.trim_start().trim_start_matches('>').trim_start();
                 in_blockquote = true;
@@ -80,6 +90,7 @@ impl Rule for MD030ListMarkerSpace {
                 in_blockquote = false;
                 continue;
             }
+
             // Use pre-computed list item information
             if let Some(line_info) = ctx.line_info(line_num)
                 && let Some(list_info) = &line_info.list_item
@@ -157,11 +168,14 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty()
-            || (!ctx.content.contains('*')
-                && !ctx.content.contains('-')
-                && !ctx.content.contains('+')
-                && !ctx.content.contains(|c: char| c.is_ascii_digit()))
+        if ctx.content.is_empty() {
+            return true;
+        }
+
+        // Fast byte-level check for list markers
+        let bytes = ctx.content.as_bytes();
+        !bytes.contains(&b'*') && !bytes.contains(&b'-') && !bytes.contains(&b'+') &&
+         !bytes.iter().any(|&b| b.is_ascii_digit())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -195,17 +209,29 @@ impl Rule for MD030ListMarkerSpace {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
         let content = ctx.content;
+
+        // Early return if no fixes needed
+        if self.should_skip(ctx) {
+            return Ok(content.to_string());
+        }
+
         let structure = crate::utils::document_structure::DocumentStructure::new(content);
         let lines: Vec<&str> = content.lines().collect();
-        let mut result_lines = Vec::new();
+        let mut result_lines = Vec::with_capacity(lines.len());
+
+        // Pre-compute which lines need potential fixes
+        let mut needs_check = vec![false; lines.len()];
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            if line_info.list_item.is_some() && !line_info.in_code_block {
+                needs_check[line_idx] = true;
+            }
+        }
 
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
-            // Skip if in code block
-            if let Some(line_info) = ctx.line_info(line_num)
-                && line_info.in_code_block
-            {
+            // Quick check: if this line doesn't need checking, just add it
+            if !needs_check[line_idx] {
                 result_lines.push(line.to_string());
                 continue;
             }

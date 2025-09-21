@@ -93,42 +93,8 @@ impl Rule for MD013LineLength {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
 
-        // Early return for empty content
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Quick check: if total content is shorter than line limit, definitely no violations
-        // BUT: in normalize mode with reflow, we still want to check for multi-line paragraphs
-        if content.len() <= self.config.line_length
-            && !(self.config.reflow && self.config.reflow_mode == ReflowMode::Normalize)
-        {
-            return Ok(Vec::new());
-        }
-
-        // More aggressive early return - check if any line could possibly be long
-        let has_long_lines = if !ctx.lines.is_empty() {
-            ctx.lines
-                .iter()
-                .any(|line| line.content.len() > self.config.line_length)
-        } else {
-            // Fallback: do a quick scan for newlines to estimate max line length
-            let mut max_line_len = 0;
-            let mut current_line_len = 0;
-            for ch in content.chars() {
-                if ch == '\n' {
-                    max_line_len = max_line_len.max(current_line_len);
-                    current_line_len = 0;
-                } else {
-                    current_line_len += 1;
-                }
-            }
-            max_line_len = max_line_len.max(current_line_len);
-            max_line_len > self.config.line_length
-        };
-
-        // In normalize mode, we want to continue even if no long lines
-        if !(has_long_lines || self.config.reflow && self.config.reflow_mode == ReflowMode::Normalize) {
+        // Fast early return using should_skip
+        if self.should_skip(ctx) && !(self.config.reflow && self.config.reflow_mode == ReflowMode::Normalize) {
             return Ok(Vec::new());
         }
 
@@ -189,6 +155,20 @@ impl Rule for MD013LineLength {
             self.config.clone()
         };
 
+        // Pre-filter lines that could be problematic to avoid processing all lines
+        let mut candidate_lines = Vec::new();
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            // Quick length check first
+            if line_info.content.len() > effective_config.line_length {
+                candidate_lines.push(line_idx);
+            }
+        }
+
+        // If no candidate lines and not in normalize mode, early return
+        if candidate_lines.is_empty() && !(effective_config.reflow && effective_config.reflow_mode == ReflowMode::Normalize) {
+            return Ok(warnings);
+        }
+
         // Use ctx.lines if available for better performance
         let lines: Vec<&str> = if !ctx.lines.is_empty() {
             ctx.lines.iter().map(|l| l.content.as_str()).collect()
@@ -196,31 +176,33 @@ impl Rule for MD013LineLength {
             content.lines().collect()
         };
 
-        // Create a quick lookup set for heading lines
-        let heading_lines_set: std::collections::HashSet<usize> = structure.heading_lines.iter().cloned().collect();
+        // Create a quick lookup set for heading lines (only if needed)
+        let heading_lines_set: std::collections::HashSet<usize> = if !effective_config.headings {
+            structure.heading_lines.iter().cloned().collect()
+        } else {
+            std::collections::HashSet::new()
+        };
 
-        // Use TableUtils to find all table blocks in the document
-        let table_blocks = TableUtils::find_table_blocks(content, ctx);
-
-        // Pre-compute table lines from the table blocks
-        let table_lines_set: std::collections::HashSet<usize> = {
+        // Use TableUtils to find all table blocks (only if needed)
+        let table_lines_set: std::collections::HashSet<usize> = if !effective_config.tables {
+            let table_blocks = TableUtils::find_table_blocks(content, ctx);
             let mut table_lines = std::collections::HashSet::new();
-
             for table in &table_blocks {
-                // Add header line
-                table_lines.insert(table.header_line + 1); // Convert 0-indexed to 1-indexed
-                // Add delimiter line
+                table_lines.insert(table.header_line + 1);
                 table_lines.insert(table.delimiter_line + 1);
-                // Add all content lines
                 for &line in &table.content_lines {
-                    table_lines.insert(line + 1); // Convert 0-indexed to 1-indexed
+                    table_lines.insert(line + 1);
                 }
             }
             table_lines
+        } else {
+            std::collections::HashSet::new()
         };
 
-        for (line_num, line) in lines.iter().enumerate() {
-            let line_number = line_num + 1;
+        // Only process candidate lines that were pre-filtered
+        for &line_idx in &candidate_lines {
+            let line_number = line_idx + 1;
+            let line = lines[line_idx];
 
             // Calculate effective length excluding unbreakable URLs
             let effective_length = self.calculate_effective_length(line);
@@ -228,7 +210,7 @@ impl Rule for MD013LineLength {
             // Use single line length limit for all content
             let line_limit = effective_config.line_length;
 
-            // Skip short lines immediately
+            // Skip short lines immediately (double-check after effective length calculation)
             if effective_length <= line_limit {
                 continue;
             }
@@ -253,7 +235,7 @@ impl Rule for MD013LineLength {
                 }
 
                 // Skip lines that are only a URL, image ref, or link ref
-                if self.should_ignore_line(line, &lines, line_num, structure) {
+                if self.should_ignore_line(line, &lines, line_idx, structure) {
                     continue;
                 }
             }
@@ -647,7 +629,13 @@ impl MD013LineLength {
             return line.chars().count();
         }
 
-        // Quick check: if line doesn't contain "http" or "[", it can't have URLs or markdown links
+        // Quick byte-level check: if line doesn't contain "http" or "[", it can't have URLs or markdown links
+        let bytes = line.as_bytes();
+        if !bytes.contains(&b'h') && !bytes.contains(&b'[') {
+            return line.chars().count();
+        }
+
+        // More precise check for URLs and links
         if !line.contains("http") && !line.contains('[') {
             return line.chars().count();
         }

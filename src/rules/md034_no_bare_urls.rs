@@ -4,7 +4,6 @@
 use crate::rule::{
     AstExtensions, Fix, LintError, LintResult, LintWarning, MarkdownAst, MaybeAst, Rule, RuleCategory, Severity,
 };
-use crate::utils::early_returns;
 use crate::utils::range_utils::calculate_url_range;
 use crate::utils::regex_cache::EMAIL_PATTERN;
 
@@ -72,7 +71,9 @@ impl MD034NoBareUrls {
     #[inline]
     pub fn should_skip(&self, content: &str) -> bool {
         // Skip if content has no URLs and no email addresses
-        !early_returns::has_urls(content) && !content.contains('@')
+        // Fast byte scanning for common URL/email indicators
+        let bytes = content.as_bytes();
+        !bytes.contains(&b':') && !bytes.contains(&b'@')
     }
 
     /// Remove trailing punctuation that is likely sentence punctuation, not part of the URL
@@ -176,19 +177,30 @@ impl MD034NoBareUrls {
             return Ok(warnings);
         }
 
-        // Use line-based processing for better cache locality
-        for line_info in ctx.lines.iter() {
-            let line_content = &line_info.content;
-
+        // Pre-filter lines that might contain URLs or emails
+        let mut candidate_lines = Vec::new();
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             // Skip lines in code blocks
             if line_info.in_code_block {
                 continue;
             }
 
-            // Quick check if line might contain URLs or emails
-            if !line_content.contains("://") && !line_content.contains('@') {
-                continue;
+            let line_content = &line_info.content;
+            let bytes = line_content.as_bytes();
+
+            // Fast byte-level check for potential URLs/emails
+            let has_url = bytes.contains(&b':') && line_content.contains("://");
+            let has_email = bytes.contains(&b'@');
+
+            if has_url || has_email {
+                candidate_lines.push(line_idx);
             }
+        }
+
+        // Process only candidate lines
+        for &line_idx in &candidate_lines {
+            let line_info = &ctx.lines[line_idx];
+            let line_content = &line_info.content;
 
             // Check for URLs in this line
             for url_match in SIMPLE_URL_REGEX.find_iter(line_content) {
@@ -537,22 +549,7 @@ impl Rule for MD034NoBareUrls {
         let content = ctx.content;
 
         // Fast path: Early return for empty content
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Fast path: Early return if no potential URLs or emails
-        if !content.contains("http://")
-            && !content.contains("https://")
-            && !content.contains("ftp://")
-            && !content.contains("ftps://")
-            && !content.contains('@')
-        {
-            return Ok(Vec::new());
-        }
-
-        // Fast path: Quick check using simple pattern
-        if !URL_QUICK_CHECK.is_match(content) {
+        if content.is_empty() || self.should_skip(content) {
             return Ok(Vec::new());
         }
 
@@ -648,13 +645,7 @@ impl crate::utils::document_structure::DocumentStructureExtensions for MD034NoBa
         _doc_structure: &crate::utils::document_structure::DocumentStructure,
     ) -> bool {
         // This rule is only relevant if there might be URLs or emails in the content
-        let content = ctx.content;
-        !content.is_empty()
-            && (content.contains("http://")
-                || content.contains("https://")
-                || content.contains("ftp://")
-                || content.contains("ftps://")
-                || content.contains('@'))
+        !self.should_skip(ctx.content)
     }
 }
 
