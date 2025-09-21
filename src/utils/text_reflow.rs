@@ -659,7 +659,12 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
             // If we have accumulated content, check if we should split
             if !current_line.is_empty() {
                 // Add the text to current line to check for sentence boundaries
-                let combined = format!("{current_line} {text}");
+                // Don't add extra space if text already starts with space or current line ends with space
+                let combined = if text.starts_with(' ') || current_line.ends_with(' ') {
+                    format!("{current_line}{text}")
+                } else {
+                    format!("{current_line} {text}")
+                };
                 let sentences = split_into_sentences(&combined);
 
                 if sentences.len() > 1 {
@@ -702,7 +707,10 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
             if current_line.is_empty() {
                 current_line = element_str;
             } else {
-                current_line.push(' ');
+                // Don't add space if current line already ends with space
+                if !current_line.ends_with(' ') {
+                    current_line.push(' ');
+                }
                 current_line.push_str(&element_str);
             }
         }
@@ -1288,6 +1296,22 @@ mod tests {
         // The bold element gets separated from the period
         assert_eq!(result2[0].trim(), "This has **bold** .");
         assert_eq!(result2[1].trim(), "And [a link](url) .");
+    }
+
+    #[test]
+    fn test_sentence_per_line_with_backticks() {
+        let options = ReflowOptions {
+            line_length: 80,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        let input = "This sentence has `code` in it. And this has `more code` too.";
+        let result = reflow_line(input, &options);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "This sentence has `code` in it.");
+        assert_eq!(result[1], "And this has `more code` too.");
     }
 
     #[test]

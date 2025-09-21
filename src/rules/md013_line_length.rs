@@ -211,65 +211,68 @@ impl Rule for MD013LineLength {
         };
 
         // Only process candidate lines that were pre-filtered
-        for &line_idx in &candidate_lines {
-            let line_number = line_idx + 1;
-            let line = lines[line_idx];
+        // Skip line length checks entirely in sentence-per-line mode
+        if effective_config.reflow_mode != ReflowMode::SentencePerLine {
+            for &line_idx in &candidate_lines {
+                let line_number = line_idx + 1;
+                let line = lines[line_idx];
 
-            // Calculate effective length excluding unbreakable URLs
-            let effective_length = self.calculate_effective_length(line);
+                // Calculate effective length excluding unbreakable URLs
+                let effective_length = self.calculate_effective_length(line);
 
-            // Use single line length limit for all content
-            let line_limit = effective_config.line_length;
+                // Use single line length limit for all content
+                let line_limit = effective_config.line_length;
 
-            // Skip short lines immediately (double-check after effective length calculation)
-            if effective_length <= line_limit {
-                continue;
+                // Skip short lines immediately (double-check after effective length calculation)
+                if effective_length <= line_limit {
+                    continue;
+                }
+
+                // Skip various block types efficiently
+                if !effective_config.strict {
+                    // Skip setext heading underlines
+                    if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
+                        continue;
+                    }
+
+                    // Skip block elements according to config flags
+                    // The flags mean: true = check these elements, false = skip these elements
+                    // So we skip when the flag is FALSE and the line is in that element type
+                    if (!effective_config.headings && heading_lines_set.contains(&line_number))
+                        || (!effective_config.code_blocks && structure.is_in_code_block(line_number))
+                        || (!effective_config.tables && table_lines_set.contains(&line_number))
+                        || structure.is_in_blockquote(line_number)
+                        || structure.is_in_html_block(line_number)
+                    {
+                        continue;
+                    }
+
+                    // Skip lines that are only a URL, image ref, or link ref
+                    if self.should_ignore_line(line, &lines, line_idx, structure) {
+                        continue;
+                    }
+                }
+
+                // Don't provide fix for individual lines when reflow is enabled
+                // Paragraph-based fixes will be handled separately
+                let fix = None;
+
+                let message = format!("Line length {effective_length} exceeds {line_limit} characters");
+
+                // Calculate precise character range for the excess portion
+                let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message,
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    severity: Severity::Warning,
+                    fix,
+                });
             }
-
-            // Skip various block types efficiently
-            if !effective_config.strict {
-                // Skip setext heading underlines
-                if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
-                    continue;
-                }
-
-                // Skip block elements according to config flags
-                // The flags mean: true = check these elements, false = skip these elements
-                // So we skip when the flag is FALSE and the line is in that element type
-                if (!effective_config.headings && heading_lines_set.contains(&line_number))
-                    || (!effective_config.code_blocks && structure.is_in_code_block(line_number))
-                    || (!effective_config.tables && table_lines_set.contains(&line_number))
-                    || structure.is_in_blockquote(line_number)
-                    || structure.is_in_html_block(line_number)
-                {
-                    continue;
-                }
-
-                // Skip lines that are only a URL, image ref, or link ref
-                if self.should_ignore_line(line, &lines, line_idx, structure) {
-                    continue;
-                }
-            }
-
-            // Don't provide fix for individual lines when reflow is enabled
-            // Paragraph-based fixes will be handled separately
-            let fix = None;
-
-            let message = format!("Line length {effective_length} exceeds {line_limit} characters");
-
-            // Calculate precise character range for the excess portion
-            let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
-
-            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message,
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                severity: Severity::Warning,
-                fix,
-            });
         }
 
         // If reflow is enabled, generate paragraph-based fixes
