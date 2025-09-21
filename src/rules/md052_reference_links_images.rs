@@ -732,6 +732,33 @@ impl Rule for MD052ReferenceLinkImages {
         let content = ctx.content;
         let mut warnings = Vec::new();
 
+        // OPTIMIZATION: Early exit if no reference-style links/images exist
+        // Check if there are any reference-style links or images in the document
+        let has_reference_links = ctx.links.iter().any(|l| l.is_reference);
+        let has_reference_images = ctx.images.iter().any(|i| i.is_reference);
+
+        // Quick check: If document contains no brackets at all, nothing to check
+        if !content.contains('[') {
+            return Ok(warnings);
+        }
+
+        // Quick check for reference definitions
+        let has_reference_definitions = content.contains("]:");
+
+        // If we have no reference links/images AND no reference definitions,
+        // then check if we might have shortcut references [text]
+        if !has_reference_links && !has_reference_images && !has_reference_definitions {
+            // Only do expensive shortcut checking if we have brackets but no links/images/refs
+            // This handles the case where all brackets are inline links [text](url)
+            let all_brackets_are_inline = ctx.links.iter().all(|l| !l.is_reference)
+                && ctx.images.iter().all(|i| !i.is_reference)
+                && ctx.links.len() + ctx.images.len() > 0;
+
+            if all_brackets_are_inline {
+                return Ok(warnings); // All brackets accounted for as inline links/images
+            }
+        }
+
         // Check if we're in MkDocs mode from the context
         let mkdocs_mode = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
