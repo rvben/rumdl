@@ -79,7 +79,6 @@ opt-level = "z"      # Optimize for size (alternative: "s" for small, "3" for sp
 codegen-units = 1    # Better optimization but slower compile times
 
 [dependencies]
-tikv-jemallocator = "0.6"
 clap = { version = "4.5", features = ["derive"] }
 colored = "3.0.0"
 fancy-regex = "0.14.0"
@@ -140,3 +139,9 @@ unicode-segmentation = "1.12"
 unicode-width = "0.2"
 unicode-blocks = "0.1"
 unicode-bidi = "0.3"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"
+
+[target.'cfg(target_env = "msvc")'.dependencies]
+mimalloc = { version = "0.1", default-features = false }

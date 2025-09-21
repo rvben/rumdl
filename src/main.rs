@@ -1,6 +1,12 @@
-// Use jemalloc for better memory allocation performance
+// Use jemalloc for better memory allocation performance on Unix-like systems
+#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+// Use mimalloc on Windows for better performance
+#[cfg(target_env = "msvc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use chrono::Local;
 use clap::{Args, Parser, Subcommand};

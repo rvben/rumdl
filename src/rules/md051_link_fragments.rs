@@ -166,7 +166,11 @@ impl MD051LinkFragments {
         }
 
         // Strip markdown formatting first - use faster byte check
-        let text = if heading.as_bytes().iter().any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']')) {
+        let text = if heading
+            .as_bytes()
+            .iter()
+            .any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']'))
+        {
             self.strip_markdown_formatting_fast(heading)
         } else {
             heading.to_string()
@@ -275,7 +279,11 @@ impl MD051LinkFragments {
         }
 
         // Strip markdown formatting first - use faster byte check
-        let text = if heading.as_bytes().iter().any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']')) {
+        let text = if heading
+            .as_bytes()
+            .iter()
+            .any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']'))
+        {
             self.strip_markdown_formatting_fast(heading)
         } else {
             heading.to_string()
@@ -322,7 +330,11 @@ impl MD051LinkFragments {
         }
 
         // Strip markdown formatting first - use faster byte check
-        let text = if heading.as_bytes().iter().any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']')) {
+        let text = if heading
+            .as_bytes()
+            .iter()
+            .any(|&b| matches!(b, b'*' | b'_' | b'`' | b'[' | b']'))
+        {
             self.strip_markdown_formatting_fast(heading)
         } else {
             heading.to_string()
@@ -644,9 +656,12 @@ impl Rule for MD051LinkFragments {
             let bytes = line.as_bytes();
 
             // Fast byte-level check for potential links with fragments
-            if bytes.contains(&b'[') && bytes.contains(&b']') &&
-               bytes.contains(&b'(') && bytes.contains(&b')') &&
-               bytes.contains(&b'#') {
+            if bytes.contains(&b'[')
+                && bytes.contains(&b']')
+                && bytes.contains(&b'(')
+                && bytes.contains(&b')')
+                && bytes.contains(&b'#')
+            {
                 candidate_lines.push(line_num);
             }
         }

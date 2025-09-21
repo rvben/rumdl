@@ -165,7 +165,9 @@ impl Rule for MD013LineLength {
         }
 
         // If no candidate lines and not in normalize mode, early return
-        if candidate_lines.is_empty() && !(effective_config.reflow && effective_config.reflow_mode == ReflowMode::Normalize) {
+        if candidate_lines.is_empty()
+            && !(effective_config.reflow && effective_config.reflow_mode == ReflowMode::Normalize)
+        {
             return Ok(warnings);
         }
 

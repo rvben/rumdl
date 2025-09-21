@@ -174,8 +174,10 @@ impl Rule for MD030ListMarkerSpace {
 
         // Fast byte-level check for list markers
         let bytes = ctx.content.as_bytes();
-        !bytes.contains(&b'*') && !bytes.contains(&b'-') && !bytes.contains(&b'+') &&
-         !bytes.iter().any(|&b| b.is_ascii_digit())
+        !bytes.contains(&b'*')
+            && !bytes.contains(&b'-')
+            && !bytes.contains(&b'+')
+            && !bytes.iter().any(|&b| b.is_ascii_digit())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
