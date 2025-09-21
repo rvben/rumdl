@@ -656,63 +656,39 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
 
         // For text elements, split into sentences
         if let Element::Text(text) = element {
-            // If we have accumulated content, check if we should split
-            if !current_line.is_empty() {
-                // Add the text to current line to check for sentence boundaries
-                // Don't add extra space if text already starts with space or current line ends with space
-                let combined = if text.starts_with(' ') || current_line.ends_with(' ') {
-                    format!("{current_line}{text}")
-                } else {
-                    format!("{current_line} {text}")
-                };
-                let sentences = split_into_sentences(&combined);
+            // Simply append text - it already has correct spacing from tokenization
+            let combined = format!("{current_line}{text}");
+            let sentences = split_into_sentences(&combined);
 
-                if sentences.len() > 1 {
-                    // We found sentence boundaries
-                    for (i, sentence) in sentences.iter().enumerate() {
-                        if i == 0 {
-                            // First sentence might continue from previous elements
-                            lines.push(sentence.to_string());
-                        } else if i == sentences.len() - 1 {
-                            // Last sentence might continue to next elements
-                            current_line = sentence.to_string();
-                        } else {
-                            // Complete sentences in the middle
-                            lines.push(sentence.to_string());
-                        }
+            if sentences.len() > 1 {
+                // We found sentence boundaries
+                for (i, sentence) in sentences.iter().enumerate() {
+                    if i == 0 {
+                        // First sentence might continue from previous elements
+                        lines.push(sentence.to_string());
+                    } else if i == sentences.len() - 1 {
+                        // Last sentence might continue to next elements
+                        current_line = sentence.to_string();
+                    } else {
+                        // Complete sentences in the middle
+                        lines.push(sentence.to_string());
                     }
-                } else {
-                    // No sentence boundary found, continue accumulating
-                    current_line = combined;
                 }
             } else {
-                // First element, check for sentences
-                let sentences = split_into_sentences(text);
-                if sentences.len() > 1 {
-                    // Multiple sentences in this text
-                    for (i, sentence) in sentences.iter().enumerate() {
-                        if i == sentences.len() - 1 {
-                            // Last sentence might continue
-                            current_line = sentence.to_string();
-                        } else {
-                            lines.push(sentence.to_string());
-                        }
-                    }
-                } else if !sentences.is_empty() {
-                    current_line = sentences[0].clone();
-                }
+                // No sentence boundary found, continue accumulating
+                current_line = combined;
             }
         } else {
-            // Non-text elements are added to current line
-            if current_line.is_empty() {
-                current_line = element_str;
-            } else {
-                // Don't add space if current line already ends with space
-                if !current_line.ends_with(' ') {
-                    current_line.push(' ');
-                }
-                current_line.push_str(&element_str);
+            // Non-text elements (Code, Bold, Italic, etc.)
+            // Add space before element if needed (unless it's after an opening paren/bracket)
+            if !current_line.is_empty()
+                && !current_line.ends_with(' ')
+                && !current_line.ends_with('(')
+                && !current_line.ends_with('[')
+            {
+                current_line.push(' ');
             }
+            current_line.push_str(&element_str);
         }
     }
 
@@ -1289,13 +1265,11 @@ mod tests {
         assert_eq!(result[2], "Third sentence.");
 
         // Test with markdown elements
-        // Note: Markdown elements are preserved as separate tokens, so spacing may differ
         let input2 = "This has **bold**. And [a link](url).";
         let result2 = reflow_line(input2, &options);
         assert_eq!(result2.len(), 2);
-        // The bold element gets separated from the period
-        assert_eq!(result2[0].trim(), "This has **bold** .");
-        assert_eq!(result2[1].trim(), "And [a link](url) .");
+        assert_eq!(result2[0], "This has **bold**.");
+        assert_eq!(result2[1], "And [a link](url).");
     }
 
     #[test]
@@ -1312,6 +1286,22 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], "This sentence has `code` in it.");
         assert_eq!(result[1], "And this has `more code` too.");
+    }
+
+    #[test]
+    fn test_sentence_per_line_with_backticks_in_parens() {
+        let options = ReflowOptions {
+            line_length: 80,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        let input = "Configure in (`.rumdl.toml` or `pyproject.toml`). Next sentence.";
+        let result = reflow_line(input, &options);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "Configure in (`.rumdl.toml` or `pyproject.toml`).");
+        assert_eq!(result[1], "Next sentence.");
     }
 
     #[test]

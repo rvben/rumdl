@@ -395,6 +395,7 @@ impl MD013LineLength {
 
             // Skip special structures
             if structure.is_in_code_block(line_num)
+                || structure.is_in_front_matter(line_num)
                 || structure.is_in_html_block(line_num)
                 || structure.is_in_blockquote(line_num)
                 || lines[i].trim().starts_with('#')
@@ -447,17 +448,21 @@ impl MD013LineLength {
                     }
                 }
 
+                // Check if any lines in this list item are within a code block
+                let contains_code_block = (list_start..i).any(|line_idx| structure.is_in_code_block(line_idx + 1));
+
                 // Now check if this list item needs reflowing
                 let combined_content = list_item_lines.join(" ").trim().to_string();
                 let full_line = format!("{marker}{combined_content}");
 
-                if self.calculate_effective_length(&full_line) > config.line_length
-                    || (config.reflow_mode == ReflowMode::Normalize && list_item_lines.len() > 1)
-                    || (config.reflow_mode == ReflowMode::SentencePerLine && {
-                        // Check if list item has multiple sentences
-                        let sentences = split_into_sentences(&combined_content);
-                        sentences.len() > 1
-                    })
+                if !contains_code_block
+                    && (self.calculate_effective_length(&full_line) > config.line_length
+                        || (config.reflow_mode == ReflowMode::Normalize && list_item_lines.len() > 1)
+                        || (config.reflow_mode == ReflowMode::SentencePerLine && {
+                            // Check if list item has multiple sentences
+                            let sentences = split_into_sentences(&combined_content);
+                            sentences.len() > 1
+                        }))
                 {
                     let start_range = line_index.whole_line_range(list_start + 1);
                     let end_line = i - 1;
@@ -528,6 +533,7 @@ impl MD013LineLength {
                 // Stop at paragraph boundaries
                 if next_trimmed.is_empty()
                     || structure.is_in_code_block(next_line_num)
+                    || structure.is_in_front_matter(next_line_num)
                     || structure.is_in_html_block(next_line_num)
                     || structure.is_in_blockquote(next_line_num)
                     || next_trimmed.starts_with('#')

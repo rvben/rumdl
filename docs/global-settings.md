@@ -87,6 +87,7 @@ enable = ["MD001", "MD003", "MD013", "MD022"]
 ```
 
 **Usage Notes**:
+
 - Rule IDs are case-insensitive but conventionally uppercase (e.g., "MD001")
 - If both `enable` and `disable` are specified, `enable` takes precedence
 - An empty array means all rules are enabled (default behavior)
@@ -112,6 +113,7 @@ disable = ["MD013", "MD033", "MD041"]
 ```
 
 **Usage Notes**:
+
 - Rule IDs are case-insensitive but conventionally uppercase
 - Commonly disabled rules include:
   - `MD013`: Line length (for projects with longer lines)
@@ -146,12 +148,14 @@ exclude = [
 ```
 
 **Supported Patterns**:
+
 - `directory/` - Exclude entire directory
 - `**/*.ext` - Exclude all files with extension in any subdirectory
 - `*.pattern` - Exclude files matching pattern in current directory
 - `path/**/file` - Exclude specific files in any subdirectory of path
 
 **Usage Notes**:
+
 - Patterns are relative to the project root
 - Exclude patterns are processed before include patterns
 - More specific patterns take precedence over general ones
@@ -183,6 +187,7 @@ include = [
 ```
 
 **Usage Notes**:
+
 - If `include` is empty, all Markdown files are included (subject to exclude patterns)
 - When `include` is specified, only matching files are processed
 - Combine with `exclude` for fine-grained control
@@ -210,10 +215,12 @@ respect_gitignore = false  # Ignore .gitignore files
 ```
 
 **Behavior**:
+
 - `true` (default): Files and directories listed in `.gitignore` are automatically excluded
 - `false`: `.gitignore` files are ignored, all Markdown files are considered
 
 **Usage Notes**:
+
 - This setting only affects directory scanning, not explicitly provided file paths
 - Useful for linting files that are normally ignored (e.g., generated docs)
 - When disabled, you may need more specific `exclude` patterns
@@ -240,11 +247,13 @@ line_length = 120  # Set global line length to 120 characters
 ```
 
 **Behavior**:
+
 - Used as the default line length for MD013 and other line-length-related rules
 - Rule-specific configurations override the global setting
 - Useful for projects that want a consistent line length across all line-length rules
 
 **Usage Notes**:
+
 - Must be a positive integer
 - Common values: 80 (traditional), 100 (relaxed), 120 (modern)
 - Individual rules can still override this setting in their own configuration
@@ -274,12 +283,14 @@ flavor = "mkdocs"  # Use MkDocs flavor
 ```
 
 **Available Flavors**:
+
 - `"standard"` (default): Standard Markdown syntax
 - `"mkdocs"`: MkDocs-specific extensions and syntax
 
 **Note**: Additional flavors like `"gfm"` (GitHub Flavored Markdown) and `"commonmark"` are planned for future releases. Currently, specifying these will emit a warning and use standard flavor.
 
 **Behavior**:
+
 - Affects how certain rules behave, particularly:
   - MD042: Empty links handling (MkDocs allows certain shorthand links)
   - MD052: Reference-style links and images (MkDocs has special syntax)
@@ -287,6 +298,7 @@ flavor = "mkdocs"  # Use MkDocs flavor
 - Some rules may be automatically adjusted based on the flavor
 
 **Usage Notes**:
+
 - Choose the flavor that matches your documentation system
 - MkDocs flavor is useful for projects using MkDocs or Material for MkDocs
 - Currently only `standard` and `mkdocs` have implementation differences
@@ -324,6 +336,7 @@ rumdl check --disable MD001,MD013 --exclude "temp/**" docs/
 ```
 
 The final configuration will be:
+
 - `disable`: `["MD001", "MD013"]` (CLI overrides file)
 - `exclude`: `["temp/**"]` (CLI overrides file)
 - Paths: `["docs/"]` (CLI argument)
@@ -365,6 +378,7 @@ respect_gitignore = true
 ```
 
 File selection process:
+
 1. Start with: `docs/guide.md`, `docs/temp/test.md`, `README.md`, `notes.draft.md`
 2. Apply includes: `docs/guide.md`, `docs/temp/test.md`, `README.md` (notes.draft.md excluded)
 3. Apply excludes: `docs/guide.md`, `README.md` (docs/temp/test.md excluded)
