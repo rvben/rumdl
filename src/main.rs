@@ -1,3 +1,7 @@
+// Use jemalloc for better memory allocation performance
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use chrono::Local;
 use clap::{Args, Parser, Subcommand};
 use colored::*;
