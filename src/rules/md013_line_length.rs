@@ -10,6 +10,7 @@ use crate::utils::regex_cache::{
     IMAGE_REF_PATTERN, INLINE_LINK_REGEX as MARKDOWN_LINK_PATTERN, LINK_REF_PATTERN, URL_IN_TEXT, URL_PATTERN,
 };
 use crate::utils::table_utils::TableUtils;
+use crate::utils::text_reflow::split_into_sentences;
 use toml;
 
 pub mod md013_config;
@@ -94,7 +95,12 @@ impl Rule for MD013LineLength {
         let content = ctx.content;
 
         // Fast early return using should_skip
-        if self.should_skip(ctx) && !(self.config.reflow && self.config.reflow_mode == ReflowMode::Normalize) {
+        // But don't skip if we're in reflow mode with Normalize or SentencePerLine
+        if self.should_skip(ctx)
+            && !(self.config.reflow
+                && (self.config.reflow_mode == ReflowMode::Normalize
+                    || self.config.reflow_mode == ReflowMode::SentencePerLine))
+        {
             return Ok(Vec::new());
         }
 
@@ -144,6 +150,7 @@ impl Rule for MD013LineLength {
                     config.reflow_mode = match reflow_mode {
                         "default" => ReflowMode::Default,
                         "normalize" => ReflowMode::Normalize,
+                        "sentence-per-line" => ReflowMode::SentencePerLine,
                         _ => ReflowMode::default(),
                     };
                 }
@@ -164,9 +171,11 @@ impl Rule for MD013LineLength {
             }
         }
 
-        // If no candidate lines and not in normalize mode, early return
+        // If no candidate lines and not in normalize or sentence-per-line mode, early return
         if candidate_lines.is_empty()
-            && !(effective_config.reflow && effective_config.reflow_mode == ReflowMode::Normalize)
+            && !(effective_config.reflow
+                && (effective_config.reflow_mode == ReflowMode::Normalize
+                    || effective_config.reflow_mode == ReflowMode::SentencePerLine))
         {
             return Ok(warnings);
         }
@@ -310,6 +319,14 @@ impl Rule for MD013LineLength {
             return true;
         }
 
+        // For sentence-per-line or normalize mode, never skip based on line length
+        if self.config.reflow
+            && (self.config.reflow_mode == ReflowMode::SentencePerLine
+                || self.config.reflow_mode == ReflowMode::Normalize)
+        {
+            return false;
+        }
+
         // Quick check: if total content is shorter than line limit, definitely skip
         if ctx.content.len() <= self.config.line_length {
             return true;
@@ -433,6 +450,11 @@ impl MD013LineLength {
 
                 if self.calculate_effective_length(&full_line) > config.line_length
                     || (config.reflow_mode == ReflowMode::Normalize && list_item_lines.len() > 1)
+                    || (config.reflow_mode == ReflowMode::SentencePerLine && {
+                        // Check if list item has multiple sentences
+                        let sentences = split_into_sentences(&combined_content);
+                        sentences.len() > 1
+                    })
                 {
                     let start_range = line_index.whole_line_range(list_start + 1);
                     let end_line = i - 1;
@@ -448,6 +470,7 @@ impl MD013LineLength {
                         line_length: config.line_length - indent_size,
                         break_on_sentences: true,
                         preserve_breaks: false,
+                        sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
                     };
                     let reflowed = crate::utils::text_reflow::reflow_line(&combined_content, &reflow_options);
 
@@ -467,10 +490,14 @@ impl MD013LineLength {
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
-                        message: format!(
-                            "Line length exceeds {} characters and can be reflowed",
-                            config.line_length
-                        ),
+                        message: if config.reflow_mode == ReflowMode::SentencePerLine {
+                            "Line contains multiple sentences (one sentence per line expected)".to_string()
+                        } else {
+                            format!(
+                                "Line length exceeds {} characters and can be reflowed",
+                                config.line_length
+                            )
+                        },
                         line: list_start + 1,
                         column: 1,
                         end_line: end_line + 1,
@@ -520,14 +547,25 @@ impl MD013LineLength {
             }
 
             // Check if this paragraph needs reflowing
-            let needs_reflow = if config.reflow_mode == ReflowMode::Normalize {
-                // In normalize mode, reflow multi-line paragraphs
-                paragraph_lines.len() > 1
-            } else {
-                // In default mode, only reflow if lines exceed limit
-                paragraph_lines
-                    .iter()
-                    .any(|line| self.calculate_effective_length(line) > config.line_length)
+            let needs_reflow = match config.reflow_mode {
+                ReflowMode::Normalize => {
+                    // In normalize mode, reflow multi-line paragraphs
+                    paragraph_lines.len() > 1
+                }
+                ReflowMode::SentencePerLine => {
+                    // In sentence-per-line mode, check if any line has multiple sentences
+                    paragraph_lines.iter().any(|line| {
+                        // Count sentences in this line
+                        let sentences = split_into_sentences(line);
+                        sentences.len() > 1
+                    })
+                }
+                ReflowMode::Default => {
+                    // In default mode, only reflow if lines exceed limit
+                    paragraph_lines
+                        .iter()
+                        .any(|line| self.calculate_effective_length(line) > config.line_length)
+                }
             };
 
             if needs_reflow {
@@ -558,6 +596,7 @@ impl MD013LineLength {
                     line_length: config.line_length,
                     break_on_sentences: true,
                     preserve_breaks: false,
+                    sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
@@ -581,32 +620,48 @@ impl MD013LineLength {
                 // Create warning with actual fix
                 // In default mode, report the specific line that violates
                 // In normalize mode, report the whole paragraph
-                let (warning_line, warning_end_line) = if config.reflow_mode == ReflowMode::Normalize {
-                    (paragraph_start + 1, end_line + 1)
-                } else {
-                    // Find the first line that exceeds the limit
-                    let mut violating_line = paragraph_start;
-                    for (idx, line) in paragraph_lines.iter().enumerate() {
-                        if self.calculate_effective_length(line) > config.line_length {
-                            violating_line = paragraph_start + idx;
-                            break;
+                // In sentence-per-line mode, report lines with multiple sentences
+                let (warning_line, warning_end_line) = match config.reflow_mode {
+                    ReflowMode::Normalize => (paragraph_start + 1, end_line + 1),
+                    ReflowMode::SentencePerLine => {
+                        // Find the first line with multiple sentences
+                        let mut violating_line = paragraph_start;
+                        for (idx, line) in paragraph_lines.iter().enumerate() {
+                            let sentences = split_into_sentences(line);
+                            if sentences.len() > 1 {
+                                violating_line = paragraph_start + idx;
+                                break;
+                            }
                         }
+                        (violating_line + 1, violating_line + 1)
                     }
-                    (violating_line + 1, violating_line + 1)
+                    ReflowMode::Default => {
+                        // Find the first line that exceeds the limit
+                        let mut violating_line = paragraph_start;
+                        for (idx, line) in paragraph_lines.iter().enumerate() {
+                            if self.calculate_effective_length(line) > config.line_length {
+                                violating_line = paragraph_start + idx;
+                                break;
+                            }
+                        }
+                        (violating_line + 1, violating_line + 1)
+                    }
                 };
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: if config.reflow_mode == ReflowMode::Normalize {
-                        format!(
+                    message: match config.reflow_mode {
+                        ReflowMode::Normalize => format!(
                             "Paragraph could be normalized to use line length of {} characters",
                             config.line_length
-                        )
-                    } else {
-                        format!(
+                        ),
+                        ReflowMode::SentencePerLine => {
+                            "Line contains multiple sentences (one sentence per line expected)".to_string()
+                        }
+                        ReflowMode::Default => format!(
                             "Line length exceeds {} characters and can be reflowed",
                             config.line_length
-                        )
+                        ),
                     },
                     line: warning_line,
                     column: 1,
@@ -2246,5 +2301,129 @@ with multiple lines."#;
             fixed.starts_with("Paragraph before list with multiple lines."),
             "Paragraph should be normalized"
         );
+    }
+
+    #[test]
+    fn test_sentence_per_line_detection() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config.clone());
+
+        // Test detection of multiple sentences
+        let content = "This is sentence one. This is sentence two. And sentence three!";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        // Debug: check if should_skip returns false
+        assert!(!rule.should_skip(&ctx), "Should not skip for sentence-per-line mode");
+
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should detect multiple sentences on one line");
+        assert_eq!(
+            result[0].message,
+            "Line contains multiple sentences (one sentence per line expected)"
+        );
+    }
+
+    #[test]
+    fn test_sentence_per_line_fix() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "First sentence. Second sentence.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should detect violation");
+        assert!(result[0].fix.is_some(), "Should provide a fix");
+
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(fix.replacement.trim(), "First sentence.\nSecond sentence.");
+    }
+
+    #[test]
+    fn test_sentence_per_line_abbreviations() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Should NOT trigger on abbreviations
+        let content = "Mr. Smith met Dr. Jones at 3:00 PM.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should not detect abbreviations as sentence boundaries"
+        );
+    }
+
+    #[test]
+    fn test_sentence_per_line_with_markdown() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "# Heading\n\nSentence with **bold**. Another with [link](url).";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should detect multiple sentences with markdown");
+        assert_eq!(result[0].line, 3); // Third line has the violation
+    }
+
+    #[test]
+    fn test_sentence_per_line_questions_exclamations() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "Is this a question? Yes it is! And a statement.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should detect sentences with ? and !");
+
+        let fix = result[0].fix.as_ref().unwrap();
+        let lines: Vec<&str> = fix.replacement.trim().lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "Is this a question?");
+        assert_eq!(lines[1], "Yes it is!");
+        assert_eq!(lines[2], "And a statement.");
+    }
+
+    #[test]
+    fn test_sentence_per_line_in_lists() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "- List item one. With two sentences.\n- Another item.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should detect sentences in list items");
+        // The fix should preserve list formatting
+        let fix = result[0].fix.as_ref().unwrap();
+        assert!(fix.replacement.starts_with("- "), "Should preserve list marker");
     }
 }

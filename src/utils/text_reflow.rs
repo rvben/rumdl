@@ -17,6 +17,8 @@ pub struct ReflowOptions {
     pub break_on_sentences: bool,
     /// Whether to preserve existing line breaks in paragraphs
     pub preserve_breaks: bool,
+    /// Whether to enforce one sentence per line
+    pub sentence_per_line: bool,
 }
 
 impl Default for ReflowOptions {
@@ -25,8 +27,88 @@ impl Default for ReflowOptions {
             line_length: 80,
             break_on_sentences: true,
             preserve_breaks: false,
+            sentence_per_line: false,
         }
     }
+}
+
+/// Detect if a character position is a sentence boundary
+/// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
+fn is_sentence_boundary(text: &str, pos: usize) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+
+    if pos + 2 >= chars.len() {
+        return false;
+    }
+
+    // Check for sentence-ending punctuation
+    let c = chars[pos];
+    if c != '.' && c != '!' && c != '?' {
+        return false;
+    }
+
+    // Must be followed by a space
+    if chars[pos + 1] != ' ' {
+        return false;
+    }
+
+    // Next character after space must be uppercase (new sentence indicator)
+    if !chars[pos + 2].is_uppercase() {
+        return false;
+    }
+
+    // Look back to check for common abbreviations
+    if pos > 0 {
+        // Abbreviation list similar to sentences-per-line
+        let prev_word = &text[..pos];
+        let ignored_words = [
+            "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr", "Jr",
+        ];
+        for word in &ignored_words {
+            if prev_word.to_lowercase().ends_with(&word.to_lowercase()) {
+                return false;
+            }
+        }
+
+        // Check for decimal numbers (e.g., "3.14")
+        if pos > 0 && chars[pos - 1].is_numeric() && pos + 2 < chars.len() && chars[pos + 2].is_numeric() {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Split text into sentences
+pub fn split_into_sentences(text: &str) -> Vec<String> {
+    let mut sentences = Vec::new();
+    let mut current_sentence = String::new();
+    let mut chars = text.chars().peekable();
+    let mut pos = 0;
+
+    while let Some(c) = chars.next() {
+        current_sentence.push(c);
+
+        if is_sentence_boundary(text, pos) {
+            // Include the space after sentence if it exists
+            if chars.peek() == Some(&' ') {
+                chars.next();
+                pos += 1;
+            }
+
+            sentences.push(current_sentence.trim().to_string());
+            current_sentence.clear();
+        }
+
+        pos += 1;
+    }
+
+    // Add any remaining text as the last sentence
+    if !current_sentence.trim().is_empty() {
+        sentences.push(current_sentence.trim().to_string());
+    }
+
+    sentences
 }
 
 /// Check if a line is a horizontal rule (---, ___, ***)
@@ -83,6 +165,12 @@ fn is_numbered_list_item(line: &str) -> bool {
 
 /// Reflow a single line of markdown text to fit within the specified line length
 pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
+    // For sentence-per-line mode, always process regardless of length
+    if options.sentence_per_line {
+        let elements = parse_markdown_elements(line);
+        return reflow_elements_sentence_per_line(&elements);
+    }
+
     // Quick check: if line is already short enough, return as-is
     if line.chars().count() <= options.line_length {
         return vec![line.to_string()];
@@ -558,6 +646,76 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
     elements
 }
 
+/// Reflow elements for sentence-per-line mode
+fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+
+    for element in elements {
+        let element_str = format!("{element}");
+
+        // For text elements, split into sentences
+        if let Element::Text(text) = element {
+            // If we have accumulated content, check if we should split
+            if !current_line.is_empty() {
+                // Add the text to current line to check for sentence boundaries
+                let combined = format!("{current_line} {text}");
+                let sentences = split_into_sentences(&combined);
+
+                if sentences.len() > 1 {
+                    // We found sentence boundaries
+                    for (i, sentence) in sentences.iter().enumerate() {
+                        if i == 0 {
+                            // First sentence might continue from previous elements
+                            lines.push(sentence.to_string());
+                        } else if i == sentences.len() - 1 {
+                            // Last sentence might continue to next elements
+                            current_line = sentence.to_string();
+                        } else {
+                            // Complete sentences in the middle
+                            lines.push(sentence.to_string());
+                        }
+                    }
+                } else {
+                    // No sentence boundary found, continue accumulating
+                    current_line = combined;
+                }
+            } else {
+                // First element, check for sentences
+                let sentences = split_into_sentences(text);
+                if sentences.len() > 1 {
+                    // Multiple sentences in this text
+                    for (i, sentence) in sentences.iter().enumerate() {
+                        if i == sentences.len() - 1 {
+                            // Last sentence might continue
+                            current_line = sentence.to_string();
+                        } else {
+                            lines.push(sentence.to_string());
+                        }
+                    }
+                } else if !sentences.is_empty() {
+                    current_line = sentences[0].clone();
+                }
+            }
+        } else {
+            // Non-text elements are added to current line
+            if current_line.is_empty() {
+                current_line = element_str;
+            } else {
+                current_line.push(' ');
+                current_line.push_str(&element_str);
+            }
+        }
+    }
+
+    // Add any remaining content
+    if !current_line.is_empty() {
+        lines.push(current_line.trim().to_string());
+    }
+
+    lines
+}
+
 /// Reflow elements into lines that fit within the line length
 fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
     let mut lines = Vec::new();
@@ -1012,6 +1170,7 @@ mod tests {
             line_length: 30,
             break_on_sentences: true,
             preserve_breaks: false,
+            sentence_per_line: false,
         };
 
         // Test cases that verify reference links are preserved as atomic units
@@ -1057,11 +1216,104 @@ mod tests {
     }
 
     #[test]
+    fn test_sentence_detection_basic() {
+        // Test basic sentence detection
+        assert!(is_sentence_boundary("Hello. World", 5));
+        assert!(is_sentence_boundary("Test! Another", 4));
+        assert!(is_sentence_boundary("Question? Answer", 8));
+
+        // Test non-boundaries
+        assert!(!is_sentence_boundary("Hello world", 5));
+        assert!(!is_sentence_boundary("Test.com", 4));
+        assert!(!is_sentence_boundary("3.14 pi", 1));
+    }
+
+    #[test]
+    fn test_sentence_detection_abbreviations() {
+        // Common abbreviations should not be treated as sentence boundaries
+        assert!(!is_sentence_boundary("Mr. Smith", 2));
+        assert!(!is_sentence_boundary("Dr. Jones", 2));
+        assert!(!is_sentence_boundary("e.g. example", 3));
+        assert!(!is_sentence_boundary("i.e. that is", 3));
+        assert!(!is_sentence_boundary("etc. items", 3));
+
+        // But sentence after abbreviation should be a boundary
+        assert!(is_sentence_boundary("Mr. Smith arrived. Next sentence.", 17));
+    }
+
+    #[test]
+    fn test_split_into_sentences() {
+        let text = "First sentence. Second sentence. Third one!";
+        let sentences = split_into_sentences(text);
+        assert_eq!(sentences.len(), 3);
+        assert_eq!(sentences[0], "First sentence.");
+        assert_eq!(sentences[1], "Second sentence.");
+        assert_eq!(sentences[2], "Third one!");
+
+        // Test with abbreviations
+        let text2 = "Mr. Smith met Dr. Jones.";
+        let sentences2 = split_into_sentences(text2);
+        assert_eq!(sentences2.len(), 1);
+        assert_eq!(sentences2[0], "Mr. Smith met Dr. Jones.");
+
+        // Test single sentence
+        let text3 = "This is a single sentence.";
+        let sentences3 = split_into_sentences(text3);
+        assert_eq!(sentences3.len(), 1);
+        assert_eq!(sentences3[0], "This is a single sentence.");
+    }
+
+    #[test]
+    fn test_sentence_per_line_reflow() {
+        let options = ReflowOptions {
+            line_length: 80,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        // Test basic sentence splitting
+        let input = "First sentence. Second sentence. Third sentence.";
+        let result = reflow_line(input, &options);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "First sentence.");
+        assert_eq!(result[1], "Second sentence.");
+        assert_eq!(result[2], "Third sentence.");
+
+        // Test with markdown elements
+        // Note: Markdown elements are preserved as separate tokens, so spacing may differ
+        let input2 = "This has **bold**. And [a link](url).";
+        let result2 = reflow_line(input2, &options);
+        assert_eq!(result2.len(), 2);
+        // The bold element gets separated from the period
+        assert_eq!(result2[0].trim(), "This has **bold** .");
+        assert_eq!(result2[1].trim(), "And [a link](url) .");
+    }
+
+    #[test]
+    fn test_sentence_per_line_with_questions_exclamations() {
+        let options = ReflowOptions {
+            line_length: 80,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        let input = "Is this a question? Yes it is! And a statement.";
+        let result = reflow_line(input, &options);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "Is this a question?");
+        assert_eq!(result[1], "Yes it is!");
+        assert_eq!(result[2], "And a statement.");
+    }
+
+    #[test]
     fn test_reference_link_edge_cases() {
         let options = ReflowOptions {
             line_length: 40,
             break_on_sentences: true,
             preserve_breaks: false,
+            sentence_per_line: false,
         };
 
         // Test cases for edge cases and potential conflicts

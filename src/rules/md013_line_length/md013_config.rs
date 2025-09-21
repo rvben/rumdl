@@ -10,6 +10,8 @@ pub enum ReflowMode {
     Default,
     /// Normalize all paragraphs to use the full line length
     Normalize,
+    /// One sentence per line - break at sentence boundaries
+    SentencePerLine,
 }
 
 /// Configuration for MD013 (Line length)
