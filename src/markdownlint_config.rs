@@ -28,7 +28,9 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
 
 /// Mapping table from markdownlint rule keys/aliases to rumdl rule keys
 fn markdownlint_to_rumdl_rule_key(key: &str) -> Option<&'static str> {
-    match key.to_ascii_uppercase().as_str() {
+    // Convert key to uppercase and replace underscores with hyphens for normalization
+    let normalized_key = key.to_ascii_uppercase().replace('_', "-");
+    match normalized_key.as_str() {
         "MD001" | "HEADING-INCREMENT" => Some("MD001"),
         "MD002" | "FIRST-HEADING-H1" => Some("MD002"),
         "MD003" | "HEADING-STYLE" => Some("MD003"),
@@ -219,19 +221,6 @@ impl MarkdownlintConfig {
         let mut enabled_rules = Vec::new();
 
         for (key, value) in &self.0 {
-            // Special handling for line-length as a global setting
-            if key.eq_ignore_ascii_case("line-length") || key.eq_ignore_ascii_case("line_length") {
-                if let Some(line_length) = value.as_u64() {
-                    fragment.global.line_length.push_override(
-                        line_length,
-                        crate::config::ConfigSource::Markdownlint,
-                        file.clone(),
-                        None,
-                    );
-                }
-                continue;
-            }
-
             let mapped = markdownlint_to_rumdl_rule_key(key);
             if let Some(rumdl_key) = mapped {
                 let norm_rule_key = rumdl_key.to_ascii_uppercase();
@@ -250,6 +239,16 @@ impl MarkdownlintConfig {
                 let toml_value = toml_value.map(normalize_toml_table_keys);
                 let rule_config = fragment.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
+                    // Special case: if line-length (MD013) is given a number value directly,
+                    // treat it as {"line_length": value}
+                    let tv = if norm_rule_key == "MD013" && tv.is_integer() {
+                        let mut table = toml::map::Map::new();
+                        table.insert("line-length".to_string(), tv);
+                        toml::Value::Table(table)
+                    } else {
+                        tv
+                    };
+
                     if let toml::Value::Table(mut table) = tv {
                         // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
                         if norm_rule_key == "MD007" && !table.contains_key("style") {
@@ -350,7 +349,7 @@ mod tests {
         assert_eq!(markdownlint_to_rumdl_rule_key("MD001"), Some("MD001"));
         assert_eq!(markdownlint_to_rumdl_rule_key("MD058"), Some("MD058"));
 
-        // Test aliases
+        // Test aliases with hyphens
         assert_eq!(markdownlint_to_rumdl_rule_key("heading-increment"), Some("MD001"));
         assert_eq!(markdownlint_to_rumdl_rule_key("HEADING-INCREMENT"), Some("MD001"));
         assert_eq!(markdownlint_to_rumdl_rule_key("first-heading-h1"), Some("MD002"));
@@ -363,10 +362,24 @@ mod tests {
         assert_eq!(markdownlint_to_rumdl_rule_key("code-block-style"), Some("MD046"));
         assert_eq!(markdownlint_to_rumdl_rule_key("code-fence-style"), Some("MD048"));
 
+        // Test aliases with underscores (should also work)
+        assert_eq!(markdownlint_to_rumdl_rule_key("heading_increment"), Some("MD001"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("HEADING_INCREMENT"), Some("MD001"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("first_heading_h1"), Some("MD002"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("ul_style"), Some("MD004"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("no_trailing_spaces"), Some("MD009"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("line_length"), Some("MD013"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("single_title"), Some("MD025"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("single_h1"), Some("MD025"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("no_bare_urls"), Some("MD034"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("code_block_style"), Some("MD046"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("code_fence_style"), Some("MD048"));
+
         // Test case insensitivity
         assert_eq!(markdownlint_to_rumdl_rule_key("md001"), Some("MD001"));
         assert_eq!(markdownlint_to_rumdl_rule_key("Md001"), Some("MD001"));
         assert_eq!(markdownlint_to_rumdl_rule_key("Line-Length"), Some("MD013"));
+        assert_eq!(markdownlint_to_rumdl_rule_key("Line_Length"), Some("MD013"));
 
         // Test invalid keys
         assert_eq!(markdownlint_to_rumdl_rule_key("MD999"), None);
@@ -509,7 +522,7 @@ ul-style:
     fn test_map_to_sourced_rumdl_config_fragment() {
         let mut config_map = HashMap::new();
 
-        // Test global line-length setting
+        // Test line-length alias for MD013 with numeric value
         config_map.insert(
             "line-length".to_string(),
             serde_yaml::Value::Number(serde_yaml::Number::from(120)),
@@ -521,14 +534,14 @@ ul-style:
         // Test rule enable (true)
         config_map.insert("MD026".to_string(), serde_yaml::Value::Bool(true));
 
-        // Test rule with configuration
+        // Test another rule with configuration
         config_map.insert(
-            "MD013".to_string(),
+            "MD003".to_string(),
             serde_yaml::Value::Mapping({
                 let mut map = serde_yaml::Mapping::new();
                 map.insert(
-                    serde_yaml::Value::String("line_length".to_string()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(100)),
+                    serde_yaml::Value::String("style".to_string()),
+                    serde_yaml::Value::String("atx".to_string()),
                 );
                 map
             }),
@@ -537,9 +550,11 @@ ul-style:
         let mdl_config = MarkdownlintConfig(config_map);
         let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
 
-        // Check global line-length
-        assert_eq!(fragment.global.line_length.value, 120);
-        assert_eq!(fragment.global.line_length.source, ConfigSource::Markdownlint);
+        // Check that line-length (MD013) was properly configured
+        assert!(fragment.rules.contains_key("MD013"));
+        let md013_config = &fragment.rules["MD013"];
+        assert!(md013_config.values.contains_key("line-length"));
+        assert_eq!(md013_config.values["line-length"].value, toml::Value::Integer(120));
 
         // Check disabled rule
         assert!(fragment.global.disable.value.contains(&"MD025".to_string()));
@@ -548,9 +563,9 @@ ul-style:
         assert!(fragment.global.enable.value.contains(&"MD026".to_string()));
 
         // Check rule configuration
-        assert!(fragment.rules.contains_key("MD013"));
-        let md013_config = &fragment.rules["MD013"];
-        assert!(md013_config.values.contains_key("line-length"));
+        assert!(fragment.rules.contains_key("MD003"));
+        let md003_config = &fragment.rules["MD003"];
+        assert!(md003_config.values.contains_key("style"));
     }
 
     #[test]
