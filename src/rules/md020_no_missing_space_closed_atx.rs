@@ -205,10 +205,6 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        None
-    }
-
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,

@@ -1,7 +1,6 @@
 use crate::utils::range_utils::LineIndex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 
 /// Rule MD006: Consider starting bulleted lists at the leftmost column
@@ -331,96 +330,6 @@ impl Rule for MD006StartBullets {
         }
     }
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = _ctx.content;
-        if doc_structure.list_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') {
-            return Ok(Vec::new());
-        }
-        let line_index = LineIndex::new(content.to_string());
-        let mut result = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-        let mut valid_bullet_lines = vec![false; lines.len()];
-        for &line_num in &doc_structure.list_lines {
-            let line_idx = line_num - 1;
-            if line_idx >= lines.len() {
-                continue;
-            }
-            let line = lines[line_idx];
-            if doc_structure.is_in_code_block(line_num) {
-                continue;
-            }
-            if let Some(indent) = Self::is_bullet_list_item(line) {
-                let mut is_valid = false; // Assume invalid initially
-                if indent == 0 {
-                    is_valid = true;
-                } else {
-                    match Self::find_relevant_previous_bullet(&lines, line_idx) {
-                        Some((prev_idx, prev_indent)) => {
-                            match prev_indent.cmp(&indent) {
-                                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
-                                    // Valid nesting or sibling if previous item was valid
-                                    is_valid = valid_bullet_lines[prev_idx];
-                                }
-                                std::cmp::Ordering::Greater => {
-                                    // remains invalid
-                                }
-                            }
-                        }
-                        None => {
-                            // Indented item with no previous bullet remains invalid
-                        }
-                    }
-                }
-                valid_bullet_lines[line_idx] = is_valid;
-
-                if !is_valid {
-                    // Calculate the precise range for the indentation that needs to be removed
-                    // For "  * Indented bullet", we want to highlight the indentation, marker, and space after marker "  * " (columns 1-4)
-                    let start_col = 1; // Start from beginning of line
-                    let end_col = indent + 3; // Include marker and space after it (indent + 1 for marker + 1 for space + 1 for inclusive range)
-
-                    // For the fix, we need to replace the highlighted part ("  *") with just the bullet marker ("* ")
-                    let line = lines[line_idx];
-                    let trimmed = line.trim_start();
-                    // Extract just the bullet marker and normalize to single space
-                    let bullet_part = if let Some(captures) = UNORDERED_LIST_MARKER_REGEX.captures(trimmed) {
-                        format!("{} ", captures.get(2).unwrap().as_str()) // Always use single space
-                    } else {
-                        "* ".to_string() // fallback
-                    };
-                    let replacement = bullet_part;
-
-                    result.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        severity: Severity::Warning,
-                        line: line_num,
-                        column: start_col,
-                        end_line: line_num,
-                        end_column: end_col,
-                        message: "List item indentation".to_string(),
-                        fix: Some(Fix {
-                            range: {
-                                let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
-                                let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
-                                start_byte..end_byte
-                            },
-                            replacement,
-                        }),
-                    });
-                }
-            }
-        }
-        Ok(result)
-    }
-
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
@@ -436,10 +345,6 @@ impl Rule for MD006StartBullets {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        None
-    }
-
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
@@ -452,30 +357,18 @@ impl Rule for MD006StartBullets {
     }
 }
 
-impl DocumentStructureExtensions for MD006StartBullets {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        // This rule is only relevant if there are unordered list items
-        ctx.list_blocks.iter().any(|block| !block.is_ordered)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_with_lint_context() {
         let rule = MD006StartBullets;
 
         // Test with properly formatted lists
         let content_valid = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
-        let structure_valid = DocumentStructure::new(content_valid);
         let ctx_valid = crate::lint_context::LintContext::new(content_valid, crate::config::MarkdownFlavor::Standard);
-        let result_valid = rule.check_with_structure(&ctx_valid, &structure_valid).unwrap();
+        let result_valid = rule.check(&ctx_valid).unwrap();
         assert!(
             result_valid.is_empty(),
             "Properly formatted lists should not generate warnings, found: {result_valid:?}"
@@ -483,10 +376,9 @@ mod tests {
 
         // Test with improperly indented list - adjust expectations based on actual implementation
         let content_invalid = "  * Item 1\n  * Item 2\n    * Nested item";
-        let structure = DocumentStructure::new(content_invalid);
         let ctx_invalid =
             crate::lint_context::LintContext::new(content_invalid, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx_invalid, &structure).unwrap();
+        let result = rule.check(&ctx_invalid).unwrap();
 
         // If no warnings are generated, the test should be updated to match implementation behavior
         assert!(!result.is_empty(), "Improperly indented lists should generate warnings");
@@ -498,9 +390,8 @@ mod tests {
 
         // Test with mixed indentation - standard nesting is VALID
         let content = "* Item 1\n  * Item 2 (standard nesting is valid)";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         // Assert that standard nesting does NOT generate warnings
         assert!(
             result.is_empty(),

@@ -3,7 +3,6 @@
 /// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::{ElementCache, ListMarkerType};
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use toml;
@@ -198,126 +197,6 @@ impl Rule for MD007ULIndent {
     }
 
     /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-
-        // Early return if no list items
-        if doc_structure.list_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Use ElementCache for detailed list analysis (still needed for nesting levels)
-        let element_cache = ElementCache::new(content);
-        let mut warnings = Vec::new();
-
-        for item in element_cache.get_list_items() {
-            // Only process unordered list items that are in our structure
-            if !doc_structure.list_lines.contains(&item.line_number) {
-                continue;
-            }
-
-            // Skip list items inside code blocks
-            if doc_structure.is_in_code_block(item.line_number) {
-                continue;
-            }
-
-            if matches!(
-                item.marker_type,
-                ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus
-            ) {
-                // Skip first level check if start_indented is false
-                if !self.config.start_indented && item.nesting_level == 0 {
-                    continue;
-                }
-
-                let expected_indent = if self.config.start_indented {
-                    self.config.start_indent + (item.nesting_level * self.config.indent)
-                } else {
-                    match self.config.style {
-                        md007_config::IndentStyle::Fixed => {
-                            // Fixed style: simple multiples of indent
-                            item.nesting_level * self.config.indent
-                        }
-                        md007_config::IndentStyle::TextAligned => {
-                            // Text-aligned style: align with parent's text content
-                            if item.nesting_level > 0 {
-                                let (has_parent, expected_pos) =
-                                    self.get_parent_info(ctx, item.line_number, item.indentation);
-                                if has_parent {
-                                    if let Some(pos) = expected_pos {
-                                        // Align with parent's text content
-                                        pos
-                                    } else {
-                                        // Fallback to standard indentation
-                                        item.nesting_level * self.config.indent
-                                    }
-                                } else {
-                                    item.nesting_level * self.config.indent
-                                }
-                            } else {
-                                item.nesting_level * self.config.indent
-                            }
-                        }
-                    }
-                };
-
-                if item.indentation != expected_indent {
-                    // Generate fix for this list item
-                    let fix = {
-                        let lines: Vec<&str> = content.lines().collect();
-                        if let Some(line) = lines.get(item.line_number - 1) {
-                            // Extract the marker and content
-                            if UNORDERED_LIST_MARKER_REGEX.captures(line).is_some() {
-                                let correct_indent = " ".repeat(expected_indent);
-
-                                // Fix range should match warning range - only the problematic indentation
-                                let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
-
-                                // Warning will cover the indentation area that needs to be fixed
-                                let start_col = item.blockquote_prefix.len() + 1; // Start of indentation
-                                let end_col = item.blockquote_prefix.len() + item.indent_str.len() + 1; // End of actual indentation string
-
-                                let start_byte = line_index.line_col_to_byte_range(item.line_number, start_col).start;
-                                let end_byte = line_index.line_col_to_byte_range(item.line_number, end_col).start;
-
-                                // Replacement should be just the correct indentation
-                                let replacement = correct_indent;
-
-                                Some(crate::rule::Fix {
-                                    range: start_byte..end_byte,
-                                    replacement,
-                                })
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    };
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: format!(
-                            "Expected {} spaces for indent depth {}, found {}",
-                            expected_indent, item.nesting_level, item.indentation
-                        ),
-                        line: item.line_number,
-                        column: item.blockquote_prefix.len() + 1, // Start of indentation
-                        end_line: item.line_number,
-                        end_column: item.blockquote_prefix.len() + item.indent_str.len() + 1, // End of actual indentation string
-                        severity: Severity::Warning,
-                        fix,
-                    });
-                }
-            }
-        }
-        Ok(warnings)
-    }
-
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // Get all warnings with their fixes
         let warnings = self.check(ctx)?;
@@ -364,10 +243,6 @@ impl Rule for MD007ULIndent {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD007Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
@@ -404,17 +279,6 @@ impl Rule for MD007ULIndent {
         }
 
         Box::new(Self::from_config_struct(rule_config))
-    }
-}
-
-impl DocumentStructureExtensions for MD007ULIndent {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        // Use the document structure to check if there are any unordered list elements
-        !doc_structure.list_lines.is_empty()
     }
 }
 

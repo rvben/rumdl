@@ -4,7 +4,6 @@
 //! See [docs/md057.md](../../docs/md057.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::element_cache::ElementCache;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -215,12 +214,7 @@ impl Rule for MD057ExistingRelativeLinks {
         content.is_empty() || !content.contains('[') || !content.contains("](")
     }
 
-    /// Optimized implementation using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
+    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
 
         // Early returns for performance
@@ -270,8 +264,8 @@ impl Rule for MD057ExistingRelativeLinks {
             return Ok(warnings);
         }
 
-        // Use DocumentStructure links instead of expensive regex parsing
-        if !structure.links.is_empty() {
+        // Use LintContext links instead of expensive regex parsing
+        if !ctx.links.is_empty() {
             // Pre-compute line positions for efficient absolute position calculation
             let mut line_positions = Vec::new();
             let mut pos = 0;
@@ -289,7 +283,7 @@ impl Rule for MD057ExistingRelativeLinks {
             // Pre-collect lines to avoid repeated line iteration
             let lines: Vec<&str> = content.lines().collect();
 
-            for link in &structure.links {
+            for link in &ctx.links {
                 let line_idx = link.line - 1;
                 if line_idx >= lines.len() {
                     continue;
@@ -339,15 +333,6 @@ impl Rule for MD057ExistingRelativeLinks {
         Ok(warnings)
     }
 
-    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        // If document structure is available, use the optimized version
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-
-        // The code below is now unreachable because we always use the document structure
-    }
-
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         Ok(ctx.content.to_string())
     }
@@ -370,16 +355,6 @@ impl Rule for MD057ExistingRelativeLinks {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD057Config>(config);
         Box::new(Self::from_config_struct(rule_config))
-    }
-}
-
-impl DocumentStructureExtensions for MD057ExistingRelativeLinks {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        true
     }
 }
 
@@ -499,9 +474,8 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing.md"));
 
-        // Test with document structure
-        let structure = DocumentStructure::new(content);
-        let result_with_structure = rule.check_with_structure(&ctx, &structure).unwrap();
+        // Test with check method
+        let result_with_structure = rule.check(&ctx).unwrap();
 
         // Results should be the same
         assert_eq!(result.len(), result_with_structure.len());
@@ -602,10 +576,9 @@ mod tests {
 
         // Test with document structure
         let content = "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
-        let structure = DocumentStructure::new(content);
 
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
 
         // Should only find the real link, not the one in code
         assert_eq!(result.len(), 1, "Should only flag the real link");

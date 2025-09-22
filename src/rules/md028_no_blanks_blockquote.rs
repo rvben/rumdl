@@ -5,7 +5,6 @@
 /// and intentional separators between distinct blockquotes.
 /// See [docs/md028.md](../../docs/md028.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 #[derive(Clone)]
@@ -181,10 +180,6 @@ impl Rule for MD028NoBlanksBlockquote {
         "Blank line inside blockquote"
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         // Early return for content without blockquotes
         if !ctx.content.contains('>') {
@@ -247,16 +242,6 @@ impl Rule for MD028NoBlanksBlockquote {
         Ok(warnings)
     }
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _structure: &DocumentStructure,
-    ) -> LintResult {
-        // Just delegate to the main check method
-        self.check(ctx)
-    }
-
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let mut result = Vec::with_capacity(ctx.lines.len());
         let lines: Vec<&str> = ctx.content.lines().collect();
@@ -292,16 +277,6 @@ impl Rule for MD028NoBlanksBlockquote {
         Self: Sized,
     {
         Box::new(MD028NoBlanksBlockquote)
-    }
-}
-
-impl DocumentStructureExtensions for MD028NoBlanksBlockquote {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        !doc_structure.blockquotes.is_empty()
     }
 }
 
@@ -503,12 +478,13 @@ mod tests {
     fn test_document_structure_extension() {
         let rule = MD028NoBlanksBlockquote;
         let ctx = LintContext::new("> test", crate::config::MarkdownFlavor::Standard);
-        let doc_structure = DocumentStructure::new("> test");
-        assert!(rule.has_relevant_elements(&ctx, &doc_structure));
+        // Test that the rule works correctly with blockquotes
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should not flag valid blockquote");
 
+        // Test that rule skips content without blockquotes
         let ctx2 = LintContext::new("no blockquote", crate::config::MarkdownFlavor::Standard);
-        let doc_structure2 = DocumentStructure::new("no blockquote");
-        assert!(!rule.has_relevant_elements(&ctx2, &doc_structure2));
+        assert!(rule.should_skip(&ctx2), "Should skip content without blockquotes");
     }
 
     #[test]

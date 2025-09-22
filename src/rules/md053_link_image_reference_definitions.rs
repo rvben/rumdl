@@ -1,6 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::calculate_line_range;
 use fancy_regex::Regex as FancyRegex;
 use lazy_static::lazy_static;
@@ -195,11 +194,7 @@ impl MD053LinkImageReferenceDefinitions {
     /// Find all link and image reference definitions in the content.
     ///
     /// This method returns a HashMap where the key is the normalized reference ID and the value is a vector of (start_line, end_line) tuples.
-    fn find_definitions(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> HashMap<String, Vec<(usize, usize)>> {
+    fn find_definitions(&self, ctx: &crate::lint_context::LintContext) -> HashMap<String, Vec<(usize, usize)>> {
         let mut definitions: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
 
         // First, add all reference definitions from context
@@ -220,7 +215,7 @@ impl MD053LinkImageReferenceDefinitions {
             let line = &line_info.content;
 
             // Skip code blocks and front matter using line info
-            if line_info.in_code_block || doc_structure.is_in_front_matter(i + 1) {
+            if line_info.in_code_block || ctx.is_in_front_matter(i + 1) {
                 i += 1;
                 continue;
             }
@@ -255,11 +250,7 @@ impl MD053LinkImageReferenceDefinitions {
     ///
     /// This method returns a HashSet of all normalized reference IDs found in usage.
     /// It leverages cached data from LintContext for efficiency.
-    fn find_usages(
-        &self,
-        doc_structure: &DocumentStructure,
-        ctx: &crate::lint_context::LintContext,
-    ) -> HashSet<String> {
+    fn find_usages(&self, ctx: &crate::lint_context::LintContext) -> HashSet<String> {
         let mut usages: HashSet<String> = HashSet::new();
 
         // 1. Add usages from cached reference links in LintContext
@@ -268,7 +259,7 @@ impl MD053LinkImageReferenceDefinitions {
                 && let Some(ref_id) = &link.reference_id
             {
                 // Ensure the link itself is not inside a code block line
-                if !doc_structure.is_in_code_block(link.line) {
+                if !ctx.is_in_code_block(link.line) {
                     usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                 }
             }
@@ -280,7 +271,7 @@ impl MD053LinkImageReferenceDefinitions {
                 && let Some(ref_id) = &image.reference_id
             {
                 // Ensure the image itself is not inside a code block line
-                if !doc_structure.is_in_code_block(image.line) {
+                if !ctx.is_in_code_block(image.line) {
                     usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                 }
             }
@@ -295,7 +286,7 @@ impl MD053LinkImageReferenceDefinitions {
             let line_num = i + 1; // 1-indexed
 
             // Skip lines in code blocks or front matter
-            if line_info.in_code_block || doc_structure.is_in_front_matter(line_num) {
+            if line_info.in_code_block || ctx.is_in_front_matter(line_num) {
                 continue;
             }
 
@@ -392,13 +383,9 @@ impl Rule for MD053LinkImageReferenceDefinitions {
     ///
     /// This implementation uses caching for improved performance on large documents.
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        // Compute DocumentStructure once
-        let doc_structure = DocumentStructure::new(content);
-
-        // Find definitions and usages using DocumentStructure
-        let definitions = self.find_definitions(ctx, &doc_structure);
-        let usages = self.find_usages(&doc_structure, ctx);
+        // Find definitions and usages using LintContext
+        let definitions = self.find_definitions(ctx);
+        let usages = self.find_usages(ctx);
 
         // Get unused references by comparing definitions and usages
         let unused_refs = self.get_unused_references(&definitions, &usages);
@@ -732,8 +719,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref1]: url1\n[ref2]: url2\nSome text\n[ref3]: url3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let doc = DocumentStructure::new(content);
-        let defs = rule.find_definitions(&ctx, &doc);
+        let defs = rule.find_definitions(&ctx);
 
         assert_eq!(defs.len(), 3);
         assert!(defs.contains_key("ref1"));
@@ -746,8 +732,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[text][ref1] and [ref2] and ![img][ref3]";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let doc = DocumentStructure::new(content);
-        let usages = rule.find_usages(&doc, &ctx);
+        let usages = rule.find_usages(&ctx);
 
         assert!(usages.contains("ref1"));
         assert!(usages.contains("ref2"));

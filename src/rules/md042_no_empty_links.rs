@@ -1,7 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
-use crate::utils::range_utils::LineIndex;
 
 /// Rule MD042: No empty links
 ///
@@ -113,55 +111,6 @@ impl Rule for MD042NoEmptyLinks {
         Ok(warnings)
     }
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = _ctx.content;
-        // Early return if there are no links
-        if structure.links.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-
-        // Get pre-computed empty links
-        let empty_links = structure.get_empty_links();
-
-        for link in empty_links {
-            let replacement = if link.text.trim().is_empty() && link.url.trim().is_empty() {
-                "[Link text](https://example.com)".to_string()
-            } else if link.text.trim().is_empty() {
-                format!("[Link text]({})", link.url)
-            } else {
-                format!("[{}](https://example.com)", link.text)
-            };
-
-            warnings.push(LintWarning {
-                rule_name: Some(self.name()),
-                message: format!("Empty link found: [{}]({})", link.text, link.url),
-                line: link.line,
-                column: link.start_col,
-                end_line: link.line,
-                end_column: link.end_col + 1,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: line_index.line_col_to_byte_range_with_length(
-                        link.line,
-                        link.start_col,
-                        (link.end_col + 1).saturating_sub(link.start_col),
-                    ),
-                    replacement,
-                }),
-            });
-        }
-
-        Ok(warnings)
-    }
-
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
@@ -211,16 +160,6 @@ impl Rule for MD042NoEmptyLinks {
     {
         // Flavor is now accessed from LintContext during check
         Box::new(MD042NoEmptyLinks::new())
-    }
-}
-
-impl DocumentStructureExtensions for MD042NoEmptyLinks {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        !doc_structure.links.is_empty()
     }
 }
 

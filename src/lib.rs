@@ -25,7 +25,6 @@ pub use rules::*;
 
 pub use crate::lint_context::{LineInfo, LintContext, ListItemInfo};
 use crate::rule::{LintResult, Rule, RuleCategory};
-use crate::utils::document_structure::DocumentStructure;
 use std::time::Instant;
 
 /// Content characteristics for efficient rule filtering
@@ -151,9 +150,6 @@ pub fn lint(
     let _total_rules = rules.len();
     let _applicable_count = applicable_rules.len();
 
-    // Parse DocumentStructure once
-    let structure = DocumentStructure::new(content);
-
     // Parse AST once for rules that can benefit from it
     let ast_rules_count = applicable_rules.iter().filter(|rule| rule.uses_ast()).count();
     let ast = if ast_rules_count > 0 {
@@ -177,15 +173,11 @@ pub fn lint(
                     .unwrap_or_else(|| rule.check_with_ast(&lint_ctx, ast_ref))
             } else {
                 // Fallback to regular check if no AST
-                rule.as_maybe_document_structure()
-                    .and_then(|ext| ext.check_with_structure_opt(&lint_ctx, &structure))
-                    .unwrap_or_else(|| rule.check(&lint_ctx))
+                rule.check(&lint_ctx)
             }
         } else {
-            // 2. Document structure path
-            rule.as_maybe_document_structure()
-                .and_then(|ext| ext.check_with_structure_opt(&lint_ctx, &structure))
-                .unwrap_or_else(|| rule.check(&lint_ctx))
+            // 2. Regular check path
+            rule.check(&lint_ctx)
         };
 
         match result {

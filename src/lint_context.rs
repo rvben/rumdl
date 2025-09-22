@@ -75,6 +75,8 @@ pub struct LineInfo {
     pub in_code_block: bool,
     /// Whether this line is inside front matter
     pub in_front_matter: bool,
+    /// Whether this line is inside an HTML block
+    pub in_html_block: bool,
     /// List item information if this line starts a list item
     pub list_item: Option<ListItemInfo>,
     /// Heading information if this line is a heading
@@ -393,7 +395,7 @@ impl<'a> LintContext<'a> {
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
         // Pre-compute line information
-        let lines = Self::compute_line_info(content, &line_offsets, &code_blocks, flavor);
+        let mut lines = Self::compute_line_info(content, &line_offsets, &code_blocks, flavor);
 
         // Parse code spans early so we can exclude them from link/image parsing
         let ast = get_cached_ast(content);
@@ -404,6 +406,9 @@ impl<'a> LintContext<'a> {
         let images = Self::parse_images(content, &lines, &code_blocks, &code_spans);
         let reference_defs = Self::parse_reference_defs(content, &lines);
         let list_blocks = Self::parse_list_blocks(&lines);
+
+        // Detect HTML blocks
+        Self::detect_html_blocks(&mut lines);
 
         // Compute character frequency for fast content analysis
         let char_frequency = Self::compute_char_frequency(content);
@@ -573,6 +578,45 @@ impl<'a> LintContext<'a> {
         self.list_blocks
             .iter()
             .find(|block| line_num >= block.start_line && line_num <= block.end_line)
+    }
+
+    // Compatibility methods for DocumentStructure migration
+
+    /// Check if a line is within a code block
+    pub fn is_in_code_block(&self, line_num: usize) -> bool {
+        if line_num == 0 || line_num > self.lines.len() {
+            return false;
+        }
+        self.lines[line_num - 1].in_code_block
+    }
+
+    /// Check if a line is within front matter
+    pub fn is_in_front_matter(&self, line_num: usize) -> bool {
+        if line_num == 0 || line_num > self.lines.len() {
+            return false;
+        }
+        self.lines[line_num - 1].in_front_matter
+    }
+
+    /// Check if a line is within an HTML block
+    pub fn is_in_html_block(&self, line_num: usize) -> bool {
+        if line_num == 0 || line_num > self.lines.len() {
+            return false;
+        }
+        self.lines[line_num - 1].in_html_block
+    }
+
+    /// Check if a line and column is within a code span
+    pub fn is_in_code_span(&self, line_num: usize, col: usize) -> bool {
+        if line_num == 0 || line_num > self.lines.len() {
+            return false;
+        }
+
+        // Use the code spans cache to check
+        let code_spans = self.code_spans();
+        code_spans
+            .iter()
+            .any(|span| span.line == line_num && col >= span.start_col && col <= span.end_col)
     }
 
     /// Check if content has any instances of a specific character (fast)
@@ -1120,6 +1164,7 @@ impl<'a> LintContext<'a> {
                 is_blank,
                 in_code_block,
                 in_front_matter: in_front_matter && i <= front_matter_end,
+                in_html_block: false, // Will be populated after line creation
                 list_item,
                 heading: None,    // Will be populated in second pass for Setext headings
                 blockquote: None, // Will be populated after line creation
@@ -1363,6 +1408,107 @@ impl<'a> LintContext<'a> {
         }
 
         lines
+    }
+
+    /// Detect HTML blocks in the content
+    fn detect_html_blocks(lines: &mut [LineInfo]) {
+        // HTML block elements that trigger block context
+        const BLOCK_ELEMENTS: &[&str] = &[
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "details",
+            "dialog",
+            "dd",
+            "div",
+            "dl",
+            "dt",
+            "fieldset",
+            "figcaption",
+            "figure",
+            "footer",
+            "form",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "header",
+            "hr",
+            "li",
+            "main",
+            "nav",
+            "ol",
+            "p",
+            "pre",
+            "section",
+            "table",
+            "tbody",
+            "td",
+            "tfoot",
+            "th",
+            "thead",
+            "tr",
+            "ul",
+        ];
+
+        let mut i = 0;
+        while i < lines.len() {
+            // Skip if already in code block or front matter
+            if lines[i].in_code_block || lines[i].in_front_matter {
+                i += 1;
+                continue;
+            }
+
+            let trimmed = lines[i].content.trim_start();
+
+            // Check if line starts with an HTML tag
+            if trimmed.starts_with('<') && trimmed.len() > 1 {
+                // Extract tag name safely
+                let after_bracket = &trimmed[1..];
+                let is_closing = after_bracket.starts_with('/');
+                let tag_start = if is_closing { &after_bracket[1..] } else { after_bracket };
+
+                // Extract tag name (stop at space, >, /, or end of string)
+                let tag_name = tag_start
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphabetic() || *c == '-')
+                    .collect::<String>()
+                    .to_lowercase();
+
+                // Check if it's a block element
+                if !tag_name.is_empty() && BLOCK_ELEMENTS.contains(&tag_name.as_str()) {
+                    // Mark this line as in HTML block
+                    lines[i].in_html_block = true;
+
+                    // For simplicity, just mark lines until we find a closing tag or reach a blank line
+                    // This avoids complex nesting logic that might cause infinite loops
+                    if !is_closing {
+                        let closing_tag = format!("</{tag_name}>");
+                        let mut j = i + 1;
+                        while j < lines.len() && j < i + 100 {
+                            // Limit search to 100 lines
+                            // Stop at blank lines
+                            if lines[j].is_blank {
+                                break;
+                            }
+
+                            lines[j].in_html_block = true;
+
+                            // Check if this line contains the closing tag
+                            if lines[j].content.contains(&closing_tag) {
+                                break;
+                            }
+                            j += 1;
+                        }
+                    }
+                }
+            }
+
+            i += 1;
+        }
     }
 
     /// Parse all inline code spans in the content using AST

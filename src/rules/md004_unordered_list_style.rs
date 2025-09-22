@@ -50,7 +50,6 @@ use crate::LintContext;
 ///
 /// Consistent list markers improve readability and reduce distraction, especially in large documents or when collaborating with others. This rule helps enforce a uniform style across all unordered lists.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::DocumentStructureExtensions;
 use toml;
 
 mod md004_config;
@@ -96,10 +95,6 @@ impl Rule for MD004UnorderedListStyle {
 
     fn description(&self) -> &'static str {
         "Use consistent style for unordered list markers"
-    }
-
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
@@ -355,17 +350,6 @@ impl Rule for MD004UnorderedListStyle {
             _ => UnorderedListStyle::Consistent,
         };
         Box::new(MD004UnorderedListStyle::new(style))
-    }
-}
-
-impl DocumentStructureExtensions for MD004UnorderedListStyle {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> bool {
-        // Quick check for any list markers and unordered list blocks
-        ctx.content.contains(['*', '-', '+']) && ctx.list_blocks.iter().any(|block| !block.is_ordered)
     }
 }
 

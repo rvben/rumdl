@@ -38,10 +38,6 @@ impl Rule for MD012NoMultipleBlanks {
         "Multiple consecutive blank lines"
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
 
@@ -466,17 +462,6 @@ impl Rule for MD012NoMultipleBlanks {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD012Config>(config);
         Box::new(Self::from_config_struct(rule_config))
-    }
-}
-
-impl crate::utils::document_structure::DocumentStructureExtensions for MD012NoMultipleBlanks {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> bool {
-        // MD012 checks for consecutive blank lines, so it's relevant for any non-empty content
-        !ctx.content.is_empty()
     }
 }
 

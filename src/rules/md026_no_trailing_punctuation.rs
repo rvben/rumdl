@@ -173,10 +173,6 @@ impl Rule for MD026NoTrailingPunctuation {
         !punctuation.chars().any(|p| ctx.content.contains(p))
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        None
-    }
-
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
 

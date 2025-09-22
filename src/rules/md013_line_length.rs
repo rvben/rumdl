@@ -3,7 +3,6 @@
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::LineIndex;
 use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{
@@ -45,7 +44,7 @@ impl MD013LineLength {
         line: &str,
         _lines: &[&str],
         current_line: usize,
-        structure: &DocumentStructure,
+        ctx: &crate::lint_context::LintContext,
     ) -> bool {
         if self.config.strict {
             return false;
@@ -70,10 +69,7 @@ impl MD013LineLength {
         }
 
         // Code blocks with long strings (only check if in code block)
-        if structure.is_in_code_block(current_line + 1)
-            && !trimmed.is_empty()
-            && !line.contains(' ')
-            && !line.contains('\t')
+        if ctx.is_in_code_block(current_line + 1) && !trimmed.is_empty() && !line.contains(' ') && !line.contains('\t')
         {
             return true;
         }
@@ -104,21 +100,8 @@ impl Rule for MD013LineLength {
             return Ok(Vec::new());
         }
 
-        // Create structure manually
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    /// Optimized check using pre-computed document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
+        // Direct implementation without DocumentStructure
         let mut warnings = Vec::new();
-
-        // Early return was already done in check(), so we know there are long lines
 
         // Check for inline configuration overrides
         let inline_config = crate::inline_config::InlineConfig::from_content(content);
@@ -189,7 +172,12 @@ impl Rule for MD013LineLength {
 
         // Create a quick lookup set for heading lines (only if needed)
         let heading_lines_set: std::collections::HashSet<usize> = if !effective_config.headings {
-            structure.heading_lines.iter().cloned().collect()
+            ctx.lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| line.heading.is_some())
+                .map(|(idx, _)| idx + 1)
+                .collect()
         } else {
             std::collections::HashSet::new()
         };
@@ -239,16 +227,16 @@ impl Rule for MD013LineLength {
                     // The flags mean: true = check these elements, false = skip these elements
                     // So we skip when the flag is FALSE and the line is in that element type
                     if (!effective_config.headings && heading_lines_set.contains(&line_number))
-                        || (!effective_config.code_blocks && structure.is_in_code_block(line_number))
+                        || (!effective_config.code_blocks && ctx.is_in_code_block(line_number))
                         || (!effective_config.tables && table_lines_set.contains(&line_number))
-                        || structure.is_in_blockquote(line_number)
-                        || structure.is_in_html_block(line_number)
+                        || ctx.lines[line_number - 1].blockquote.is_some()
+                        || ctx.is_in_html_block(line_number)
                     {
                         continue;
                     }
 
                     // Skip lines that are only a URL, image ref, or link ref
-                    if self.should_ignore_line(line, &lines, line_idx, structure) {
+                    if self.should_ignore_line(line, &lines, line_idx, ctx) {
                         continue;
                     }
                 }
@@ -277,7 +265,7 @@ impl Rule for MD013LineLength {
 
         // If reflow is enabled, generate paragraph-based fixes
         if effective_config.reflow {
-            let paragraph_warnings = self.generate_paragraph_fixes(ctx, structure, &effective_config, &lines);
+            let paragraph_warnings = self.generate_paragraph_fixes(ctx, &effective_config, &lines);
             // Merge paragraph warnings with line warnings, removing duplicates
             for pw in paragraph_warnings {
                 // Remove any line warnings that overlap with this paragraph
@@ -306,10 +294,6 @@ impl Rule for MD013LineLength {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
-    }
-
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
     }
 
     fn category(&self) -> RuleCategory {
@@ -382,7 +366,6 @@ impl MD013LineLength {
     fn generate_paragraph_fixes(
         &self,
         ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
         config: &MD013Config,
         lines: &[&str],
     ) -> Vec<LintWarning> {
@@ -394,10 +377,10 @@ impl MD013LineLength {
             let line_num = i + 1;
 
             // Skip special structures
-            if structure.is_in_code_block(line_num)
-                || structure.is_in_front_matter(line_num)
-                || structure.is_in_html_block(line_num)
-                || structure.is_in_blockquote(line_num)
+            if ctx.is_in_code_block(line_num)
+                || ctx.is_in_front_matter(line_num)
+                || ctx.is_in_html_block(line_num)
+                || (line_num > 0 && line_num <= ctx.lines.len() && ctx.lines[line_num - 1].blockquote.is_some())
                 || lines[i].trim().starts_with('#')
                 || TableUtils::is_potential_table_row(lines[i])
                 || lines[i].trim().is_empty()
@@ -449,7 +432,7 @@ impl MD013LineLength {
                 }
 
                 // Check if any lines in this list item are within a code block
-                let contains_code_block = (list_start..i).any(|line_idx| structure.is_in_code_block(line_idx + 1));
+                let contains_code_block = (list_start..i).any(|line_idx| ctx.is_in_code_block(line_idx + 1));
 
                 // Now check if this list item needs reflowing
                 let combined_content = list_item_lines.join(" ").trim().to_string();
@@ -532,10 +515,12 @@ impl MD013LineLength {
 
                 // Stop at paragraph boundaries
                 if next_trimmed.is_empty()
-                    || structure.is_in_code_block(next_line_num)
-                    || structure.is_in_front_matter(next_line_num)
-                    || structure.is_in_html_block(next_line_num)
-                    || structure.is_in_blockquote(next_line_num)
+                    || ctx.is_in_code_block(next_line_num)
+                    || ctx.is_in_front_matter(next_line_num)
+                    || ctx.is_in_html_block(next_line_num)
+                    || (next_line_num > 0
+                        && next_line_num <= ctx.lines.len()
+                        && ctx.lines[next_line_num - 1].blockquote.is_some())
                     || next_trimmed.starts_with('#')
                     || TableUtils::is_potential_table_row(next_line)
                     || is_list_item(next_trimmed)
@@ -737,17 +722,6 @@ impl MD013LineLength {
         }
 
         effective_line.chars().count()
-    }
-}
-
-impl DocumentStructureExtensions for MD013LineLength {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        // This rule always applies unless content is empty
-        !ctx.content.is_empty()
     }
 }
 
@@ -1187,15 +1161,16 @@ Another long line that should trigger a warning."#;
     }
 
     #[test]
-    fn test_has_relevant_elements() {
+    fn test_content_detection() {
         let rule = MD013LineLength::default();
-        let structure = DocumentStructure::new("test");
 
-        let ctx = LintContext::new("Some content", crate::config::MarkdownFlavor::Standard);
-        assert!(rule.has_relevant_elements(&ctx, &structure));
+        // Use a line longer than default line_length (80) to ensure it's not skipped
+        let long_line = "a".repeat(100);
+        let ctx = LintContext::new(&long_line, crate::config::MarkdownFlavor::Standard);
+        assert!(!rule.should_skip(&ctx)); // Should not skip processing when there's long content
 
         let empty_ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
-        assert!(!rule.has_relevant_elements(&empty_ctx, &structure));
+        assert!(rule.should_skip(&empty_ctx)); // Should skip processing when content is empty
     }
 
     #[test]

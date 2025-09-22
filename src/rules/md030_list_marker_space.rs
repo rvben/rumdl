@@ -6,7 +6,6 @@
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::list_utils::ListType;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::calculate_match_range;
 use toml;
 
@@ -184,10 +183,6 @@ impl Rule for MD030ListMarkerSpace {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD030Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;
@@ -217,7 +212,7 @@ impl Rule for MD030ListMarkerSpace {
             return Ok(content.to_string());
         }
 
-        let structure = crate::utils::document_structure::DocumentStructure::new(content);
+        // DocumentStructure is no longer used for optimization
         let lines: Vec<&str> = content.lines().collect();
         let mut result_lines = Vec::with_capacity(lines.len());
 
@@ -239,10 +234,8 @@ impl Rule for MD030ListMarkerSpace {
             }
 
             // Skip if in front matter
-            if structure.is_in_front_matter(line_num) {
-                result_lines.push(line.to_string());
-                continue;
-            }
+            // Note: Front matter checking is handled by LintContext directly
+            // No additional front matter check needed here
 
             // Skip if this is an indented code block (4+ spaces with blank line before)
             if self.is_indented_code_block(line, line_idx, &lines) {
@@ -427,36 +420,24 @@ impl MD030ListMarkerSpace {
     }
 }
 
-impl DocumentStructureExtensions for MD030ListMarkerSpace {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        !doc_structure.list_lines.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_basic_functionality() {
         let rule = MD030ListMarkerSpace::default();
         let content = "* Item 1\n* Item 2\n  * Nested item\n1. Ordered item";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Correctly spaced list markers should not generate warnings"
         );
         let content = "*  Item 1 (too many spaces)\n* Item 2\n1.   Ordered item (too many spaces)";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         // Expect warnings for lines with too many spaces after the marker
         assert_eq!(
             result.len(),

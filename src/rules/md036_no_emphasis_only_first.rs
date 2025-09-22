@@ -4,7 +4,6 @@
 //! See [docs/md036.md](../../docs/md036.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::calculate_emphasis_range;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -90,7 +89,7 @@ impl MD036NoEmphasisAsHeading {
     fn is_entire_line_emphasized(
         &self,
         line: &str,
-        doc_structure: &DocumentStructure,
+        ctx: &crate::lint_context::LintContext,
         line_num: usize,
     ) -> Option<(usize, String, usize, usize)> {
         let original_line = line;
@@ -111,11 +110,9 @@ impl MD036NoEmphasisAsHeading {
             return None;
         }
 
-        // Skip if line is in a list, blockquote, or code block using DocumentStructure
-        if LIST_MARKER.is_match(line)
-            || BLOCKQUOTE_MARKER.is_match(line)
-            || doc_structure.is_in_code_block(line_num + 1)
-        // line_num is 0-based, but DocumentStructure expects 1-based
+        // Skip if line is in a list, blockquote, or code block
+        if LIST_MARKER.is_match(line) || BLOCKQUOTE_MARKER.is_match(line) || ctx.is_in_code_block(line_num + 1)
+        // line_num is 0-based, but LintContext expects 1-based
         {
             return None;
         }
@@ -185,23 +182,6 @@ impl Rule for MD036NoEmphasisAsHeading {
             return Ok(Vec::new());
         }
 
-        // Use the optimized document structure approach
-        let doc_structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &doc_structure)
-    }
-
-    /// Optimized check using pre-computed document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-        // Fast path for empty content or content without emphasis markers
-        if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
-            return Ok(Vec::new());
-        }
-
         let mut warnings = Vec::new();
 
         for (i, line) in content.lines().enumerate() {
@@ -210,7 +190,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                 continue;
             }
 
-            if let Some((_level, text, start_pos, end_pos)) = self.is_entire_line_emphasized(line, doc_structure, i) {
+            if let Some((_level, text, start_pos, end_pos)) = self.is_entire_line_emphasized(line, ctx, i) {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_emphasis_range(i + 1, line, start_pos, end_pos);
 

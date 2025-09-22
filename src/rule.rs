@@ -9,7 +9,6 @@ use thiserror::Error;
 
 // Import document structure
 use crate::lint_context::LintContext;
-use crate::utils::document_structure::DocumentStructure;
 
 // Import markdown AST for shared parsing
 pub use markdown::mdast::Node as MarkdownAst;
@@ -99,26 +98,9 @@ pub trait Rule: DynClone + Send + Sync {
     fn check(&self, ctx: &LintContext) -> LintResult;
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError>;
 
-    /// Enhanced check method using document structure
-    /// By default, calls the regular check method if not overridden
-    fn check_with_structure(&self, ctx: &LintContext, _structure: &DocumentStructure) -> LintResult {
-        self.check(ctx)
-    }
-
     /// AST-based check method for rules that can benefit from shared AST parsing
     /// By default, calls the regular check method if not overridden
     fn check_with_ast(&self, ctx: &LintContext, _ast: &MarkdownAst) -> LintResult {
-        self.check(ctx)
-    }
-
-    /// Combined check method using both document structure and AST
-    /// By default, calls the regular check method if not overridden
-    fn check_with_structure_and_ast(
-        &self,
-        ctx: &LintContext,
-        _structure: &DocumentStructure,
-        _ast: &MarkdownAst,
-    ) -> LintResult {
         self.check(ctx)
     }
 
@@ -137,16 +119,12 @@ pub trait Rule: DynClone + Send + Sync {
         false
     }
 
-    /// Check if this rule can benefit from document structure
-    fn uses_document_structure(&self) -> bool {
-        false
-    }
-
     fn as_any(&self) -> &dyn std::any::Any;
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn MaybeDocumentStructure> {
-        None
-    }
+    // DocumentStructure has been merged into LintContext - this method is no longer used
+    // fn as_maybe_document_structure(&self) -> Option<&dyn MaybeDocumentStructure> {
+    //     None
+    // }
 
     fn as_maybe_ast(&self) -> Option<&dyn MaybeAst> {
         None
@@ -332,6 +310,9 @@ pub fn is_rule_disabled_by_comment(content: &str, rule_name: &str) -> bool {
     is_rule_disabled_at_line(content, rule_name, lines.len())
 }
 
+// DocumentStructure has been merged into LintContext - these traits are no longer needed
+// The functionality is now directly available through LintContext methods
+/*
 // Helper trait for dynamic dispatch to check_with_structure
 pub trait MaybeDocumentStructure {
     fn check_with_structure_opt(
@@ -363,6 +344,7 @@ impl MaybeDocumentStructure for dyn Rule {
         None
     }
 }
+*/
 
 // Helper trait for dynamic dispatch to check_with_ast
 pub trait MaybeAst {

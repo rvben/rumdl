@@ -4,7 +4,6 @@
 //! See [docs/md054.md](../../docs/md054.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::document_structure::DocumentStructure;
 use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -145,13 +144,12 @@ impl Rule for MD054LinkImageStyle {
             return Ok(Vec::new());
         }
 
-        let structure = DocumentStructure::new(content);
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip code blocks and reference definitions early
-            if structure.is_in_code_block(line_num + 1) {
+            if ctx.is_in_code_block(line_num + 1) {
                 continue;
             }
             if REFERENCE_DEF_RE.is_match(line) {
@@ -255,7 +253,7 @@ impl Rule for MD054LinkImageStyle {
             for m in filtered_matches {
                 let match_start_char = line[..m.start].chars().count();
 
-                if !structure.is_in_code_span(line_num + 1, match_start_char + 1) && !self.is_style_allowed(m.style) {
+                if !ctx.is_in_code_span(line_num + 1, match_start_char + 1) && !self.is_style_allowed(m.style) {
                     let match_len = line[m.start..m.end].chars().count();
                     let (start_line, start_col, end_line, end_col) =
                         calculate_match_range(line_num + 1, line, match_start_char, match_len);

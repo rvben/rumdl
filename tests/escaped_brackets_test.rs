@@ -1,32 +1,4 @@
 use rumdl_lib::lint_context::LintContext;
-use rumdl_lib::utils::document_structure::DocumentStructure;
-
-#[test]
-fn test_escaped_brackets_in_document_structure() {
-    let content = r#"This is not a link: \[escaped text\]
-This is a real link: [actual link](https://example.com)
-Reference style: \[not a reference\][ref]
-Real reference: [real reference][ref]
-
-[ref]: https://example.com
-
-Images too: \![not an image](image.jpg)
-Real image: ![actual image](image.jpg)"#;
-
-    let doc_struct = DocumentStructure::new(content);
-
-    // Document structure should not detect escaped brackets as links
-    assert_eq!(
-        doc_struct.links.len(),
-        2,
-        "Should only detect 2 real links, not escaped ones"
-    );
-    assert_eq!(
-        doc_struct.images.len(),
-        1,
-        "Should only detect 1 real image, not escaped ones"
-    );
-}
 
 #[test]
 fn test_escaped_brackets_in_lint_context() {
@@ -57,22 +29,16 @@ Multiple \[escaped\] \[brackets\] on same line"#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
-    // Currently, both LintContext and DocumentStructure don't handle double backslash escapes
+    // Currently, LintContext doesn't handle double backslash escapes
     // This is a potential future enhancement: when \\ precedes [, the first \ escapes the second \
-    // making the bracket not escaped. For now, both implementations consistently don't detect this.
+    // making the bracket not escaped. For now, the implementation doesn't detect this.
     assert_eq!(
         ctx.links.len(),
         0,
         "Current behavior: doesn't handle double backslash escapes"
     );
 
-    // Test that DocumentStructure matches LintContext behavior
-    let doc_struct = DocumentStructure::new(content);
-    assert_eq!(
-        doc_struct.links.len(),
-        ctx.links.len(),
-        "DocumentStructure should match LintContext"
-    );
+    // LintContext behavior is now the canonical implementation
 }
 
 #[test]

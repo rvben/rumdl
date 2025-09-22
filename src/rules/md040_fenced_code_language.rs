@@ -1,5 +1,4 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 
 /// Rule MD040: Fenced code blocks should have a language
@@ -135,17 +134,6 @@ impl Rule for MD040FencedCodeLanguage {
         }
 
         Ok(warnings)
-    }
-
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> LintResult {
-        // For now, just delegate to the regular check method to ensure consistent behavior
-        // The document structure optimization can be re-added later once the logic is stable
-        self.check(ctx)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -364,18 +352,6 @@ impl Rule for MD040FencedCodeLanguage {
         Self: Sized,
     {
         Box::new(MD040FencedCodeLanguage)
-    }
-}
-
-impl DocumentStructureExtensions for MD040FencedCodeLanguage {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        let content = ctx.content;
-        // Rule is only relevant if content contains code fences
-        content.contains("```") || content.contains("~~~")
     }
 }
 

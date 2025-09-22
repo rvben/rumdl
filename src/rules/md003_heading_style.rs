@@ -250,10 +250,6 @@ impl Rule for MD003HeadingStyle {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        None
-    }
-
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let default_config = MD003Config::default();
         let json_value = serde_json::to_value(&default_config).ok()?;

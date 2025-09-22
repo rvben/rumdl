@@ -6,7 +6,6 @@
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::DocumentStructure;
 // No regex patterns needed for this rule
 use std::collections::HashMap;
 use toml;
@@ -559,27 +558,8 @@ impl Rule for MD005ListIndent {
         ctx.content.is_empty() || !ctx.lines.iter().any(|line| line.list_item.is_some())
     }
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        // If no lists in structure, return early
-        if structure.list_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Use optimized check - it's already efficient enough
-        self.check_optimized(ctx)
-    }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
-    }
-
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -627,21 +607,10 @@ impl Rule for MD005ListIndent {
     }
 }
 
-impl crate::utils::document_structure::DocumentStructureExtensions for MD005ListIndent {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> bool {
-        !doc_structure.list_lines.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
-    use crate::utils::document_structure::DocumentStructureExtensions;
 
     #[test]
     fn test_valid_unordered_list() {
@@ -796,28 +765,25 @@ Even more text";
     }
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_with_lint_context() {
         let rule = MD005ListIndent::default();
 
         // Test with consistent list indentation
         let content = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with inconsistent list indentation
         let content = "* Item 1\n* Item 2\n * Nested item\n  * Another nested item";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty()); // Should have at least one warning
 
         // Test with different level indentation issues
         let content = "* Item 1\n  * Nested item\n * Another nested item with wrong indent";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty()); // Should have at least one warning
     }
 
@@ -1007,17 +973,15 @@ Even more text";
     }
 
     #[test]
-    fn test_has_relevant_elements() {
+    fn test_should_skip_validation() {
         let rule = MD005ListIndent::default();
         let content = "* List item";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let doc_structure = DocumentStructure::new(content);
-        assert!(rule.has_relevant_elements(&ctx, &doc_structure));
+        assert!(!rule.should_skip(&ctx));
 
         let content = "No lists here";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let doc_structure = DocumentStructure::new(content);
-        assert!(!rule.has_relevant_elements(&ctx, &doc_structure));
+        assert!(rule.should_skip(&ctx));
     }
 
     #[test]

@@ -253,22 +253,15 @@ fn test_list_with_content() {
     let content = "Text\n* Item 1\n  Content\n* Item 2\n  More content\nText";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
-    // --- Temporary Debugging ---
-    let temp_structure = rumdl_lib::utils::document_structure::document_structure_from_str(ctx.content);
-    println!(
-        "DEBUG MD032 - test_list_with_content - structure.list_lines: {:?}",
-        temp_structure.list_lines
-    );
-
     let lines_vec: Vec<&str> = ctx.content.lines().collect();
     let num_lines_vec = lines_vec.len();
     let mut calculated_blocks: Vec<(usize, usize)> = Vec::new();
     let mut current_block_start_debug: Option<usize> = None;
     for i_debug in 0..num_lines_vec {
         let current_line_idx_1_debug = i_debug + 1;
-        let is_list_related_debug = temp_structure.list_lines.contains(&current_line_idx_1_debug);
-        let is_excluded_debug = temp_structure.is_in_code_block(current_line_idx_1_debug)
-            || temp_structure.is_in_front_matter(current_line_idx_1_debug);
+        let is_list_related_debug = ctx.lines[i_debug].list_item.is_some();
+        let is_excluded_debug =
+            ctx.is_in_code_block(current_line_idx_1_debug) || ctx.is_in_front_matter(current_line_idx_1_debug);
         if is_list_related_debug && !is_excluded_debug {
             if current_block_start_debug.is_none() {
                 current_block_start_debug = Some(current_line_idx_1_debug);

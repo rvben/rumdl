@@ -1,6 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockStyle;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use toml;
@@ -125,27 +124,6 @@ impl MD046CodeBlockStyle {
             }
 
             // Continue looking backwards through indented content
-        }
-
-        false
-    }
-
-    /// Helper function to check if a line is part of a list
-    fn is_in_list(&self, lines: &[&str], i: usize) -> bool {
-        // Check if current line is a list item
-        if i > 0 && lines[i - 1].trim_start().matches(&['-', '*', '+'][..]).count() > 0 {
-            return true;
-        }
-
-        // Check for numbered list items
-        if i > 0 {
-            let prev = lines[i - 1].trim_start();
-            if prev.len() > 2
-                && prev.chars().next().unwrap().is_numeric()
-                && (prev.contains(". ") || prev.contains(") "))
-            {
-                return true;
-            }
         }
 
         false
@@ -495,10 +473,6 @@ impl Rule for MD046CodeBlockStyle {
         "Code blocks should use a consistent style"
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         // Early return for empty content
         if ctx.content.is_empty() {
@@ -519,13 +493,78 @@ impl Rule for MD046CodeBlockStyle {
             return Ok(unclosed_warnings);
         }
 
-        // Try optimized path for style consistency checks
-        let structure = DocumentStructure::new(ctx.content);
-        if self.has_relevant_elements(ctx, &structure) {
-            return self.check_with_structure(ctx, &structure);
+        // Check for code block style consistency
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        let mut warnings = Vec::new();
+
+        // Check if we're in MkDocs mode
+        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+
+        // Determine the target style from the detected style in the document
+        let target_style = match self.config.style {
+            CodeBlockStyle::Consistent => self
+                .detect_style(ctx.content, is_mkdocs)
+                .unwrap_or(CodeBlockStyle::Fenced),
+            _ => self.config.style,
+        };
+
+        // Process each line to find style inconsistencies
+        let mut in_fenced_block = false;
+        let line_index = LineIndex::new(ctx.content.to_string());
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+
+            // Track fenced code blocks
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_fenced_block = !in_fenced_block;
+
+                if target_style == CodeBlockStyle::Indented && !in_fenced_block {
+                    // This is starting a fenced block but we want indented style
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "Use indented code blocks".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(i + 1, 1),
+                            replacement: String::new(),
+                        }),
+                    });
+                }
+            }
+            // Check for indented code blocks (when not in a fenced block)
+            else if !in_fenced_block
+                && self.is_indented_code_block(&lines, i, is_mkdocs)
+                && target_style == CodeBlockStyle::Fenced
+            {
+                // Check if this is the start of a new indented block
+                let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1, is_mkdocs);
+
+                if !prev_line_is_indented {
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "Use fenced code blocks".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range(i + 1, 1),
+                            replacement: format!("```\n{}", line.trim_start()),
+                        }),
+                    });
+                }
+            }
         }
 
-        Ok(Vec::new())
+        Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -688,232 +727,6 @@ impl Rule for MD046CodeBlockStyle {
             || (!ctx.content.contains("```") && !ctx.content.contains("~~~") && !ctx.content.contains("    "))
     }
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        if ctx.content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // First, always check for unclosed code blocks and nested fences
-        let line_index = LineIndex::new(ctx.content.to_string());
-        let unclosed_warnings = self.check_unclosed_code_blocks(ctx, &line_index)?;
-
-        // If we found unclosed blocks or nested fences, return those warnings first
-        if !unclosed_warnings.is_empty() {
-            return Ok(unclosed_warnings);
-        }
-
-        if !self.has_relevant_elements(ctx, structure) {
-            return Ok(Vec::new());
-        }
-
-        // Skip README.md files - they often contain a mix of styles for documentation purposes
-        if ctx.content.contains("# rumdl") && ctx.content.contains("## Quick Start") {
-            return Ok(Vec::new());
-        }
-
-        // If there are no code blocks, nothing to check
-        if structure.code_blocks.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Analyze code blocks in the content to determine what types are present
-        // If all blocks are fenced and target style is fenced, or all blocks are indented and target style is indented, return empty
-        let lines: Vec<&str> = ctx.content.lines().collect();
-        let mut all_fenced = true;
-
-        for block in &structure.code_blocks {
-            // If we find a non-fenced block, set all_fenced to false
-            match block.block_type {
-                crate::utils::document_structure::CodeBlockType::Fenced => {
-                    // Keep all_fenced as true
-                }
-                crate::utils::document_structure::CodeBlockType::Indented => {
-                    all_fenced = false;
-                    break;
-                }
-            }
-        }
-
-        // Fast path: If all blocks are fenced and target style is fenced (or consistent), return empty
-        if all_fenced
-            && (self.config.style == CodeBlockStyle::Fenced || self.config.style == CodeBlockStyle::Consistent)
-        {
-            return Ok(Vec::new());
-        }
-
-        let line_index = LineIndex::new(ctx.content.to_string());
-        let mut warnings = Vec::new();
-
-        // Check if we're in MkDocs mode
-        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
-
-        // Determine the target style from the detected style in the document
-        let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => {
-                // For consistent style, use the same logic as the check method to ensure compatibility
-                let mut first_fenced_line = usize::MAX;
-                let mut first_indented_line = usize::MAX;
-
-                for (i, line) in lines.iter().enumerate() {
-                    if first_fenced_line == usize::MAX
-                        && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~"))
-                    {
-                        first_fenced_line = i;
-                    } else if first_indented_line == usize::MAX && self.is_indented_code_block(&lines, i, is_mkdocs) {
-                        first_indented_line = i;
-                    }
-
-                    if first_fenced_line != usize::MAX && first_indented_line != usize::MAX {
-                        break;
-                    }
-                }
-
-                // Determine which style to use based on which appears first
-                if first_fenced_line != usize::MAX
-                    && (first_indented_line == usize::MAX || first_fenced_line < first_indented_line)
-                {
-                    CodeBlockStyle::Fenced
-                } else if first_indented_line != usize::MAX {
-                    CodeBlockStyle::Indented
-                } else {
-                    // Default to fenced if no code blocks found
-                    CodeBlockStyle::Fenced
-                }
-            }
-            _ => self.config.style,
-        };
-
-        // Keep track of code blocks we've processed to avoid duplicate warnings
-        let mut processed_blocks = std::collections::HashSet::new();
-
-        // Process each code block based on its type, following the same logic as the check method
-        for (i, line) in lines.iter().enumerate() {
-            let i_1based = i + 1; // Convert to 1-based for comparison with line numbers
-
-            // Skip if we've already processed this block
-            if processed_blocks.contains(&i_1based) {
-                continue;
-            }
-
-            // Check for fenced code blocks
-            if !self.is_in_list(&lines, i)
-                && (line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~"))
-            {
-                if target_style == CodeBlockStyle::Indented {
-                    // Calculate precise character range for the entire fence line
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
-
-                    // Add warning for opening fence
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: "Use fenced code blocks".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: String::new(), // Remove the opening fence
-                        }),
-                    });
-
-                    // Find closing fence and add warnings for all lines in the fenced block
-                    let mut j = i + 1;
-                    while j < lines.len() {
-                        if lines[j].trim_start().starts_with("```") || lines[j].trim_start().starts_with("~~~") {
-                            // Add warnings for content lines and closing fence
-                            for (k, line_content) in lines.iter().enumerate().take(j + 1).skip(i + 1) {
-                                // Calculate precise character range for the entire line
-                                let (start_line, start_col, end_line, end_col) =
-                                    calculate_line_range(k + 1, line_content);
-
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
-                                    line: start_line,
-                                    column: start_col,
-                                    end_line,
-                                    end_column: end_col,
-                                    message: "Use fenced code blocks".to_string(),
-                                    severity: Severity::Warning,
-                                    fix: Some(Fix {
-                                        range: line_index.line_col_to_byte_range(k + 1, 1),
-                                        replacement: if k == j {
-                                            String::new() // Remove closing fence
-                                        } else {
-                                            format!("    {}", line_content.trim_start())
-                                            // Convert content to indented
-                                        },
-                                    }),
-                                });
-                            }
-
-                            // Mark all lines in the fenced block as processed
-                            for k in i..=j {
-                                processed_blocks.insert(k + 1);
-                            }
-                            break;
-                        }
-                        j += 1;
-                    }
-                } else {
-                    // Mark this block as processed (for non-indented target styles)
-                    processed_blocks.insert(i_1based);
-
-                    // Find closing fence to mark all lines as processed
-                    let mut j = i + 1;
-                    while j < lines.len() {
-                        if lines[j].trim_start().starts_with("```") || lines[j].trim_start().starts_with("~~~") {
-                            // Mark all lines in between as processed
-                            for k in i + 1..=j {
-                                processed_blocks.insert(k + 1);
-                            }
-                            break;
-                        }
-                        j += 1;
-                    }
-                }
-            }
-            // Check for indented code blocks
-            else if !self.is_in_list(&lines, i) && self.is_indented_code_block(&lines, i, is_mkdocs) {
-                if target_style == CodeBlockStyle::Fenced {
-                    // Check if this is the start of a new indented block
-                    let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1, is_mkdocs);
-
-                    if !prev_line_is_indented {
-                        // Calculate precise character range for the entire indented line
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
-
-                        // Add warning for indented block that should be fenced
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "Use fenced code blocks".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range(i + 1, 1),
-                                replacement: "```\n".to_string() + line.trim_start(),
-                            }),
-                        });
-                    }
-                }
-
-                // Mark this line as processed
-                processed_blocks.insert(i_1based);
-            }
-        }
-
-        Ok(warnings)
-    }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -932,12 +745,6 @@ impl Rule for MD046CodeBlockStyle {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
         Box::new(Self::from_config_struct(rule_config))
-    }
-}
-
-impl DocumentStructureExtensions for MD046CodeBlockStyle {
-    fn has_relevant_elements(&self, ctx: &crate::lint_context::LintContext, structure: &DocumentStructure) -> bool {
-        !ctx.content.is_empty() && !structure.code_blocks.is_empty()
     }
 }
 

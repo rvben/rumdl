@@ -97,10 +97,6 @@ impl Rule for MD039NoSpaceInLinks {
         RuleCategory::Link
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         let content = ctx.content;
         content.is_empty() || !self.has_links_or_images(content)
@@ -348,16 +344,6 @@ impl Rule for MD039NoSpaceInLinks {
         Self: Sized,
     {
         Box::new(Self)
-    }
-}
-
-impl crate::utils::document_structure::DocumentStructureExtensions for MD039NoSpaceInLinks {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> bool {
-        !doc_structure.links.is_empty() || !doc_structure.images.is_empty()
     }
 }
 

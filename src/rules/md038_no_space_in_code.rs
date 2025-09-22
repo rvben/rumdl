@@ -302,10 +302,6 @@ impl Rule for MD038NoSpaceInCode {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let mut map = toml::map::Map::new();
         map.insert(
@@ -342,18 +338,6 @@ impl Rule for MD038NoSpaceInCode {
             allow_single_char_spaces,
             allow_command_spaces,
         })
-    }
-}
-
-impl crate::utils::document_structure::DocumentStructureExtensions for MD038NoSpaceInCode {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> bool {
-        // We now use centralized code spans from LintContext
-        // Quick check without parsing
-        ctx.content.contains('`')
     }
 }
 

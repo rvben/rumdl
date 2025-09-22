@@ -1,6 +1,4 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::document_structure_from_str;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use lazy_static::lazy_static;
@@ -102,14 +100,13 @@ impl MD032BlanksAroundLists {
         &self,
         prev_line: &str,
         ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
         prev_line_num: usize,
         current_line_num: usize,
     ) -> bool {
         let trimmed_prev = prev_line.trim();
 
         // Always require blank lines after code blocks, front matter, etc.
-        if structure.is_in_code_block(prev_line_num) || structure.is_in_front_matter(prev_line_num) {
+        if ctx.is_in_code_block(prev_line_num) || ctx.is_in_front_matter(prev_line_num) {
             return true;
         }
 
@@ -285,7 +282,6 @@ impl MD032BlanksAroundLists {
     fn perform_checks(
         &self,
         ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
         lines: &[&str],
         list_blocks: &[(usize, usize, String)],
         line_index: &LineIndex,
@@ -307,7 +303,7 @@ impl MD032BlanksAroundLists {
             }
 
             // Skip if in code block or front matter
-            if structure.is_in_code_block(line_num) || structure.is_in_front_matter(line_num) {
+            if ctx.is_in_code_block(line_num) || ctx.is_in_front_matter(line_num) {
                 continue;
             }
 
@@ -317,7 +313,7 @@ impl MD032BlanksAroundLists {
                 if line_idx > 0 {
                     let prev_line = lines[line_idx - 1];
                     let prev_is_blank = is_blank_in_context(prev_line);
-                    let prev_excluded = structure.is_in_code_block(line_idx) || structure.is_in_front_matter(line_idx);
+                    let prev_excluded = ctx.is_in_code_block(line_idx) || ctx.is_in_front_matter(line_idx);
 
                     if !prev_is_blank && !prev_excluded {
                         // This ordered list item starting with non-1 needs a blank line before it
@@ -346,8 +342,8 @@ impl MD032BlanksAroundLists {
                 let prev_line_actual_idx_0 = start_line - 2;
                 let prev_line_actual_idx_1 = start_line - 1;
                 let prev_line_str = lines[prev_line_actual_idx_0];
-                let is_prev_excluded = structure.is_in_code_block(prev_line_actual_idx_1)
-                    || structure.is_in_front_matter(prev_line_actual_idx_1);
+                let is_prev_excluded =
+                    ctx.is_in_code_block(prev_line_actual_idx_1) || ctx.is_in_front_matter(prev_line_actual_idx_1);
                 let prev_prefix = BLOCKQUOTE_PREFIX_RE
                     .find(prev_line_str)
                     .map_or(String::new(), |m| m.as_str().to_string());
@@ -356,13 +352,8 @@ impl MD032BlanksAroundLists {
 
                 // Only require blank lines for content in the same context (same blockquote level)
                 // and when the context actually requires it
-                let should_require = self.should_require_blank_line_before(
-                    prev_line_str,
-                    ctx,
-                    structure,
-                    prev_line_actual_idx_1,
-                    start_line,
-                );
+                let should_require =
+                    self.should_require_blank_line_before(prev_line_str, ctx, prev_line_actual_idx_1, start_line);
                 if !is_prev_excluded && !prev_is_blank && prefixes_match && should_require {
                     // Calculate precise character range for the entire list line that needs a blank line before it
                     let (start_line, start_col, end_line, end_col) =
@@ -390,8 +381,8 @@ impl MD032BlanksAroundLists {
                 let next_line_str = lines[next_line_idx_0];
                 // Check if next line is excluded - in code block, front matter, or starts an indented code block
                 // Only exclude code fence lines if they're indented (part of list content)
-                let is_next_excluded = structure.is_in_code_block(next_line_idx_1)
-                    || structure.is_in_front_matter(next_line_idx_1)
+                let is_next_excluded = ctx.is_in_code_block(next_line_idx_1)
+                    || ctx.is_in_front_matter(next_line_idx_1)
                     || (next_line_idx_0 < ctx.lines.len()
                         && ctx.lines[next_line_idx_0].in_code_block
                         && ctx.lines[next_line_idx_0].indent >= 2
@@ -439,18 +430,6 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        // Delegate to optimized check_with_structure by creating a temporary DocumentStructure
-        // This fallback path should rarely be used since the main lint engine calls check_with_structure
-        let structure = document_structure_from_str(ctx.content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    /// Optimized check using pre-computed document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
         let content = ctx.content;
         let lines: Vec<&str> = content.lines().collect();
         let line_index = LineIndex::new(content.to_string());
@@ -466,13 +445,11 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(Vec::new());
         }
 
-        self.perform_checks(ctx, structure, &lines, &list_blocks, &line_index)
+        self.perform_checks(ctx, &lines, &list_blocks, &line_index)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // Delegate to helper method with temporary DocumentStructure
-        let structure = document_structure_from_str(ctx.content);
-        self.fix_with_structure(ctx, &structure)
+        self.fix_with_structure_impl(ctx)
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
@@ -515,19 +492,11 @@ impl Rule for MD032BlanksAroundLists {
             allow_after_colons,
         })
     }
-
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
 }
 
 impl MD032BlanksAroundLists {
-    /// Helper method for fixing with a pre-computed DocumentStructure
-    fn fix_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> Result<String, LintError> {
+    /// Helper method for fixing implementation
+    fn fix_with_structure_impl(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let lines: Vec<&str> = ctx.content.lines().collect();
         let num_lines = lines.len();
         if num_lines == 0 {
@@ -547,8 +516,8 @@ impl MD032BlanksAroundLists {
             if start_line > 1 {
                 let prev_line_actual_idx_0 = start_line - 2;
                 let prev_line_actual_idx_1 = start_line - 1;
-                let is_prev_excluded = structure.is_in_code_block(prev_line_actual_idx_1)
-                    || structure.is_in_front_matter(prev_line_actual_idx_1);
+                let is_prev_excluded =
+                    ctx.is_in_code_block(prev_line_actual_idx_1) || ctx.is_in_front_matter(prev_line_actual_idx_1);
                 let prev_prefix = BLOCKQUOTE_PREFIX_RE
                     .find(lines[prev_line_actual_idx_0])
                     .map_or(String::new(), |m| m.as_str().to_string());
@@ -556,7 +525,6 @@ impl MD032BlanksAroundLists {
                 let should_require = self.should_require_blank_line_before(
                     lines[prev_line_actual_idx_0],
                     ctx,
-                    structure,
                     prev_line_actual_idx_1,
                     start_line,
                 );
@@ -576,8 +544,8 @@ impl MD032BlanksAroundLists {
                 let line_after_block_content_str = lines[after_block_line_idx_0];
                 // Check if next line is excluded - in code block, front matter, or starts an indented code block
                 // Only exclude code fence lines if they're indented (part of list content)
-                let is_line_after_excluded = structure.is_in_code_block(after_block_line_idx_1)
-                    || structure.is_in_front_matter(after_block_line_idx_1)
+                let is_line_after_excluded = ctx.is_in_code_block(after_block_line_idx_1)
+                    || ctx.is_in_front_matter(after_block_line_idx_1)
                     || (after_block_line_idx_0 < ctx.lines.len()
                         && ctx.lines[after_block_line_idx_0].in_code_block
                         && ctx.lines[after_block_line_idx_0].indent >= 2
@@ -614,33 +582,6 @@ impl MD032BlanksAroundLists {
             result.push('\n');
         }
         Ok(result)
-    }
-}
-
-impl DocumentStructureExtensions for MD032BlanksAroundLists {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        let content = ctx.content;
-
-        // Early return for empty content
-        if content.is_empty() {
-            return false;
-        }
-
-        // Quick check for list markers
-        if !content.contains('-')
-            && !content.contains('*')
-            && !content.contains('+')
-            && !content.chars().any(|c| c.is_numeric())
-        {
-            return false;
-        }
-
-        // This rule is relevant if we found any list blocks
-        !ctx.list_blocks.is_empty()
     }
 }
 
@@ -1088,19 +1029,16 @@ mod tests {
     fn test_fix_list_with_code_blocks_inside() {
         let content = "Text\n- Item 1\n  ```\n  code\n  ```\n- Item 2\nText";
         let warnings = lint(content);
-        // MD032 detects the code block as breaking the list, so we get 3 warnings:
-        // Line 2: preceded, Line 6: preceded + followed
-        assert_eq!(
-            warnings.len(),
-            3,
-            "Should warn for missing blanks around list items separated by code blocks"
-        );
+        // MD032 detects missing blanks around the list
+        // Line 2: list should be preceded by blank line
+        // Line 6: list should be followed by blank line
+        assert_eq!(warnings.len(), 2, "Should warn for missing blanks around list");
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
-        let expected = "Text\n\n- Item 1\n  ```\n  code\n  ```\n\n- Item 2\n\nText";
+        let expected = "Text\n\n- Item 1\n  ```\n  code\n  ```\n- Item 2\n\nText";
         assert_eq!(
             fixed_content, expected,
             "Fix should handle lists with internal code blocks"

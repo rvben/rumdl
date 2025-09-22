@@ -1,6 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::range_utils::calculate_heading_range;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -221,16 +220,6 @@ impl Rule for MD043RequiredHeadings {
         Ok(content.to_string())
     }
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        _structure: &DocumentStructure,
-    ) -> LintResult {
-        // Just use the regular check method which now uses cached headings
-        self.check(_ctx)
-    }
-
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::Heading
@@ -277,21 +266,10 @@ impl Rule for MD043RequiredHeadings {
     }
 }
 
-impl DocumentStructureExtensions for MD043RequiredHeadings {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        !doc_structure.heading_lines.is_empty() || !self.config.headings.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
-    use crate::utils::document_structure::document_structure_from_str;
 
     #[test]
     fn test_extract_headings_code_blocks() {
@@ -332,34 +310,22 @@ mod tests {
 
         // Test with matching headings
         let content = "# Introduction\n\nContent\n\n# Method\n\nMore content\n\n# Results\n\nFinal content";
-        let structure = document_structure_from_str(content);
         let warnings = rule
-            .check_with_structure(
-                &LintContext::new(content, crate::config::MarkdownFlavor::Standard),
-                &structure,
-            )
+            .check(&LintContext::new(content, crate::config::MarkdownFlavor::Standard))
             .unwrap();
         assert!(warnings.is_empty(), "Expected no warnings for matching headings");
 
         // Test with mismatched headings
         let content = "# Introduction\n\nContent\n\n# Results\n\nSkipped method";
-        let structure = document_structure_from_str(content);
         let warnings = rule
-            .check_with_structure(
-                &LintContext::new(content, crate::config::MarkdownFlavor::Standard),
-                &structure,
-            )
+            .check(&LintContext::new(content, crate::config::MarkdownFlavor::Standard))
             .unwrap();
         assert!(!warnings.is_empty(), "Expected warnings for mismatched headings");
 
         // Test with no headings but requirements exist
         let content = "No headings here, just plain text";
-        let structure = document_structure_from_str(content);
         let warnings = rule
-            .check_with_structure(
-                &LintContext::new(content, crate::config::MarkdownFlavor::Standard),
-                &structure,
-            )
+            .check(&LintContext::new(content, crate::config::MarkdownFlavor::Standard))
             .unwrap();
         assert!(!warnings.is_empty(), "Expected warnings when headings are missing");
 
@@ -371,12 +337,8 @@ mod tests {
         ];
         let rule_setext = MD043RequiredHeadings::new(required_setext);
         let content = "Introduction\n===========\n\nContent\n\nMethod\n------\n\nMore content\n\nResults\n=======\n\nFinal content";
-        let structure = document_structure_from_str(content);
         let warnings = rule_setext
-            .check_with_structure(
-                &LintContext::new(content, crate::config::MarkdownFlavor::Standard),
-                &structure,
-            )
+            .check(&LintContext::new(content, crate::config::MarkdownFlavor::Standard))
             .unwrap();
         assert!(warnings.is_empty(), "Expected no warnings for matching setext headings");
     }

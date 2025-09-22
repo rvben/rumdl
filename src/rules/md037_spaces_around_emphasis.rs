@@ -2,7 +2,6 @@
 ///
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::emphasis_utils::{
     EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
 };
@@ -81,32 +80,12 @@ impl Rule for MD037NoSpaceInEmphasis {
             return Ok(vec![]);
         }
 
-        // Fallback path: create structure manually (should rarely be used)
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    /// Enhanced function to check for spaces inside emphasis markers
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let _timer = crate::profiling::ScopedTimer::new("MD037_check_with_structure");
-
-        let content = ctx.content;
-
-        // Early return if the content is empty or has no emphasis characters
-        if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
-            return Ok(vec![]);
-        }
-
         let mut warnings = Vec::new();
 
-        // Process the content line by line using the document structure
+        // Process the content line by line
         for (line_num, line) in content.lines().enumerate() {
             // Skip if in code block or front matter
-            if structure.is_in_code_block(line_num + 1) || structure.is_in_front_matter(line_num + 1) {
+            if ctx.is_in_code_block(line_num + 1) || ctx.is_in_front_matter(line_num + 1) {
                 continue;
             }
 
@@ -221,26 +200,11 @@ impl Rule for MD037NoSpaceInEmphasis {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
         Box::new(MD037NoSpaceInEmphasis)
-    }
-}
-
-impl DocumentStructureExtensions for MD037NoSpaceInEmphasis {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        let content = ctx.content;
-        content.contains('*') || content.contains('_')
     }
 }
 
@@ -387,7 +351,6 @@ impl MD037NoSpaceInEmphasis {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
-    use crate::utils::document_structure::DocumentStructure;
 
     #[test]
     fn test_emphasis_marker_parsing() {
@@ -421,23 +384,20 @@ mod tests {
 
         // Test with no spaces inside emphasis - should pass
         let content = "This is *correct* emphasis and **strong emphasis**";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "No warnings expected for correct emphasis");
 
         // Test with actual spaces inside emphasis - use content that should warn
         let content = "This is * text with spaces * and more content";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty(), "Expected warnings for spaces in emphasis");
 
         // Test with code blocks - emphasis in code should be ignored
         let content = "This is *correct* emphasis\n```\n* incorrect * in code block\n```\nOutside block with * spaces in emphasis *";
-        let structure = DocumentStructure::new(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(
             !result.is_empty(),
             "Expected warnings for spaces in emphasis outside code block"

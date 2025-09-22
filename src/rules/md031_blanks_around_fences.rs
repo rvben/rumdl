@@ -3,7 +3,6 @@
 /// See [docs/md031.md](../../docs/md031.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
@@ -408,85 +407,6 @@ impl Rule for MD031BlanksAroundFences {
         content.is_empty() || (!content.contains("```") && !content.contains("~~~"))
     }
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
-        // Early return if no code blocks
-        if !self.has_relevant_elements(ctx, structure) {
-            return Ok(Vec::new());
-        }
-
-        let line_index = LineIndex::new(content.to_string());
-        let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Process each code fence start and end
-        for &start_line in &structure.fenced_code_block_starts {
-            let line_num = start_line;
-
-            // Check for blank line before fence
-            if line_num > 1
-                && !Self::is_empty_line(lines[line_num - 2])
-                && self.should_require_blank_line(line_num - 1, &lines)
-            {
-                // Calculate precise character range for the entire fence line that needs a blank line before it
-                let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, lines[line_num - 1]);
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    message: "No blank line before fenced code block".to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
-                        replacement: "\n".to_string(),
-                    }),
-                });
-            }
-        }
-
-        for &end_line in &structure.fenced_code_block_ends {
-            let line_num = end_line;
-
-            // Check for blank line after fence
-            if line_num < lines.len()
-                && !Self::is_empty_line(lines[line_num])
-                && self.should_require_blank_line(line_num - 1, &lines)
-            {
-                // Calculate precise character range for the entire fence line that needs a blank line after it
-                let (start_line_fence, start_col_fence, end_line_fence, end_col_fence) =
-                    calculate_line_range(line_num, lines[line_num - 1]);
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    line: start_line_fence,
-                    column: start_col_fence,
-                    end_line: end_line_fence,
-                    end_column: end_col_fence,
-                    message: "No blank line after fenced code block".to_string(),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(
-                            line_num,
-                            lines[line_num - 1].len() + 1,
-                            0,
-                        ),
-                        replacement: "\n".to_string(),
-                    }),
-                });
-            }
-        }
-
-        Ok(warnings)
-    }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -515,31 +435,19 @@ impl Rule for MD031BlanksAroundFences {
     }
 }
 
-impl DocumentStructureExtensions for MD031BlanksAroundFences {
-    fn has_relevant_elements(
-        &self,
-        _ctx: &crate::lint_context::LintContext,
-        doc_structure: &DocumentStructure,
-    ) -> bool {
-        !doc_structure.fenced_code_block_starts.is_empty() || !doc_structure.fenced_code_block_ends.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
-    use crate::utils::document_structure::document_structure_from_str;
 
     #[test]
-    fn test_with_document_structure() {
+    fn test_basic_functionality() {
         let rule = MD031BlanksAroundFences::default();
 
         // Test with properly formatted code blocks
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\n\nSome text here.";
-        let structure = document_structure_from_str(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
+        let warnings = rule.check(&ctx).unwrap();
         assert!(
             warnings.is_empty(),
             "Expected no warnings for properly formatted code blocks"
@@ -547,9 +455,8 @@ mod tests {
 
         // Test with missing blank line before
         let content = "# Test Code Blocks\n```rust\nfn main() {}\n```\n\nSome text here.";
-        let structure = document_structure_from_str(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
+        let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1, "Expected 1 warning for missing blank line before");
         assert_eq!(warnings[0].line, 2, "Warning should be on line 2");
         assert!(
@@ -559,9 +466,8 @@ mod tests {
 
         // Test with missing blank line after
         let content = "# Test Code Blocks\n\n```rust\nfn main() {}\n```\nSome text here.";
-        let structure = document_structure_from_str(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
+        let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1, "Expected 1 warning for missing blank line after");
         assert_eq!(warnings[0].line, 5, "Warning should be on line 5");
         assert!(
@@ -571,9 +477,8 @@ mod tests {
 
         // Test with missing blank lines both before and after
         let content = "# Test Code Blocks\n```rust\nfn main() {}\n```\nSome text here.";
-        let structure = document_structure_from_str(content);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let warnings = rule.check_with_structure(&ctx, &structure).unwrap();
+        let warnings = rule.check(&ctx).unwrap();
         assert_eq!(
             warnings.len(),
             2,

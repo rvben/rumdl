@@ -1,6 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
-use crate::utils::document_structure::DocumentStructure;
 use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -115,8 +114,7 @@ impl Rule for MD049EmphasisStyle {
             return Ok(warnings);
         }
 
-        // Create document structure to skip code blocks
-        let structure = DocumentStructure::new(content);
+        // Use LintContext to skip code blocks
 
         // Collect all emphasis from the document
         let mut emphasis_info = vec![];
@@ -128,7 +126,7 @@ impl Rule for MD049EmphasisStyle {
             let line_num = line_idx + 1;
 
             // Skip if in code block or front matter
-            if structure.is_in_code_block(line_num) || structure.is_in_front_matter(line_num) {
+            if ctx.is_in_code_block(line_num) || ctx.is_in_front_matter(line_num) {
                 abs_pos += line.len() + 1; // +1 for newline
                 continue;
             }

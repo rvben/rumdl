@@ -3,7 +3,6 @@
 /// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
 use toml;
 
@@ -228,17 +227,6 @@ impl Rule for MD029OrderedListPrefix {
         Ok(result)
     }
 
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> LintResult {
-        // For MD029, we need to use the regular check method to get lazy continuation detection
-        // The document structure optimization doesn't provide enough context for proper lazy continuation checking
-        self.check(ctx)
-    }
-
     /// Get the category of this rule for selective processing
     fn category(&self) -> RuleCategory {
         RuleCategory::List
@@ -254,10 +242,6 @@ impl Rule for MD029OrderedListPrefix {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
-    }
-
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -281,20 +265,6 @@ impl Rule for MD029OrderedListPrefix {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD029Config>(config);
         Box::new(MD029OrderedListPrefix::from_config_struct(rule_config))
-    }
-}
-
-impl DocumentStructureExtensions for MD029OrderedListPrefix {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        // This rule is relevant if there are any ordered list items
-        // We need to check even lists with all "1." items for:
-        // 1. Incorrect numbering according to configured style
-        // 2. Lazy continuation issues
-        ctx.list_blocks.iter().any(|block| block.is_ordered)
     }
 }
 
@@ -665,41 +635,35 @@ impl MD029OrderedListPrefix {
 mod tests {
     use super::*;
 
-    use crate::utils::document_structure::DocumentStructure;
-
     #[test]
-    fn test_with_document_structure() {
+    fn test_basic_functionality() {
         // Test with default style (ordered)
         let rule = MD029OrderedListPrefix::default();
 
         // Test with correctly ordered list
         let content = "1. First item\n2. Second item\n3. Third item";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with incorrectly ordered list
         let content = "1. First item\n3. Third item\n5. Fifth item";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 5
 
         // Test with one-one style
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOne);
         let content = "1. First item\n2. Second item\n3. Third item";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 2 and 3
 
         // Test with ordered0 style
         let rule = MD029OrderedListPrefix::new(ListStyle::Ordered0);
         let content = "0. First item\n1. Second item\n2. Third item";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
 
@@ -713,11 +677,10 @@ mod tests {
 
         // Test with mixed valid and edge case content
         let content = "1. First item\n3. Wrong number\n2. Another wrong number";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         // This should not panic and should produce warnings for incorrect numbering
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 2
 
         // Verify the warnings have correct content
@@ -736,11 +699,10 @@ mod tests {
             content.push_str(&format!("{}. Item {}\n", i + 1, i)); // All wrong numbers
         }
 
-        let structure = DocumentStructure::new(&content);
         let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
 
         // This should complete without issues and produce warnings for all items
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 100); // Should have warnings for all 100 items
 
         // Verify first and last warnings
@@ -754,9 +716,8 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
 
         let content = "1. First item\n1. Second item\n1. Third item";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "All ones should be valid in OneOrOrdered mode");
     }
 
@@ -766,9 +727,8 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
 
         let content = "1. First item\n2. Second item\n3. Third item";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Sequential numbering should be valid in OneOrOrdered mode"
@@ -781,9 +741,8 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
 
         let content = "1. First item\n2. Second item\n1. Third item";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Mixed style should produce one warning");
         assert!(result[0].message.contains("1 does not match style (expected 3)"));
     }
@@ -794,9 +753,8 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
 
         let content = "# First list\n\n1. Item A\n1. Item B\n\n# Second list\n\n1. Item X\n2. Item Y\n3. Item Z";
-        let structure = DocumentStructure::new(content);
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check_with_structure(&ctx, &structure).unwrap();
+        let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Separate lists can use different styles in OneOrOrdered mode"

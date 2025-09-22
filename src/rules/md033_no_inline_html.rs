@@ -4,7 +4,6 @@
 //! See [docs/md033.md](../../docs/md033.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::document_structure::{DocumentStructure, DocumentStructureExtensions};
 use crate::utils::kramdown_utils::{is_kramdown_block_attribute, is_kramdown_extension};
 use crate::utils::range_utils::calculate_html_tag_range;
 use crate::utils::regex_cache::*;
@@ -170,7 +169,6 @@ impl MD033NoInlineHtml {
         &self,
         ctx: &crate::lint_context::LintContext,
         content: &str,
-        structure: &DocumentStructure,
         nomarkdown_ranges: &[(usize, usize)],
         warnings: &mut Vec<LintWarning>,
     ) {
@@ -190,7 +188,7 @@ impl MD033NoInlineHtml {
             let line_num = i + 1;
 
             // Skip code blocks and empty lines
-            if line.trim().is_empty() || structure.is_in_code_block(line_num) {
+            if line.trim().is_empty() || ctx.is_in_code_block(line_num) {
                 continue;
             }
 
@@ -220,7 +218,7 @@ impl MD033NoInlineHtml {
                     let next_line_num = j + 1;
 
                     // Stop if we hit a code block
-                    if structure.is_in_code_block(next_line_num) {
+                    if ctx.is_in_code_block(next_line_num) {
                         break;
                     }
 
@@ -291,17 +289,6 @@ impl Rule for MD033NoInlineHtml {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let structure = DocumentStructure::new(content);
-        self.check_with_structure(ctx, &structure)
-    }
-
-    /// Optimized check using document structure
-    fn check_with_structure(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        structure: &DocumentStructure,
-    ) -> LintResult {
-        let content = ctx.content;
 
         // Early return: if no HTML tags at all, skip processing
         if content.is_empty() || !has_html_tags(content) {
@@ -354,7 +341,7 @@ impl Rule for MD033NoInlineHtml {
             if line.trim().is_empty() {
                 continue;
             }
-            if structure.is_in_code_block(line_num) {
+            if ctx.is_in_code_block(line_num) {
                 continue;
             }
             // Skip lines that are indented code blocks (4+ spaces or tab) per CommonMark spec
@@ -402,7 +389,7 @@ impl Rule for MD033NoInlineHtml {
 
                 // Skip tags inside code spans
                 let tag_start_col = tag_match.start() + 1; // 1-indexed
-                if structure.is_in_code_span(line_num, tag_start_col) {
+                if ctx.is_in_code_span(line_num, tag_start_col) {
                     continue;
                 }
 
@@ -433,7 +420,7 @@ impl Rule for MD033NoInlineHtml {
         }
 
         // Third pass: find multi-line HTML tags
-        self.find_multiline_html_tags(ctx, ctx.content, structure, &nomarkdown_ranges, &mut warnings);
+        self.find_multiline_html_tags(ctx, ctx.content, &nomarkdown_ranges, &mut warnings);
 
         Ok(warnings)
     }
@@ -462,10 +449,6 @@ impl Rule for MD033NoInlineHtml {
         self
     }
 
-    fn as_maybe_document_structure(&self) -> Option<&dyn crate::rule::MaybeDocumentStructure> {
-        Some(self)
-    }
-
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let json_value = serde_json::to_value(&self.config).ok()?;
         Some((
@@ -480,17 +463,6 @@ impl Rule for MD033NoInlineHtml {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD033Config>(config);
         Box::new(Self::from_config_struct(rule_config))
-    }
-}
-
-impl DocumentStructureExtensions for MD033NoInlineHtml {
-    fn has_relevant_elements(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        _doc_structure: &DocumentStructure,
-    ) -> bool {
-        // Rule is only relevant if content contains potential HTML tags
-        ctx.content.contains('<') && ctx.content.contains('>')
     }
 }
 
