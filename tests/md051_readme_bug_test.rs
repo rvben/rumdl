@@ -15,10 +15,9 @@ fn test_md051_readme_headings() {
 
     let warnings = rumdl_lib::lint(&content, &md051_rules, false, MarkdownFlavor::Standard).unwrap();
 
-    // TODO: Fix MD051 anchor generation bug
-    // These anchors are incorrectly reported as missing even though the headings exist
-    // This is a known issue that needs to be fixed in a future release
-    let known_false_positives = vec![
+    // Check that we no longer have false positives for these anchors
+    // This bug was fixed in v0.0.144
+    let previously_false_positives = vec![
         "#markdownlint-migration",
         "#configuration-file-example",
         "#initializing-configuration",
@@ -26,13 +25,12 @@ fn test_md051_readme_headings() {
         "#configuration-output",
     ];
 
-    // For now, we expect these false positives to exist
-    // This test should be updated once the MD051 anchor generation bug is fixed
-    for fp in &known_false_positives {
-        let has_warning = warnings.iter().any(|w| w.message.contains(fp));
+    // Verify that these anchors are NOT reported as missing
+    for anchor in &previously_false_positives {
+        let has_warning = warnings.iter().any(|w| w.message.contains(anchor));
         assert!(
-            has_warning,
-            "Expected MD051 to report '{fp}' as missing (known bug to be fixed)"
+            !has_warning,
+            "MD051 incorrectly reported '{anchor}' as missing - regression detected"
         );
     }
 }

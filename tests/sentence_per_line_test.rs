@@ -95,7 +95,7 @@ fn test_markdown_elements_preserved_in_fix() {
     let fix = result[0].fix.as_ref().unwrap();
     assert_eq!(
         fix.replacement.trim(),
-        "This has **bold text** .\nAnd this has [a link](https://example.com) ."
+        "This has **bold text**.\nAnd this has [a link](https://example.com)."
     );
 }
 
