@@ -24,7 +24,7 @@ lazy_static! {
 pub struct CodeBlockUtils;
 
 impl CodeBlockUtils {
-    /// Detect all code blocks in the content
+    /// Detect all code blocks in the content (NOT including inline code spans)
     pub fn detect_code_blocks(content: &str) -> Vec<(usize, usize)> {
         let mut blocks = Vec::new();
         let mut in_code_block = false;
@@ -127,78 +127,21 @@ impl CodeBlockUtils {
             blocks.push((indented_block_start, content.len()));
         }
 
-        // Find inline code spans
-        let mut i = 0;
-        while i < content.len() {
-            if let Some(m) = CODE_SPAN_PATTERN.find_at(content, i) {
-                let backtick_length = m.end() - m.start();
-                let start = m.start();
-
-                // Check if this is a fence marker (3+ backticks at start of line)
-                if backtick_length >= 3 {
-                    // Check if it's at the start of a line
-                    let at_line_start = start == 0 || content.as_bytes()[start - 1] == b'\n';
-                    if at_line_start {
-                        // This is a fence, not an inline code span - skip it
-                        i = m.end();
-                        continue;
-                    }
-                }
-
-                // Check if these backticks are escaped (preceded by backslash)
-                // In Markdown, \` is an escaped backtick and should not start a code span
-                let is_escaped = start > 0 && content.as_bytes()[start - 1] == b'\\';
-
-                if is_escaped {
-                    // Skip escaped backticks
-                    i = m.end();
-                    continue;
-                }
-
-                // Find matching closing backticks (that are also not escaped)
-                let search_str = &content[m.end()..];
-                let backtick_pattern = "`".repeat(backtick_length);
-
-                // Look for unescaped closing backticks
-                let mut search_pos = 0;
-                let mut found_end = None;
-                while search_pos < search_str.len() {
-                    if let Some(pos) = search_str[search_pos..].find(&backtick_pattern) {
-                        let absolute_pos = m.end() + search_pos + pos;
-                        // Check if these closing backticks are escaped
-                        if absolute_pos > 0 && content.as_bytes()[absolute_pos - 1] == b'\\' {
-                            // These are escaped, keep searching
-                            // Advance past the escaped backticks, but at least by 1
-                            let advance = (pos + backtick_length).max(1);
-                            search_pos += advance;
-                        } else {
-                            // Found unescaped closing backticks
-                            found_end = Some(search_pos + pos);
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                if let Some(end_pos) = found_end {
-                    let end = m.end() + end_pos + backtick_length;
-                    blocks.push((start, end));
-                    i = end;
-                } else {
-                    i = m.end();
-                }
-            } else {
-                break;
-            }
-        }
+        // Note: We DO NOT include inline code spans here - they are not code blocks!
+        // Inline code spans are handled separately by the code span parser.
 
         blocks.sort_by(|a, b| a.0.cmp(&b.0));
         blocks
     }
 
-    /// Check if a position is within a code block or code span
+    /// Check if a position is within a code block (for compatibility)
     pub fn is_in_code_block_or_span(blocks: &[(usize, usize)], pos: usize) -> bool {
+        // This is a compatibility function - it only checks code blocks now, not spans
+        blocks.iter().any(|&(start, end)| pos >= start && pos < end)
+    }
+
+    /// Check if a position is within a code block (NOT including inline code spans)
+    pub fn is_in_code_block(blocks: &[(usize, usize)], pos: usize) -> bool {
         blocks.iter().any(|&(start, end)| pos >= start && pos < end)
     }
 
@@ -402,23 +345,21 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_code_spans() {
-        // Single backtick code span
+    fn test_inline_code_spans_not_detected() {
+        // Inline code spans should NOT be detected as code blocks
         let content = "Text with `inline code` here";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(&content[blocks[0].0..blocks[0].1], "`inline code`");
+        assert_eq!(blocks.len(), 0); // No blocks, only inline spans
 
         // Multiple backtick code span
         let content = "Text with ``code with ` backtick`` here";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(&content[blocks[0].0..blocks[0].1], "``code with ` backtick``");
+        assert_eq!(blocks.len(), 0); // No blocks, only inline spans
 
         // Multiple code spans
         let content = "Has `code1` and `code2` spans";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks.len(), 0); // No blocks, only inline spans
     }
 
     #[test]
@@ -438,19 +379,14 @@ mod tests {
     fn test_mixed_code_blocks_and_spans() {
         let content = "Has `span1` text\n```\nblock\n```\nand `span2`";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // The function may detect overlapping blocks (fenced block and inline spans)
-        // We should have at least: span1, fenced block, span2
-        assert!(blocks.len() >= 3);
+        // Should only detect the fenced block, NOT the inline spans
+        assert_eq!(blocks.len(), 1);
 
-        // Check we have the expected elements
-        assert!(blocks.iter().any(|(s, e)| &content[*s..*e] == "`span1`"));
-        assert!(blocks.iter().any(|(s, e)| &content[*s..*e] == "`span2`"));
+        // Check we have the fenced block only
         assert!(blocks.iter().any(|(s, e)| content[*s..*e].contains("block")));
-
-        // Verify they're sorted by position (allowing duplicates/overlaps)
-        for i in 1..blocks.len() {
-            assert!(blocks[i - 1].0 <= blocks[i].0);
-        }
+        // Should NOT detect inline spans
+        assert!(!blocks.iter().any(|(s, e)| &content[*s..*e] == "`span1`"));
+        assert!(!blocks.iter().any(|(s, e)| &content[*s..*e] == "`span2`"));
     }
 
     #[test]
@@ -528,11 +464,10 @@ mod tests {
 
     #[test]
     fn test_code_span_with_spaces() {
-        // Code spans can have leading/trailing spaces
+        // Code spans should NOT be detected as code blocks
         let content = "Text ` code with spaces ` more";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(&content[blocks[0].0..blocks[0].1], "` code with spaces `");
+        assert_eq!(blocks.len(), 0); // No blocks, only inline span
     }
 
     #[test]
@@ -550,7 +485,7 @@ mod tests {
         // Indented fence markers should still work as fences
         let content = "Text\n  ```\n  code\n  ```\nAfter";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
-        // 1 fenced + 1 inline span
-        assert_eq!(blocks.len(), 2);
+        // Only 1 fenced block (indented fences still work)
+        assert_eq!(blocks.len(), 1);
     }
 }

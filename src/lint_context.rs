@@ -1,6 +1,8 @@
 use crate::config::MarkdownFlavor;
+use crate::utils::ast_utils::get_cached_ast;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use lazy_static::lazy_static;
+use markdown::mdast::Node;
 use regex::Regex;
 
 lazy_static! {
@@ -374,6 +376,7 @@ pub struct LintContext<'a> {
     emphasis_spans_cache: Mutex<Option<Arc<Vec<EmphasisSpan>>>>, // Lazy-loaded emphasis spans
     table_rows_cache: Mutex<Option<Arc<Vec<TableRow>>>>, // Lazy-loaded table rows
     bare_urls_cache: Mutex<Option<Arc<Vec<BareUrl>>>>, // Lazy-loaded bare URLs
+    ast_cache: Mutex<Option<Arc<Node>>>,  // Lazy-loaded AST
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
 }
 
@@ -392,10 +395,13 @@ impl<'a> LintContext<'a> {
         // Pre-compute line information
         let lines = Self::compute_line_info(content, &line_offsets, &code_blocks, flavor);
 
+        // Parse code spans early so we can exclude them from link/image parsing
+        let ast = get_cached_ast(content);
+        let code_spans = Self::parse_code_spans(content, &lines, &ast);
+
         // Parse links, images, references, and list blocks
-        // Skip code spans - they'll be computed lazily
-        let links = Self::parse_links(content, &lines, &code_blocks, flavor);
-        let images = Self::parse_images(content, &lines, &code_blocks);
+        let links = Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor);
+        let images = Self::parse_images(content, &lines, &code_blocks, &code_spans);
         let reference_defs = Self::parse_reference_defs(content, &lines);
         let list_blocks = Self::parse_list_blocks(&lines);
 
@@ -410,15 +416,29 @@ impl<'a> LintContext<'a> {
             links,
             images,
             reference_defs,
-            code_spans_cache: Mutex::new(None),
+            code_spans_cache: Mutex::new(Some(Arc::new(code_spans))),
             list_blocks,
             char_frequency,
             html_tags_cache: Mutex::new(None),
             emphasis_spans_cache: Mutex::new(None),
             table_rows_cache: Mutex::new(None),
             bare_urls_cache: Mutex::new(None),
+            ast_cache: Mutex::new(None),
             flavor,
         }
+    }
+
+    /// Get AST - uses global cache for deduplication
+    pub fn get_ast(&self) -> Arc<Node> {
+        let mut cache = self.ast_cache.lock().unwrap();
+
+        if cache.is_none() {
+            // Use global AST cache to avoid duplicate parsing
+            // MarkdownAst is just a type alias for Node, so no conversion needed
+            *cache = Some(get_cached_ast(self.content));
+        }
+
+        cache.as_ref().unwrap().clone()
     }
 
     /// Get code spans - computed lazily on first access
@@ -427,7 +447,8 @@ impl<'a> LintContext<'a> {
 
         // Check if we need to compute code spans
         if cache.is_none() {
-            let code_spans = Self::parse_code_spans(self.content, &self.lines);
+            let ast = self.get_ast();
+            let code_spans = Self::parse_code_spans(self.content, &self.lines, &ast);
             *cache = Some(Arc::new(code_spans));
         }
 
@@ -675,6 +696,7 @@ impl<'a> LintContext<'a> {
         content: &str,
         lines: &[LineInfo],
         code_blocks: &[(usize, usize)],
+        code_spans: &[CodeSpan],
         flavor: MarkdownFlavor,
     ) -> Vec<ParsedLink> {
         use crate::utils::skip_context::is_mkdocs_snippet_line;
@@ -698,8 +720,16 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Skip if in code block or span
-            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+            // Skip if in code block
+            if CodeBlockUtils::is_in_code_block(code_blocks, match_start) {
+                continue;
+            }
+
+            // Skip if in code span
+            if code_spans
+                .iter()
+                .any(|span| match_start >= span.byte_offset && match_start < span.byte_end)
+            {
                 continue;
             }
 
@@ -790,7 +820,12 @@ impl<'a> LintContext<'a> {
     }
 
     /// Parse all images in the content
-    fn parse_images(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<ParsedImage> {
+    fn parse_images(
+        content: &str,
+        lines: &[LineInfo],
+        code_blocks: &[(usize, usize)],
+        code_spans: &[CodeSpan],
+    ) -> Vec<ParsedImage> {
         // Pre-size based on a heuristic: images are less common than links
         let mut images = Vec::with_capacity(content.len() / 1000); // ~1 image per 1000 chars
 
@@ -805,8 +840,16 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Skip if in code block or span
-            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+            // Skip if in code block
+            if CodeBlockUtils::is_in_code_block(code_blocks, match_start) {
+                continue;
+            }
+
+            // Skip if in code span
+            if code_spans
+                .iter()
+                .any(|span| match_start >= span.byte_offset && match_start < span.byte_end)
+            {
                 continue;
             }
 
@@ -1322,158 +1365,174 @@ impl<'a> LintContext<'a> {
         lines
     }
 
-    /// Parse all inline code spans in the content
-    fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
-        // Pre-size based on content - code spans are fairly common
-        let mut code_spans = Vec::with_capacity(content.matches('`').count() / 2);
+    /// Parse all inline code spans in the content using AST
+    fn parse_code_spans(content: &str, lines: &[LineInfo], ast: &Node) -> Vec<CodeSpan> {
+        let mut code_spans = Vec::new();
 
         // Quick check - if no backticks, no code spans
         if !content.contains('`') {
             return code_spans;
         }
 
-        let bytes = content.as_bytes();
+        // Helper function to recursively extract inline code spans from AST nodes
+        fn extract_code_spans(node: &Node, content: &str, lines: &[LineInfo], spans: &mut Vec<CodeSpan>) {
+            match node {
+                Node::InlineCode(inline_code) => {
+                    if let Some(pos) = &inline_code.position {
+                        let start_pos = pos.start.offset;
+                        let end_pos = pos.end.offset;
 
-        // First pass: identify which backticks are escaped
-        let mut escaped_positions = Vec::new();
-        for i in 0..bytes.len() {
-            if i > 0 && bytes[i - 1] == b'\\' && bytes[i] == b'`' {
-                escaped_positions.push(i);
-            }
-        }
+                        // The position includes the backticks, extract the actual content
+                        let full_span = &content[start_pos..end_pos];
+                        let backtick_count = full_span.chars().take_while(|&c| c == '`').count();
 
-        let mut pos = 0;
-        while pos < bytes.len() {
-            // Find the next backtick
-            if let Some(backtick_start) = content[pos..].find('`') {
-                let start_pos = pos + backtick_start;
+                        // Extract content between backticks, preserving spaces
+                        let content_start = start_pos + backtick_count;
+                        let content_end = end_pos - backtick_count;
+                        let span_content = if content_start < content_end {
+                            content[content_start..content_end].to_string()
+                        } else {
+                            String::new()
+                        };
 
-                // Skip if this backtick is escaped
-                if escaped_positions.contains(&start_pos) {
-                    pos = start_pos + 1;
-                    continue;
-                }
-
-                // Skip if this backtick is inside a code block
-                let mut in_code_block = false;
-                for (line_idx, line_info) in lines.iter().enumerate() {
-                    if start_pos >= line_info.byte_offset
-                        && (line_idx + 1 >= lines.len() || start_pos < lines[line_idx + 1].byte_offset)
-                    {
-                        in_code_block = line_info.in_code_block;
-                        break;
-                    }
-                }
-
-                if in_code_block {
-                    pos = start_pos + 1;
-                    continue;
-                }
-
-                // Count consecutive non-escaped backticks
-                let mut backtick_count = 0;
-                let mut i = start_pos;
-                while i < bytes.len() && bytes[i] == b'`' && !escaped_positions.contains(&i) {
-                    backtick_count += 1;
-                    i += 1;
-                }
-
-                // Look for matching closing backticks
-                let search_start = start_pos + backtick_count;
-                let mut found_closing = false;
-                let mut closing_end = 0;
-
-                // Search for the exact number of unescaped backticks
-                let mut search_pos = search_start;
-                while search_pos < bytes.len() {
-                    // Look for the first backtick
-                    if let Some(rel_pos) = content[search_pos..].find('`') {
-                        let backtick_pos = search_pos + rel_pos;
-
-                        // Skip if escaped
-                        if escaped_positions.contains(&backtick_pos) {
-                            search_pos = backtick_pos + 1;
-                            continue;
-                        }
-
-                        // Count consecutive non-escaped backticks at this position
-                        let mut count = 0;
-                        let mut j = backtick_pos;
-                        while j < bytes.len() && bytes[j] == b'`' && !escaped_positions.contains(&j) {
-                            count += 1;
-                            j += 1;
-                        }
-
-                        // Check if we found the right number of backticks
-                        if count == backtick_count {
-                            // Make sure it's not part of a longer sequence
-                            let before_ok = backtick_pos == 0
-                                || bytes[backtick_pos - 1] != b'`'
-                                || escaped_positions.contains(&(backtick_pos - 1));
-                            let after_ok = j >= bytes.len() || bytes[j] != b'`' || escaped_positions.contains(&j);
-
-                            if before_ok && after_ok {
-                                found_closing = true;
-                                closing_end = j;
+                        // Find which line this code span starts on
+                        let mut line_num = 1;
+                        let mut col_start = start_pos;
+                        for (idx, line_info) in lines.iter().enumerate() {
+                            if start_pos >= line_info.byte_offset {
+                                line_num = idx + 1;
+                                col_start = start_pos - line_info.byte_offset;
+                            } else {
                                 break;
                             }
                         }
 
-                        search_pos = backtick_pos + 1;
-                    } else {
-                        break;
+                        // Find end column
+                        let mut col_end = end_pos;
+                        for line_info in lines.iter() {
+                            if end_pos > line_info.byte_offset {
+                                col_end = end_pos - line_info.byte_offset;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        spans.push(CodeSpan {
+                            line: line_num,
+                            start_col: col_start,
+                            end_col: col_end,
+                            byte_offset: start_pos,
+                            byte_end: end_pos,
+                            backtick_count,
+                            content: span_content,
+                        });
                     }
                 }
-
-                if found_closing {
-                    // We found a valid code span
-                    let content_start = start_pos + backtick_count;
-                    let content_end = closing_end - backtick_count;
-                    let span_content = content[content_start..content_end].to_string();
-
-                    // Find which line this code span starts on
-                    let mut line_num = 1;
-                    let mut col_start = start_pos;
-                    for (idx, line_info) in lines.iter().enumerate() {
-                        if start_pos >= line_info.byte_offset {
-                            line_num = idx + 1;
-                            col_start = start_pos - line_info.byte_offset;
-                        } else {
-                            break;
-                        }
+                // Recursively process children
+                Node::Root(root) => {
+                    for child in &root.children {
+                        extract_code_spans(child, content, lines, spans);
                     }
-
-                    // Find end column
-                    let mut col_end = closing_end;
-                    for line_info in lines.iter() {
-                        if closing_end > line_info.byte_offset {
-                            col_end = closing_end - line_info.byte_offset;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    code_spans.push(CodeSpan {
-                        line: line_num,
-                        start_col: col_start,
-                        end_col: col_end,
-                        byte_offset: start_pos,
-                        byte_end: closing_end,
-                        backtick_count,
-                        content: span_content,
-                    });
-
-                    // Move position after this code span
-                    pos = closing_end;
-                } else {
-                    // No valid closing found, skip these opening backticks
-                    pos = start_pos + backtick_count;
                 }
-            } else {
-                // No more backticks found
-                break;
+                Node::Paragraph(para) => {
+                    for child in &para.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::Heading(heading) => {
+                    for child in &heading.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::List(list) => {
+                    for child in &list.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::ListItem(item) => {
+                    for child in &item.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::Blockquote(blockquote) => {
+                    for child in &blockquote.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::Table(table) => {
+                    for child in &table.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::TableRow(row) => {
+                    for child in &row.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::TableCell(cell) => {
+                    for child in &cell.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::Emphasis(emphasis) => {
+                    for child in &emphasis.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::Strong(strong) => {
+                    for child in &strong.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::Link(link) => {
+                    for child in &link.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::LinkReference(link_ref) => {
+                    for child in &link_ref.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::FootnoteDefinition(footnote) => {
+                    for child in &footnote.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                Node::Delete(delete) => {
+                    for child in &delete.children {
+                        extract_code_spans(child, content, lines, spans);
+                    }
+                }
+                // Terminal nodes or nodes without relevant children
+                Node::Code(_)
+                | Node::Text(_)
+                | Node::Html(_)
+                | Node::Image(_)
+                | Node::ImageReference(_)
+                | Node::FootnoteReference(_)
+                | Node::Break(_)
+                | Node::ThematicBreak(_)
+                | Node::Definition(_)
+                | Node::Yaml(_)
+                | Node::Toml(_)
+                | Node::Math(_)
+                | Node::InlineMath(_)
+                | Node::MdxJsxFlowElement(_)
+                | Node::MdxFlowExpression(_)
+                | Node::MdxJsxTextElement(_)
+                | Node::MdxTextExpression(_)
+                | Node::MdxjsEsm(_) => {
+                    // No children to process or not relevant for code spans
+                }
             }
         }
+
+        // Extract all code spans from the AST
+        extract_code_spans(ast, content, lines, &mut code_spans);
+
+        // Sort by position to ensure consistent ordering
+        code_spans.sort_by_key(|span| span.byte_offset);
 
         code_spans
     }

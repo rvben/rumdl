@@ -12,7 +12,6 @@ lazy_static! {
     static ref EMPHASIS_PATTERN: Regex = Regex::new(r"\*+([^*]+)\*+").unwrap();
     static ref CODE_PATTERN: Regex = Regex::new(r"`([^`]+)`").unwrap();
     static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|\[([^\]]+)\]\[[^\]]*\]").unwrap();
-    static ref TOC_SECTION_START: Regex = Regex::new(r"(?i)^#+\s*(table\s+of\s+contents?|contents?|toc)\s*$").unwrap();
     // HTML tags with id or name attributes (supports any HTML element, not just <a>)
     // This pattern only captures the first id/name attribute in a tag
     static ref HTML_ANCHOR_PATTERN: Regex = Regex::new(r#"\b(?:id|name)\s*=\s*["']([^"']+)["']"#).unwrap();
@@ -58,7 +57,6 @@ impl MD051LinkFragments {
         let mut markdown_headings = HashSet::with_capacity(32);
         let mut html_anchors = HashSet::with_capacity(16);
         let mut fragment_counts = std::collections::HashMap::new();
-        let mut in_toc = false;
 
         // Single pass through lines, only processing lines with headings
         for line_info in &ctx.lines {
@@ -108,21 +106,6 @@ impl MD051LinkFragments {
             }
 
             if let Some(heading) = &line_info.heading {
-                let line = &line_info.content;
-
-                // Check if we're entering a TOC section
-                let is_toc_heading = TOC_SECTION_START.is_match(line);
-
-                // If we were in TOC and hit another heading, we're out of TOC
-                if in_toc && !is_toc_heading {
-                    in_toc = false;
-                }
-
-                // Skip if we're inside a TOC section (but not the TOC heading itself)
-                if in_toc && !is_toc_heading {
-                    continue;
-                }
-
                 // If heading has a custom ID, add it as a valid anchor
                 if let Some(custom_id) = &heading.custom_id {
                     markdown_headings.insert(custom_id.clone());
@@ -145,11 +128,6 @@ impl MD051LinkFragments {
                         fragment
                     };
                     markdown_headings.insert(final_fragment);
-                }
-
-                // After processing the TOC heading, mark that we're in a TOC section
-                if is_toc_heading {
-                    in_toc = true;
                 }
             }
         }

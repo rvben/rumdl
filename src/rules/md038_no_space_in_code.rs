@@ -93,7 +93,7 @@ impl MD038NoSpaceInCode {
         // Common command patterns - check case-insensitive prefixes
         const COMMAND_PREFIXES: &[&str] = &[
             "git ", "npm ", "cargo ", "docker ", "kubectl ", "pip ", "yarn ", "sudo ", "chmod ", "chown ", "ls ",
-            "cd ", "mkdir ", "rm ", "cp ", "mv ", "cat ", "grep ", "find ", "awk ", "sed ",
+            "cd ", "mkdir ", "rm ", "cp ", "mv ", "cat ", "grep ", "find ", "awk ", "sed ", "rumdl ",
         ];
 
         // Check if content starts with any command (case-insensitive)

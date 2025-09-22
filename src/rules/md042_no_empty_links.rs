@@ -79,9 +79,24 @@ impl Rule for MD042NoEmptyLinks {
                     format!("[{}](https://example.com)", link.text)
                 };
 
+                // Format the link as it appears in the source
+                let link_display = if link.is_reference {
+                    if let Some(ref_id) = &link.reference_id {
+                        if ref_id.is_empty() {
+                            format!("[{}][]", link.text)
+                        } else {
+                            format!("[{}][{}]", link.text, ref_id)
+                        }
+                    } else {
+                        format!("[{}]", link.text)
+                    }
+                } else {
+                    format!("[{}]({})", link.text, link.url)
+                };
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
-                    message: format!("Empty link found: [{}]({})", link.text, effective_url),
+                    message: format!("Empty link found: {link_display}"),
                     line: link.line,
                     column: link.start_col + 1, // Convert to 1-indexed
                     end_line: link.line,
@@ -266,7 +281,7 @@ mod tests {
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Empty link found: [](https://example.com)");
+        assert_eq!(result[0].message, "Empty link found: [][ref]");
         assert_eq!(result[0].line, 1);
 
         // Empty text with empty reference
