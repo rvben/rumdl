@@ -515,6 +515,11 @@ impl Rule for MD046CodeBlockStyle {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
 
+            // Skip lines that are in HTML blocks - they shouldn't be treated as indented code
+            if ctx.is_in_html_block(i + 1) {
+                continue;
+            }
+
             // Track fenced code blocks
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 in_fenced_block = !in_fenced_block;

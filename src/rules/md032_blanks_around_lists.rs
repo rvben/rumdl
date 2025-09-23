@@ -379,15 +379,9 @@ impl MD032BlanksAroundLists {
                 let next_line_idx_0 = end_line;
                 let next_line_idx_1 = end_line + 1;
                 let next_line_str = lines[next_line_idx_0];
-                // Check if next line is excluded - in code block, front matter, or starts an indented code block
-                // Only exclude code fence lines if they're indented (part of list content)
-                let is_next_excluded = ctx.is_in_code_block(next_line_idx_1)
-                    || ctx.is_in_front_matter(next_line_idx_1)
-                    || (next_line_idx_0 < ctx.lines.len()
-                        && ctx.lines[next_line_idx_0].in_code_block
-                        && ctx.lines[next_line_idx_0].indent >= 2
-                        && (ctx.lines[next_line_idx_0].content.trim().starts_with("```")
-                            || ctx.lines[next_line_idx_0].content.trim().starts_with("~~~")));
+                // Check if next line is excluded - only front matter
+                // Don't exclude code blocks - we want blank lines before them
+                let is_next_excluded = ctx.is_in_front_matter(next_line_idx_1);
                 let next_prefix = BLOCKQUOTE_PREFIX_RE
                     .find(next_line_str)
                     .map_or(String::new(), |m| m.as_str().to_string());

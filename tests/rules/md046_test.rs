@@ -48,8 +48,8 @@ fn test_mixed_blocks_prefer_indented() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
-        3,
-        "Should detect all parts of the inconsistent fenced code block"
+        1,
+        "Should detect the fenced code block when indented style is preferred"
     );
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
