@@ -820,7 +820,7 @@ mod tests {
 
         // Fenced blocks should be flagged when indented style is required
         assert!(!result.is_empty());
-        assert!(result[0].message.contains("Use fenced code blocks"));
+        assert!(result[0].message.contains("Use indented code blocks"));
     }
 
     #[test]
