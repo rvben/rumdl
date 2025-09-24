@@ -122,6 +122,7 @@ impl FixCoordinator {
     }
 
     /// Apply fixes iteratively until no more fixes are needed or max iterations reached
+    /// Returns (rules_fixed_count, iterations, context_creations, fixed_rule_names)
     pub fn apply_fixes_iterative(
         &self,
         rules: &[Box<dyn Rule>],
@@ -129,7 +130,7 @@ impl FixCoordinator {
         content: &mut String,
         config: &Config,
         max_iterations: usize,
-    ) -> Result<(usize, usize, usize), String> {
+    ) -> Result<(usize, usize, usize, HashSet<String>), String> {
         // Get optimal rule order
         let ordered_rules = self.get_optimal_order(rules);
 
@@ -147,6 +148,9 @@ impl FixCoordinator {
 
         // Keep track of which rules have been processed successfully
         let mut processed_rules = HashSet::new();
+
+        // Track which rules actually applied fixes
+        let mut fixed_rule_names = HashSet::new();
 
         // Keep applying fixes until content stabilizes
         while iterations < max_iterations {
@@ -202,6 +206,7 @@ impl FixCoordinator {
                             fixes_in_iteration += 1;
                             any_fix_applied = true;
                             processed_rules.insert(rule.name());
+                            fixed_rule_names.insert(rule.name().to_string());
 
                             // If this rule has dependents, break to start fresh iteration
                             if self.dependencies.contains_key(rule.name()) {
@@ -233,7 +238,7 @@ impl FixCoordinator {
             }
         }
 
-        Ok((total_fixed, iterations, total_ctx_creations))
+        Ok((total_fixed, iterations, total_ctx_creations, fixed_rule_names))
     }
 }
 
@@ -357,7 +362,7 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
 
         assert!(result.is_ok());
-        let (total_fixed, iterations, ctx_creations) = result.unwrap();
+        let (total_fixed, iterations, ctx_creations, _) = result.unwrap();
         assert_eq!(total_fixed, 1);
         assert_eq!(iterations, 1);
         assert_eq!(ctx_creations, 1);
@@ -431,7 +436,7 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
 
         assert!(result.is_ok());
-        let (total_fixed, iterations, ctx_creations) = result.unwrap();
+        let (total_fixed, iterations, ctx_creations, _) = result.unwrap();
         assert_eq!(total_fixed, 2);
         assert_eq!(iterations, 2); // Should take 2 iterations due to dependency
         assert!(ctx_creations >= 2);
@@ -477,7 +482,7 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
 
         assert!(result.is_ok());
-        let (total_fixed, _, _) = result.unwrap();
+        let (total_fixed, _, _, _) = result.unwrap();
         assert_eq!(total_fixed, 0);
         assert_eq!(content, "original"); // Should not be changed
     }
@@ -541,7 +546,7 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 3);
 
         assert!(result.is_ok());
-        let (_, iterations, _) = result.unwrap();
+        let (_, iterations, _, _) = result.unwrap();
         assert_eq!(iterations, 1); // Should stop after first successful fix
     }
 
@@ -560,7 +565,7 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
 
         assert!(result.is_ok());
-        let (total_fixed, iterations, ctx_creations) = result.unwrap();
+        let (total_fixed, iterations, ctx_creations, _) = result.unwrap();
         assert_eq!(total_fixed, 0);
         assert_eq!(iterations, 1);
         assert_eq!(ctx_creations, 0);

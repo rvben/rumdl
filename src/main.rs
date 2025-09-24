@@ -3114,28 +3114,22 @@ fn apply_fixes_coordinated(
 
     // Apply fixes iteratively (up to 10 iterations to ensure convergence)
     match coordinator.apply_fixes_iterative(rules, all_warnings, content, config, 10) {
-        Ok((_rules_applied, iterations, ctx_creations)) => {
+        Ok((rules_applied, iterations, ctx_creations, fixed_rule_names)) => {
             let elapsed = start.elapsed();
 
             if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
                 eprintln!("DEBUG: Fix Coordinator used");
                 eprintln!("DEBUG: Iterations: {iterations}");
+                eprintln!("DEBUG: Rules applied: {rules_applied}");
                 eprintln!("DEBUG: LintContext creations: {ctx_creations}");
                 eprintln!("DEBUG: Total time: {elapsed:?}");
             }
 
-            // Count actual warnings fixed by comparing before/after
-            let final_ctx = LintContext::new(content, config.markdown_flavor());
-            let mut remaining_count = 0;
-
-            for rule in rules {
-                if let Ok(warnings) = rule.check(&final_ctx) {
-                    remaining_count += warnings.len();
-                }
-            }
-
-            // Return the difference between original and remaining warnings
-            all_warnings.len().saturating_sub(remaining_count)
+            // Count warnings for the rules that were successfully applied
+            all_warnings
+                .iter()
+                .filter(|w| w.rule_name.map(|name| fixed_rule_names.contains(name)).unwrap_or(false))
+                .count()
         }
         Err(e) => {
             if !quiet {
