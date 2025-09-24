@@ -3119,17 +3119,17 @@ fn apply_fixes_coordinated(
 
             if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
                 eprintln!("DEBUG: Fix Coordinator used");
-                eprintln!("DEBUG: Iterations: {}", iterations);
-                eprintln!("DEBUG: Fixes applied: {}", total_fixed);
-                eprintln!("DEBUG: LintContext creations: {}", ctx_creations);
-                eprintln!("DEBUG: Total time: {:?}", elapsed);
+                eprintln!("DEBUG: Iterations: {iterations}");
+                eprintln!("DEBUG: Fixes applied: {total_fixed}");
+                eprintln!("DEBUG: LintContext creations: {ctx_creations}");
+                eprintln!("DEBUG: Total time: {elapsed:?}");
             }
 
             total_fixed
         }
         Err(e) => {
             if !quiet {
-                eprintln!("Warning: Fix coordinator failed: {}", e);
+                eprintln!("Warning: Fix coordinator failed: {e}");
             }
             0
         }
