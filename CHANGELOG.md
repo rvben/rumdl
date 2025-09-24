@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.146] - 2025-09-24
+
+### Added
+
+- **Fix Coordinator**: New intelligent fix system as default behavior (#88)
+  - ~75% faster execution on large files (15.6s vs 60.7s for OpenAPI spec)
+  - ~90% of issues fixed in single pass (vs 2-3 passes previously required)
+  - Topological sort ensures optimal rule ordering based on dependencies
+  - Handles cyclic dependencies gracefully
+  - Opt-out available via RUMDL_NO_FIX_COORDINATOR=1
+  - Debug output available via RUMDL_DEBUG_FIX_PERF=1
+
+### Changed
+
+- Fix mode now uses Fix Coordinator by default for dramatic performance gains
+- Fix strategy prioritizes intelligent ordering over bulk fixes
+
+### Performance
+
+- First pass: 87% faster than v0.0.141, 74% faster than v0.0.143
+- Completes 3 full passes (35.5s) faster than v0.0.141 does single pass (115.6s)
+- Reduces LintContext creations through intelligent batching
+
+## [0.0.145] - 2025-09-23
+
+### Fixed
+
+- **MD032**: Refined to handle nested code blocks correctly
+- Various CI test failures and compatibility improvements
+
 ## [0.0.144] - 2025-09-22
 
 ## [0.0.142] - 2025-09-20
