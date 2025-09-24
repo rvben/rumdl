@@ -1938,7 +1938,11 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     if args._fix {
         if has_issues {
             let mut fixed_content = content.clone();
-            let warnings_fixed = apply_fixes_stdin(rules, &all_warnings, &mut fixed_content, quiet, config);
+            let warnings_fixed = if std::env::var("RUMDL_NO_FIX_COORDINATOR").is_ok() {
+                apply_fixes_stdin(rules, &all_warnings, &mut fixed_content, quiet, config)
+            } else {
+                apply_fixes_stdin_coordinated(rules, &all_warnings, &mut fixed_content, quiet, config)
+            };
 
             // Output the fixed content to stdout
             print!("{fixed_content}");
@@ -2834,7 +2838,11 @@ fn process_file_with_formatter(
     if diff {
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
-        warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, true, config);
+        if std::env::var("RUMDL_NO_FIX_COORDINATOR").is_ok() {
+            warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, true, config);
+        } else {
+            warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, true, config);
+        }
 
         if warnings_fixed > 0 {
             let diff_output = generate_diff(&original_content, &content, file_path);
@@ -2846,7 +2854,12 @@ fn process_file_with_formatter(
         // Don't actually write the file in diff mode
         return (total_warnings > 0, total_warnings, 0, fixable_warnings, all_warnings);
     } else if _fix {
-        warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, quiet, config);
+        // Use Fix Coordinator by default (disable with RUMDL_NO_FIX_COORDINATOR=1)
+        if std::env::var("RUMDL_NO_FIX_COORDINATOR").is_ok() {
+            warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, quiet, config);
+        } else {
+            warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, config);
+        }
 
         // Write fixed content back to file
         if warnings_fixed > 0
@@ -3085,6 +3098,44 @@ fn generate_diff(original: &str, modified: &str, file_path: &str) -> String {
     diff
 }
 
+// Apply fixes using the new Fix Coordinator (when enabled)
+fn apply_fixes_coordinated(
+    rules: &[Box<dyn Rule>],
+    all_warnings: &[rumdl_lib::rule::LintWarning],
+    content: &mut String,
+    quiet: bool,
+    config: &rumdl_config::Config,
+) -> usize {
+    use rumdl_lib::fix_coordinator::FixCoordinator;
+    use std::time::Instant;
+
+    let start = Instant::now();
+    let coordinator = FixCoordinator::new();
+
+    // Apply fixes iteratively (up to 10 iterations to ensure convergence)
+    match coordinator.apply_fixes_iterative(rules, all_warnings, content, config, 10) {
+        Ok((total_fixed, iterations, ctx_creations)) => {
+            let elapsed = start.elapsed();
+
+            if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
+                eprintln!("DEBUG: Fix Coordinator used");
+                eprintln!("DEBUG: Iterations: {}", iterations);
+                eprintln!("DEBUG: Fixes applied: {}", total_fixed);
+                eprintln!("DEBUG: LintContext creations: {}", ctx_creations);
+                eprintln!("DEBUG: Total time: {:?}", elapsed);
+            }
+
+            total_fixed
+        }
+        Err(e) => {
+            if !quiet {
+                eprintln!("Warning: Fix coordinator failed: {}", e);
+            }
+            0
+        }
+    }
+}
+
 // Apply fixes to content based on warnings
 fn apply_fixes(
     rules: &[Box<dyn Rule>],
@@ -3211,6 +3262,18 @@ fn apply_fixes(
     }
 
     warnings_fixed
+}
+
+/// Apply fixes to stdin content using Fix Coordinator
+fn apply_fixes_stdin_coordinated(
+    rules: &[Box<dyn Rule>],
+    all_warnings: &[rumdl_lib::rule::LintWarning],
+    content: &mut String,
+    quiet: bool,
+    config: &rumdl_config::Config,
+) -> usize {
+    // Just delegate to the coordinated version
+    apply_fixes_coordinated(rules, all_warnings, content, quiet, config)
 }
 
 /// Apply fixes to stdin content (similar to apply_fixes but without file writing)
