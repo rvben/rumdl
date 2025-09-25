@@ -6,18 +6,16 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::get_cached_regex;
 use toml;
 
 mod md014_config;
 use md014_config::MD014Config;
 
-lazy_static! {
-    static ref COMMAND_PATTERN: Regex = Regex::new(r"^\s*[$>]\s+\S+").unwrap();
-    static ref SHELL_LANG_PATTERN: Regex = Regex::new(r"^(?i)(bash|sh|shell|console|terminal)").unwrap();
-    static ref DOLLAR_PROMPT_PATTERN: Regex = Regex::new(r"^\s*([$>])").unwrap();
-}
+// Regex patterns - now using cached system
+const COMMAND_PATTERN: &str = r"^\s*[$>]\s+\S+";
+const SHELL_LANG_PATTERN: &str = r"^(?i)(bash|sh|shell|console|terminal)";
+const DOLLAR_PROMPT_PATTERN: &str = r"^\s*([$>])";
 
 #[derive(Clone, Default)]
 pub struct MD014CommandsShowOutput {
@@ -40,11 +38,15 @@ impl MD014CommandsShowOutput {
     }
 
     fn is_command_line(&self, line: &str) -> bool {
-        COMMAND_PATTERN.is_match(line)
+        get_cached_regex(COMMAND_PATTERN)
+            .map(|re| re.is_match(line))
+            .unwrap_or(false)
     }
 
     fn is_shell_language(&self, lang: &str) -> bool {
-        SHELL_LANG_PATTERN.is_match(lang)
+        get_cached_regex(SHELL_LANG_PATTERN)
+            .map(|re| re.is_match(lang))
+            .unwrap_or(false)
     }
 
     fn is_output_line(&self, line: &str) -> bool {
@@ -193,7 +195,9 @@ impl Rule for MD014CommandsShowOutput {
                             let cmd_line_num = block_start_line + 1 + cmd_line_idx + 1; // +1 for fence, +1 for 1-indexed
 
                             // Find and highlight the dollar sign or prompt
-                            if let Some(cap) = DOLLAR_PROMPT_PATTERN.captures(cmd_line) {
+                            if let Ok(re) = get_cached_regex(DOLLAR_PROMPT_PATTERN)
+                                && let Some(cap) = re.captures(cmd_line)
+                            {
                                 let match_obj = cap.get(1).unwrap(); // The $ or > character
                                 let (start_line, start_col, end_line, end_col) =
                                     calculate_match_range(cmd_line_num, cmd_line, match_obj.start(), match_obj.len());
