@@ -4,16 +4,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::skip_context::{is_in_html_comment, is_in_math_context};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::get_cached_regex;
 
-lazy_static! {
-    // Main pattern to match reversed links: (URL)[text]
-    // We'll manually check that it's not followed by another ( to avoid false positives
-    static ref REVERSED_LINK_REGEX: Regex = Regex::new(
-        r"(^|[^\\])\(([^()]+)\)\[([^\]]+)\]"
-    ).unwrap();
-}
+// Reversed link detection pattern
+const REVERSED_LINK_REGEX_STR: &str = r"(^|[^\\])\(([^()]+)\)\[([^\]]+)\]";
 
 #[derive(Clone)]
 pub struct MD011NoReversedLinks;
@@ -26,7 +20,10 @@ impl MD011NoReversedLinks {
         for line in content.lines() {
             let mut last_end = 0;
 
-            while let Some(cap) = REVERSED_LINK_REGEX.captures(&line[last_end..]) {
+            while let Some(cap) = get_cached_regex(REVERSED_LINK_REGEX_STR)
+                .ok()
+                .and_then(|re| re.captures(&line[last_end..]))
+            {
                 let match_obj = cap.get(0).unwrap();
                 let prechar = &cap[1];
                 let url = &cap[2];
@@ -83,7 +80,10 @@ impl Rule for MD011NoReversedLinks {
 
             let mut last_end = 0;
 
-            while let Some(cap) = REVERSED_LINK_REGEX.captures(&line[last_end..]) {
+            while let Some(cap) = get_cached_regex(REVERSED_LINK_REGEX_STR)
+                .ok()
+                .and_then(|re| re.captures(&line[last_end..]))
+            {
                 let match_obj = cap.get(0).unwrap();
                 let prechar = &cap[1];
                 let url = &cap[2];

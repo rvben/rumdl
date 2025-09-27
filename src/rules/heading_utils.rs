@@ -1,25 +1,22 @@
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::get_cached_regex;
 use std::fmt;
 use std::str::FromStr;
 
-lazy_static! {
-    // Optimized regex patterns with more efficient non-capturing groups
-    static ref ATX_PATTERN: Regex = Regex::new(r"^(\s*)(#{1,6})(\s*)([^#\n]*?)(?:\s+(#{1,6}))?\s*$").unwrap();
-    static ref SETEXT_HEADING_1: Regex = Regex::new(r"^(\s*)(=+)(\s*)$").unwrap();
-    static ref SETEXT_HEADING_2: Regex = Regex::new(r"^(\s*)(-+)(\s*)$").unwrap();
-    static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,}).*$").unwrap();
-    static ref FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
-    static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
-    static ref INDENTED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s{4,})").unwrap();
-    static ref HTML_TAG_REGEX: Regex = Regex::new(r"<[^>]*>").unwrap();
+// Regex patterns
+const ATX_PATTERN_STR: &str = r"^(\s*)(#{1,6})(\s*)([^#\n]*?)(?:\s+(#{1,6}))?\s*$";
+const SETEXT_HEADING_1_STR: &str = r"^(\s*)(=+)(\s*)$";
+const SETEXT_HEADING_2_STR: &str = r"^(\s*)(-+)(\s*)$";
+const FENCED_CODE_BLOCK_START_STR: &str = r"^(\s*)(`{3,}|~{3,}).*$";
+const FENCED_CODE_BLOCK_END_STR: &str = r"^(\s*)(`{3,}|~{3,})\s*$";
+const FRONT_MATTER_DELIMITER_STR: &str = r"^---\s*$";
+const INDENTED_CODE_BLOCK_PATTERN_STR: &str = r"^(\s{4,})";
+const HTML_TAG_REGEX_STR: &str = r"<[^>]*>";
 
-    // Single line emphasis patterns
-    static ref SINGLE_LINE_ASTERISK_EMPHASIS: Regex = Regex::new(r"^\s*\*([^*\n]+)\*\s*$").unwrap();
-    static ref SINGLE_LINE_UNDERSCORE_EMPHASIS: Regex = Regex::new(r"^\s*_([^_\n]+)_\s*$").unwrap();
-    static ref SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS: Regex = Regex::new(r"^\s*\*\*([^*\n]+)\*\*\s*$").unwrap();
-    static ref SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS: Regex = Regex::new(r"^\s*__([^_\n]+)__\s*$").unwrap();
-}
+// Single line emphasis patterns
+const SINGLE_LINE_ASTERISK_EMPHASIS_STR: &str = r"^\s*\*([^*\n]+)\*\s*$";
+const SINGLE_LINE_UNDERSCORE_EMPHASIS_STR: &str = r"^\s*_([^_\n]+)_\s*$";
+const SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS_STR: &str = r"^\s*\*\*([^*\n]+)\*\*\s*$";
+const SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS_STR: &str = r"^\s*__([^_\n]+)__\s*$";
 
 /// Represents different styles of Markdown headings
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -83,7 +80,9 @@ pub struct HeadingUtils;
 impl HeadingUtils {
     /// Check if a line is an ATX heading (starts with #)
     pub fn is_atx_heading(line: &str) -> bool {
-        ATX_PATTERN.is_match(line)
+        get_cached_regex(ATX_PATTERN_STR)
+            .map(|re| re.is_match(line))
+            .unwrap_or(false)
     }
 
     /// Check if a line is inside a code block
@@ -133,7 +132,9 @@ impl HeadingUtils {
         }
 
         // Check for ATX style headings
-        if let Some(captures) = ATX_PATTERN.captures(line) {
+        if let Some(captures) = get_cached_regex(ATX_PATTERN_STR)
+            .ok()
+            .and_then(|re| re.captures(line)) {
             let indentation = captures.get(1).map_or("", |m| m.as_str()).to_string();
             let opening_hashes = captures.get(2).map_or("", |m| m.as_str());
             let level = opening_hashes.len() as u32;
@@ -185,7 +186,9 @@ impl HeadingUtils {
                 return None;
             }
 
-            if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
+            if let Some(captures) = get_cached_regex(SETEXT_HEADING_1_STR)
+                .ok()
+                .and_then(|re| re.captures(next_line)) {
                 let underline_indent = captures.get(1).map_or("", |m| m.as_str());
                 if underline_indent == line_indentation {
                     let heading = Heading {
@@ -198,7 +201,9 @@ impl HeadingUtils {
                     };
                     return Some(heading);
                 }
-            } else if let Some(captures) = SETEXT_HEADING_2.captures(next_line) {
+            } else if let Some(captures) = get_cached_regex(SETEXT_HEADING_2_STR)
+                .ok()
+                .and_then(|re| re.captures(next_line)) {
                 let underline_indent = captures.get(1).map_or("", |m| m.as_str());
                 if underline_indent == line_indentation {
                     let heading = Heading {
@@ -321,37 +326,54 @@ impl HeadingUtils {
 
     /// Get the text content of a heading line
     pub fn get_heading_text(line: &str) -> Option<String> {
-        ATX_PATTERN
-            .captures(line)
+        get_cached_regex(ATX_PATTERN_STR)
+            .ok()
+            .and_then(|re| re.captures(line))
             .map(|captures| captures.get(4).map_or("", |m| m.as_str()).trim().to_string())
     }
 
     /// Detect emphasis-only lines
     pub fn is_emphasis_only_line(line: &str) -> bool {
         let trimmed = line.trim();
-        SINGLE_LINE_ASTERISK_EMPHASIS.is_match(trimmed)
-            || SINGLE_LINE_UNDERSCORE_EMPHASIS.is_match(trimmed)
-            || SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS.is_match(trimmed)
-            || SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS.is_match(trimmed)
+        get_cached_regex(SINGLE_LINE_ASTERISK_EMPHASIS_STR)
+            .map(|re| re.is_match(trimmed))
+            .unwrap_or(false)
+            || get_cached_regex(SINGLE_LINE_UNDERSCORE_EMPHASIS_STR)
+                .map(|re| re.is_match(trimmed))
+                .unwrap_or(false)
+            || get_cached_regex(SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS_STR)
+                .map(|re| re.is_match(trimmed))
+                .unwrap_or(false)
+            || get_cached_regex(SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS_STR)
+                .map(|re| re.is_match(trimmed))
+                .unwrap_or(false)
     }
 
     /// Extract text from an emphasis-only line
     pub fn extract_emphasis_text(line: &str) -> Option<(String, u32)> {
         let trimmed = line.trim();
 
-        if let Some(caps) = SINGLE_LINE_ASTERISK_EMPHASIS.captures(trimmed) {
+        if let Some(caps) = get_cached_regex(SINGLE_LINE_ASTERISK_EMPHASIS_STR)
+            .ok()
+            .and_then(|re| re.captures(trimmed)) {
             return Some((caps.get(1).unwrap().as_str().trim().to_string(), 1));
         }
 
-        if let Some(caps) = SINGLE_LINE_UNDERSCORE_EMPHASIS.captures(trimmed) {
+        if let Some(caps) = get_cached_regex(SINGLE_LINE_UNDERSCORE_EMPHASIS_STR)
+            .ok()
+            .and_then(|re| re.captures(trimmed)) {
             return Some((caps.get(1).unwrap().as_str().trim().to_string(), 1));
         }
 
-        if let Some(caps) = SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS.captures(trimmed) {
+        if let Some(caps) = get_cached_regex(SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS_STR)
+            .ok()
+            .and_then(|re| re.captures(trimmed)) {
             return Some((caps.get(1).unwrap().as_str().trim().to_string(), 2));
         }
 
-        if let Some(caps) = SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS.captures(trimmed) {
+        if let Some(caps) = get_cached_regex(SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS_STR)
+            .ok()
+            .and_then(|re| re.captures(trimmed)) {
             return Some((caps.get(1).unwrap().as_str().trim().to_string(), 2));
         }
 
@@ -386,7 +408,9 @@ impl HeadingUtils {
     /// Convert a heading text to a valid ID for fragment links
     pub fn heading_to_fragment(text: &str) -> String {
         // Remove any HTML tags
-        let text_no_html = HTML_TAG_REGEX.replace_all(text, "");
+        let text_no_html = get_cached_regex(HTML_TAG_REGEX_STR)
+            .map(|re| re.replace_all(text, ""))
+            .unwrap_or_else(|_| text.into());
 
         // Convert to lowercase and trim
         let text_lower = text_no_html.trim().to_lowercase();
@@ -451,7 +475,9 @@ pub fn is_heading(line: &str) -> bool {
 
     if trimmed.starts_with('#') {
         // Check for ATX heading
-        ATX_PATTERN.is_match(line)
+        get_cached_regex(ATX_PATTERN_STR)
+            .map(|re| re.is_match(line))
+            .unwrap_or(false)
     } else {
         // We can't tell for setext headings without looking at the next line
         false
@@ -461,7 +487,12 @@ pub fn is_heading(line: &str) -> bool {
 /// Checks if a line is a setext heading marker
 #[inline]
 pub fn is_setext_heading_marker(line: &str) -> bool {
-    SETEXT_HEADING_1.is_match(line) || SETEXT_HEADING_2.is_match(line)
+    get_cached_regex(SETEXT_HEADING_1_STR)
+        .map(|re| re.is_match(line))
+        .unwrap_or(false)
+        || get_cached_regex(SETEXT_HEADING_2_STR)
+            .map(|re| re.is_match(line))
+            .unwrap_or(false)
 }
 
 /// Checks if a line is a setext heading by examining its next line
@@ -485,12 +516,16 @@ pub fn is_setext_heading(lines: &[&str], index: usize) -> bool {
         .take_while(|c| c.is_whitespace())
         .collect::<String>();
 
-    if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
+    if let Some(captures) = get_cached_regex(SETEXT_HEADING_1_STR)
+        .ok()
+        .and_then(|re| re.captures(next_line)) {
         let underline_indent = captures.get(1).map_or("", |m| m.as_str());
         return underline_indent == current_indentation;
     }
 
-    if let Some(captures) = SETEXT_HEADING_2.captures(next_line) {
+    if let Some(captures) = get_cached_regex(SETEXT_HEADING_2_STR)
+        .ok()
+        .and_then(|re| re.captures(next_line)) {
         let underline_indent = captures.get(1).map_or("", |m| m.as_str());
         return underline_indent == current_indentation;
     }
@@ -508,7 +543,9 @@ pub fn get_heading_level(lines: &[&str], index: usize) -> u32 {
     let line = lines[index];
 
     // Check for ATX style heading
-    if let Some(captures) = ATX_PATTERN.captures(line) {
+    if let Some(captures) = get_cached_regex(ATX_PATTERN_STR)
+        .ok()
+        .and_then(|re| re.captures(line)) {
         let hashes = captures.get(2).map_or("", |m| m.as_str());
         return hashes.len() as u32;
     }
@@ -517,11 +554,15 @@ pub fn get_heading_level(lines: &[&str], index: usize) -> u32 {
     if index < lines.len() - 1 {
         let next_line = lines[index + 1];
 
-        if SETEXT_HEADING_1.is_match(next_line) {
+        if get_cached_regex(SETEXT_HEADING_1_STR)
+            .map(|re| re.is_match(next_line))
+            .unwrap_or(false) {
             return 1;
         }
 
-        if SETEXT_HEADING_2.is_match(next_line) {
+        if get_cached_regex(SETEXT_HEADING_2_STR)
+            .map(|re| re.is_match(next_line))
+            .unwrap_or(false) {
             return 2;
         }
     }
@@ -539,7 +580,9 @@ pub fn extract_heading_text(lines: &[&str], index: usize) -> String {
     let line = lines[index];
 
     // Extract from ATX heading
-    if let Some(captures) = ATX_PATTERN.captures(line) {
+    if let Some(captures) = get_cached_regex(ATX_PATTERN_STR)
+        .ok()
+        .and_then(|re| re.captures(line)) {
         return captures.get(4).map_or("", |m| m.as_str()).trim().to_string();
     }
 
@@ -548,14 +591,18 @@ pub fn extract_heading_text(lines: &[&str], index: usize) -> String {
         let next_line = lines[index + 1];
         let line_indentation = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
 
-        if let Some(captures) = SETEXT_HEADING_1.captures(next_line) {
+        if let Some(captures) = get_cached_regex(SETEXT_HEADING_1_STR)
+        .ok()
+        .and_then(|re| re.captures(next_line)) {
             let underline_indent = captures.get(1).map_or("", |m| m.as_str());
             if underline_indent == line_indentation {
                 return line[line_indentation.len()..].trim().to_string();
             }
         }
 
-        if let Some(captures) = SETEXT_HEADING_2.captures(next_line) {
+        if let Some(captures) = get_cached_regex(SETEXT_HEADING_2_STR)
+        .ok()
+        .and_then(|re| re.captures(next_line)) {
             let underline_indent = captures.get(1).map_or("", |m| m.as_str());
             if underline_indent == line_indentation {
                 return line[line_indentation.len()..].trim().to_string();
@@ -580,13 +627,20 @@ pub fn get_heading_indentation(lines: &[&str], index: usize) -> usize {
 /// Check if a line is a code block delimiter
 #[inline]
 pub fn is_code_block_delimiter(line: &str) -> bool {
-    FENCED_CODE_BLOCK_START.is_match(line) || FENCED_CODE_BLOCK_END.is_match(line)
+    get_cached_regex(FENCED_CODE_BLOCK_START_STR)
+        .map(|re| re.is_match(line))
+        .unwrap_or(false)
+        || get_cached_regex(FENCED_CODE_BLOCK_END_STR)
+            .map(|re| re.is_match(line))
+            .unwrap_or(false)
 }
 
 /// Check if a line is a front matter delimiter
 #[inline]
 pub fn is_front_matter_delimiter(line: &str) -> bool {
-    FRONT_MATTER_DELIMITER.is_match(line)
+    get_cached_regex(FRONT_MATTER_DELIMITER_STR)
+        .map(|re| re.is_match(line))
+        .unwrap_or(false)
 }
 
 /// Remove trailing hashes from a heading

@@ -3,16 +3,11 @@
 /// See [docs/md018.md](../../docs/md018.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_single_line_range;
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::get_cached_regex;
 
-lazy_static! {
-    // Pattern to detect emoji hashtags like #️⃣
-    static ref EMOJI_HASHTAG_PATTERN: Regex = Regex::new(r"^#️⃣|^#⃣").unwrap();
-
-    // Pattern to detect Unicode hashtag symbols that shouldn't be treated as headings
-    static ref UNICODE_HASHTAG_PATTERN: Regex = Regex::new(r"^#[\u{FE0F}\u{20E3}]").unwrap();
-}
+// Emoji and Unicode hashtag patterns
+const EMOJI_HASHTAG_PATTERN_STR: &str = r"^#️⃣|^#⃣";
+const UNICODE_HASHTAG_PATTERN_STR: &str = r"^#[\u{FE0F}\u{20E3}]";
 
 #[derive(Clone)]
 pub struct MD018NoMissingSpaceAtx;
@@ -39,7 +34,13 @@ impl MD018NoMissingSpaceAtx {
         }
 
         // Skip emoji hashtags and Unicode hashtag patterns
-        if EMOJI_HASHTAG_PATTERN.is_match(trimmed_line) || UNICODE_HASHTAG_PATTERN.is_match(trimmed_line) {
+        let is_emoji = get_cached_regex(EMOJI_HASHTAG_PATTERN_STR)
+            .map(|re| re.is_match(trimmed_line))
+            .unwrap_or(false);
+        let is_unicode = get_cached_regex(UNICODE_HASHTAG_PATTERN_STR)
+            .map(|re| re.is_match(trimmed_line))
+            .unwrap_or(false);
+        if is_emoji || is_unicode {
             return None;
         }
 
@@ -150,7 +151,13 @@ impl Rule for MD018NoMissingSpaceAtx {
                     let trimmed = line.trim_start();
 
                     // Skip emoji hashtags and Unicode hashtag patterns
-                    if EMOJI_HASHTAG_PATTERN.is_match(trimmed) || UNICODE_HASHTAG_PATTERN.is_match(trimmed) {
+                    let is_emoji = get_cached_regex(EMOJI_HASHTAG_PATTERN_STR)
+                        .map(|re| re.is_match(trimmed))
+                        .unwrap_or(false);
+                    let is_unicode = get_cached_regex(UNICODE_HASHTAG_PATTERN_STR)
+                        .map(|re| re.is_match(trimmed))
+                        .unwrap_or(false);
+                    if is_emoji || is_unicode {
                         continue;
                     }
 
@@ -229,7 +236,13 @@ impl Rule for MD018NoMissingSpaceAtx {
                     let trimmed = line.trim_start();
 
                     // Skip emoji hashtags and Unicode hashtag patterns
-                    if EMOJI_HASHTAG_PATTERN.is_match(trimmed) || UNICODE_HASHTAG_PATTERN.is_match(trimmed) {
+                    let is_emoji = get_cached_regex(EMOJI_HASHTAG_PATTERN_STR)
+                        .map(|re| re.is_match(trimmed))
+                        .unwrap_or(false);
+                    let is_unicode = get_cached_regex(UNICODE_HASHTAG_PATTERN_STR)
+                        .map(|re| re.is_match(trimmed))
+                        .unwrap_or(false);
+                    if is_emoji || is_unicode {
                         continue;
                     }
 

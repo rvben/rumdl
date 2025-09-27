@@ -7,17 +7,13 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severi
 use crate::utils::kramdown_utils::{is_kramdown_block_attribute, is_kramdown_extension};
 use crate::utils::range_utils::calculate_html_tag_range;
 use crate::utils::regex_cache::*;
-use lazy_static::lazy_static;
-use regex::Regex;
 use std::collections::HashSet;
 
 mod md033_config;
 use md033_config::MD033Config;
 
-lazy_static! {
-    // HTML/Markdown comment pattern (specific to MD033)
-    static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r"<!--.*?-->").unwrap();
-}
+// HTML comment pattern
+const HTML_COMMENT_PATTERN_STR: &str = r"<!--.*?-->";
 
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {

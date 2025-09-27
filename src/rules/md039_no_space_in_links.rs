@@ -1,15 +1,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::get_cached_regex;
 
-lazy_static! {
-    // Pre-compiled regex patterns for performance - using DOTALL flag to match newlines
-    static ref LINK_PATTERN: Regex = Regex::new(r"(?s)!?\[([^\]]*)\]\(([^)]*)\)").unwrap();
-
-    // Fast check patterns - simple string-based checks are faster than complex regex
-    static ref WHITESPACE_CHECK: Regex = Regex::new(r"^\s+|\s+$").unwrap();
-    static ref ALL_WHITESPACE: Regex = Regex::new(r"^\s*$").unwrap();
-}
+// Regex patterns
+const LINK_PATTERN_STR: &str = r"(?s)!?\[([^\]]*)\]\(([^)]*)\)";
+const WHITESPACE_CHECK_STR: &str = r"^\s+|\s+$";
+const ALL_WHITESPACE_STR: &str = r"^\s*$";
 
 /// Rule MD039: No space inside link text
 ///
@@ -31,7 +26,9 @@ impl MD039NoSpaceInLinks {
     /// Optimized fast check to see if content has any potential links or images
     #[inline]
     fn has_links_or_images(&self, content: &str) -> bool {
-        LINK_PATTERN.is_match(content)
+        get_cached_regex(LINK_PATTERN_STR)
+            .map(|re| re.is_match(content))
+            .unwrap_or(false)
     }
 
     #[inline]
@@ -120,7 +117,7 @@ impl Rule for MD039NoSpaceInLinks {
             // Optimized unescaping for whitespace check
             let unescaped = self.unescape_fast(&link.text);
 
-            let needs_warning = if ALL_WHITESPACE.is_match(&unescaped) {
+            let needs_warning = if get_cached_regex(ALL_WHITESPACE_STR).map(|re| re.is_match(&unescaped)).unwrap_or(false) {
                 true
             } else {
                 let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
@@ -138,7 +135,7 @@ impl Rule for MD039NoSpaceInLinks {
                     format!("({})", link.url)
                 };
 
-                let fixed = if ALL_WHITESPACE.is_match(&unescaped) {
+                let fixed = if get_cached_regex(ALL_WHITESPACE_STR).map(|re| re.is_match(&unescaped)).unwrap_or(false) {
                     format!("[]{url}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
@@ -176,7 +173,7 @@ impl Rule for MD039NoSpaceInLinks {
             // Optimized unescaping for whitespace check
             let unescaped = self.unescape_fast(&image.alt_text);
 
-            let needs_warning = if ALL_WHITESPACE.is_match(&unescaped) {
+            let needs_warning = if get_cached_regex(ALL_WHITESPACE_STR).map(|re| re.is_match(&unescaped)).unwrap_or(false) {
                 true
             } else {
                 let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
@@ -194,7 +191,7 @@ impl Rule for MD039NoSpaceInLinks {
                     format!("({})", image.url)
                 };
 
-                let fixed = if ALL_WHITESPACE.is_match(&unescaped) {
+                let fixed = if get_cached_regex(ALL_WHITESPACE_STR).map(|re| re.is_match(&unescaped)).unwrap_or(false) {
                     format!("![]{url}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
@@ -237,7 +234,7 @@ impl Rule for MD039NoSpaceInLinks {
 
             let unescaped = self.unescape_fast(&link.text);
 
-            let needs_fix = if ALL_WHITESPACE.is_match(&unescaped) {
+            let needs_fix = if get_cached_regex(ALL_WHITESPACE_STR).map(|re| re.is_match(&unescaped)).unwrap_or(false) {
                 true
             } else {
                 let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
@@ -255,7 +252,7 @@ impl Rule for MD039NoSpaceInLinks {
                     format!("({})", link.url)
                 };
 
-                let replacement = if ALL_WHITESPACE.is_match(&unescaped) {
+                let replacement = if get_cached_regex(ALL_WHITESPACE_STR).map(|re| re.is_match(&unescaped)).unwrap_or(false) {
                     format!("[]{url_part}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
@@ -279,7 +276,7 @@ impl Rule for MD039NoSpaceInLinks {
 
             let unescaped = self.unescape_fast(&image.alt_text);
 
-            let needs_fix = if ALL_WHITESPACE.is_match(&unescaped) {
+            let needs_fix = if get_cached_regex(ALL_WHITESPACE_STR).map(|re| re.is_match(&unescaped)).unwrap_or(false) {
                 true
             } else {
                 let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
@@ -297,7 +294,7 @@ impl Rule for MD039NoSpaceInLinks {
                     format!("({})", image.url)
                 };
 
-                let replacement = if ALL_WHITESPACE.is_match(&unescaped) {
+                let replacement = if get_cached_regex(ALL_WHITESPACE_STR).map(|re| re.is_match(&unescaped)).unwrap_or(false) {
                     format!("![]{url_part}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);

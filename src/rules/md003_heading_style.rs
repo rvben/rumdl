@@ -7,17 +7,15 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severi
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::range_utils::calculate_heading_range;
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::get_cached_regex;
 use toml;
 
 mod md003_config;
 use md003_config::MD003Config;
 
-lazy_static! {
-    static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
-    static ref QUICK_HEADING_CHECK: Regex = Regex::new(r"(?m)^(\s*)#|^(\s*)[^\s].*\n(\s*)(=+|-+)\s*$").unwrap();
-}
+// Regex patterns
+const FRONT_MATTER_DELIMITER_STR: &str = r"^---\s*$";
+const QUICK_HEADING_CHECK_STR: &str = r"(?m)^(\s*)#|^(\s*)[^\s].*\n(\s*)(=+|-+)\s*$";
 
 /// Rule MD003: Heading style
 #[derive(Clone, Default)]

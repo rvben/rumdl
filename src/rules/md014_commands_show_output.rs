@@ -12,7 +12,7 @@ use toml;
 mod md014_config;
 use md014_config::MD014Config;
 
-// Regex patterns - now using cached system
+// Command detection patterns
 const COMMAND_PATTERN: &str = r"^\s*[$>]\s+\S+";
 const SHELL_LANG_PATTERN: &str = r"^(?i)(bash|sh|shell|console|terminal)";
 const DOLLAR_PROMPT_PATTERN: &str = r"^\s*([$>])";

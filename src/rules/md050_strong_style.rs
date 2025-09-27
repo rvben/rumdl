@@ -3,15 +3,10 @@ use crate::utils::regex_cache::{BOLD_ASTERISK_REGEX, BOLD_UNDERSCORE_REGEX};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::utils::regex_cache::get_cached_regex;
 
-lazy_static! {
-    // Reference definition pattern - matches [ref]: url "title"
-    static ref REF_DEF_REGEX: Regex = Regex::new(
-        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
-    ).unwrap();
-}
+// Reference definition pattern
+const REF_DEF_REGEX_STR: &str = r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#;
 
 mod md050_config;
 use md050_config::MD050Config;
@@ -54,9 +49,11 @@ impl MD050StrongStyle {
         }
 
         // Check reference definitions [ref]: url "title" using regex pattern
-        for m in REF_DEF_REGEX.find_iter(ctx.content) {
-            if m.start() <= byte_pos && byte_pos < m.end() {
-                return true;
+        if let Ok(re) = get_cached_regex(REF_DEF_REGEX_STR) {
+            for m in re.find_iter(ctx.content) {
+                if m.start() <= byte_pos && byte_pos < m.end() {
+                    return true;
+                }
             }
         }
 
