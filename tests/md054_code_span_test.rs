@@ -45,7 +45,7 @@ Complex: `Array<[T]>` and `Map<[K, V]>` should be ignored
     fn test_md054_off_by_one_bug() {
         // This test specifically targets the off-by-one indexing bug
         // The bug would cause false positives or panics at certain character positions
-        let test_cases = vec![
+        let test_cases = [
             "`[x](y)` [a](b)",                   // Code span at position 0
             " `[x](y)` [a](b)",                  // Code span at position 1
             "  `[x](y)` [a](b)",                 // Code span at position 2
@@ -93,7 +93,7 @@ Complex: `Array<[T]>` and `Map<[K, V]>` should be ignored
 
         // The test passes if it doesn't panic
         let result = rumdl_lib::lint(content, &md054_rules, false, MarkdownFlavor::Standard);
-        assert!(result.is_ok(), "MD054 regression test failed: {:?}", result);
+        assert!(result.is_ok(), "MD054 regression test failed: {result:?}");
 
         if let Ok(warnings) = result {
             println!("MD054 regression test produced {} warnings", warnings.len());
