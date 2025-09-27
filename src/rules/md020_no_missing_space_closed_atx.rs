@@ -39,7 +39,8 @@ impl MD020NoMissingSpaceClosedAtx {
     fn fix_closed_atx_heading(&self, line: &str) -> String {
         if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line)) {
+            .and_then(|re| re.captures(line))
+        {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
             let content = &captures[3];
@@ -49,7 +50,8 @@ impl MD020NoMissingSpaceClosedAtx {
             format!("{indentation}{opening_hashes} {content}{last_char} {closing_hashes}{custom_id}")
         } else if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_START_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line)) {
+            .and_then(|re| re.captures(line))
+        {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
             let content = &captures[3];
@@ -58,7 +60,8 @@ impl MD020NoMissingSpaceClosedAtx {
             format!("{indentation}{opening_hashes} {content} {closing_hashes}{custom_id}")
         } else if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_END_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line)) {
+            .and_then(|re| re.captures(line))
+        {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
             let content = &captures[3];
@@ -109,7 +112,8 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
 
                         if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_PATTERN_STR)
                             .ok()
-                            .and_then(|re| re.captures(line)) {
+                            .and_then(|re| re.captures(line))
+                        {
                             // Missing space at both start and end: #Heading#
                             let opening_hashes = captures.get(2).unwrap();
                             message = format!(
@@ -121,7 +125,8 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                             length = 1;
                         } else if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_START_PATTERN_STR)
                             .ok()
-                            .and_then(|re| re.captures(line)) {
+                            .and_then(|re| re.captures(line))
+                        {
                             // Missing space at start: #Heading #
                             let opening_hashes = captures.get(2).unwrap();
                             message = format!(
@@ -133,7 +138,8 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                             length = 1;
                         } else if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_END_PATTERN_STR)
                             .ok()
-                            .and_then(|re| re.captures(line)) {
+                            .and_then(|re| re.captures(line))
+                        {
                             // Missing space at end: # Heading#
                             let content = captures.get(3).unwrap();
                             let closing_hashes = captures.get(5).unwrap();

@@ -12,9 +12,6 @@ use std::collections::HashSet;
 mod md033_config;
 use md033_config::MD033Config;
 
-// HTML comment pattern
-const HTML_COMMENT_PATTERN_STR: &str = r"<!--.*?-->";
-
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {
     config: MD033Config,

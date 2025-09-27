@@ -7,7 +7,6 @@ use crate::utils::regex_cache::get_cached_regex;
 
 // Regex patterns
 const CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR: &str = r"^(\s*)(#+)(\s+)(.*?)(\s+)(#+)\s*$";
-const CODE_FENCE_PATTERN_STR: &str = r"^(`{3,}|~{3,})";
 
 #[derive(Clone)]
 pub struct MD021NoMultipleSpaceClosedAtx;
@@ -26,7 +25,8 @@ impl MD021NoMultipleSpaceClosedAtx {
     fn is_closed_atx_heading_with_multiple_spaces(&self, line: &str) -> bool {
         if let Some(captures) = get_cached_regex(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line)) {
+            .and_then(|re| re.captures(line))
+        {
             let start_spaces = captures.get(3).unwrap().as_str().len();
             let end_spaces = captures.get(5).unwrap().as_str().len();
             start_spaces > 1 || end_spaces > 1
@@ -38,7 +38,8 @@ impl MD021NoMultipleSpaceClosedAtx {
     fn fix_closed_atx_heading(&self, line: &str) -> String {
         if let Some(captures) = get_cached_regex(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line)) {
+            .and_then(|re| re.captures(line))
+        {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
             let content = &captures[4];
@@ -58,7 +59,8 @@ impl MD021NoMultipleSpaceClosedAtx {
     fn count_spaces(&self, line: &str) -> (usize, usize) {
         if let Some(captures) = get_cached_regex(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line)) {
+            .and_then(|re| re.captures(line))
+        {
             let start_spaces = captures.get(3).unwrap().as_str().len();
             let end_spaces = captures.get(5).unwrap().as_str().len();
             (start_spaces, end_spaces)

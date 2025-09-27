@@ -1,23 +1,19 @@
 /// Rule MD034: No unformatted URLs
 ///
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
-use crate::rule::{
-    Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity,
-};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_url_range;
-use crate::utils::regex_cache::{get_cached_regex, EMAIL_PATTERN};
+use crate::utils::regex_cache::{EMAIL_PATTERN, get_cached_regex};
 
 use crate::lint_context::LintContext;
 
 // URL detection patterns
 const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?)://|@"#;
-const URL_REGEX_STR: &str = r#"(?<![\w\[\(\<])((?:https?|ftps?)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#;
-const URL_FIX_REGEX_STR: &str = r#"(?<![\w\[\(\<])((?:https?|ftps?)://(?:\[[0-9a-fA-F:%]+\]|[^\s<>\[\]()\\'\"]+)(?::\d+)?(?:/[^\s<>\[\]()\\'\"]*)?(?:\?[^\s<>\[\]()\\'\"]*)?(?:#[^\s<>\[\]()\\'\"]*)?)"#;
 const CUSTOM_PROTOCOL_PATTERN_STR: &str = r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#;
 const MARKDOWN_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
-const ANGLE_LINK_PATTERN_STR: &str = r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
+const ANGLE_LINK_PATTERN_STR: &str =
+    r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
 const BADGE_LINK_LINE_STR: &str = r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#;
-const IMAGE_ONLY_LINK_TEXT_PATTERN_STR: &str = r#"^!\s*\[[^\]]*\]\s*\([^)]*\)$"#;
 const MARKDOWN_IMAGE_PATTERN_STR: &str = r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
 const SIMPLE_URL_REGEX_STR: &str = r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`:\]]+(?::\d+)?)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
 const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
@@ -112,10 +108,11 @@ impl MD034NoBareUrls {
         }
 
         // Quick check - does this line potentially have a URL or email?
-        if let Ok(re) = get_cached_regex(URL_QUICK_CHECK_STR) {
-            if !re.is_match(line) && !line.contains('@') {
-                return warnings;
-            }
+        if let Ok(re) = get_cached_regex(URL_QUICK_CHECK_STR)
+            && !re.is_match(line)
+            && !line.contains('@')
+        {
+            return warnings;
         }
 
         // Find all markdown links and angle bracket links for exclusion
@@ -211,7 +208,12 @@ impl MD034NoBareUrls {
             }
 
             // Check if we're inside an HTML comment
-            let absolute_pos = content.lines().take(line_number - 1).map(|l| l.len() + 1).sum::<usize>() + start;
+            let absolute_pos = content
+                .lines()
+                .take(line_number - 1)
+                .map(|l| l.len() + 1)
+                .sum::<usize>()
+                + start;
             if self.is_in_html_comment(content, absolute_pos) {
                 continue;
             }
@@ -222,7 +224,8 @@ impl MD034NoBareUrls {
             // Only report if we have a valid URL after trimming
             if !trimmed_url.is_empty() && trimmed_url != "//" {
                 let trimmed_end = start + trimmed_url.len();
-                let (start_line, start_col, end_line, end_col) = calculate_url_range(line_number, line, start, trimmed_end);
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_url_range(line_number, line, start, trimmed_end);
 
                 warnings.push(LintWarning {
                     rule_name: Some("MD034"),
@@ -234,7 +237,11 @@ impl MD034NoBareUrls {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: {
-                            let line_start_byte = content.lines().take(line_number - 1).map(|l| l.len() + 1).sum::<usize>();
+                            let line_start_byte = content
+                                .lines()
+                                .take(line_number - 1)
+                                .map(|l| l.len() + 1)
+                                .sum::<usize>();
                             (line_start_byte + start)..(line_start_byte + trimmed_end)
                         },
                         replacement: format!("<{trimmed_url}>"),
@@ -245,42 +252,46 @@ impl MD034NoBareUrls {
 
         // Check for bare email addresses
         for cap in EMAIL_PATTERN.captures_iter(line) {
-                if let Some(mat) = cap.get(0) {
-                    let email = mat.as_str();
-                    let start = mat.start();
-                    let end = mat.end();
+            if let Some(mat) = cap.get(0) {
+                let email = mat.as_str();
+                let start = mat.start();
+                let end = mat.end();
 
-                    // Check if email is inside angle brackets or markdown link
-                    let mut is_inside_construct = false;
-                    for &(link_start, link_end) in &markdown_link_ranges {
-                        if start >= link_start && end <= link_end {
-                            is_inside_construct = true;
-                            break;
-                        }
-                    }
-
-                    if !is_inside_construct {
-                        let (start_line, start_col, end_line, end_col) = calculate_url_range(line_number, line, start, end);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some("MD034"),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: format!("Bare email address '{email}' should be formatted as a link"),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: {
-                                    let line_start_byte = content.lines().take(line_number - 1).map(|l| l.len() + 1).sum::<usize>();
-                                    (line_start_byte + start)..(line_start_byte + end)
-                                },
-                                replacement: format!("<{email}>"),
-                            }),
-                        });
+                // Check if email is inside angle brackets or markdown link
+                let mut is_inside_construct = false;
+                for &(link_start, link_end) in &markdown_link_ranges {
+                    if start >= link_start && end <= link_end {
+                        is_inside_construct = true;
+                        break;
                     }
                 }
+
+                if !is_inside_construct {
+                    let (start_line, start_col, end_line, end_col) = calculate_url_range(line_number, line, start, end);
+
+                    warnings.push(LintWarning {
+                        rule_name: Some("MD034"),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!("Bare email address '{email}' should be formatted as a link"),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: {
+                                let line_start_byte = content
+                                    .lines()
+                                    .take(line_number - 1)
+                                    .map(|l| l.len() + 1)
+                                    .sum::<usize>();
+                                (line_start_byte + start)..(line_start_byte + end)
+                            },
+                            replacement: format!("<{email}>"),
+                        }),
+                    });
+                }
             }
+        }
 
         warnings
     }
@@ -300,7 +311,7 @@ impl Rule for MD034NoBareUrls {
     where
         Self: Sized,
     {
-        Box::new(MD034NoBareUrls::default())
+        Box::new(MD034NoBareUrls)
     }
 
     #[inline]

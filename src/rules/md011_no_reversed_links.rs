@@ -3,8 +3,8 @@
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
-use crate::utils::skip_context::{is_in_html_comment, is_in_math_context};
 use crate::utils::regex_cache::get_cached_regex;
+use crate::utils::skip_context::{is_in_html_comment, is_in_math_context};
 
 // Reversed link detection pattern
 const REVERSED_LINK_REGEX_STR: &str = r"(^|[^\\])\(([^()]+)\)\[([^\]]+)\]";
