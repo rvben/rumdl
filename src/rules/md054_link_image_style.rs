@@ -253,7 +253,7 @@ impl Rule for MD054LinkImageStyle {
             for m in filtered_matches {
                 let match_start_char = line[..m.start].chars().count();
 
-                if !ctx.is_in_code_span(line_num + 1, match_start_char + 1) && !self.is_style_allowed(m.style) {
+                if !ctx.is_in_code_span(line_num + 1, match_start_char) && !self.is_style_allowed(m.style) {
                     let match_len = line[m.start..m.end].chars().count();
                     let (start_line, start_col, end_line, end_col) =
                         calculate_match_range(line_num + 1, line, match_start_char, match_len);
