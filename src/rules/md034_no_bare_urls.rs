@@ -15,10 +15,12 @@ const ANGLE_LINK_PATTERN_STR: &str =
     r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
 const BADGE_LINK_LINE_STR: &str = r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#;
 const MARKDOWN_IMAGE_PATTERN_STR: &str = r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
-const SIMPLE_URL_REGEX_STR: &str = r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`:\]]+(?::\d+)?)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
+const SIMPLE_URL_REGEX_STR: &str = r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`\]]+)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
 const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
 const REFERENCE_DEF_RE_STR: &str = r"^\s*\[[^\]]+\]:\s*(?:https?|ftps?)://\S+$";
 const HTML_COMMENT_PATTERN_STR: &str = r#"<!--[\s\S]*?-->"#;
+const HTML_TAG_PATTERN_STR: &str = r#"<[^>]*>"#;
+const MULTILINE_LINK_CONTINUATION_STR: &str = r#"^[^\[]*\]\(.*\)"#;
 
 #[derive(Default, Clone)]
 pub struct MD034NoBareUrls;
@@ -99,11 +101,38 @@ impl MD034NoBareUrls {
         false
     }
 
-    fn check_line(&self, line: &str, content: &str, line_number: usize) -> Vec<LintWarning> {
+    /// Check if a position in a line is inside an HTML tag
+    fn is_in_html_tag(&self, line: &str, pos: usize) -> bool {
+        // Find all HTML tags in the line
+        if let Ok(re) = get_cached_regex(HTML_TAG_PATTERN_STR) {
+            for mat in re.find_iter(line) {
+                if pos >= mat.start() && pos < mat.end() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn check_line(
+        &self,
+        line: &str,
+        content: &str,
+        line_number: usize,
+        code_spans: &[crate::lint_context::CodeSpan],
+    ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
 
         // Skip reference definitions
         if self.is_reference_definition(line) {
+            return warnings;
+        }
+
+        // Skip lines that are continuations of multiline markdown links
+        // Pattern: text](url) without a leading [
+        if let Ok(re) = get_cached_regex(MULTILINE_LINK_CONTINUATION_STR)
+            && re.is_match(line)
+        {
             return warnings;
         }
 
@@ -173,6 +202,22 @@ impl MD034NoBareUrls {
                     continue;
                 }
 
+                // Skip malformed IPv6-like URLs
+                // Check for IPv6-like patterns that are malformed
+                if let Some(host_start) = url_str.find("://") {
+                    let after_protocol = &url_str[host_start + 3..];
+                    // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
+                    if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
+                        // Check if the next character after our match is ]
+                        if let Some(char_after) = line.chars().nth(mat.end())
+                            && char_after == ']'
+                        {
+                            // This is likely a malformed IPv6 URL like "https://::1]:8080"
+                            continue;
+                        }
+                    }
+                }
+
                 urls_found.push((mat.start(), mat.end(), url_str.to_string()));
             }
         }
@@ -207,6 +252,11 @@ impl MD034NoBareUrls {
                 continue;
             }
 
+            // Check if URL is inside an HTML tag
+            if self.is_in_html_tag(line, start) {
+                continue;
+            }
+
             // Check if we're inside an HTML comment
             let absolute_pos = content
                 .lines()
@@ -223,9 +273,9 @@ impl MD034NoBareUrls {
 
             // Only report if we have a valid URL after trimming
             if !trimmed_url.is_empty() && trimmed_url != "//" {
-                let trimmed_end = start + trimmed_url.len();
+                let trimmed_len = trimmed_url.len();
                 let (start_line, start_col, end_line, end_col) =
-                    calculate_url_range(line_number, line, start, trimmed_end);
+                    calculate_url_range(line_number, line, start, trimmed_len);
 
                 warnings.push(LintWarning {
                     rule_name: Some("MD034"),
@@ -233,7 +283,7 @@ impl MD034NoBareUrls {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: format!("Bare URL '{trimmed_url}' should be formatted as a link"),
+                    message: format!("URL without angle brackets or link formatting: '{trimmed_url}'"),
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: {
@@ -242,7 +292,7 @@ impl MD034NoBareUrls {
                                 .take(line_number - 1)
                                 .map(|l| l.len() + 1)
                                 .sum::<usize>();
-                            (line_start_byte + start)..(line_start_byte + trimmed_end)
+                            (line_start_byte + start)..(line_start_byte + start + trimmed_len)
                         },
                         replacement: format!("<{trimmed_url}>"),
                     }),
@@ -267,28 +317,42 @@ impl MD034NoBareUrls {
                 }
 
                 if !is_inside_construct {
-                    let (start_line, start_col, end_line, end_col) = calculate_url_range(line_number, line, start, end);
+                    // Check if email is inside an HTML tag
+                    if self.is_in_html_tag(line, start) {
+                        continue;
+                    }
 
-                    warnings.push(LintWarning {
-                        rule_name: Some("MD034"),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: format!("Bare email address '{email}' should be formatted as a link"),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: {
-                                let line_start_byte = content
-                                    .lines()
-                                    .take(line_number - 1)
-                                    .map(|l| l.len() + 1)
-                                    .sum::<usize>();
-                                (line_start_byte + start)..(line_start_byte + end)
-                            },
-                            replacement: format!("<{email}>"),
-                        }),
-                    });
+                    // Check if email is inside a code span
+                    let is_in_code_span = code_spans
+                        .iter()
+                        .any(|span| span.line == line_number && start >= span.start_col && start < span.end_col);
+
+                    if !is_in_code_span {
+                        let email_len = end - start;
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_url_range(line_number, line, start, email_len);
+
+                        warnings.push(LintWarning {
+                            rule_name: Some("MD034"),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!("Email address without angle brackets or link formatting: '{email}'"),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: {
+                                    let line_start_byte = content
+                                        .lines()
+                                        .take(line_number - 1)
+                                        .map(|l| l.len() + 1)
+                                        .sum::<usize>();
+                                    (line_start_byte + start)..(line_start_byte + end)
+                                },
+                                replacement: format!("<{email}>"),
+                            }),
+                        });
+                    }
                 }
             }
         }
@@ -333,9 +397,29 @@ impl Rule for MD034NoBareUrls {
             return Ok(warnings);
         }
 
+        // Get code spans for exclusion
+        let code_spans = ctx.code_spans();
+
         // Check line by line
         for (line_num, line) in content.lines().enumerate() {
-            let line_warnings = self.check_line(line, content, line_num + 1);
+            // Skip lines inside code blocks
+            if ctx.is_in_code_block(line_num + 1) {
+                continue;
+            }
+
+            let mut line_warnings = self.check_line(line, content, line_num + 1, &code_spans);
+
+            // Filter out warnings that are inside code spans
+            line_warnings.retain(|warning| {
+                // Check if the URL is inside a code span
+                !code_spans.iter().any(|span| {
+                    span.line == warning.line &&
+                    warning.column > 0 && // column is 1-indexed
+                    (warning.column - 1) >= span.start_col &&
+                    (warning.column - 1) < span.end_col
+                })
+            });
+
             warnings.extend(line_warnings);
         }
 
@@ -344,7 +428,10 @@ impl Rule for MD034NoBareUrls {
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
         let mut content = ctx.content.to_string();
-        let warnings = self.check(ctx)?;
+        let mut warnings = self.check(ctx)?;
+
+        // Sort warnings by position to ensure consistent fix application
+        warnings.sort_by_key(|w| w.fix.as_ref().map(|f| f.range.start).unwrap_or(0));
 
         // Apply fixes in reverse order to maintain positions
         for warning in warnings.iter().rev() {
