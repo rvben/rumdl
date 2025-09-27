@@ -622,4 +622,52 @@ mod tests {
             "Inline HTML found: <br/> (use Markdown syntax instead)"
         );
     }
+
+    #[test]
+    fn test_md033_issue_90_code_span_with_diff_block() {
+        // Test for issue #90: inline code span followed by diff code block
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"# Heading
+
+`<env>`
+
+```diff
+- this
++ that
+```"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        // Should NOT detect <env> as HTML since it's inside backticks
+        assert_eq!(result.len(), 0, "Should not report HTML tags inside code spans");
+    }
+
+    #[test]
+    fn test_md033_multiple_code_spans_with_angle_brackets() {
+        // Test multiple code spans on same line
+        let rule = MD033NoInlineHtml::default();
+        let content = "`<one>` and `<two>` and `<three>` are all code spans";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should not report HTML tags inside any code spans");
+    }
+
+    #[test]
+    fn test_md033_nested_angle_brackets_in_code_span() {
+        // Test nested angle brackets
+        let rule = MD033NoInlineHtml::default();
+        let content = "Text with `<<nested>>` brackets";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should handle nested angle brackets in code spans");
+    }
+
+    #[test]
+    fn test_md033_code_span_at_end_before_code_block() {
+        // Test code span at end of line before code block
+        let rule = MD033NoInlineHtml::default();
+        let content = "Testing `<test>`\n```\ncode here\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Should handle code span before code block");
+    }
 }

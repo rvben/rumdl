@@ -136,12 +136,32 @@ pub fn parse_markdown_ast(content: &str) -> MarkdownAst {
 /// Check if content contains patterns that cause the markdown crate to panic
 fn content_has_problematic_lists(content: &str) -> bool {
     let lines: Vec<&str> = content.lines().collect();
+    let mut in_code_block = false;
 
-    // Look for mixed list markers in consecutive lines (which causes the panic)
-    for window in lines.windows(3) {
-        if window.len() >= 2 {
-            let line1 = window[0].trim_start();
-            let line2 = window[1].trim_start();
+    // Track code blocks to avoid false positives
+    for i in 0..lines.len() {
+        let line = lines[i].trim_start();
+
+        // Toggle code block state
+        if line.starts_with("```") || line.starts_with("~~~") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+
+        // Skip lines inside code blocks
+        if in_code_block {
+            continue;
+        }
+
+        // Check for adjacent lines with different list markers
+        if i + 1 < lines.len() {
+            let line1 = lines[i].trim_start();
+            let line2 = lines[i + 1].trim_start();
+
+            // Skip if next line is a code block start
+            if line2.starts_with("```") || line2.starts_with("~~~") {
+                continue;
+            }
 
             // Check if both lines are list items with different markers
             let is_list1 = line1.starts_with("* ") || line1.starts_with("+ ") || line1.starts_with("- ");
@@ -159,28 +179,8 @@ fn content_has_problematic_lists(content: &str) -> bool {
         }
     }
 
-    // Check for mixed markers with different indentation levels
-    for i in 0..lines.len().saturating_sub(1) {
-        let line1 = lines[i];
-        let line2 = lines[i + 1];
-
-        // Get the full line for marker check
-        let trimmed1 = line1.trim_start();
-        let trimmed2 = line2.trim_start();
-
-        let is_list1 = trimmed1.starts_with("* ") || trimmed1.starts_with("+ ") || trimmed1.starts_with("- ");
-        let is_list2 = trimmed2.starts_with("* ") || trimmed2.starts_with("+ ") || trimmed2.starts_with("- ");
-
-        if is_list1 && is_list2 {
-            let marker1 = trimmed1.chars().next().unwrap_or(' ');
-            let marker2 = trimmed2.chars().next().unwrap_or(' ');
-
-            // If different markers (even with different indentation), this could cause issues
-            if marker1 != marker2 {
-                return true;
-            }
-        }
-    }
+    // The first loop above should handle all cases
+    // No need for a second loop that would duplicate the check
 
     false
 }

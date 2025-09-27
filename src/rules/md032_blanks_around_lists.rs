@@ -178,21 +178,37 @@ impl MD032BlanksAroundLists {
 
             for &item_line in &block.item_lines {
                 if prev_item_line > 0 {
-                    // Check if there's a fenced code block between prev_item_line and item_line
-                    let mut has_code_fence = false;
+                    // Check if there's a standalone code fence between prev_item_line and item_line
+                    // A code fence that's indented as part of a list item should NOT split the list
+                    let mut has_standalone_code_fence = false;
+
+                    // Calculate minimum indentation for list item content
+                    let min_indent_for_content = if block.is_ordered {
+                        // For ordered lists, content should be indented at least to align with text after marker
+                        // e.g., "1. " = 3 chars, so content should be indented 3+ spaces
+                        3 // Minimum for "1. "
+                    } else {
+                        // For unordered lists, content should be indented at least 2 spaces
+                        2 // For "- " or "* "
+                    };
+
                     for check_line in (prev_item_line + 1)..item_line {
                         if check_line - 1 < ctx.lines.len() {
                             let line = &ctx.lines[check_line - 1];
                             if line.in_code_block
                                 && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~"))
                             {
-                                has_code_fence = true;
-                                break;
+                                // Check if this code fence is indented as part of the list item
+                                // If it's indented enough to be part of the list item, it shouldn't split
+                                if line.indent < min_indent_for_content {
+                                    has_standalone_code_fence = true;
+                                    break;
+                                }
                             }
                         }
                     }
 
-                    if has_code_fence {
+                    if has_standalone_code_fence {
                         // End current segment before this item
                         segments.push((current_start, prev_item_line));
                         current_start = item_line;

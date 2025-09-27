@@ -405,6 +405,8 @@ impl<'a> LintContext<'a> {
         let links = Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor);
         let images = Self::parse_images(content, &lines, &code_blocks, &code_spans);
         let reference_defs = Self::parse_reference_defs(content, &lines);
+        // Use line-by-line list parsing for MD032 compatibility
+        // TODO: Consider using AST-based parsing in the future when MD032 is updated
         let list_blocks = Self::parse_list_blocks(&lines);
 
         // Detect HTML blocks
@@ -613,10 +615,13 @@ impl<'a> LintContext<'a> {
         }
 
         // Use the code spans cache to check
+        // Note: col is 1-indexed from caller, but span.start_col and span.end_col are 0-indexed
+        // Convert col to 0-indexed for comparison
+        let col_0indexed = if col > 0 { col - 1 } else { 0 };
         let code_spans = self.code_spans();
         code_spans
             .iter()
-            .any(|span| span.line == line_num && col >= span.start_col && col <= span.end_col)
+            .any(|span| span.line == line_num && col_0indexed >= span.start_col && col_0indexed < span.end_col)
     }
 
     /// Check if content has any instances of a specific character (fast)
@@ -1683,7 +1688,7 @@ impl<'a> LintContext<'a> {
         code_spans
     }
 
-    /// Parse all list blocks in the content
+    /// Parse all list blocks in the content (legacy line-by-line approach)
     fn parse_list_blocks(lines: &[LineInfo]) -> Vec<ListBlock> {
         // Pre-size based on lines that could be list items
         let mut list_blocks = Vec::with_capacity(lines.len() / 10); // Estimate ~10% of lines might start list blocks
@@ -1988,6 +1993,14 @@ impl<'a> LintContext<'a> {
                 // - Blank lines followed by indented content continue the list
                 // - Everything else ends the list
 
+                // Check if the last line in the list block ended with a backslash (hard line break)
+                // This handles cases where list items use backslash for hard line breaks
+                let prev_line_ends_with_backslash = if block.end_line > 0 && block.end_line - 1 < lines.len() {
+                    lines[block.end_line - 1].content.trim_end().ends_with('\\')
+                } else {
+                    false
+                };
+
                 // Calculate minimum indentation for list continuation
                 // For ordered lists, use the last marker width (e.g., 3 for "1. ", 4 for "10. ")
                 // For unordered lists like "- ", content starts at column 2, so continuations need at least 2 spaces
@@ -1997,8 +2010,8 @@ impl<'a> LintContext<'a> {
                     current_indent_level + 2 // Unordered lists need at least 2 spaces (e.g., "- " = 2 chars)
                 };
 
-                if line_info.indent >= min_continuation_indent {
-                    // Indented line continues the list
+                if prev_line_ends_with_backslash || line_info.indent >= min_continuation_indent {
+                    // Indented line or backslash continuation continues the list
                     block.end_line = line_num;
                 } else if line_info.is_blank {
                     // Blank line - check if it's internal to the list or ending it
