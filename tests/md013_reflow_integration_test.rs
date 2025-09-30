@@ -107,6 +107,7 @@ fn test_md013_reflow_disabled_by_default() {
     // Run rumdl with fix (no config, so reflow should be disabled)
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .arg("check")
+        .arg("--no-config")
         .arg("--fix")
         .arg(&file_path)
         .output()

@@ -479,26 +479,29 @@ impl MD013LineLength {
                         reflowed_text
                     };
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: if config.reflow_mode == ReflowMode::SentencePerLine {
-                            "Line contains multiple sentences (one sentence per line expected)".to_string()
-                        } else {
-                            format!(
-                                "Line length exceeds {} characters and can be reflowed",
-                                config.line_length
-                            )
-                        },
-                        line: list_start + 1,
-                        column: 1,
-                        end_line: end_line + 1,
-                        end_column: lines[end_line].len() + 1,
-                        severity: Severity::Warning,
-                        fix: Some(crate::rule::Fix {
-                            range: byte_range,
-                            replacement,
-                        }),
-                    });
+                    // Get the original text to compare
+                    let original_text = &ctx.content[byte_range.clone()];
+
+                    // Only generate a warning if the replacement is different from the original
+                    if original_text != replacement {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message: if config.reflow_mode == ReflowMode::SentencePerLine {
+                                "Line contains multiple sentences (one sentence per line expected)".to_string()
+                            } else {
+                                format!("Line length exceeds {} characters", config.line_length)
+                            },
+                            line: list_start + 1,
+                            column: 1,
+                            end_line: end_line + 1,
+                            end_column: lines[end_line].len() + 1,
+                            severity: Severity::Warning,
+                            fix: Some(crate::rule::Fix {
+                                range: byte_range,
+                                replacement,
+                            }),
+                        });
+                    }
                 }
                 continue;
             }
@@ -611,62 +614,65 @@ impl MD013LineLength {
                     reflowed_text
                 };
 
-                // Create warning with actual fix
-                // In default mode, report the specific line that violates
-                // In normalize mode, report the whole paragraph
-                // In sentence-per-line mode, report lines with multiple sentences
-                let (warning_line, warning_end_line) = match config.reflow_mode {
-                    ReflowMode::Normalize => (paragraph_start + 1, end_line + 1),
-                    ReflowMode::SentencePerLine => {
-                        // Find the first line with multiple sentences
-                        let mut violating_line = paragraph_start;
-                        for (idx, line) in paragraph_lines.iter().enumerate() {
-                            let sentences = split_into_sentences(line);
-                            if sentences.len() > 1 {
-                                violating_line = paragraph_start + idx;
-                                break;
-                            }
-                        }
-                        (violating_line + 1, violating_line + 1)
-                    }
-                    ReflowMode::Default => {
-                        // Find the first line that exceeds the limit
-                        let mut violating_line = paragraph_start;
-                        for (idx, line) in paragraph_lines.iter().enumerate() {
-                            if self.calculate_effective_length(line) > config.line_length {
-                                violating_line = paragraph_start + idx;
-                                break;
-                            }
-                        }
-                        (violating_line + 1, violating_line + 1)
-                    }
-                };
+                // Get the original text to compare
+                let original_text = &ctx.content[byte_range.clone()];
 
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message: match config.reflow_mode {
-                        ReflowMode::Normalize => format!(
-                            "Paragraph could be normalized to use line length of {} characters",
-                            config.line_length
-                        ),
+                // Only generate a warning if the replacement is different from the original
+                if original_text != replacement {
+                    // Create warning with actual fix
+                    // In default mode, report the specific line that violates
+                    // In normalize mode, report the whole paragraph
+                    // In sentence-per-line mode, report lines with multiple sentences
+                    let (warning_line, warning_end_line) = match config.reflow_mode {
+                        ReflowMode::Normalize => (paragraph_start + 1, end_line + 1),
                         ReflowMode::SentencePerLine => {
-                            "Line contains multiple sentences (one sentence per line expected)".to_string()
+                            // Find the first line with multiple sentences
+                            let mut violating_line = paragraph_start;
+                            for (idx, line) in paragraph_lines.iter().enumerate() {
+                                let sentences = split_into_sentences(line);
+                                if sentences.len() > 1 {
+                                    violating_line = paragraph_start + idx;
+                                    break;
+                                }
+                            }
+                            (violating_line + 1, violating_line + 1)
                         }
-                        ReflowMode::Default => format!(
-                            "Line length exceeds {} characters and can be reflowed",
-                            config.line_length
-                        ),
-                    },
-                    line: warning_line,
-                    column: 1,
-                    end_line: warning_end_line,
-                    end_column: lines[warning_end_line.saturating_sub(1)].len() + 1,
-                    severity: Severity::Warning,
-                    fix: Some(crate::rule::Fix {
-                        range: byte_range,
-                        replacement,
-                    }),
-                });
+                        ReflowMode::Default => {
+                            // Find the first line that exceeds the limit
+                            let mut violating_line = paragraph_start;
+                            for (idx, line) in paragraph_lines.iter().enumerate() {
+                                if self.calculate_effective_length(line) > config.line_length {
+                                    violating_line = paragraph_start + idx;
+                                    break;
+                                }
+                            }
+                            (violating_line + 1, violating_line + 1)
+                        }
+                    };
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message: match config.reflow_mode {
+                            ReflowMode::Normalize => format!(
+                                "Paragraph could be normalized to use line length of {} characters",
+                                config.line_length
+                            ),
+                            ReflowMode::SentencePerLine => {
+                                "Line contains multiple sentences (one sentence per line expected)".to_string()
+                            }
+                            ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length),
+                        },
+                        line: warning_line,
+                        column: 1,
+                        end_line: warning_end_line,
+                        end_column: lines[warning_end_line.saturating_sub(1)].len() + 1,
+                        severity: Severity::Warning,
+                        fix: Some(crate::rule::Fix {
+                            range: byte_range,
+                            replacement,
+                        }),
+                    });
+                }
             }
         }
 
