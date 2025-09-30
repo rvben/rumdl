@@ -12,6 +12,7 @@ pub mod element_cache;
 pub mod emphasis_utils;
 pub mod fix_utils;
 pub mod header_id_utils;
+pub mod jinja_utils;
 pub mod kramdown_utils;
 pub mod line_ending;
 pub mod markdown_elements;

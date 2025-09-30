@@ -2,6 +2,7 @@
 ///
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::utils::jinja_utils::is_in_jinja_template;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::get_cached_regex;
 use crate::utils::skip_context::{is_in_html_comment, is_in_math_context};
@@ -107,10 +108,11 @@ impl Rule for MD011NoReversedLinks {
                 let match_start = last_end + match_obj.start() + prechar.len();
                 let match_byte_pos = byte_pos + match_start;
 
-                // Skip if in code block, inline code, HTML comments, or math contexts
+                // Skip if in code block, inline code, HTML comments, math contexts, or Jinja templates
                 if ctx.is_in_code_block_or_span(match_byte_pos)
                     || is_in_html_comment(content, match_byte_pos)
                     || is_in_math_context(ctx, match_byte_pos)
+                    || is_in_jinja_template(content, match_byte_pos)
                 {
                     last_end += match_obj.end();
                     continue;
@@ -170,7 +172,10 @@ impl Rule for MD011NoReversedLinks {
             }
 
             // Skip if in any skip context
-            if !ctx.is_in_code_block_or_span(pos) && !is_in_html_comment(content, pos) && !is_in_math_context(ctx, pos)
+            if !ctx.is_in_code_block_or_span(pos)
+                && !is_in_html_comment(content, pos)
+                && !is_in_math_context(ctx, pos)
+                && !is_in_jinja_template(content, pos)
             {
                 let adjusted_pos = (pos as isize + offset) as usize;
                 let original = format!("({url})[{text}]");
