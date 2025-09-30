@@ -340,15 +340,15 @@ mod comprehensive_tests {
         let content_multi = "* Item 1\n\t* Item 2\n\t\t* Item 3";
         let ctx = LintContext::new(content_multi, rumdl_lib::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With dynamic alignment: Item 3 aligns with Item 2 at correct position
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n   * Item 3");
+        // With cascade behavior: Item 3 aligns with Item 2's actual content position
+        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
 
         // Mixed tabs and spaces
         // TODO: Tab handling may not be consistent
         let content_mixed = "* Item 1\n \t* Item 2\n\t * Item 3";
         let ctx = LintContext::new(content_mixed, rumdl_lib::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With dynamic alignment: Item 3 aligns with Item 2 at correct position
+        // With cascade behavior: Item 3 aligns with Item 2's actual content position
         assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
     }
 
@@ -396,7 +396,7 @@ mod comprehensive_tests {
         let content2 = "> * Item 1\n>    * Item 2\n>      * Item 3";
         let ctx = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2); // Detects the indentation issues
+        assert_eq!(result.len(), 1); // Only detects one issue due to cascade behavior
 
         let fixed = rule.fix(&ctx).unwrap();
         // TODO: Fix for lists in blockquotes is not working properly
