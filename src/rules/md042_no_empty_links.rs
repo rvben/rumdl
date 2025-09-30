@@ -108,21 +108,8 @@ impl Rule for MD042NoEmptyLinks {
                     format!("[{}](https://example.com)", link.text)
                 };
 
-                // Format the link as it appears in the source
-                let link_display = if link.is_reference {
-                    if let Some(ref_id) = &link.reference_id {
-                        if ref_id.is_empty() || ref_id == &link.text {
-                            // Shorthand reference: [text][] or [text][text]
-                            format!("[{}][]", link.text)
-                        } else {
-                            format!("[{}][{}]", link.text, ref_id)
-                        }
-                    } else {
-                        format!("[{}]", link.text)
-                    }
-                } else {
-                    format!("[{}]({})", link.text, link.url)
-                };
+                // Extract the exact link text from the source
+                let link_display = &ctx.content[link.byte_offset..link.byte_end];
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name()),
