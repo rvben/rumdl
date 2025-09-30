@@ -356,6 +356,7 @@ mod tests {
         let mut content = "original content".to_string();
         let config = Config {
             global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
             rules: Default::default(),
         };
 
@@ -430,6 +431,7 @@ mod tests {
         let mut content = "content with tabs".to_string();
         let config = Config {
             global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
             rules: Default::default(),
         };
 
@@ -475,6 +477,7 @@ mod tests {
         let mut content = "original".to_string();
         let mut config = Config {
             global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
             rules: Default::default(),
         };
         config.global.unfixable = vec!["MD001".to_string()];
@@ -540,6 +543,7 @@ mod tests {
         let mut content = "test".to_string();
         let config = Config {
             global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
             rules: Default::default(),
         };
 
@@ -559,6 +563,7 @@ mod tests {
         let mut content = "unchanged".to_string();
         let config = Config {
             global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
             rules: Default::default(),
         };
 

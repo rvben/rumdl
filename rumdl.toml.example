@@ -28,6 +28,18 @@ exclude = [
 # Respect .gitignore files when scanning directories
 respect_gitignore = true
 
+# Per-file rule ignores - disable specific rules for specific files or file patterns
+# Useful when certain files (like README.md) need different rules than the rest
+[per-file-ignores]
+# Disable inline HTML check for GitHub README (GitHub doesn't support all MkDocs extensions)
+"README.md" = ["MD033"]
+
+# Disable line length check for documentation with long code examples
+"docs/api/**/*.md" = ["MD013"]
+
+# Disable first line heading check for generated files
+"generated/**/*.md" = ["MD041"]
+
 # Rule-specific configurations
 [MD002]
 level = 1  # Expected level for first heading

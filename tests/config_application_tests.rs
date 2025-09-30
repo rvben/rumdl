@@ -1,7 +1,7 @@
 use rumdl_lib::config::{Config, GlobalConfig, RuleConfig, normalize_key};
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
 fn create_test_config() -> Config {
@@ -23,6 +23,7 @@ fn create_test_config() -> Config {
 
     Config {
         global: GlobalConfig::default(),
+        per_file_ignores: HashMap::new(),
         rules,
     }
 }
@@ -206,6 +207,7 @@ fn test_partial_rule_config() {
 
     let config = Config {
         global: GlobalConfig::default(),
+        per_file_ignores: HashMap::new(),
         rules: rules_map,
     };
 
@@ -239,6 +241,7 @@ fn test_partial_rule_config() {
 
     let config = Config {
         global: GlobalConfig::default(),
+        per_file_ignores: HashMap::new(),
         rules: rules_map,
     };
 

@@ -8,7 +8,7 @@ use lazy_static::lazy_static;
 use log;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -102,6 +102,11 @@ pub struct Config {
     #[serde(default)]
     pub global: GlobalConfig,
 
+    /// Per-file rule ignores: maps file patterns to lists of rules to ignore
+    /// Example: { "README.md": ["MD033"], "docs/**/*.md": ["MD013"] }
+    #[serde(default, rename = "per-file-ignores")]
+    pub per_file_ignores: HashMap<String, Vec<String>>,
+
     /// Rule-specific configurations
     #[serde(flatten)]
     pub rules: BTreeMap<String, RuleConfig>,
@@ -125,6 +130,51 @@ impl Config {
     /// Legacy method for backwards compatibility - redirects to is_mkdocs_flavor
     pub fn is_mkdocs_project(&self) -> bool {
         self.is_mkdocs_flavor()
+    }
+
+    /// Get the set of rules that should be ignored for a specific file based on per-file-ignores configuration
+    /// Returns a HashSet of rule names (uppercase, e.g., "MD033") that match the given file path
+    pub fn get_ignored_rules_for_file(&self, file_path: &Path) -> HashSet<String> {
+        use globset::{Glob, GlobSetBuilder};
+
+        let mut ignored_rules = HashSet::new();
+
+        if self.per_file_ignores.is_empty() {
+            return ignored_rules;
+        }
+
+        // Build a globset for efficient matching
+        let mut builder = GlobSetBuilder::new();
+        let mut pattern_to_rules: Vec<(usize, &Vec<String>)> = Vec::new();
+
+        for (idx, (pattern, rules)) in self.per_file_ignores.iter().enumerate() {
+            if let Ok(glob) = Glob::new(pattern) {
+                builder.add(glob);
+                pattern_to_rules.push((idx, rules));
+            } else {
+                log::warn!("Invalid glob pattern in per-file-ignores: {pattern}");
+            }
+        }
+
+        let globset = match builder.build() {
+            Ok(gs) => gs,
+            Err(e) => {
+                log::error!("Failed to build globset for per-file-ignores: {e}");
+                return ignored_rules;
+            }
+        };
+
+        // Match the file path against all patterns
+        for match_idx in globset.matches(file_path) {
+            if let Some((_, rules)) = pattern_to_rules.get(match_idx) {
+                for rule in rules.iter() {
+                    // Normalize rule names to uppercase (MD033, md033 -> MD033)
+                    ignored_rules.insert(normalize_key(rule));
+                }
+            }
+        }
+
+        ignored_rules
     }
 }
 
@@ -1023,6 +1073,219 @@ local_time = 07:32:00
             "Default config from rumdl init should pass validation without warnings"
         );
     }
+
+    #[test]
+    fn test_per_file_ignores_config_parsing() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-ignores]
+"README.md" = ["MD033"]
+"docs/**/*.md" = ["MD013", "MD033"]
+"test/*.md" = ["MD041"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // Verify per-file-ignores was loaded
+        assert_eq!(config.per_file_ignores.len(), 3);
+        assert_eq!(
+            config.per_file_ignores.get("README.md"),
+            Some(&vec!["MD033".to_string()])
+        );
+        assert_eq!(
+            config.per_file_ignores.get("docs/**/*.md"),
+            Some(&vec!["MD013".to_string(), "MD033".to_string()])
+        );
+        assert_eq!(
+            config.per_file_ignores.get("test/*.md"),
+            Some(&vec!["MD041".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_per_file_ignores_glob_matching() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-ignores]
+"README.md" = ["MD033"]
+"docs/**/*.md" = ["MD013"]
+"**/test_*.md" = ["MD041"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // Test exact match
+        let ignored = config.get_ignored_rules_for_file(&PathBuf::from("README.md"));
+        assert!(ignored.contains("MD033"));
+        assert_eq!(ignored.len(), 1);
+
+        // Test glob pattern matching
+        let ignored = config.get_ignored_rules_for_file(&PathBuf::from("docs/api/overview.md"));
+        assert!(ignored.contains("MD013"));
+        assert_eq!(ignored.len(), 1);
+
+        // Test recursive glob pattern
+        let ignored = config.get_ignored_rules_for_file(&PathBuf::from("tests/fixtures/test_example.md"));
+        assert!(ignored.contains("MD041"));
+        assert_eq!(ignored.len(), 1);
+
+        // Test non-matching path
+        let ignored = config.get_ignored_rules_for_file(&PathBuf::from("other/file.md"));
+        assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn test_per_file_ignores_pyproject_toml() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("pyproject.toml");
+        let config_content = r#"
+[tool.rumdl]
+[tool.rumdl.per-file-ignores]
+"README.md" = ["MD033", "MD013"]
+"generated/*.md" = ["MD041"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // Verify per-file-ignores was loaded from pyproject.toml
+        assert_eq!(config.per_file_ignores.len(), 2);
+        assert_eq!(
+            config.per_file_ignores.get("README.md"),
+            Some(&vec!["MD033".to_string(), "MD013".to_string()])
+        );
+        assert_eq!(
+            config.per_file_ignores.get("generated/*.md"),
+            Some(&vec!["MD041".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_per_file_ignores_multiple_patterns_match() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-ignores]
+"docs/**/*.md" = ["MD013"]
+"**/api/*.md" = ["MD033"]
+"docs/api/overview.md" = ["MD041"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // File matches multiple patterns - should get union of all rules
+        let ignored = config.get_ignored_rules_for_file(&PathBuf::from("docs/api/overview.md"));
+        assert_eq!(ignored.len(), 3);
+        assert!(ignored.contains("MD013"));
+        assert!(ignored.contains("MD033"));
+        assert!(ignored.contains("MD041"));
+    }
+
+    #[test]
+    fn test_per_file_ignores_rule_name_normalization() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-ignores]
+"README.md" = ["md033", "MD013", "Md041"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // All rule names should be normalized to uppercase
+        let ignored = config.get_ignored_rules_for_file(&PathBuf::from("README.md"));
+        assert_eq!(ignored.len(), 3);
+        assert!(ignored.contains("MD033"));
+        assert!(ignored.contains("MD013"));
+        assert!(ignored.contains("MD041"));
+    }
+
+    #[test]
+    fn test_per_file_ignores_invalid_glob_pattern() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-ignores]
+"[invalid" = ["MD033"]
+"valid/*.md" = ["MD013"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // Invalid pattern should be skipped, valid pattern should work
+        let ignored = config.get_ignored_rules_for_file(&PathBuf::from("valid/test.md"));
+        assert!(ignored.contains("MD013"));
+
+        // Invalid pattern should not cause issues
+        let ignored2 = config.get_ignored_rules_for_file(&PathBuf::from("[invalid"));
+        assert!(ignored2.is_empty());
+    }
+
+    #[test]
+    fn test_per_file_ignores_empty_section() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[global]
+disable = ["MD001"]
+
+[per-file-ignores]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // Empty per-file-ignores should work fine
+        assert_eq!(config.per_file_ignores.len(), 0);
+        let ignored = config.get_ignored_rules_for_file(&PathBuf::from("README.md"));
+        assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn test_per_file_ignores_with_underscores_in_pyproject() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("pyproject.toml");
+        let config_content = r#"
+[tool.rumdl]
+[tool.rumdl.per_file_ignores]
+"README.md" = ["MD033"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into();
+
+        // Should support both per-file-ignores and per_file_ignores
+        assert_eq!(config.per_file_ignores.len(), 1);
+        assert_eq!(
+            config.per_file_ignores.get("README.md"),
+            Some(&vec!["MD033".to_string()])
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1151,19 +1414,43 @@ pub struct SourcedRuleConfig {
 
 /// Represents configuration loaded from a single source file, with provenance.
 /// Used as an intermediate step before merging into the final SourcedConfig.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct SourcedConfigFragment {
     pub global: SourcedGlobalConfig,
+    pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     // Note: Does not include loaded_files or unknown_keys, as those are tracked globally.
 }
 
-#[derive(Debug, Default, Clone)]
+impl Default for SourcedConfigFragment {
+    fn default() -> Self {
+        Self {
+            global: SourcedGlobalConfig::default(),
+            per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
+            rules: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SourcedConfig {
     pub global: SourcedGlobalConfig,
+    pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     pub loaded_files: Vec<String>,
     pub unknown_keys: Vec<(String, String)>, // (section, key)
+}
+
+impl Default for SourcedConfig {
+    fn default() -> Self {
+        Self {
+            global: SourcedGlobalConfig::default(),
+            per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
+            rules: BTreeMap::new(),
+            loaded_files: Vec::new(),
+            unknown_keys: Vec::new(),
+        }
+    }
 }
 
 impl SourcedConfig {
@@ -1264,6 +1551,14 @@ impl SourcedConfig {
                 self.global.output_format = Some(output_format_fragment);
             }
         }
+
+        // Merge per_file_ignores
+        self.per_file_ignores.merge_override(
+            fragment.per_file_ignores.value,
+            fragment.per_file_ignores.source,
+            fragment.per_file_ignores.overrides.first().and_then(|o| o.file.clone()),
+            fragment.per_file_ignores.overrides.first().and_then(|o| o.line),
+        );
 
         // Merge rule configs
         for (rule_name, rule_fragment) in fragment.rules {
@@ -1633,7 +1928,11 @@ impl From<SourcedConfig> for Config {
             flavor: sourced.global.flavor.value,
             force_exclude: sourced.global.force_exclude.value,
         };
-        Config { global, rules }
+        Config {
+            global,
+            per_file_ignores: sourced.per_file_ignores.value,
+            rules,
+        }
     }
 }
 
@@ -1989,6 +2288,31 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         // Also extract global options from [tool.rumdl] directly (for flat structure)
         extract_global_config(&mut fragment, rumdl_table);
 
+        // --- Extract per-file-ignores configurations ---
+        // Check both hyphenated and underscored versions for compatibility
+        let per_file_ignores_key = rumdl_table
+            .get("per-file-ignores")
+            .or_else(|| rumdl_table.get("per_file_ignores"));
+
+        if let Some(per_file_ignores_value) = per_file_ignores_key
+            && let Some(per_file_table) = per_file_ignores_value.as_table()
+        {
+            let mut per_file_map = HashMap::new();
+            for (pattern, rules_value) in per_file_table {
+                if let Ok(rules) = Vec::<String>::deserialize(rules_value.clone()) {
+                    let normalized_rules = rules.into_iter().map(|s| normalize_key(&s)).collect();
+                    per_file_map.insert(pattern.clone(), normalized_rules);
+                } else {
+                    log::warn!(
+                        "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {path}, found {rules_value:?}"
+                    );
+                }
+            }
+            fragment
+                .per_file_ignores
+                .push_override(per_file_map, source, file.clone(), None);
+        }
+
         // --- Extract rule-specific configurations ---
         for (key, value) in rumdl_table {
             let norm_rule_key = normalize_key(key);
@@ -2009,6 +2333,9 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 "output-format",
                 "fixable",
                 "unfixable",
+                "per-file-ignores",
+                "per_file_ignores",
+                "global",
             ]
             .contains(&norm_rule_key.as_str())
             {
@@ -2105,6 +2432,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         || !fragment.global.fixable.value.is_empty()
         || !fragment.global.unfixable.value.is_empty()
         || fragment.global.output_format.is_some()
+        || !fragment.per_file_ignores.value.is_empty()
         || !fragment.rules.is_empty();
     if has_any { Ok(Some(fragment)) } else { Ok(None) }
 }
@@ -2323,6 +2651,31 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                 }
             }
         }
+    }
+
+    // Handle [per-file-ignores] section
+    if let Some(per_file_item) = doc.get("per-file-ignores")
+        && let Some(per_file_table) = per_file_item.as_table()
+    {
+        let mut per_file_map = HashMap::new();
+        for (pattern, value_item) in per_file_table.iter() {
+            if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
+                let rules: Vec<String> = formatted_array
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .map(normalize_key)
+                    .collect();
+                per_file_map.insert(pattern.to_string(), rules);
+            } else {
+                let type_name = value_item.type_name();
+                log::warn!(
+                    "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {path}, found {type_name}"
+                );
+            }
+        }
+        fragment
+            .per_file_ignores
+            .push_override(per_file_map, source, file.clone(), None);
     }
 
     // Rule-specific: all other top-level tables

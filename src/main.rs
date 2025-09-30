@@ -2179,7 +2179,7 @@ fn perform_check_run(args: &CheckArgs, config: &rumdl_config::Config, quiet: boo
                 args._fix,
                 args.verbose && !args.silent,
                 quiet,
-                config.global.flavor,
+                config,
             );
 
             if !warnings.is_empty() {
@@ -2978,8 +2978,20 @@ fn process_file_inner(
         std::env::set_var("RUMDL_FILE_PATH", file_path);
     }
 
+    // Filter rules based on per-file-ignores configuration
+    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
+    let filtered_rules: Vec<_> = if !ignored_rules_for_file.is_empty() {
+        rules
+            .iter()
+            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
+            .map(|r| dyn_clone::clone_box(&**r))
+            .collect()
+    } else {
+        rules.to_vec()
+    };
+
     // Use the standard lint function with the configured flavor
-    let warnings_result = rumdl_lib::lint(&content, rules, verbose, config.markdown_flavor());
+    let warnings_result = rumdl_lib::lint(&content, &filtered_rules, verbose, config.markdown_flavor());
 
     // Clear the environment variable after processing
     unsafe {
@@ -3414,7 +3426,7 @@ fn process_file_collect_warnings(
     _fix: bool,
     verbose: bool,
     quiet: bool,
-    flavor: rumdl_lib::config::MarkdownFlavor,
+    config: &rumdl_config::Config,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     if verbose && !quiet {
         println!("Processing file: {file_path}");
@@ -3431,10 +3443,22 @@ fn process_file_collect_warnings(
         }
     };
 
+    // Filter rules based on per-file-ignores configuration
+    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
+    let filtered_rules: Vec<_> = if !ignored_rules_for_file.is_empty() {
+        rules
+            .iter()
+            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
+            .map(|r| dyn_clone::clone_box(&**r))
+            .collect()
+    } else {
+        rules.to_vec()
+    };
+
     unsafe {
         std::env::set_var("RUMDL_FILE_PATH", file_path);
     }
-    let warnings_result = rumdl_lib::lint(&content, rules, verbose, flavor);
+    let warnings_result = rumdl_lib::lint(&content, &filtered_rules, verbose, config.markdown_flavor());
     unsafe {
         std::env::remove_var("RUMDL_FILE_PATH");
     }
