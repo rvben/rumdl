@@ -111,7 +111,8 @@ impl Rule for MD042NoEmptyLinks {
                 // Format the link as it appears in the source
                 let link_display = if link.is_reference {
                     if let Some(ref_id) = &link.reference_id {
-                        if ref_id.is_empty() {
+                        if ref_id.is_empty() || ref_id == &link.text {
+                            // Shorthand reference: [text][] or [text][text]
                             format!("[{}][]", link.text)
                         } else {
                             format!("[{}][{}]", link.text, ref_id)
