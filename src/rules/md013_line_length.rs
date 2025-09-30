@@ -216,16 +216,8 @@ impl Rule for MD013LineLength {
                     continue;
                 }
 
-                // Skip lines in skip context (e.g., mkdocstrings blocks)
-                // Calculate byte position for the line start
-                let mut byte_pos = 0;
-                for line in lines.iter().take(line_idx) {
-                    byte_pos += line.len() + 1; // +1 for newline
-                }
-                // Skip mkdocstrings blocks in MkDocs flavor
-                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs
-                    && crate::utils::mkdocstrings_refs::is_within_autodoc_block(ctx.content, byte_pos)
-                {
+                // Skip mkdocstrings blocks (already handled by LintContext)
+                if ctx.lines[line_idx].in_mkdocstrings {
                     continue;
                 }
 

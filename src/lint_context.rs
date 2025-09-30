@@ -83,6 +83,8 @@ pub struct LineInfo {
     pub heading: Option<HeadingInfo>,
     /// Blockquote information if this line is a blockquote
     pub blockquote: Option<BlockquoteInfo>,
+    /// Whether this line is inside a mkdocstrings autodoc block
+    pub in_mkdocstrings: bool,
 }
 
 /// Information about a list item
@@ -1177,6 +1179,7 @@ impl<'a> LintContext<'a> {
                 list_item,
                 heading: None,    // Will be populated in second pass for Setext headings
                 blockquote: None, // Will be populated after line creation
+                in_mkdocstrings,
             });
         }
 

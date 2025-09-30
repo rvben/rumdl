@@ -3,9 +3,6 @@
 /// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::element_cache::{ElementCache, ListMarkerType};
-use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
-use crate::utils::skip_context;
 use toml;
 
 mod md007_config;
@@ -32,43 +29,22 @@ impl MD007ULIndent {
         Self { config }
     }
 
-    /// Get parent info for any list item to determine proper text alignment
-    /// Returns (has_parent, expected_indent_position)
-    fn get_parent_info(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        line_number: usize,
-        indentation: usize,
-    ) -> (bool, Option<usize>) {
-        // Look backward from current line to find parent item
-        for line_idx in (1..line_number).rev() {
-            if let Some(line_info) = ctx.line_info(line_idx) {
-                if let Some(list_item) = &line_info.list_item {
-                    // Found a list item - check if it's at a lower indentation (parent level)
-                    if list_item.marker_column < indentation {
-                        // This is a parent item - calculate where child content should align
-                        if list_item.is_ordered {
-                            // For ordered lists, calculate the position where text starts
-                            // e.g., "1. Text" -> text starts at position 3
-                            // e.g., "10. Text" -> text starts at position 4
-                            // e.g., "100. Text" -> text starts at position 5
-                            let text_start_pos = list_item.marker_column + list_item.marker.len() + 1; // +1 for space after marker
-                            return (true, Some(text_start_pos));
-                        } else {
-                            // For unordered lists, calculate where text starts
-                            // e.g., "  * Text" -> text starts at position 4 (2 spaces + "* ")
-                            let text_start_pos = list_item.marker_column + 2; // "* " or "- " or "+ "
-                            return (true, Some(text_start_pos));
-                        }
-                    }
-                }
-                // If we encounter non-blank, non-list content at column 0, stop looking
-                else if !line_info.is_blank && line_info.indent == 0 {
-                    break;
-                }
+    /// Convert character position to visual column (accounting for tabs)
+    fn char_pos_to_visual_column(content: &str, char_pos: usize) -> usize {
+        let mut visual_col = 0;
+
+        for (current_pos, ch) in content.chars().enumerate() {
+            if current_pos >= char_pos {
+                break;
+            }
+            if ch == '\t' {
+                // Tab moves to next multiple of 4
+                visual_col = (visual_col / 4 + 1) * 4;
+            } else {
+                visual_col += 1;
             }
         }
-        (false, None)
+        visual_col
     }
 }
 
@@ -81,128 +57,173 @@ impl Rule for MD007ULIndent {
         "Unordered list indentation"
     }
 
-    // TODO: Consider migrating to centralized list blocks once ElementCache is deprecated
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-
-        // Early returns for performance
-        if content.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Quick check for any list markers before expensive processing
-        if !content.contains('*') && !content.contains('-') && !content.contains('+') {
-            return Ok(Vec::new());
-        }
-
-        let element_cache = ElementCache::new(content);
         let mut warnings = Vec::new();
+        let mut list_stack: Vec<(usize, usize, bool, usize)> = Vec::new(); // Stack of (marker_visual_col, line_num, is_ordered, content_visual_col) for tracking nesting
 
-        for item in element_cache.get_list_items() {
-            // Only unordered list items
-            // Skip list items inside code blocks (including YAML/front matter)
-            if element_cache.is_in_code_block(item.line_number) {
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            // Skip if this line is in a code block, front matter, or mkdocstrings
+            if line_info.in_code_block || line_info.in_front_matter || line_info.in_mkdocstrings {
                 continue;
             }
 
-            // Skip if this line is in a skip context (e.g., mkdocstrings block)
-            // Calculate byte position for the line start
-            let lines: Vec<&str> = content.lines().collect();
-            let mut byte_pos = 0;
-            for line in lines.iter().take(item.line_number.saturating_sub(1)) {
-                byte_pos += line.len() + 1; // +1 for newline
-            }
-            if skip_context::is_in_skip_context(ctx, byte_pos) {
-                continue;
-            }
+            // Check if this line has a list item
+            if let Some(list_item) = &line_info.list_item {
+                // For blockquoted lists, we need to calculate indentation relative to the blockquote content
+                // not the full line. This is because blockquoted lists follow the same indentation rules
+                // as regular lists, just within their blockquote context.
+                let (content_for_calculation, adjusted_marker_column) = if line_info.blockquote.is_some() {
+                    // Find the position after the blockquote prefix (> or >> etc)
+                    // We need to find where the actual content starts after all '>' characters and spaces
+                    let mut content_start = 0;
+                    let mut found_gt = false;
 
-            if matches!(
-                item.marker_type,
-                ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus
-            ) {
-                // Skip first level check if start_indented is false
-                if !self.config.start_indented && item.nesting_level == 0 {
+                    for (i, ch) in line_info.content.chars().enumerate() {
+                        if ch == '>' {
+                            found_gt = true;
+                            content_start = i + 1;
+                        } else if found_gt && ch == ' ' {
+                            // Skip the space after '>'
+                            content_start = i + 1;
+                            break;
+                        } else if found_gt {
+                            // No space after '>', content starts here
+                            break;
+                        }
+                    }
+
+                    // Extract the content after the blockquote prefix
+                    let content_after_prefix = &line_info.content[content_start..];
+                    // Adjust the marker column to be relative to the content after the prefix
+                    let adjusted_col = if list_item.marker_column >= content_start {
+                        list_item.marker_column - content_start
+                    } else {
+                        // This shouldn't happen, but handle it gracefully
+                        list_item.marker_column
+                    };
+                    (content_after_prefix.to_string(), adjusted_col)
+                } else {
+                    (line_info.content.clone(), list_item.marker_column)
+                };
+
+                // Convert marker position to visual column
+                let visual_marker_column =
+                    Self::char_pos_to_visual_column(&content_for_calculation, adjusted_marker_column);
+
+                // Calculate content visual column for text-aligned style
+                let visual_content_column = if line_info.blockquote.is_some() {
+                    // For blockquoted content, we already have the adjusted content
+                    let adjusted_content_col =
+                        if list_item.content_column >= (line_info.content.len() - content_for_calculation.len()) {
+                            list_item.content_column - (line_info.content.len() - content_for_calculation.len())
+                        } else {
+                            list_item.content_column
+                        };
+                    Self::char_pos_to_visual_column(&content_for_calculation, adjusted_content_col)
+                } else {
+                    Self::char_pos_to_visual_column(&line_info.content, list_item.content_column)
+                };
+
+                // Clean up stack - remove items at same or deeper indentation
+                while let Some(&(indent, _, _, _)) = list_stack.last() {
+                    if indent >= visual_marker_column {
+                        list_stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+
+                // For ordered list items, just track them in the stack
+                if list_item.is_ordered {
+                    // For ordered lists, we don't check indentation but we need to track for text-aligned children
+                    // Use the actual positions since we don't enforce indentation for ordered lists
+                    list_stack.push((visual_marker_column, line_idx, true, visual_content_column));
                     continue;
                 }
 
-                let expected_indent = if self.config.start_indented {
-                    self.config.start_indent + (item.nesting_level * self.config.indent)
-                } else {
-                    match self.config.style {
-                        md007_config::IndentStyle::Fixed => {
-                            // Fixed style: simple multiples of indent
-                            item.nesting_level * self.config.indent
-                        }
-                        md007_config::IndentStyle::TextAligned => {
-                            // Text-aligned style: align with parent's text content
-                            if item.nesting_level > 0 {
-                                let (has_parent, expected_pos) =
-                                    self.get_parent_info(ctx, item.line_number, item.indentation);
-                                if has_parent {
-                                    if let Some(pos) = expected_pos {
-                                        // Align with parent's text content
-                                        pos
+                // Only check unordered list items
+                if !list_item.is_ordered {
+                    // Now stack contains only parent items
+                    let nesting_level = list_stack.len();
+
+                    // Calculate expected indent first to determine expected content position
+                    let expected_indent = if self.config.start_indented {
+                        self.config.start_indent + (nesting_level * self.config.indent)
+                    } else {
+                        match self.config.style {
+                            md007_config::IndentStyle::Fixed => {
+                                // Fixed style: simple multiples of indent
+                                nesting_level * self.config.indent
+                            }
+                            md007_config::IndentStyle::TextAligned => {
+                                // Text-aligned style: align with parent's text content
+                                if nesting_level > 0 {
+                                    // Check if parent is an ordered list
+                                    if let Some(&(_, _parent_line_idx, _is_ordered, parent_content_visual_col)) =
+                                        list_stack.get(nesting_level - 1)
+                                    {
+                                        // We already have the parent's content visual column from the stack
+                                        parent_content_visual_col
                                     } else {
-                                        // Fallback to standard indentation
-                                        item.nesting_level * self.config.indent
+                                        // No parent at that level - for text-aligned, use standard alignment
+                                        // Each level aligns with previous level's text position
+                                        (nesting_level - 1) * 2 + 2
                                     }
                                 } else {
-                                    item.nesting_level * self.config.indent
+                                    0 // First level, no indentation needed
                                 }
-                            } else {
-                                item.nesting_level * self.config.indent
                             }
-                        }
-                    }
-                };
-
-                if item.indentation != expected_indent {
-                    // Generate fix for this list item
-                    let fix = {
-                        let lines: Vec<&str> = content.lines().collect();
-                        if let Some(line) = lines.get(item.line_number - 1) {
-                            // Extract the marker and content
-                            if UNORDERED_LIST_MARKER_REGEX.captures(line).is_some() {
-                                let correct_indent = " ".repeat(expected_indent);
-
-                                // Fix range should match warning range - only the problematic indentation
-                                let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
-
-                                // Warning will cover the indentation area that needs to be fixed
-                                let start_col = item.blockquote_prefix.len() + 1; // Start of indentation
-                                let end_col = item.blockquote_prefix.len() + item.indent_str.len() + 1; // End of actual indentation string
-
-                                let start_byte = line_index.line_col_to_byte_range(item.line_number, start_col).start;
-                                let end_byte = line_index.line_col_to_byte_range(item.line_number, end_col).start;
-
-                                // Replacement should be just the correct indentation
-                                let replacement = correct_indent;
-
-                                Some(crate::rule::Fix {
-                                    range: start_byte..end_byte,
-                                    replacement,
-                                })
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
                         }
                     };
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
-                        message: format!(
-                            "Expected {} spaces for indent depth {}, found {}",
-                            expected_indent, item.nesting_level, item.indentation
-                        ),
-                        line: item.line_number,
-                        column: item.blockquote_prefix.len() + 1, // Start of indentation
-                        end_line: item.line_number,
-                        end_column: item.blockquote_prefix.len() + item.indent_str.len() + 1, // End of actual indentation string
-                        severity: Severity::Warning,
-                        fix,
-                    });
+                    // Add current item to stack
+                    // Use actual marker position for cleanup logic
+                    // Use expected content position for text-aligned children
+                    let expected_content_visual_col = expected_indent + 2; // where content SHOULD be
+                    list_stack.push((visual_marker_column, line_idx, false, expected_content_visual_col));
+
+                    // Skip first level check if start_indented is false
+                    if !self.config.start_indented && nesting_level == 0 {
+                        continue;
+                    }
+
+                    if visual_marker_column != expected_indent {
+                        // Generate fix for this list item
+                        let fix = {
+                            let correct_indent = " ".repeat(expected_indent);
+
+                            // The fix should replace the current indentation with the correct one
+                            let start_byte = line_info.byte_offset;
+
+                            // Find the byte position where the marker starts
+                            // We need to replace everything before the marker
+                            let mut end_byte = start_byte;
+                            for (i, ch) in line_info.content.chars().enumerate() {
+                                if i >= list_item.marker_column {
+                                    break;
+                                }
+                                end_byte += ch.len_utf8();
+                            }
+
+                            Some(crate::rule::Fix {
+                                range: start_byte..end_byte,
+                                replacement: correct_indent,
+                            })
+                        };
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name()),
+                            message: format!(
+                                "Expected {expected_indent} spaces for indent depth {nesting_level}, found {visual_marker_column}"
+                            ),
+                            line: line_idx + 1, // Convert to 1-indexed
+                            column: 1,          // Start of line
+                            end_line: line_idx + 1,
+                            end_column: visual_marker_column + 1, // End of visual indentation
+                            severity: Severity::Warning,
+                            fix,
+                        });
+                    }
                 }
             }
         }
@@ -344,10 +365,10 @@ mod tests {
         let content = "* Item 1\n   * Item 2\n      * Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
-        // With dynamic alignment:
+        // With text-aligned style:
         // Item 2 aligns with Item 1's text (2 spaces)
-        // Item 3 aligns with Item 2's text (4 + 1 = 5 spaces)
-        let expected = "* Item 1\n  * Item 2\n     * Item 3";
+        // Item 3 aligns with Item 2's text (4 spaces)
+        let expected = "* Item 1\n  * Item 2\n    * Item 3";
         assert_eq!(result, expected);
     }
 
@@ -557,8 +578,8 @@ repos:
         let content_multi = "* Item 1\n\t* Item 2\n\t\t* Item 3";
         let ctx = LintContext::new(content_multi, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With dynamic alignment: Item 3 aligns with Item 2 at correct position
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n   * Item 3");
+        // With text-aligned style: Item 3 aligns with Item 2's text at column 4
+        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
 
         // Mixed tabs and spaces
         let content_mixed = "* Item 1\n \t* Item 2\n\t * Item 3";
@@ -669,8 +690,8 @@ tags:
         let content = "* Item 1 with **bold** and *italic*\n   * Item 2 with `code`\n     * Item 3 with [link](url)";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With dynamic alignment: Item 3 aligns with Item 2's text (2 + 2 + 1 = 5 spaces)
-        let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n     * Item 3 with [link](url)";
+        // With text-aligned style: Item 3 aligns with Item 2's text (4 spaces)
+        let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n    * Item 3 with [link](url)";
         assert_eq!(fixed, expected, "Fix should only change indentation, not content");
     }
 
