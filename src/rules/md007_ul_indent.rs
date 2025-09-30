@@ -193,43 +193,46 @@ impl Rule for MD007ULIndent {
                         let fix = {
                             let correct_indent = " ".repeat(expected_indent);
 
-                            // For blockquoted lines, preserve the blockquote prefix
-                            let (replacement, start_offset) = if line_info.blockquote.is_some() {
-                                // Find where the content starts after blockquote markers
-                                let mut prefix_end = 0;
-                                let mut found_gt = false;
-                                for (i, ch) in line_info.content.chars().enumerate() {
+                            // Build the replacement string - need to preserve everything before the list marker
+                            // For blockquoted lines, this includes the blockquote prefix
+                            let replacement = if line_info.blockquote.is_some() {
+                                // Count the blockquote markers
+                                let mut blockquote_count = 0;
+                                for ch in line_info.content.chars() {
                                     if ch == '>' {
-                                        found_gt = true;
-                                        prefix_end = i + 1;
-                                    } else if found_gt && ch == ' ' {
-                                        prefix_end = i + 1;
-                                        break;
-                                    } else if found_gt {
+                                        blockquote_count += 1;
+                                    } else if ch != ' ' && ch != '\t' {
                                         break;
                                     }
                                 }
-                                // Preserve the blockquote prefix and add correct indentation
-                                let prefix = &line_info.content[..prefix_end];
-                                (format!("{prefix}{correct_indent}"), prefix_end)
+                                // Build the blockquote prefix (one '>' per level, with spaces between for nested)
+                                let blockquote_prefix = if blockquote_count > 1 {
+                                    (0..blockquote_count)
+                                        .map(|_| "> ")
+                                        .collect::<String>()
+                                        .trim_end()
+                                        .to_string()
+                                } else {
+                                    ">".to_string()
+                                };
+                                // Add correct indentation after the blockquote prefix
+                                // Include one space after the blockquote marker(s) as part of the indent
+                                format!("{blockquote_prefix} {correct_indent}")
                             } else {
-                                (correct_indent, 0)
+                                correct_indent
                             };
 
                             // Calculate the byte positions
-                            let mut start_byte = line_info.byte_offset;
+                            // The range should cover from start of line to the marker position
+                            let start_byte = line_info.byte_offset;
                             let mut end_byte = line_info.byte_offset;
 
-                            // For blockquoted lines, start after the prefix
+                            // Calculate where the marker starts
                             for (i, ch) in line_info.content.chars().enumerate() {
-                                if i < start_offset {
-                                    start_byte += ch.len_utf8();
-                                    end_byte = start_byte;
-                                } else if i >= list_item.marker_column {
+                                if i >= list_item.marker_column {
                                     break;
-                                } else {
-                                    end_byte += ch.len_utf8();
                                 }
+                                end_byte += ch.len_utf8();
                             }
 
                             Some(crate::rule::Fix {
