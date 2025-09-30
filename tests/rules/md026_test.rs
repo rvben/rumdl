@@ -127,15 +127,18 @@ fn test_md026_with_front_matter() {
 #[test]
 fn test_md026_multiple_trailing_punctuation() {
     let rule = MD026NoTrailingPunctuation::default();
-    // With lenient rules, ! and ? are allowed, but . is still flagged
+    // Default punctuation is ".,;:!" so . is flagged
+    // The first heading ends with ??? which is allowed, so only periods are flagged
     let content = "# Heading with multiple marks!!!???\n## Another heading.....";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Only the periods should be flagged
+    // Only the second heading should be flagged (ends with periods)
+    // The first heading ends with ??? which is not in the punctuation list
     assert_eq!(result.len(), 1);
 
     let fixed = rule.fix(&ctx).unwrap();
-    // Only the periods should be removed
+    // Only periods should be removed from the second heading
+    // The first heading is unchanged because it ends with allowed punctuation (?)
     assert_eq!(fixed, "# Heading with multiple marks!!!???\n## Another heading");
 }
 
@@ -174,13 +177,13 @@ fn test_md026_performance() {
     let rule = MD026NoTrailingPunctuation::default();
 
     // Create a large document with many headings
-    // With lenient rules, use periods (which are still flagged) for testing
+    // Default punctuation is ".,;:!" so periods are flagged
     let mut content = String::new();
     for i in 1..=100 {
         content.push_str(&format!(
             "# Heading {}{}\n\nSome content paragraph.\n\n",
             i,
-            if i % 3 == 0 { "." } else { "" } // Use periods instead of ! for testing
+            if i % 3 == 0 { "." } else { "" }
         ));
     }
 
@@ -191,7 +194,7 @@ fn test_md026_performance() {
     let result = rule.check(&ctx).unwrap();
     let duration = start.elapsed();
 
-    // Verify correctness - only periods are flagged now
+    // Verify correctness - periods are flagged
     assert_eq!(result.len(), 33, "Should detect exactly 33 headings with periods");
 
     // Verify performance
@@ -483,4 +486,56 @@ fn test_md026_special_regex_characters() {
         result.len() >= 5,
         "Should detect special regex characters as punctuation"
     );
+}
+
+#[test]
+fn test_md026_alphanumeric_as_punctuation() {
+    // Test that alphanumeric characters can be used as punctuation
+    let rule = MD026NoTrailingPunctuation::new(Some("abc123XYZ".to_string()));
+    let content = r#"# Heading ending with a
+## Heading ending with 1
+### Heading ending with Z
+#### Normal heading!
+##### Heading ending with c
+###### Heading ending with 3"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag headings ending with configured alphanumeric characters
+    assert_eq!(result.len(), 5, "Should flag a, 1, Z, c, and 3");
+    assert_eq!(result[0].line, 1); // ends with 'a'
+    assert_eq!(result[1].line, 2); // ends with '1'
+    assert_eq!(result[2].line, 3); // ends with 'Z'
+    assert_eq!(result[3].line, 5); // ends with 'c'
+    assert_eq!(result[4].line, 6); // ends with '3'
+
+    let fixed = rule.fix(&ctx).unwrap();
+    // Note: the fix removes the trailing punctuation character, preserving the space before it
+    // This could be considered a minor issue but is consistent with how punctuation removal works
+    assert_eq!(
+        fixed,
+        "# Heading ending with \n## Heading ending with \n### Heading ending with \n#### Normal heading!\n##### Heading ending with \n###### Heading ending with "
+    );
+}
+
+#[test]
+fn test_md026_mixed_alphanumeric_and_punctuation() {
+    // Test mixing traditional punctuation with alphanumeric characters
+    let rule = MD026NoTrailingPunctuation::new(Some(".,!a1".to_string()));
+    let content = r#"# Heading.
+## Heading!
+### Heading a
+#### Heading 1
+##### Heading?"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag ., !, a, and 1 but not ?
+    assert_eq!(result.len(), 4);
+    assert_eq!(result[0].line, 1); // .
+    assert_eq!(result[1].line, 2); // !
+    assert_eq!(result[2].line, 3); // a
+    assert_eq!(result[3].line, 4); // 1
 }
