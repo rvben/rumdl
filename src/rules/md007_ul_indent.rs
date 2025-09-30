@@ -156,18 +156,18 @@ impl Rule for MD007ULIndent {
                                 nesting_level * self.config.indent
                             }
                             md007_config::IndentStyle::TextAligned => {
-                                // Text-aligned style: align with parent's text content
+                                // Text-aligned style: child's marker aligns with parent's text content
                                 if nesting_level > 0 {
                                     // Check if parent is an ordered list
                                     if let Some(&(_, _parent_line_idx, _is_ordered, parent_content_visual_col)) =
                                         list_stack.get(nesting_level - 1)
                                     {
-                                        // We already have the parent's content visual column from the stack
+                                        // Child marker is positioned where parent's text starts
                                         parent_content_visual_col
                                     } else {
                                         // No parent at that level - for text-aligned, use standard alignment
                                         // Each level aligns with previous level's text position
-                                        (nesting_level - 1) * 2 + 2
+                                        nesting_level * 2
                                     }
                                 } else {
                                     0 // First level, no indentation needed
@@ -178,9 +178,10 @@ impl Rule for MD007ULIndent {
 
                     // Add current item to stack
                     // Use actual marker position for cleanup logic
-                    // Use expected content position for text-aligned children
-                    let expected_content_visual_col = expected_indent + 2; // where content SHOULD be
-                    list_stack.push((visual_marker_column, line_idx, false, expected_content_visual_col));
+                    // For text-aligned children, store the ACTUAL content position
+                    // to match markdownlint's behavior (allows cascade)
+                    let actual_content_visual_col = visual_marker_column + 2; // where content ACTUALLY is
+                    list_stack.push((visual_marker_column, line_idx, false, actual_content_visual_col));
 
                     // Skip first level check if start_indented is false
                     if !self.config.start_indented && nesting_level == 0 {
@@ -192,22 +193,48 @@ impl Rule for MD007ULIndent {
                         let fix = {
                             let correct_indent = " ".repeat(expected_indent);
 
-                            // The fix should replace the current indentation with the correct one
-                            let start_byte = line_info.byte_offset;
-
-                            // Find the byte position where the marker starts
-                            // We need to replace everything before the marker
-                            let mut end_byte = start_byte;
-                            for (i, ch) in line_info.content.chars().enumerate() {
-                                if i >= list_item.marker_column {
-                                    break;
+                            // For blockquoted lines, preserve the blockquote prefix
+                            let (replacement, start_offset) = if line_info.blockquote.is_some() {
+                                // Find where the content starts after blockquote markers
+                                let mut prefix_end = 0;
+                                let mut found_gt = false;
+                                for (i, ch) in line_info.content.chars().enumerate() {
+                                    if ch == '>' {
+                                        found_gt = true;
+                                        prefix_end = i + 1;
+                                    } else if found_gt && ch == ' ' {
+                                        prefix_end = i + 1;
+                                        break;
+                                    } else if found_gt {
+                                        break;
+                                    }
                                 }
-                                end_byte += ch.len_utf8();
+                                // Preserve the blockquote prefix and add correct indentation
+                                let prefix = &line_info.content[..prefix_end];
+                                (format!("{prefix}{correct_indent}"), prefix_end)
+                            } else {
+                                (correct_indent, 0)
+                            };
+
+                            // Calculate the byte positions
+                            let mut start_byte = line_info.byte_offset;
+                            let mut end_byte = line_info.byte_offset;
+
+                            // For blockquoted lines, start after the prefix
+                            for (i, ch) in line_info.content.chars().enumerate() {
+                                if i < start_offset {
+                                    start_byte += ch.len_utf8();
+                                    end_byte = start_byte;
+                                } else if i >= list_item.marker_column {
+                                    break;
+                                } else {
+                                    end_byte += ch.len_utf8();
+                                }
                             }
 
                             Some(crate::rule::Fix {
                                 range: start_byte..end_byte,
-                                replacement: correct_indent,
+                                replacement,
                             })
                         };
 
@@ -365,10 +392,10 @@ mod tests {
         let content = "* Item 1\n   * Item 2\n      * Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
-        // With text-aligned style:
+        // With text-aligned style (cascade behavior like markdownlint):
         // Item 2 aligns with Item 1's text (2 spaces)
-        // Item 3 aligns with Item 2's text (4 spaces)
-        let expected = "* Item 1\n  * Item 2\n    * Item 3";
+        // Item 3 aligns with Item 2's ACTUAL text position (5 spaces)
+        let expected = "* Item 1\n  * Item 2\n     * Item 3";
         assert_eq!(result, expected);
     }
 
@@ -578,15 +605,17 @@ repos:
         let content_multi = "* Item 1\n\t* Item 2\n\t\t* Item 3";
         let ctx = LintContext::new(content_multi, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With text-aligned style: Item 3 aligns with Item 2's text at column 4
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
+        // With cascade: Item 2 is at column 4 (tab), content at 6
+        // Item 3 aligns with Item 2's actual content at column 6
+        assert_eq!(fixed, "* Item 1\n  * Item 2\n      * Item 3");
 
         // Mixed tabs and spaces
         let content_mixed = "* Item 1\n \t* Item 2\n\t * Item 3";
         let ctx = LintContext::new(content_mixed, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With dynamic alignment: Item 3 aligns with Item 2 at correct position
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
+        // With cascade: Item 2 at column 4 (space+tab), content at 6
+        // Item 3 at column 5 (tab+space), child of Item 2, aligns with content at 6
+        assert_eq!(fixed, "* Item 1\n  * Item 2\n      * Item 3");
     }
 
     #[test]
@@ -690,8 +719,9 @@ tags:
         let content = "* Item 1 with **bold** and *italic*\n   * Item 2 with `code`\n     * Item 3 with [link](url)";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With text-aligned style: Item 3 aligns with Item 2's text (4 spaces)
-        let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n    * Item 3 with [link](url)";
+        // With cascade: Item 2 is at column 3, content at 5
+        // Item 3 aligns with Item 2's actual content at column 5
+        let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n     * Item 3 with [link](url)";
         assert_eq!(fixed, expected, "Fix should only change indentation, not content");
     }
 

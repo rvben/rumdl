@@ -110,7 +110,17 @@ disable = ["MD013"]
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     let absolute_path = fs::canonicalize(&config_path).unwrap();
-    assert_eq!(stdout.trim(), absolute_path.to_string_lossy());
+
+    // The command may find multiple config files (including global ones)
+    // We just need to ensure our temp config is in the list
+    let found_configs: Vec<&str> = stdout.trim().split('\n').collect();
+    assert!(
+        found_configs
+            .iter()
+            .any(|&path| path == absolute_path.to_string_lossy()),
+        "Expected config file {} not found in output: {found_configs:?}",
+        absolute_path.display()
+    );
 }
 
 #[test]
@@ -145,12 +155,20 @@ disable = ["MD013"]
     let stdout = String::from_utf8(output.stdout).unwrap();
     let lines: Vec<&str> = stdout.trim().split('\n').collect();
 
-    // Should only have .rumdl.toml listed (higher precedence than pyproject.toml)
-    assert_eq!(lines.len(), 1);
-
     let rumdl_absolute = fs::canonicalize(&rumdl_path).unwrap();
+    let pyproject_absolute = fs::canonicalize(&pyproject_path).unwrap();
 
-    // Check that only .rumdl.toml is present (has higher precedence)
-    let output_path = lines[0];
-    assert_eq!(output_path, rumdl_absolute.to_string_lossy());
+    // When both .rumdl.toml and pyproject.toml exist, only .rumdl.toml is loaded
+    // (it has higher precedence and stops the search)
+    assert!(
+        lines.iter().any(|&path| path == rumdl_absolute.to_string_lossy()),
+        "Expected .rumdl.toml in output: {lines:?}"
+    );
+
+    // pyproject.toml should NOT be listed when .rumdl.toml exists
+    // because .rumdl.toml has higher precedence
+    assert!(
+        !lines.iter().any(|&path| path == pyproject_absolute.to_string_lossy()),
+        "pyproject.toml should not be loaded when .rumdl.toml exists: {lines:?}"
+    );
 }
