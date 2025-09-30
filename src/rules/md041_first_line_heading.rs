@@ -1,6 +1,6 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use crate::utils::regex_cache::HTML_HEADING_PATTERN;
 use regex::Regex;
 
@@ -162,9 +162,6 @@ impl Rule for MD041FirstLineHeading {
             let first_line_content = &first_line_info.content;
             let (start_line, start_col, end_line, end_col) = calculate_line_range(first_line, first_line_content);
 
-            // Detect line ending style for the fix
-            let line_ending = crate::utils::detect_line_ending(content);
-
             warnings.push(LintWarning {
                 rule_name: Some(self.name()),
                 line: start_line,
@@ -173,113 +170,16 @@ impl Rule for MD041FirstLineHeading {
                 end_column: end_col,
                 message: format!("First line in file should be a level {} heading", self.level),
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: LineIndex::new(content.to_string()).line_col_to_byte_range_with_length(first_line, 1, 0),
-                    replacement: format!("{} Title{}{}", "#".repeat(self.level), line_ending, line_ending),
-                }),
+                fix: None, // MD041 no longer provides auto-fix suggestions
             });
         }
         Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let content = crate::rules::front_matter_utils::FrontMatterUtils::fix_malformed_front_matter(content);
-        if content.trim().is_empty() || self.has_front_matter_title(&content) {
-            return Ok(content.to_string());
-        }
-
-        // Detect the line ending style to use
-        let line_ending = crate::utils::detect_line_ending(&content);
-
-        // Re-create context for the potentially fixed content
-        let fixed_ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
-
-        // Find the first non-blank line after front matter
-        let mut first_content_line_num = None;
-        let mut skip_lines = 0;
-
-        // Check for front matter
-        if fixed_ctx.lines.first().map(|l| l.content.trim()) == Some("---") {
-            // Skip front matter
-            for (idx, line_info) in fixed_ctx.lines.iter().enumerate().skip(1) {
-                if line_info.content.trim() == "---" {
-                    skip_lines = idx + 1;
-                    break;
-                }
-            }
-        }
-
-        for (line_num, line_info) in fixed_ctx.lines.iter().enumerate().skip(skip_lines) {
-            let line_content = line_info.content.trim();
-            if !line_content.is_empty() && !Self::is_non_content_line(&line_info.content) {
-                first_content_line_num = Some(line_num);
-                break;
-            }
-        }
-
-        let mut result = String::new();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Check if we have any headings at all
-        let has_any_heading = fixed_ctx.lines.iter().any(|line| line.heading.is_some());
-
-        if !has_any_heading {
-            // Add a new title at the beginning
-            result.push_str(&format!(
-                "{} Title{}{}{}",
-                "#".repeat(self.level),
-                line_ending,
-                line_ending,
-                content
-            ));
-        } else if let Some(first_line_idx) = first_content_line_num {
-            // Check if first content line is a heading of correct level
-            let first_line_info = &fixed_ctx.lines[first_line_idx];
-
-            if let Some(heading) = &first_line_info.heading {
-                if heading.level as usize != self.level {
-                    // Fix the existing heading level
-                    for (i, line) in lines.iter().enumerate() {
-                        if i == first_line_idx {
-                            result.push_str(&format!("{} {}", "#".repeat(self.level), heading.text));
-                        } else {
-                            result.push_str(line);
-                        }
-                        if i < lines.len() - 1 {
-                            result.push_str(line_ending);
-                        }
-                    }
-                } else {
-                    // No fix needed, return original
-                    return Ok(content.to_string());
-                }
-            } else if Self::is_html_heading(&first_line_info.content, self.level) {
-                // HTML heading with correct level, no fix needed
-                return Ok(content.to_string());
-            } else {
-                // First line is not a heading, add a new title before it
-                for (i, line) in lines.iter().enumerate() {
-                    if i == first_line_idx {
-                        result.push_str(&format!(
-                            "{} Title{}{}",
-                            "#".repeat(self.level),
-                            line_ending,
-                            line_ending
-                        ));
-                    }
-                    result.push_str(line);
-                    if i < lines.len() - 1 {
-                        result.push_str(line_ending);
-                    }
-                }
-            }
-        } else {
-            // No content after front matter
-            return Ok(content.to_string());
-        }
-
-        Ok(result)
+        // MD041 should not auto-fix - adding content/titles is a decision that should be made by the document author
+        // This rule now only detects and warns about missing titles, but does not automatically add them
+        Ok(ctx.content.to_string())
     }
 
     /// Check if this rule should be skipped
@@ -576,18 +476,15 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_suggestion() {
+    fn test_no_fix_suggestion() {
         let rule = MD041FirstLineHeading::default();
 
-        // Check that fix suggestion is provided
+        // Check that NO fix suggestion is provided (MD041 is now detection-only)
         let content = "Not a heading\n\nContent.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert!(result[0].fix.is_some());
-
-        let fix = result[0].fix.as_ref().unwrap();
-        assert!(fix.replacement.contains("# Title"));
+        assert!(result[0].fix.is_none(), "MD041 should not provide fix suggestions");
     }
 
     #[test]

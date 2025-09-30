@@ -50,11 +50,12 @@ fn test_with_front_matter_no_heading() {
 
 #[test]
 fn test_fix_missing_heading() {
+    // MD041 no longer auto-fixes - it should return content unchanged
     let rule = MD041FirstLineHeading::new(1, false);
     let content = "Some text\nMore text";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
-    assert!(result.starts_with("# "));
+    assert_eq!(result, content, "MD041 should not modify content (detection-only rule)");
 }
 
 #[test]
