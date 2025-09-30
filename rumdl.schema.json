@@ -1,0 +1,152 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Config",
+  "description": "rumdl configuration for linting Markdown files. Rules can be configured individually using [MD###] sections with rule-specific options.",
+  "type": "object",
+  "properties": {
+    "global": {
+      "description": "Global configuration options",
+      "default": {
+        "disable": [],
+        "enable": [],
+        "exclude": [],
+        "fixable": [],
+        "flavor": "standard",
+        "force_exclude": false,
+        "include": [],
+        "line_length": 80,
+        "respect_gitignore": true,
+        "unfixable": []
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/GlobalConfig"
+        }
+      ]
+    },
+    "per-file-ignores": {
+      "description": "Per-file rule ignores: maps file patterns to lists of rules to ignore Example: { \"README.md\": [\"MD033\"], \"docs/**/*.md\": [\"MD013\"] }",
+      "default": {},
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "GlobalConfig": {
+      "description": "Global configuration options",
+      "type": "object",
+      "properties": {
+        "disable": {
+          "description": "Disabled rules",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enable": {
+          "description": "Enabled rules",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "description": "Files to exclude",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fixable": {
+          "description": "Rules that are allowed to be fixed when --fix is used If specified, only these rules will be fixed",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "flavor": {
+          "description": "Markdown flavor/dialect to use (mkdocs, gfm, commonmark, etc.) When set, adjusts parsing and validation rules for that specific Markdown variant",
+          "default": "standard",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MarkdownFlavor"
+            }
+          ]
+        },
+        "force_exclude": {
+          "description": "Whether to enforce exclude and extend-exclude patterns even for paths that are passed explicitly. By default (false), rumdl will lint any paths passed in directly, even if they would typically be excluded. Setting this to true will cause rumdl to respect exclusions unequivocally. This is useful for pre-commit, which explicitly passes all changed files.",
+          "default": false,
+          "type": "boolean"
+        },
+        "include": {
+          "description": "Files to include",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "line_length": {
+          "description": "Global line length setting (used by MD013 and other rules if not overridden)",
+          "default": 80,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "output_format": {
+          "description": "Output format for linting results (e.g., \"text\", \"json\", \"pylint\", etc.)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "respect_gitignore": {
+          "description": "Respect .gitignore files when scanning directories",
+          "default": true,
+          "type": "boolean"
+        },
+        "unfixable": {
+          "description": "Rules that should never be fixed, even when --fix is used Takes precedence over fixable",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "MarkdownFlavor": {
+      "description": "Markdown flavor/dialect enumeration",
+      "oneOf": [
+        {
+          "description": "Standard Markdown without flavor-specific adjustments",
+          "type": "string",
+          "enum": [
+            "standard"
+          ]
+        },
+        {
+          "description": "MkDocs flavor with auto-reference support",
+          "type": "string",
+          "enum": [
+            "mkdocs"
+          ]
+        }
+      ]
+    },
+    "RuleConfig": {
+      "description": "Represents a rule-specific configuration",
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

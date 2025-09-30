@@ -17,7 +17,7 @@ use std::str::FromStr;
 use toml_edit::DocumentMut;
 
 /// Markdown flavor/dialect enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MarkdownFlavor {
     /// Standard Markdown without flavor-specific adjustments
@@ -88,15 +88,32 @@ pub fn normalize_key(key: &str) -> String {
 }
 
 /// Represents a rule-specific configuration
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
 pub struct RuleConfig {
     /// Configuration values for the rule
     #[serde(flatten)]
+    #[schemars(schema_with = "arbitrary_value_schema")]
     pub values: BTreeMap<String, toml::Value>,
 }
 
+/// Generate a JSON schema for arbitrary configuration values
+fn arbitrary_value_schema(_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    use schemars::schema::*;
+    Schema::Object(SchemaObject {
+        instance_type: Some(InstanceType::Object.into()),
+        object: Some(Box::new(ObjectValidation {
+            additional_properties: Some(Box::new(Schema::Bool(true))),
+            ..Default::default()
+        })),
+        ..Default::default()
+    })
+}
+
 /// Represents the complete configuration loaded from rumdl.toml
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
+#[schemars(
+    description = "rumdl configuration for linting Markdown files. Rules can be configured individually using [MD###] sections with rule-specific options."
+)]
 pub struct Config {
     /// Global configuration options
     #[serde(default)]
@@ -107,7 +124,16 @@ pub struct Config {
     #[serde(default, rename = "per-file-ignores")]
     pub per_file_ignores: HashMap<String, Vec<String>>,
 
-    /// Rule-specific configurations
+    /// Rule-specific configurations (e.g., MD013, MD007, MD044)
+    /// Each rule section can contain options specific to that rule.
+    ///
+    /// Common examples:
+    /// - MD013: line_length, code_blocks, tables, headings
+    /// - MD007: indent
+    /// - MD003: style ("atx", "atx_closed", "setext")
+    /// - MD044: names (array of proper names to check)
+    ///
+    /// See https://github.com/rvben/rumdl for full rule documentation.
     #[serde(flatten)]
     pub rules: BTreeMap<String, RuleConfig>,
 }
@@ -179,7 +205,7 @@ impl Config {
 }
 
 /// Global configuration options
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct GlobalConfig {
     /// Enabled rules
@@ -1285,6 +1311,27 @@ disable = ["MD001"]
             config.per_file_ignores.get("README.md"),
             Some(&vec!["MD033".to_string()])
         );
+    }
+
+    #[test]
+    fn test_generate_json_schema() {
+        use schemars::schema_for;
+        use std::env;
+
+        let schema = schema_for!(Config);
+        let schema_json = serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
+
+        // Write schema to file if RUMDL_UPDATE_SCHEMA env var is set
+        if env::var("RUMDL_UPDATE_SCHEMA").is_ok() {
+            let schema_path = env::current_dir().unwrap().join("rumdl.schema.json");
+            fs::write(&schema_path, &schema_json).expect("Failed to write schema file");
+            println!("Schema written to: {}", schema_path.display());
+        }
+
+        // Basic validation that schema was generated
+        assert!(schema_json.contains("\"title\": \"Config\""));
+        assert!(schema_json.contains("\"global\""));
+        assert!(schema_json.contains("\"per-file-ignores\""));
     }
 }
 

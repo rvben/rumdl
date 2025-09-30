@@ -106,6 +106,7 @@ url = { version = "2", features = ["serde"] }
 unicode-normalization = "0.1"
 memmap2 = "0.9"
 seahash = "4.1"
+schemars = "0.8"
 
 # LSP dependencies
 tower-lsp = "0.20"
