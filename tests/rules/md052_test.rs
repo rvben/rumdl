@@ -662,3 +662,102 @@ fn test_issue_81_toml_code_block_not_parsed() {
         "Should not flag [[bin]] in TOML code block as undefined reference (issue #81)"
     );
 }
+
+#[test]
+fn test_mkdocs_backtick_wrapped_auto_references() {
+    // Test for issue #97 - backtick-wrapped references should be recognized as MkDocs auto-references
+    let rule = MD052ReferenceLinkImages::new();
+
+    // Module.Class pattern with backticks
+    let content = "[`module.Class`][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag [`module.Class`][] as undefined reference in MkDocs mode (issue #97). Got: {result:?}"
+    );
+
+    // Reference with explicit ID
+    let content = "[`module.Class`][ref]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag [`module.Class`][ref] as undefined reference in MkDocs mode (issue #97). Got: {result:?}"
+    );
+
+    // Path-like reference with backticks
+    let content = "[`api/endpoint`][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag [`api/endpoint`][] as undefined reference in MkDocs mode (issue #97). Got: {result:?}"
+    );
+
+    // Multiple backtick-wrapped references
+    let content = "See [`module.func`][], [`package.Class`][], and [`api/endpoint`][] for details.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag multiple backtick-wrapped auto-references in MkDocs mode (issue #97). Got: {result:?}"
+    );
+
+    // Should still flag in standard mode (no MkDocs auto-references)
+    let content = "[`module.Class`][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag [`module.Class`][] as undefined reference in Standard mode (no auto-refs). Got: {result:?}"
+    );
+
+    // Should still flag truly undefined references even in MkDocs mode
+    let content = "[undefined_reference][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Should still flag [undefined_reference][] as undefined in MkDocs mode. Got: {result:?}"
+    );
+
+    // Backtick-wrapped images should also work
+    let content = "![`module.Class`][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag backtick-wrapped image references in MkDocs mode (issue #97). Got: {result:?}"
+    );
+
+    // Single-word backtick-wrapped identifiers should also work (the actual issue #97 example)
+    let content = "[`str`][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag [`str`][] as undefined reference in MkDocs mode (issue #97 example). Got: {result:?}"
+    );
+
+    // Multiple single-word backtick-wrapped identifiers
+    let content = "See [`str`][], [`int`][], and [`bool`][] for details.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag single-word backtick-wrapped identifiers in MkDocs mode (issue #97). Got: {result:?}"
+    );
+
+    // Plain single words without backticks should still be flagged
+    let content = "[str][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag [str][] (without backticks) as undefined reference. Got: {result:?}"
+    );
+}

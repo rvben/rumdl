@@ -51,6 +51,26 @@ impl MD052ReferenceLinkImages {
         Self {}
     }
 
+    /// Strip surrounding backticks from a string
+    /// Used for MkDocs auto-reference detection where `module.Class` should be treated as module.Class
+    fn strip_backticks(s: &str) -> &str {
+        s.trim_start_matches('`').trim_end_matches('`')
+    }
+
+    /// Check if a string is a valid Python identifier
+    /// Used for MkDocs auto-reference detection where single-word backtick-wrapped identifiers
+    /// like `str`, `int`, etc. should be accepted as valid auto-references
+    fn is_valid_python_identifier(s: &str) -> bool {
+        if s.is_empty() {
+            return false;
+        }
+        let first_char = s.chars().next().unwrap();
+        if !first_char.is_ascii_alphabetic() && first_char != '_' {
+            return false;
+        }
+        s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
+
     /// Check if a pattern is likely NOT a markdown reference
     /// Returns true if this pattern should be skipped
     fn is_likely_not_reference(text: &str) -> bool {
@@ -308,7 +328,15 @@ impl MD052ReferenceLinkImages {
 
                 // Skip MkDocs auto-references if in MkDocs mode
                 // Check both the reference_id and the link text for shorthand references
-                if mkdocs_mode && (is_mkdocs_auto_reference(ref_id) || is_mkdocs_auto_reference(&link.text)) {
+                // Strip backticks since MkDocs resolves `module.Class` as module.Class
+                let stripped_ref = Self::strip_backticks(ref_id);
+                let stripped_text = Self::strip_backticks(&link.text);
+                if mkdocs_mode
+                    && (is_mkdocs_auto_reference(stripped_ref)
+                        || is_mkdocs_auto_reference(stripped_text)
+                        || (ref_id != stripped_ref && Self::is_valid_python_identifier(stripped_ref))
+                        || (link.text.as_str() != stripped_text && Self::is_valid_python_identifier(stripped_text)))
+                {
                     continue;
                 }
 
@@ -385,7 +413,15 @@ impl MD052ReferenceLinkImages {
 
                 // Skip MkDocs auto-references if in MkDocs mode
                 // Check both the reference_id and the alt text for shorthand references
-                if mkdocs_mode && (is_mkdocs_auto_reference(ref_id) || is_mkdocs_auto_reference(&image.alt_text)) {
+                // Strip backticks since MkDocs resolves `module.Class` as module.Class
+                let stripped_ref = Self::strip_backticks(ref_id);
+                let stripped_alt = Self::strip_backticks(&image.alt_text);
+                if mkdocs_mode
+                    && (is_mkdocs_auto_reference(stripped_ref)
+                        || is_mkdocs_auto_reference(stripped_alt)
+                        || (ref_id != stripped_ref && Self::is_valid_python_identifier(stripped_ref))
+                        || (image.alt_text.as_str() != stripped_alt && Self::is_valid_python_identifier(stripped_alt)))
+                {
                     continue;
                 }
 
@@ -596,7 +632,12 @@ impl MD052ReferenceLinkImages {
                         }
 
                         // Skip MkDocs auto-references if in MkDocs mode
-                        if mkdocs_mode && is_mkdocs_auto_reference(reference) {
+                        // Strip backticks since MkDocs resolves `module.Class` as module.Class
+                        let stripped_ref = Self::strip_backticks(reference);
+                        if mkdocs_mode
+                            && (is_mkdocs_auto_reference(stripped_ref)
+                                || (reference != stripped_ref && Self::is_valid_python_identifier(stripped_ref)))
+                        {
                             continue;
                         }
 

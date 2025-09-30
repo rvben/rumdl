@@ -13,6 +13,27 @@ impl MD042NoEmptyLinks {
     pub fn new() -> Self {
         Self {}
     }
+
+    /// Strip surrounding backticks from a string
+    /// Used for MkDocs auto-reference detection where `module.Class` should be treated as module.Class
+    fn strip_backticks(s: &str) -> &str {
+        s.trim_start_matches('`').trim_end_matches('`')
+    }
+
+    /// Check if a string is a valid Python identifier
+    /// Python identifiers can contain alphanumeric characters and underscores, but cannot start with a digit
+    fn is_valid_python_identifier(s: &str) -> bool {
+        if s.is_empty() {
+            return false;
+        }
+
+        let first_char = s.chars().next().unwrap();
+        if !first_char.is_ascii_alphabetic() && first_char != '_' {
+            return false;
+        }
+
+        s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
 }
 
 impl Rule for MD042NoEmptyLinks {
@@ -46,15 +67,25 @@ impl Rule for MD042NoEmptyLinks {
             // For MkDocs mode, check if this looks like an auto-reference
             // Note: We check both the reference_id AND the text since shorthand references
             // like [class.Name][] use the text as the implicit reference
+            // Also strip backticks since MkDocs resolves `module.Class` as module.Class
             if mkdocs_mode && link.is_reference {
-                // Check the reference_id if present
-                if let Some(ref_id) = &link.reference_id
-                    && is_mkdocs_auto_reference(ref_id)
-                {
-                    continue;
+                // Check the reference_id if present (strip backticks first)
+                if let Some(ref_id) = &link.reference_id {
+                    let stripped_ref = Self::strip_backticks(ref_id);
+                    // Accept if it matches MkDocs patterns OR if it's a backtick-wrapped valid identifier
+                    // Backticks indicate code/type reference (like `str`, `int`, `MyClass`)
+                    if is_mkdocs_auto_reference(stripped_ref)
+                        || (ref_id != stripped_ref && Self::is_valid_python_identifier(stripped_ref))
+                    {
+                        continue;
+                    }
                 }
-                // Also check the link text itself for shorthand references
-                if is_mkdocs_auto_reference(&link.text) {
+                // Also check the link text itself for shorthand references (strip backticks)
+                let stripped_text = Self::strip_backticks(&link.text);
+                // Accept if it matches MkDocs patterns OR if it's a backtick-wrapped valid identifier
+                if is_mkdocs_auto_reference(stripped_text)
+                    || (link.text.as_str() != stripped_text && Self::is_valid_python_identifier(stripped_text))
+                {
                     continue;
                 }
             }
@@ -537,6 +568,54 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         assert!(
             result.is_empty(),
             "Should not flag reference links as empty when code blocks contain tildes (issue #29). Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_backtick_wrapped_references() {
+        // Test for issue #97 - backtick-wrapped references should be recognized as MkDocs auto-references
+        let rule = MD042NoEmptyLinks::new();
+
+        // Module.Class pattern with backticks
+        let ctx = LintContext::new("[`module.Class`][]", crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag [`module.Class`][] as empty in MkDocs mode (issue #97). Got: {result:?}"
+        );
+
+        // Reference with explicit ID
+        let ctx = LintContext::new("[`module.Class`][ref]", crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag [`module.Class`][ref] as empty in MkDocs mode (issue #97). Got: {result:?}"
+        );
+
+        // Path-like reference with backticks
+        let ctx = LintContext::new("[`api/endpoint`][]", crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag [`api/endpoint`][] as empty in MkDocs mode (issue #97). Got: {result:?}"
+        );
+
+        // Should still flag in standard mode
+        let ctx = LintContext::new("[`module.Class`][]", crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should flag [`module.Class`][] as empty in Standard mode (no auto-refs). Got: {result:?}"
+        );
+
+        // Should still flag truly empty links even in MkDocs mode
+        let ctx = LintContext::new("[][]", crate::config::MarkdownFlavor::MkDocs);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should still flag [][] as empty in MkDocs mode. Got: {result:?}"
         );
     }
 }

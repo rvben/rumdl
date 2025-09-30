@@ -324,3 +324,65 @@ fn test_md042_reference_links() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Empty text and no matching reference
 }
+
+#[test]
+fn test_md042_mkdocs_backtick_wrapped_auto_references() {
+    // Test for issue #97 - backtick-wrapped references should be recognized as MkDocs auto-references
+    let rule = MD042NoEmptyLinks::new();
+
+    // Module.Class pattern with backticks - should not flag
+    let content = "[`module.Class`][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag [`module.Class`][] as empty in MkDocs mode (issue #97). Got: {result:?}"
+    );
+
+    // Single-word backtick-wrapped identifiers should also work (the actual issue #97 example)
+    let content = "[`str`][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag [`str`][] as empty in MkDocs mode (issue #97 example). Got: {result:?}"
+    );
+
+    // Multiple single-word backtick-wrapped identifiers
+    let content = "See [`str`][], [`int`][], and [`bool`][] for details.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag single-word backtick-wrapped identifiers in MkDocs mode (issue #97). Got: {result:?}"
+    );
+
+    // Plain single words without backticks should still be flagged
+    let content = "[str][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag [str][] (without backticks) as empty. Got: {result:?}"
+    );
+
+    // Should still flag in standard mode
+    let content = "[`str`][]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag [`str`][] as empty in Standard mode (no auto-refs). Got: {result:?}"
+    );
+
+    // Test with text in reference ID position
+    let content = "[`module.func`][`module.func`]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag explicit backtick-wrapped reference IDs in MkDocs mode. Got: {result:?}"
+    );
+}
