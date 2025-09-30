@@ -520,6 +520,19 @@ impl Rule for MD046CodeBlockStyle {
                 continue;
             }
 
+            // Skip if this line is in a mkdocstrings block (but not other skip contexts,
+            // since MD046 needs to detect regular code blocks)
+            if ctx.flavor == crate::config::MarkdownFlavor::MkDocs {
+                // Calculate byte position for the line start
+                let mut byte_pos = 0;
+                for prev_line in lines.iter().take(i) {
+                    byte_pos += prev_line.len() + 1; // +1 for newline
+                }
+                if crate::utils::mkdocstrings_refs::is_within_autodoc_block(ctx.content, byte_pos) {
+                    continue;
+                }
+            }
+
             // Track fenced code blocks
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 in_fenced_block = !in_fenced_block;

@@ -5,6 +5,7 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severi
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::element_cache::{ElementCache, ListMarkerType};
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
+use crate::utils::skip_context;
 use toml;
 
 mod md007_config;
@@ -103,6 +104,18 @@ impl Rule for MD007ULIndent {
             if element_cache.is_in_code_block(item.line_number) {
                 continue;
             }
+
+            // Skip if this line is in a skip context (e.g., mkdocstrings block)
+            // Calculate byte position for the line start
+            let lines: Vec<&str> = content.lines().collect();
+            let mut byte_pos = 0;
+            for line in lines.iter().take(item.line_number.saturating_sub(1)) {
+                byte_pos += line.len() + 1; // +1 for newline
+            }
+            if skip_context::is_in_skip_context(ctx, byte_pos) {
+                continue;
+            }
+
             if matches!(
                 item.marker_type,
                 ListMarkerType::Asterisk | ListMarkerType::Plus | ListMarkerType::Minus

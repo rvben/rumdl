@@ -1096,71 +1096,75 @@ impl<'a> LintContext<'a> {
                 byte_offset >= start && byte_offset < end && (is_multiline || is_fenced || is_indented)
             });
 
-            // Detect list items (skip if in frontmatter)
-            let list_item = if !(in_code_block || is_blank || in_front_matter && i <= front_matter_end) {
-                // Strip blockquote prefix if present for list detection
-                let (line_for_list_check, blockquote_prefix_len) = if let Some(caps) = BLOCKQUOTE_REGEX.captures(line) {
-                    let prefix = caps.get(1).unwrap().as_str();
-                    let content = caps.get(2).unwrap().as_str();
-                    (content, prefix.len())
-                } else {
-                    (&**line, 0)
-                };
+            // Detect list items (skip if in frontmatter or in mkdocstrings block)
+            let in_mkdocstrings = flavor == MarkdownFlavor::MkDocs
+                && crate::utils::mkdocstrings_refs::is_within_autodoc_block(content, byte_offset);
+            let list_item =
+                if !(in_code_block || is_blank || in_mkdocstrings || in_front_matter && i <= front_matter_end) {
+                    // Strip blockquote prefix if present for list detection
+                    let (line_for_list_check, blockquote_prefix_len) =
+                        if let Some(caps) = BLOCKQUOTE_REGEX.captures(line) {
+                            let prefix = caps.get(1).unwrap().as_str();
+                            let content = caps.get(2).unwrap().as_str();
+                            (content, prefix.len())
+                        } else {
+                            (&**line, 0)
+                        };
 
-                if let Some(caps) = UNORDERED_REGEX.captures(line_for_list_check) {
-                    let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
-                    let marker = caps.get(2).map_or("", |m| m.as_str());
-                    let spacing = caps.get(3).map_or("", |m| m.as_str());
-                    let _content = caps.get(4).map_or("", |m| m.as_str());
-                    let marker_column = blockquote_prefix_len + leading_spaces.len();
-                    let content_column = marker_column + marker.len() + spacing.len();
+                    if let Some(caps) = UNORDERED_REGEX.captures(line_for_list_check) {
+                        let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
+                        let marker = caps.get(2).map_or("", |m| m.as_str());
+                        let spacing = caps.get(3).map_or("", |m| m.as_str());
+                        let _content = caps.get(4).map_or("", |m| m.as_str());
+                        let marker_column = blockquote_prefix_len + leading_spaces.len();
+                        let content_column = marker_column + marker.len() + spacing.len();
 
-                    // According to CommonMark spec, unordered list items MUST have at least one space
-                    // after the marker (-, *, or +). Without a space, it's not a list item.
-                    // This also naturally handles cases like:
-                    // - *emphasis* (not a list)
-                    // - **bold** (not a list)
-                    // - --- (horizontal rule, not a list)
-                    if spacing.is_empty() {
-                        None
+                        // According to CommonMark spec, unordered list items MUST have at least one space
+                        // after the marker (-, *, or +). Without a space, it's not a list item.
+                        // This also naturally handles cases like:
+                        // - *emphasis* (not a list)
+                        // - **bold** (not a list)
+                        // - --- (horizontal rule, not a list)
+                        if spacing.is_empty() {
+                            None
+                        } else {
+                            Some(ListItemInfo {
+                                marker: marker.to_string(),
+                                is_ordered: false,
+                                number: None,
+                                marker_column,
+                                content_column,
+                            })
+                        }
+                    } else if let Some(caps) = ORDERED_REGEX.captures(line_for_list_check) {
+                        let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
+                        let number_str = caps.get(2).map_or("", |m| m.as_str());
+                        let delimiter = caps.get(3).map_or("", |m| m.as_str());
+                        let spacing = caps.get(4).map_or("", |m| m.as_str());
+                        let _content = caps.get(5).map_or("", |m| m.as_str());
+                        let marker = format!("{number_str}{delimiter}");
+                        let marker_column = blockquote_prefix_len + leading_spaces.len();
+                        let content_column = marker_column + marker.len() + spacing.len();
+
+                        // According to CommonMark spec, ordered list items MUST have at least one space
+                        // after the marker (period or parenthesis). Without a space, it's not a list item.
+                        if spacing.is_empty() {
+                            None
+                        } else {
+                            Some(ListItemInfo {
+                                marker,
+                                is_ordered: true,
+                                number: number_str.parse().ok(),
+                                marker_column,
+                                content_column,
+                            })
+                        }
                     } else {
-                        Some(ListItemInfo {
-                            marker: marker.to_string(),
-                            is_ordered: false,
-                            number: None,
-                            marker_column,
-                            content_column,
-                        })
-                    }
-                } else if let Some(caps) = ORDERED_REGEX.captures(line_for_list_check) {
-                    let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
-                    let number_str = caps.get(2).map_or("", |m| m.as_str());
-                    let delimiter = caps.get(3).map_or("", |m| m.as_str());
-                    let spacing = caps.get(4).map_or("", |m| m.as_str());
-                    let _content = caps.get(5).map_or("", |m| m.as_str());
-                    let marker = format!("{number_str}{delimiter}");
-                    let marker_column = blockquote_prefix_len + leading_spaces.len();
-                    let content_column = marker_column + marker.len() + spacing.len();
-
-                    // According to CommonMark spec, ordered list items MUST have at least one space
-                    // after the marker (period or parenthesis). Without a space, it's not a list item.
-                    if spacing.is_empty() {
                         None
-                    } else {
-                        Some(ListItemInfo {
-                            marker,
-                            is_ordered: true,
-                            number: number_str.parse().ok(),
-                            marker_column,
-                            content_column,
-                        })
                     }
                 } else {
                     None
-                }
-            } else {
-                None
-            };
+                };
 
             lines.push(LineInfo {
                 content: line.to_string(),

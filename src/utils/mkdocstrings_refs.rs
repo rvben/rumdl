@@ -93,14 +93,22 @@ pub fn is_autodoc_options(line: &str, base_indent: usize) -> bool {
     // Options must be indented at least 4 spaces more than the ::: marker
     let line_indent = super::mkdocs_common::get_line_indent(line);
 
-    // Empty lines within options are allowed
-    if line.trim().is_empty() {
-        return true;
-    }
+    // Check if properly indented (at least 4 spaces from base)
+    if line_indent >= base_indent + 4 {
+        // Empty lines that are properly indented are considered part of options
+        if line.trim().is_empty() {
+            return true;
+        }
 
-    // Check if it looks like YAML options (key: value format)
-    if line_indent >= base_indent + 4 && line.contains(':') {
-        return true;
+        // YAML key-value pairs
+        if line.contains(':') {
+            return true;
+        }
+        // YAML list items
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+            return true;
+        }
     }
 
     false
@@ -120,18 +128,33 @@ pub fn is_within_autodoc_block(content: &str, position: usize) -> bool {
         if is_autodoc_marker(line) {
             in_autodoc = true;
             autodoc_indent = get_autodoc_indent(line).unwrap_or(0);
+            // Check if position is on the autodoc marker line itself
+            if byte_pos <= position && position <= line_end {
+                return true;
+            }
         } else if in_autodoc {
             // Check if we're still in autodoc options
-            if !is_autodoc_options(line, autodoc_indent) && !line.trim().is_empty() {
-                // Non-option line that's not empty ends the autodoc block
-                in_autodoc = false;
-                autodoc_indent = 0;
+            if is_autodoc_options(line, autodoc_indent) {
+                // This line is part of autodoc options
+                if byte_pos <= position && position <= line_end {
+                    return true;
+                }
+            } else {
+                // Not part of options - check if this ends the block
+                // Completely empty lines (no indentation) don't end the block
+                if line.is_empty() {
+                    // Continue in autodoc
+                } else {
+                    // Non-option, non-empty line ends the autodoc block
+                    in_autodoc = false;
+                    autodoc_indent = 0;
+                    // If the position is on this line, it's NOT in the autodoc block
+                    // (since we just ended the block)
+                    if byte_pos <= position && position <= line_end {
+                        return false;
+                    }
+                }
             }
-        }
-
-        // Check if the position is within this line and we're in an autodoc block
-        if byte_pos <= position && position <= line_end && in_autodoc {
-            return true;
         }
 
         // Account for newline character
@@ -177,9 +200,12 @@ mod tests {
         assert!(is_autodoc_options("    handler: python", 0));
         assert!(is_autodoc_options("    options:", 0));
         assert!(is_autodoc_options("      show_source: true", 0));
-        assert!(is_autodoc_options("", 0)); // Empty lines allowed
+        assert!(!is_autodoc_options("", 0)); // Empty lines are neutral
         assert!(!is_autodoc_options("Not indented", 0));
         assert!(!is_autodoc_options("  Only 2 spaces", 0));
+        // Test YAML list items
+        assert!(is_autodoc_options("            - window", 0));
+        assert!(is_autodoc_options("            - app", 0));
     }
 
     #[test]
