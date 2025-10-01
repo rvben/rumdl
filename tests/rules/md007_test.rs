@@ -53,7 +53,7 @@ fn test_fix_indentation() {
     let content = "* Item 1\n   * Item 2\n      * Item 3";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.fix(&ctx).unwrap();
-    let expected = "* Item 1\n  * Item 2\n     * Item 3";
+    let expected = "* Item 1\n  * Item 2\n    * Item 3";
     assert_eq!(result, expected);
 }
 
@@ -240,14 +240,13 @@ mod comprehensive_tests {
 
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2, "Expected 2 warnings for incorrectly nested list");
+        assert_eq!(result.len(), 3, "Expected 3 warnings for incorrectly nested list");
 
         // Check that fix works correctly
-        // TODO: The fix incorrectly changes nesting level of properly indented items
         let fixed = rule.fix(&ctx).unwrap();
         let expected = r#"* Level 1
   * Level 2 (wrong)
-     * Level 3 (wrong)
+    * Level 3 (wrong)
   * Level 2 (correct)
     * Level 3 (wrong)"#;
         assert_eq!(fixed, expected);
@@ -323,7 +322,6 @@ mod comprehensive_tests {
 
     // 7. Tab indentation
     #[test]
-    #[ignore = "Tab indentation edge cases need investigation - see issue #98"]
     fn test_tab_indentation() {
         let rule = MD007ULIndent::default();
 
@@ -341,9 +339,9 @@ mod comprehensive_tests {
         let content_multi = "* Item 1\n\t* Item 2\n\t\t* Item 3";
         let ctx = LintContext::new(content_multi, rumdl_lib::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With cascade behavior: Item 3 aligns with Item 2's actual content position (column 4)
-        // Plus 2 more spaces for nesting = 6 spaces total
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n      * Item 3");
+        // With text-aligned style: Item 3's marker aligns with Item 2's content position
+        // Item 2: marker at 2, content at 4 → Item 3: marker at 4 (4 spaces)
+        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
 
         // Mixed tabs and spaces
         // TODO: Tab handling may not be consistent
@@ -398,14 +396,14 @@ mod comprehensive_tests {
         let content2 = "> * Item 1\n>    * Item 2\n>      * Item 3";
         let ctx = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1); // Only detects one issue due to cascade behavior
+        assert_eq!(result.len(), 2); // Detects two issues: Item 2 and Item 3
 
         let fixed = rule.fix(&ctx).unwrap();
-        // With text-aligned style, proper blockquote list indentation is:
+        // With text-aligned style and non-cascade, proper blockquote list indentation is:
         // Level 1: > * (no extra spaces)
         // Level 2: >   * (2 spaces)
-        // Level 3: >     * (4 spaces - but due to cascade from Item 2's bad position, becomes 5)
-        assert_eq!(fixed, "> * Item 1\n>   * Item 2\n>      * Item 3");
+        // Level 3: >     * (4 spaces)
+        assert_eq!(fixed, "> * Item 1\n>   * Item 2\n>     * Item 3");
 
         // Nested blockquotes
         let content3 = "> > * Item 1\n> >   * Item 2\n> >     * Item 3";
@@ -476,8 +474,8 @@ tags:
         let content = "* Item 1 with **bold** and *italic*\n   * Item 2 with `code`\n     * Item 3 with [link](url)";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With dynamic alignment: Item 3 aligns with Item 2's text (2 + 2 + 1 = 5 spaces)
-        let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n     * Item 3 with [link](url)";
+        // With non-cascade: Item 3 aligns with Item 2's expected text position (4 spaces)
+        let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n    * Item 3 with [link](url)";
         assert_eq!(fixed, expected, "Fix should only change indentation, not content");
     }
 
@@ -569,13 +567,15 @@ mod parity_with_markdownlint {
     #[test]
     fn parity_nested_list_incorrect_indent() {
         let input = "* Item 1\n * Nested 1\n   * Nested 2";
-        let expected = "* Item 1\n  * Nested 1\n   * Nested 2";
+        // With 1 space, Nested 1 is insufficient for nesting, so it becomes a sibling at 0
+        // With 3 spaces, Nested 2 is a child of Nested 1, so it should be at 2 spaces
+        let expected = "* Item 1\n* Nested 1\n  * Nested 2";
         let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard);
         let rule = MD007ULIndent::default();
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, expected);
         let warnings = rule.check(&ctx).unwrap();
-        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings.len(), 2); // Two errors: Nested 1 and Nested 2
     }
 
     #[test]
@@ -697,10 +697,12 @@ mod parity_with_markdownlint {
     }
 
     #[test]
-    #[ignore = "Tab indentation edge cases need investigation - see issue #98"]
     fn parity_mixed_tabs_and_spaces_in_indentation() {
         let input = "* Item 1\n\t* Nested item 1\n  \t* Nested item 2\n* Item 2";
-        let expected = "* Item 1\n  * Nested item 1\n   * Nested item 2\n* Item 2";
+        // Both nested items are at level 1, so both should have 2 spaces of indentation
+        // Note: markdownlint produces hybrid space+tab indentation, but we convert to pure spaces
+        // which is cleaner and more consistent
+        let expected = "* Item 1\n  * Nested item 1\n  * Nested item 2\n* Item 2";
         let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard);
         let rule = MD007ULIndent::default();
         let fixed = rule.fix(&ctx).unwrap();
@@ -742,11 +744,11 @@ mod excessive_indentation_bug_fix {
         let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
 
-        // Line 4: 4 spaces instead of 2
-        // Line 5: 5 spaces instead of 2
-        // Line 6: 6 spaces instead of 4
-        // Line 7: 8 spaces instead of 4
-        assert!(warnings.len() >= 3, "Should detect multiple indentation issues");
+        // Line 4: 4 spaces instead of 2 → warning
+        // Line 5: 5 spaces instead of 4 (child of line 4) → warning
+        // Lines 6-7: Correct indentation for their respective nesting levels
+        // Note: markdownlint may handle excessive nesting differently
+        assert!(warnings.len() >= 2, "Should detect indentation issues on lines 4 and 5");
 
         // These should NOT be treated as code blocks - ensure they're detected as list items
         // (The bug was that they were being treated as code blocks)
@@ -787,22 +789,17 @@ mod excessive_indentation_bug_fix {
         let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard);
         let warnings = rule.check(&ctx).unwrap();
 
-        // With TextAligned style and indent=4:
-        // Line 2: 4 spaces - wrong because it should align with Item 1's text (2 spaces)
-        // Line 3: 5 spaces - wrong, should align with Item 2's text
-        // Line 4: 6 spaces - wrong, should align with Item 3's text
-        // Line 5: 8 spaces - wrong, should align with Item 4's text
+        // With TextAligned style (indent param not used for text-aligned):
+        // Line 2: 4 spaces - wrong, should align with Item 1's text (2 spaces)
+        // Line 3: 5 spaces - wrong, should align with Item 2's expected text (4 spaces)
+        // Lines 4-5: Correct for their respective nesting levels
+        // Note: markdownlint may handle excessive nesting differently
 
-        // All nested items should have warnings with dynamic alignment
-        assert!(
-            warnings.len() >= 3,
-            "Should detect indentation issues with text-aligned style"
-        );
+        assert!(warnings.len() >= 2, "Should detect indentation issues on lines 2 and 3");
 
-        // At least lines 2, 3, and 4 should have warnings
+        // At least lines 2 and 3 should have warnings
         assert!(warnings.iter().any(|w| w.line == 2), "Line 2 should have warning");
         assert!(warnings.iter().any(|w| w.line == 3), "Line 3 should have warning");
-        assert!(warnings.iter().any(|w| w.line == 4), "Line 4 should have warning");
     }
 
     #[test]
@@ -816,13 +813,18 @@ mod excessive_indentation_bug_fix {
         // Check warnings are detected
         let warnings = rule.check(&ctx).unwrap();
         // Line 2: 5 spaces instead of 2 (depth 1)
-        // Line 3: 7 spaces - this is correct for depth 2 if line 2 is treated as depth 1
-        assert_eq!(warnings.len(), 1, "Should detect excessive indentation on line 2");
+        // Line 3: 7 spaces instead of 4 (depth 2) - with non-cascade
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Should detect excessive indentation on lines 2 and 3"
+        );
         assert_eq!(warnings[0].line, 2);
+        assert_eq!(warnings[1].line, 3);
 
         // Check fix works correctly
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "- Item 1\n  - Item 2 with 5 spaces\n       - Item 3 with 7 spaces";
+        let expected = "- Item 1\n  - Item 2 with 5 spaces\n    - Item 3 with 7 spaces";
         assert_eq!(fixed, expected, "Should fix excessive indentation to correct levels");
     }
 

@@ -124,9 +124,17 @@ impl Rule for MD007ULIndent {
                     Self::char_pos_to_visual_column(&line_info.content, list_item.content_column)
                 };
 
+                // For nesting detection, treat 1-space indent as if it's at column 0
+                // because 1 space is insufficient to establish a nesting relationship
+                let visual_marker_for_nesting = if visual_marker_column == 1 {
+                    0
+                } else {
+                    visual_marker_column
+                };
+
                 // Clean up stack - remove items at same or deeper indentation
                 while let Some(&(indent, _, _, _)) = list_stack.last() {
-                    if indent >= visual_marker_column {
+                    if indent >= visual_marker_for_nesting {
                         list_stack.pop();
                     } else {
                         break;
@@ -178,13 +186,14 @@ impl Rule for MD007ULIndent {
 
                     // Add current item to stack
                     // Use actual marker position for cleanup logic
-                    // For text-aligned children, store the ACTUAL content position
-                    // to match markdownlint's behavior (allows cascade)
-                    let actual_content_visual_col = visual_marker_column + 2; // where content ACTUALLY is
-                    list_stack.push((visual_marker_column, line_idx, false, actual_content_visual_col));
+                    // For text-aligned children, store the EXPECTED content position after fix
+                    // (not the actual position) to prevent error cascade
+                    let expected_content_visual_col = expected_indent + 2; // where content SHOULD be after fix
+                    list_stack.push((visual_marker_column, line_idx, false, expected_content_visual_col));
 
                     // Skip first level check if start_indented is false
-                    if !self.config.start_indented && nesting_level == 0 {
+                    // BUT always check items with 1 space indent (insufficient for nesting)
+                    if !self.config.start_indented && nesting_level == 0 && visual_marker_column != 1 {
                         continue;
                     }
 
@@ -395,10 +404,10 @@ mod tests {
         let content = "* Item 1\n   * Item 2\n      * Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
-        // With text-aligned style (cascade behavior like markdownlint):
+        // With text-aligned style and non-cascade:
         // Item 2 aligns with Item 1's text (2 spaces)
-        // Item 3 aligns with Item 2's ACTUAL text position (5 spaces)
-        let expected = "* Item 1\n  * Item 2\n     * Item 3";
+        // Item 3 aligns with Item 2's expected text position (4 spaces)
+        let expected = "* Item 1\n  * Item 2\n    * Item 3";
         assert_eq!(result, expected);
     }
 
@@ -608,17 +617,17 @@ repos:
         let content_multi = "* Item 1\n\t* Item 2\n\t\t* Item 3";
         let ctx = LintContext::new(content_multi, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With cascade: Item 2 is at column 4 (tab), content at 6
-        // Item 3 aligns with Item 2's actual content at column 6
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n      * Item 3");
+        // With non-cascade: Item 2 at 2 spaces, content at 4
+        // Item 3 aligns with Item 2's expected content at 4 spaces
+        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
 
         // Mixed tabs and spaces
         let content_mixed = "* Item 1\n \t* Item 2\n\t * Item 3";
         let ctx = LintContext::new(content_mixed, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With cascade: Item 2 at column 4 (space+tab), content at 6
-        // Item 3 at column 5 (tab+space), child of Item 2, aligns with content at 6
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n      * Item 3");
+        // With non-cascade: Item 2 at 2 spaces, content at 4
+        // Item 3 aligns with Item 2's expected content at 4 spaces
+        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
     }
 
     #[test]
@@ -722,9 +731,9 @@ tags:
         let content = "* Item 1 with **bold** and *italic*\n   * Item 2 with `code`\n     * Item 3 with [link](url)";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        // With cascade: Item 2 is at column 3, content at 5
-        // Item 3 aligns with Item 2's actual content at column 5
-        let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n     * Item 3 with [link](url)";
+        // With non-cascade: Item 2 at 2 spaces, content at 4
+        // Item 3 aligns with Item 2's expected content at 4 spaces
+        let expected = "* Item 1 with **bold** and *italic*\n  * Item 2 with `code`\n    * Item 3 with [link](url)";
         assert_eq!(fixed, expected, "Fix should only change indentation, not content");
     }
 
@@ -836,17 +845,17 @@ tags:
         assert!(result[0].message.contains("Expected 2 spaces"));
         assert!(result[0].message.contains("found 3"));
 
-        // Test insufficient indentation (1 space instead of 2)
+        // Test insufficient indentation (1 space is treated as level 0, should be 0)
         let content = "- Item 1\n - Item 2 with 1 space";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
             1,
-            "Should detect insufficient indentation (1 instead of 2)"
+            "Should detect 1-space indent (insufficient for nesting, expected 0)"
         );
         assert_eq!(result[0].line, 2);
-        assert!(result[0].message.contains("Expected 2 spaces"));
+        assert!(result[0].message.contains("Expected 0 spaces"));
         assert!(result[0].message.contains("found 1"));
     }
 
