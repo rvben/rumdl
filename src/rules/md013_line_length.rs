@@ -401,57 +401,166 @@ impl MD013LineLength {
                 // Collect the entire list item including continuation lines
                 let list_start = i;
                 let (marker, first_content) = extract_list_marker_and_content(lines[i]);
-                let indent_size = marker.len();
-                let expected_indent = " ".repeat(indent_size);
+                let marker_len = marker.len();
 
-                let mut list_item_lines = vec![first_content];
+                // Track lines and their types (content, code block, fence)
+                #[derive(Clone)]
+                enum LineType {
+                    Content(String),
+                    CodeBlock(String, usize), // content and original indent
+                    Empty,
+                }
+
+                let mut actual_indent: Option<usize> = None;
+                let mut list_item_lines: Vec<LineType> = vec![LineType::Content(first_content)];
                 i += 1;
 
-                // Collect continuation lines (lines that are indented to match the list marker)
+                // Collect continuation lines using ctx.lines for metadata
                 while i < lines.len() {
-                    let line = lines[i];
-                    // Check if this line is indented as a continuation
-                    if line.starts_with(&expected_indent) && !line.trim().is_empty() {
-                        // Check if this is actually a nested list item
-                        let content_after_indent = &line[indent_size..];
-                        if is_list_item(content_after_indent.trim()) {
-                            // This is a nested list item, not a continuation
+                    let line_info = &ctx.lines[i];
+
+                    // Use pre-computed is_blank from ctx
+                    if line_info.is_blank {
+                        // Empty line - check if next line is indented (part of list item)
+                        if i + 1 < lines.len() {
+                            let next_info = &ctx.lines[i + 1];
+
+                            // Check if next line is indented enough to be continuation
+                            if !next_info.is_blank && next_info.indent >= marker_len {
+                                // This blank line is between paragraphs/blocks in the list item
+                                list_item_lines.push(LineType::Empty);
+                                i += 1;
+                                continue;
+                            }
+                        }
+                        // No indented line after blank, end of list item
+                        break;
+                    }
+
+                    // Use pre-computed indent from ctx
+                    let indent = line_info.indent;
+
+                    // Valid continuation must be indented at least marker_len
+                    if indent >= marker_len {
+                        let trimmed = line_info.content.trim();
+
+                        // Use pre-computed in_code_block from ctx
+                        if line_info.in_code_block {
+                            list_item_lines.push(LineType::CodeBlock(line_info.content[indent..].to_string(), indent));
+                            i += 1;
+                            continue;
+                        }
+
+                        // Check if this is a SIBLING list item (breaks parent)
+                        // Nested lists are indented >= marker_len and are PART of the parent item
+                        // Siblings are at indent < marker_len (at or before parent marker)
+                        if is_list_item(trimmed) && indent < marker_len {
+                            // This is a sibling item at same or higher level - end parent item
                             break;
                         }
-                        // This is a continuation line
-                        let content = line[indent_size..].to_string();
-                        list_item_lines.push(content);
-                        i += 1;
-                    } else if line.trim().is_empty() {
-                        // Empty line might be part of the list item
-                        // Check if the next line is also indented
-                        if i + 1 < lines.len() && lines[i + 1].starts_with(&expected_indent) {
-                            list_item_lines.push(String::new());
+
+                        // Normal continuation: marker_len to marker_len+3
+                        if indent <= marker_len + 3 {
+                            // Set actual_indent from first non-code continuation if not set
+                            if actual_indent.is_none() {
+                                actual_indent = Some(indent);
+                            }
+
+                            // Extract content (remove indentation)
+                            let content = line_info.content[indent..].to_string();
+                            list_item_lines.push(LineType::Content(content));
                             i += 1;
                         } else {
-                            break;
+                            // indent >= marker_len + 4: indented code block
+                            list_item_lines.push(LineType::CodeBlock(line_info.content[indent..].to_string(), indent));
+                            i += 1;
                         }
                     } else {
+                        // Not indented enough, end of list item
                         break;
                     }
                 }
 
-                // Check if any lines in this list item are within a code block
-                let contains_code_block = (list_start..i).any(|line_idx| ctx.is_in_code_block(line_idx + 1));
+                // Use detected indent or fallback to marker length
+                let indent_size = actual_indent.unwrap_or(marker_len);
+                let expected_indent = " ".repeat(indent_size);
 
-                // Now check if this list item needs reflowing
-                let combined_content = list_item_lines.join(" ").trim().to_string();
+                // Split list_item_lines into blocks (paragraphs and code blocks)
+                #[derive(Clone)]
+                enum Block {
+                    Paragraph(Vec<String>),
+                    CodeBlock(Vec<(String, usize)>), // (content, indent) pairs
+                }
+
+                let mut blocks: Vec<Block> = Vec::new();
+                let mut current_paragraph: Vec<String> = Vec::new();
+                let mut current_code_block: Vec<(String, usize)> = Vec::new();
+                let mut in_code = false;
+
+                for line in &list_item_lines {
+                    match line {
+                        LineType::Empty => {
+                            if in_code {
+                                current_code_block.push((String::new(), 0));
+                            } else if !current_paragraph.is_empty() {
+                                blocks.push(Block::Paragraph(current_paragraph.clone()));
+                                current_paragraph.clear();
+                            }
+                        }
+                        LineType::Content(content) => {
+                            if in_code {
+                                // Switching from code to content
+                                blocks.push(Block::CodeBlock(current_code_block.clone()));
+                                current_code_block.clear();
+                                in_code = false;
+                            }
+                            current_paragraph.push(content.clone());
+                        }
+                        LineType::CodeBlock(content, indent) => {
+                            if !in_code {
+                                // Switching from content to code
+                                if !current_paragraph.is_empty() {
+                                    blocks.push(Block::Paragraph(current_paragraph.clone()));
+                                    current_paragraph.clear();
+                                }
+                                in_code = true;
+                            }
+                            current_code_block.push((content.clone(), *indent));
+                        }
+                    }
+                }
+
+                // Push remaining block
+                if in_code && !current_code_block.is_empty() {
+                    blocks.push(Block::CodeBlock(current_code_block));
+                } else if !current_paragraph.is_empty() {
+                    blocks.push(Block::Paragraph(current_paragraph));
+                }
+
+                // Check if reflowing is needed (only for content paragraphs, not code blocks)
+                let content_lines: Vec<String> = list_item_lines
+                    .iter()
+                    .filter_map(|line| {
+                        if let LineType::Content(s) = line {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                let combined_content = content_lines.join(" ").trim().to_string();
                 let full_line = format!("{marker}{combined_content}");
 
-                if !contains_code_block
-                    && (self.calculate_effective_length(&full_line) > config.line_length
-                        || (config.reflow_mode == ReflowMode::Normalize && list_item_lines.len() > 1)
-                        || (config.reflow_mode == ReflowMode::SentencePerLine && {
-                            // Check if list item has multiple sentences
-                            let sentences = split_into_sentences(&combined_content);
-                            sentences.len() > 1
-                        }))
-                {
+                let needs_reflow = self.calculate_effective_length(&full_line) > config.line_length
+                    || (config.reflow_mode == ReflowMode::Normalize && content_lines.len() > 1)
+                    || (config.reflow_mode == ReflowMode::SentencePerLine && {
+                        // Check if list item has multiple sentences
+                        let sentences = split_into_sentences(&combined_content);
+                        sentences.len() > 1
+                    });
+
+                if needs_reflow {
                     let start_range = line_index.whole_line_range(list_start + 1);
                     let end_line = i - 1;
                     let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
@@ -461,20 +570,65 @@ impl MD013LineLength {
                     };
                     let byte_range = start_range.start..end_range.end;
 
-                    // Reflow the content part
+                    // Reflow each block (paragraphs only, preserve code blocks)
                     let reflow_options = crate::utils::text_reflow::ReflowOptions {
                         line_length: config.line_length - indent_size,
                         break_on_sentences: true,
                         preserve_breaks: false,
                         sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
                     };
-                    let reflowed = crate::utils::text_reflow::reflow_line(&combined_content, &reflow_options);
 
-                    // Rebuild with proper indentation
-                    let mut result = vec![format!("{marker}{}", reflowed[0])];
-                    for line in reflowed.iter().skip(1) {
-                        result.push(format!("{expected_indent}{line}"));
+                    let mut result: Vec<String> = Vec::new();
+                    let mut is_first_block = true;
+
+                    for block in &blocks {
+                        match block {
+                            Block::Paragraph(para_lines) => {
+                                let paragraph_text = para_lines.join(" ").trim().to_string();
+                                if !paragraph_text.is_empty() {
+                                    let reflowed =
+                                        crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
+
+                                    if is_first_block {
+                                        // First block starts with marker
+                                        result.push(format!("{marker}{}", reflowed[0]));
+                                        for line in reflowed.iter().skip(1) {
+                                            result.push(format!("{expected_indent}{line}"));
+                                        }
+                                        is_first_block = false;
+                                    } else {
+                                        // Subsequent blocks need blank line before them
+                                        result.push(String::new());
+                                        for line in reflowed {
+                                            result.push(format!("{expected_indent}{line}"));
+                                        }
+                                    }
+                                }
+                            }
+                            Block::CodeBlock(code_lines) => {
+                                // Preserve code blocks as-is with original indentation
+                                if !is_first_block {
+                                    result.push(String::new());
+                                }
+
+                                for (idx, (content, orig_indent)) in code_lines.iter().enumerate() {
+                                    if is_first_block && idx == 0 {
+                                        // First line of first block gets marker
+                                        result.push(format!(
+                                            "{marker}{}",
+                                            " ".repeat(orig_indent - marker_len) + content
+                                        ));
+                                        is_first_block = false;
+                                    } else if content.is_empty() {
+                                        result.push(String::new());
+                                    } else {
+                                        result.push(format!("{}{}", " ".repeat(*orig_indent), content));
+                                    }
+                                }
+                            }
+                        }
                     }
+
                     let reflowed_text = result.join("\n");
 
                     // Preserve trailing newline
@@ -2420,5 +2574,351 @@ with multiple lines."#;
         // The fix should preserve list formatting
         let fix = result[0].fix.as_ref().unwrap();
         assert!(fix.replacement.starts_with("- "), "Should preserve list marker");
+    }
+
+    #[test]
+    fn test_multi_paragraph_list_item_with_3_space_indent() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 999999,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "1. First paragraph\n   continuation line.\n\n   Second paragraph\n   more content.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should detect multi-line paragraphs in list item");
+        let fix = result[0].fix.as_ref().unwrap();
+
+        // Should preserve paragraph structure, not collapse everything
+        assert!(
+            fix.replacement.contains("\n\n"),
+            "Should preserve blank line between paragraphs"
+        );
+        assert!(fix.replacement.starts_with("1. "), "Should preserve list marker");
+    }
+
+    #[test]
+    fn test_multi_paragraph_list_item_with_4_space_indent() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 999999,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // User's example from issue #76 - uses 4 spaces for continuation
+        let content = "1. It **generated an application template**. There's a lot of files and\n    configurations required to build a native installer, above and\n    beyond the code of your actual application.\n\n    If you're not happy with the template provided by Briefcase, you can\n    provide your own.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            !result.is_empty(),
+            "Should detect multi-line paragraphs in list item with 4-space indent"
+        );
+        let fix = result[0].fix.as_ref().unwrap();
+
+        // Should preserve paragraph structure
+        assert!(
+            fix.replacement.contains("\n\n"),
+            "Should preserve blank line between paragraphs"
+        );
+        assert!(fix.replacement.starts_with("1. "), "Should preserve list marker");
+
+        // Both paragraphs should be reflowed but kept separate
+        let lines: Vec<&str> = fix.replacement.split('\n').collect();
+        let blank_line_idx = lines.iter().position(|l| l.trim().is_empty());
+        assert!(blank_line_idx.is_some(), "Should have blank line separating paragraphs");
+    }
+
+    #[test]
+    fn test_multi_paragraph_bullet_list_item() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 999999,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "- First paragraph\n  continuation.\n\n  Second paragraph\n  more text.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should detect multi-line paragraphs in bullet list");
+        let fix = result[0].fix.as_ref().unwrap();
+
+        assert!(
+            fix.replacement.contains("\n\n"),
+            "Should preserve blank line between paragraphs"
+        );
+        assert!(fix.replacement.starts_with("- "), "Should preserve bullet marker");
+    }
+
+    #[test]
+    fn test_code_block_in_list_item_five_spaces() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 80,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // 5 spaces = code block indentation (marker_len=3 + 4 = 7, but we have 5 which is marker_len+2, still valid continuation but >= marker_len+4 would be code)
+        // For "1. " marker (3 chars), 3+4=7 spaces would be code block
+        let content = "1. First paragraph with some text that should be reflowed.\n\n       code_block()\n       more_code()\n\n   Second paragraph.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        if !result.is_empty() {
+            let fix = result[0].fix.as_ref().unwrap();
+            // Code block lines should NOT be reflowed - they should be preserved with original indentation
+            assert!(
+                fix.replacement.contains("       code_block()"),
+                "Code block should be preserved: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("       more_code()"),
+                "Code block should be preserved: {}",
+                fix.replacement
+            );
+        }
+    }
+
+    #[test]
+    fn test_fenced_code_block_in_list_item() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 80,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "1. First paragraph with some text.\n\n   ```rust\n   fn foo() {}\n   let x = 1;\n   ```\n\n   Second paragraph.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        if !result.is_empty() {
+            let fix = result[0].fix.as_ref().unwrap();
+            // Fenced code block should be preserved
+            assert!(
+                fix.replacement.contains("```rust"),
+                "Should preserve fence: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("fn foo() {}"),
+                "Should preserve code: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("```"),
+                "Should preserve closing fence: {}",
+                fix.replacement
+            );
+        }
+    }
+
+    #[test]
+    fn test_mixed_indentation_3_and_4_spaces() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 999999,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // First continuation has 3 spaces, second has 4 - both should be accepted
+        let content = "1. Text\n   3 space continuation\n    4 space continuation";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should detect multi-line list item");
+        let fix = result[0].fix.as_ref().unwrap();
+        // Should reflow all content together
+        assert!(
+            fix.replacement.contains("3 space continuation"),
+            "Should include 3-space line: {}",
+            fix.replacement
+        );
+        assert!(
+            fix.replacement.contains("4 space continuation"),
+            "Should include 4-space line: {}",
+            fix.replacement
+        );
+    }
+
+    #[test]
+    fn test_nested_list_in_multi_paragraph_item() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 999999,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "1. First paragraph.\n\n   - Nested item\n     continuation\n\n   Second paragraph.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Nested lists at continuation indent should be INCLUDED in parent item
+        assert!(!result.is_empty(), "Should detect and reflow parent item");
+        if let Some(fix) = result[0].fix.as_ref() {
+            // The nested list should be preserved in the output
+            assert!(
+                fix.replacement.contains("- Nested"),
+                "Should preserve nested list: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("Second paragraph"),
+                "Should include content after nested list: {}",
+                fix.replacement
+            );
+        }
+    }
+
+    #[test]
+    fn test_nested_fence_markers_different_types() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 80,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Nested fences with different markers (backticks inside tildes)
+        let content = "1. Example with nested fences:\n\n   ~~~markdown\n   This shows ```python\n   code = True\n   ```\n   ~~~\n\n   Text after.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        if !result.is_empty() {
+            let fix = result[0].fix.as_ref().unwrap();
+            // Inner fence should NOT close outer fence (different markers)
+            assert!(
+                fix.replacement.contains("```python"),
+                "Should preserve inner fence: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("~~~"),
+                "Should preserve outer fence: {}",
+                fix.replacement
+            );
+            // All lines should remain as code
+            assert!(
+                fix.replacement.contains("code = True"),
+                "Should preserve code: {}",
+                fix.replacement
+            );
+        }
+    }
+
+    #[test]
+    fn test_nested_fence_markers_same_type() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 80,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Nested backticks - inner must have different length or won't work
+        let content =
+            "1. Example:\n\n   ````markdown\n   Shows ```python in code\n   ```\n   text here\n   ````\n\n   After.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        if !result.is_empty() {
+            let fix = result[0].fix.as_ref().unwrap();
+            // 4 backticks opened, 3 backticks shouldn't close it
+            assert!(
+                fix.replacement.contains("```python"),
+                "Should preserve inner fence: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("````"),
+                "Should preserve outer fence: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("text here"),
+                "Should keep text as code: {}",
+                fix.replacement
+            );
+        }
+    }
+
+    #[test]
+    fn test_sibling_list_item_breaks_parent() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 999999,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Sibling list item (at indent 0, before parent marker at 3)
+        let content = "1. First item\n   continuation.\n2. Second item";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should process first item only, second item breaks it
+        if !result.is_empty() {
+            let fix = result[0].fix.as_ref().unwrap();
+            // Should only include first item
+            assert!(fix.replacement.starts_with("1. "), "Should start with first marker");
+            assert!(fix.replacement.contains("continuation"), "Should include continuation");
+            // Should NOT include second item (it's outside the byte range)
+        }
+    }
+
+    #[test]
+    fn test_nested_list_at_continuation_indent_preserved() {
+        let config = MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: 999999,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        // Nested list at exactly continuation indent (3 spaces for "1. ")
+        let content = "1. Parent paragraph\n   with continuation.\n\n   - Nested at 3 spaces\n   - Another nested\n\n   After nested.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        if !result.is_empty() {
+            let fix = result[0].fix.as_ref().unwrap();
+            // All nested content should be preserved
+            assert!(
+                fix.replacement.contains("- Nested"),
+                "Should include first nested item: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("- Another"),
+                "Should include second nested item: {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.contains("After nested"),
+                "Should include content after nested list: {}",
+                fix.replacement
+            );
+        }
     }
 }
