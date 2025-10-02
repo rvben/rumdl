@@ -459,6 +459,27 @@ impl MD013LineLength {
                             break;
                         }
 
+                        // Check if this is a NESTED list item marker
+                        // Nested lists should be processed separately UNLESS they're part of a
+                        // multi-paragraph list item (indicated by a blank line before them OR
+                        // it's a continuation of an already-started nested list)
+                        if is_list_item(trimmed) && indent >= marker_len {
+                            // Check if there was a blank line before this (multi-paragraph context)
+                            let has_blank_before = matches!(list_item_lines.last(), Some(LineType::Empty));
+
+                            // Check if we've already seen nested list content (another nested item)
+                            let has_nested_content = list_item_lines
+                                .iter()
+                                .any(|line| matches!(line, LineType::Content(c) if is_list_item(c.trim())));
+
+                            if !has_blank_before && !has_nested_content {
+                                // Single-paragraph context with no prior nested items: starts a new item
+                                // End parent collection; nested list will be processed next
+                                break;
+                            }
+                            // else: multi-paragraph context or continuation of nested list, keep collecting
+                        }
+
                         // Normal continuation: marker_len to marker_len+3
                         if indent <= marker_len + 3 {
                             // Set actual_indent from first non-code continuation if not set
