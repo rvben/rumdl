@@ -47,9 +47,9 @@ impl MD051LinkFragments {
         Self { anchor_style: style }
     }
 
-    /// Extract headings from cached LintContext information
-    /// Returns (markdown_anchors, html_anchors) where markdown_anchors are case-insensitive
-    /// and html_anchors are case-sensitive
+    /// Extract all valid heading anchors from the document
+    /// Returns (markdown_anchors, html_anchors) where markdown_anchors are lowercased
+    /// for case-insensitive matching, and html_anchors are case-sensitive
     fn extract_headings_from_context(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -58,67 +58,64 @@ impl MD051LinkFragments {
         let mut html_anchors = HashSet::with_capacity(16);
         let mut fragment_counts = std::collections::HashMap::new();
 
-        // Single pass through lines, only processing lines with headings
         for line_info in &ctx.lines {
-            // Skip front matter
             if line_info.in_front_matter {
                 continue;
             }
 
             // Extract HTML anchor tags with id/name attributes
             if !line_info.in_code_block {
-                // First, we need to handle multiple id attributes on same element
-                // HTML spec says only the first id attribute is used
-                // So we need to extract element by element, not all ids at once
                 let content = &line_info.content;
-                let mut pos = 0;
-                while pos < content.len() {
-                    // Find next HTML element
-                    if let Some(start) = content[pos..].find('<') {
-                        let tag_start = pos + start;
-                        if let Some(end) = content[tag_start..].find('>') {
-                            let tag_end = tag_start + end + 1;
-                            let tag = &content[tag_start..tag_end];
+                let bytes = content.as_bytes();
 
-                            // Extract only the FIRST id or name attribute from this tag
-                            // Use find() instead of captures_iter() to get only the first match
-                            if let Some(caps) = HTML_ANCHOR_PATTERN.find(tag) {
-                                // Now extract the actual id value from the first match
-                                let matched_text = caps.as_str();
-                                if let Some(caps) = HTML_ANCHOR_PATTERN.captures(matched_text)
-                                    && let Some(id_match) = caps.get(1)
-                                {
-                                    let id = id_match.as_str();
-                                    if !id.is_empty() {
-                                        // HTML anchors are case-sensitive
-                                        html_anchors.insert(id.to_string());
+                // Skip lines without HTML tags or id/name attributes
+                if bytes.contains(&b'<') && (content.contains("id=") || content.contains("name=")) {
+                    // HTML spec: only the first id attribute per element is valid
+                    // Process element by element to handle multiple id attributes correctly
+                    let mut pos = 0;
+                    while pos < content.len() {
+                        if let Some(start) = content[pos..].find('<') {
+                            let tag_start = pos + start;
+                            if let Some(end) = content[tag_start..].find('>') {
+                                let tag_end = tag_start + end + 1;
+                                let tag = &content[tag_start..tag_end];
+
+                                // Extract first id or name attribute from this tag
+                                if let Some(caps) = HTML_ANCHOR_PATTERN.find(tag) {
+                                    let matched_text = caps.as_str();
+                                    if let Some(caps) = HTML_ANCHOR_PATTERN.captures(matched_text)
+                                        && let Some(id_match) = caps.get(1)
+                                    {
+                                        let id = id_match.as_str();
+                                        if !id.is_empty() {
+                                            html_anchors.insert(id.to_string());
+                                        }
                                     }
                                 }
+                                pos = tag_end;
+                            } else {
+                                break;
                             }
-                            pos = tag_end;
                         } else {
                             break;
                         }
-                    } else {
-                        break;
                     }
                 }
             }
 
+            // Extract markdown heading anchors
             if let Some(heading) = &line_info.heading {
-                // If heading has a custom ID, add it as a valid anchor
+                // Custom ID from {#custom-id} syntax
                 if let Some(custom_id) = &heading.custom_id {
-                    markdown_headings.insert(custom_id.clone());
+                    markdown_headings.insert(custom_id.to_lowercase());
                 }
 
-                // ALWAYS generate the normal anchor too (for backward compatibility)
-                // This ensures both the custom ID and the generated anchor work
-                // Strip any HTML tags from the heading text first (e.g., <a id="..."></a>)
+                // Generate standard GitHub-style anchor from heading text
                 let text_without_html = Self::strip_html_tags(&heading.text);
                 let fragment = self.anchor_style.generate_fragment(&text_without_html);
 
                 if !fragment.is_empty() {
-                    // Handle duplicate fragments by appending numbers
+                    // Handle duplicate headings by appending -1, -2, etc.
                     let final_fragment = if let Some(count) = fragment_counts.get_mut(&fragment) {
                         let suffix = *count;
                         *count += 1;
@@ -447,12 +444,16 @@ impl MD051LinkFragments {
         }
     }
 
-    /// Strip HTML tags from text
+    /// Strip HTML tags from heading text
     fn strip_html_tags(text: &str) -> String {
+        if !text.contains('<') {
+            return text.to_string();
+        }
+
         lazy_static! {
-            // More precise HTML tag pattern that won't match arrow patterns like <->
-            // Matches: opening tags, closing tags, and self-closing tags
-            // But not: arrow patterns like <->, <--, etc.
+            // Match valid HTML tags but not arrow patterns like <->
+            // Matches: <tag>, </tag>, <tag/>
+            // Excludes: <->, <--, etc.
             static ref HTML_TAG_PATTERN: Regex = Regex::new(
                 r"</?[a-zA-Z][^>]*>|<[a-zA-Z][^>]*/>"
             ).unwrap();
@@ -612,121 +613,65 @@ impl Rule for MD051LinkFragments {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
-        let content = ctx.content;
 
-        // Skip empty content or content without links or fragments
-        if content.is_empty() || self.should_skip(ctx) {
+        if ctx.content.is_empty() || ctx.links.is_empty() || self.should_skip(ctx) {
             return Ok(warnings);
         }
 
-        // Extract all valid heading anchors (markdown and HTML)
         let (markdown_headings, html_anchors) = self.extract_headings_from_context(ctx);
 
-        // Pre-filter lines that might contain links with fragments
-        let mut candidate_lines = Vec::new();
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // Skip front matter and code blocks
-            if line_info.in_front_matter || line_info.in_code_block {
+        for link in &ctx.links {
+            if link.is_reference {
                 continue;
             }
 
-            let line = &line_info.content;
-            let bytes = line.as_bytes();
+            let url = &link.url;
 
-            // Fast byte-level check for potential links with fragments
-            if bytes.contains(&b'[')
-                && bytes.contains(&b']')
-                && bytes.contains(&b'(')
-                && bytes.contains(&b')')
-                && bytes.contains(&b'#')
-            {
-                candidate_lines.push(line_num);
+            // Skip links without fragments or external URLs
+            if !url.contains('#') || Self::is_external_url_fast(url) {
+                continue;
             }
-        }
 
-        // Only process candidate lines
-        let link_regex = get_cached_regex(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
-        let lines: Vec<&str> = content.lines().collect();
+            // Cross-file links are valid if the file exists (not checked here)
+            if Self::is_cross_file_link(url) {
+                continue;
+            }
 
-        for line_num in candidate_lines {
-            let line = lines[line_num];
+            let Some(fragment_pos) = url.find('#') else {
+                continue;
+            };
 
-            for cap in link_regex.captures_iter(line) {
-                if let Some(url_match) = cap.get(2) {
-                    let url = url_match.as_str();
-                    let full_match = cap.get(0).unwrap(); // Get the entire link match
+            let fragment = &url[fragment_pos + 1..];
 
-                    // Calculate byte position for this match within the entire content
-                    let line_byte_offset = if line_num == 0 {
-                        0
-                    } else {
-                        content.lines().take(line_num).map(|l| l.len() + 1).sum::<usize>() // +1 for newline
-                    };
-                    let match_byte_pos = line_byte_offset + full_match.start();
+            // Skip Liquid template variables and filters
+            if (url.contains("{{") && fragment.contains('|')) || fragment.ends_with("}}") || fragment.ends_with("%}") {
+                continue;
+            }
 
-                    // Skip links in code blocks or inline code spans
-                    if ctx.is_in_code_block_or_span(match_byte_pos) {
-                        continue;
-                    }
+            if fragment.is_empty() {
+                continue;
+            }
 
-                    // Check if this URL contains a fragment
-                    if url.contains('#') && !Self::is_external_url_fast(url) {
-                        // If it's a cross-file link, skip validation as the target file may not be in the current context
-                        if Self::is_cross_file_link(url) {
-                            continue;
-                        }
+            // Validate fragment against document headings
+            // HTML anchors are case-sensitive, markdown anchors are case-insensitive
+            let found = if html_anchors.contains(fragment) {
+                true
+            } else {
+                let fragment_lower = fragment.to_lowercase();
+                markdown_headings.contains(&fragment_lower)
+            };
 
-                        // Extract fragment (everything after #)
-                        if let Some(fragment_pos) = url.find('#') {
-                            let fragment = &url[fragment_pos + 1..];
-
-                            // Handle Liquid template syntax with filters
-                            // If we're inside a Liquid variable ({{ ... }}), extract just the fragment part
-                            // before any filters (marked by |)
-                            if url.contains("{{") && fragment.contains('|') {
-                                // For patterns like {{ "/tags#alternative-data-streams" | relative_url }}
-                                // We want to skip this entirely as it's a Liquid template
-                                continue;
-                            }
-
-                            // Also check if the fragment ends with template syntax that wasn't caught
-                            if fragment.ends_with("}}") || fragment.ends_with("%}") {
-                                // This is likely part of a Liquid template, skip it
-                                continue;
-                            }
-
-                            // Skip empty fragments
-                            if fragment.is_empty() {
-                                continue;
-                            }
-
-                            // Check if fragment exists in document
-                            // HTML anchors are case-sensitive, Markdown anchors are case-insensitive
-                            let found = if html_anchors.contains(fragment) {
-                                // Found as case-sensitive HTML anchor
-                                true
-                            } else {
-                                // Check case-insensitive for Markdown anchors
-                                let fragment_lower = fragment.to_lowercase();
-                                markdown_headings.iter().any(|h| h.to_lowercase() == fragment_lower)
-                            };
-                            if !found {
-                                let column = full_match.start() + 1; // Point to start of entire link
-
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
-                                    message: format!("Link anchor '#{fragment}' does not exist in document headings"),
-                                    line: line_num + 1,
-                                    column,
-                                    end_line: line_num + 1,
-                                    end_column: full_match.end() + 1, // End of entire link
-                                    severity: Severity::Warning,
-                                    fix: None, // No auto-fix per industry standard
-                                });
-                            }
-                        }
-                    }
-                }
+            if !found {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name()),
+                    message: format!("Link anchor '#{fragment}' does not exist in document headings"),
+                    line: link.line,
+                    column: link.start_col + 1,
+                    end_line: link.line,
+                    end_column: link.end_col + 1,
+                    severity: Severity::Warning,
+                    fix: None,
+                });
             }
         }
 

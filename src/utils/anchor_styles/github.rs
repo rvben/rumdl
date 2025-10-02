@@ -109,9 +109,6 @@ pub fn heading_to_fragment(heading: &str) -> String {
 
 /// Internal implementation with security hardening
 fn heading_to_fragment_internal(heading: &str) -> String {
-    // Save original heading state for edge detection
-    let _original_heading_lower = heading.to_lowercase();
-
     // Security Step 2: Unicode normalization to prevent homograph attacks
     // NFC normalization ensures canonical representation
     let normalized: String = heading.nfc().collect();
@@ -128,7 +125,7 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     }) {
         process_emoji_sequences(&normalized)
     } else {
-        normalized.clone()
+        normalized
     };
 
     // Security Step 4: Filter dangerous Unicode characters
@@ -138,22 +135,21 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     let mut text = sanitized.to_lowercase();
 
     // Step 5: Remove markdown formatting while preserving inner text
-    // Process multiple times to handle nested emphasis (e.g., **_text_**)
-    // Using ReDoS-resistant patterns with bounded repetition
-    for _ in 0..3 {
-        // Max 3 levels of nesting to prevent infinite loops
-        let prev = text.clone();
-        text = EMPHASIS_ASTERISK.replace_all(&text, "$1").to_string();
-        // Strip emphasis underscores - the regex now properly handles snake_case preservation
-        text = EMPHASIS_UNDERSCORE.replace_all(&text, "$1").to_string();
-        if text == prev {
-            break;
-        } // No more changes
+    if text.contains('*') || text.contains('_') || text.contains('`') || text.contains('[') {
+        // Process emphasis iteratively to handle nesting (e.g., **_text_**)
+        // Bounded to 3 iterations to prevent infinite loops on malformed input
+        for _ in 0..3 {
+            let prev = text.clone();
+            text = EMPHASIS_ASTERISK.replace_all(&text, "$1").to_string();
+            text = EMPHASIS_UNDERSCORE.replace_all(&text, "$1").to_string();
+            if text == prev {
+                break;
+            }
+        }
+        text = CODE_PATTERN.replace_all(&text, "$1").to_string();
+        text = IMAGE_PATTERN.replace_all(&text, "$1").to_string();
+        text = LINK_PATTERN.replace_all(&text, "$1").to_string();
     }
-    text = CODE_PATTERN.replace_all(&text, "$1").to_string();
-    // Handle images first, then links
-    text = IMAGE_PATTERN.replace_all(&text, "$1").to_string();
-    text = LINK_PATTERN.replace_all(&text, "$1").to_string();
 
     // Step 6: Multi-character arrow patterns (order matters!)
     // GitHub.com converts these patterns to specific hyphen sequences
