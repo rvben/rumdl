@@ -68,6 +68,7 @@ impl Rule for MD030ListMarkerSpace {
             }
         }
 
+        // Collect lines once instead of in every is_multi_line_list_item call
         let lines: Vec<&str> = ctx.content.lines().collect();
         let mut in_blockquote = false;
 
@@ -105,7 +106,7 @@ impl Rule for MD030ListMarkerSpace {
                 let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
                 // Determine if this is a multi-line list item
-                let is_multi_line = self.is_multi_line_list_item(ctx, line_num);
+                let is_multi_line = self.is_multi_line_list_item(ctx, line_num, &lines);
                 let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
 
                 // Check for tabs in the spacing
@@ -250,7 +251,7 @@ impl Rule for MD030ListMarkerSpace {
             }
 
             // Try to fix list marker spacing
-            let is_multi_line = self.is_multi_line_list_item(ctx, line_num);
+            let is_multi_line = self.is_multi_line_list_item(ctx, line_num, &lines);
             if let Some(fixed_line) = self.try_fix_list_marker_spacing_with_context(line, is_multi_line) {
                 result_lines.push(fixed_line);
             } else {
@@ -270,7 +271,7 @@ impl Rule for MD030ListMarkerSpace {
 
 impl MD030ListMarkerSpace {
     /// Check if a list item is multi-line (spans multiple lines or contains nested content)
-    fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
+    fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize, lines: &[&str]) -> bool {
         // Get the current list item info
         let current_line_info = match ctx.line_info(line_num) {
             Some(info) if info.list_item.is_some() => info,
@@ -278,7 +279,6 @@ impl MD030ListMarkerSpace {
         };
 
         let current_list = current_line_info.list_item.as_ref().unwrap();
-        let lines: Vec<&str> = ctx.content.lines().collect();
 
         // Check subsequent lines to see if they are continuation of this list item
         for next_line_num in (line_num + 1)..=lines.len() {
