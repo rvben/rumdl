@@ -833,8 +833,8 @@ impl Rule for MD052ReferenceLinkImages {
 
     /// Check if this rule should be skipped for performance
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or has no reference-style links/images
-        ctx.content.is_empty() || (!ctx.content.contains("](") && !ctx.content.contains("]["))
+        // Skip if content is empty or has no links/images
+        ctx.content.is_empty() || !ctx.likely_has_links_or_images()
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

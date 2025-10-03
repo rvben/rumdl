@@ -184,7 +184,9 @@ impl Rule for MD041FirstLineHeading {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || (self.front_matter_title && self.has_front_matter_title(ctx.content))
+        ctx.content.is_empty()
+            || !ctx.likely_has_headings()
+            || (self.front_matter_title && self.has_front_matter_title(ctx.content))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

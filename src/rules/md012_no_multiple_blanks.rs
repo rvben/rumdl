@@ -436,8 +436,8 @@ impl Rule for MD012NoMultipleBlanks {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or doesn't have consecutive newlines
-        ctx.content.is_empty() || !ctx.content.contains("\n\n")
+        // Skip if content is empty or doesn't have newlines (single line can't have multiple blanks)
+        ctx.content.is_empty() || !ctx.has_char('\n')
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {

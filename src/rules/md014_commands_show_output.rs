@@ -309,7 +309,7 @@ impl Rule for MD014CommandsShowOutput {
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or has no code blocks
-        ctx.content.is_empty() || !ctx.content.contains("```")
+        ctx.content.is_empty() || !ctx.likely_has_code()
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {

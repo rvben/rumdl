@@ -281,8 +281,8 @@ impl Rule for MD002FirstHeadingH1 {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || (!content.contains('#') && !content.contains('=') && !content.contains('-'))
+        // Check for heading indicators: # for ATX, = or - for Setext
+        ctx.content.is_empty() || (!ctx.has_char('#') && !ctx.has_char('=') && !ctx.has_char('-'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

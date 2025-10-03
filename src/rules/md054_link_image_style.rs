@@ -285,6 +285,10 @@ impl Rule for MD054LinkImageStyle {
         crate::rule::FixCapability::Unfixable
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.likely_has_links_or_images()
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -235,8 +235,12 @@ impl Rule for MD003HeadingStyle {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or has no headings
-        ctx.content.is_empty() || !ctx.lines.iter().any(|line| line.heading.is_some())
+        // Fast path: check if document likely has headings using character frequency
+        if ctx.content.is_empty() || !ctx.likely_has_headings() {
+            return true;
+        }
+        // Verify headings actually exist (handles false positives from character frequency)
+        !ctx.lines.iter().any(|line| line.heading.is_some())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

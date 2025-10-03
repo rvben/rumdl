@@ -234,10 +234,7 @@ impl Rule for MD029OrderedListPrefix {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty()
-            || !content.contains('1')
-            || (!content.contains("1.") && !content.contains("2.") && !content.contains("0."))
+        ctx.content.is_empty() || !ctx.likely_has_lists()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

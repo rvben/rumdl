@@ -265,7 +265,7 @@ impl Rule for MD028NoBlanksBlockquote {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        !ctx.content.contains('>')
+        !ctx.likely_has_blockquotes()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

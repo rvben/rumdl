@@ -220,7 +220,7 @@ impl Rule for MD036NoEmphasisAsHeading {
     /// Check if this rule should be skipped for performance
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or has no emphasis markers
-        ctx.content.is_empty() || (!ctx.content.contains('*') && !ctx.content.contains('_'))
+        ctx.content.is_empty() || !ctx.likely_has_emphasis()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

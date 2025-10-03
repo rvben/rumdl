@@ -165,8 +165,7 @@ impl Rule for MD042NoEmptyLinks {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || !content.contains('[')
+        ctx.content.is_empty() || !ctx.likely_has_links_or_images()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

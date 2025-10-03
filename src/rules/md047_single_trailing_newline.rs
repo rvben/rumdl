@@ -1,11 +1,12 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 
 /// Detect the line ending style used in the content
-fn detect_line_ending(content: &str) -> &'static str {
+fn detect_line_ending(content: &str, ctx: &crate::lint_context::LintContext) -> &'static str {
     // Check for CRLF first (more specific than LF)
-    if content.contains("\r\n") {
+    // Use O(1) character check before doing O(n) string search
+    if ctx.has_char('\r') && content.contains("\r\n") {
         "\r\n"
-    } else if content.contains('\n') {
+    } else if ctx.has_char('\n') {
         "\n"
     } else {
         // Default to LF for empty or single-line files
@@ -29,6 +30,11 @@ impl Rule for MD047SingleTrailingNewline {
         "Files should end with a single newline character"
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip empty files - they don't need trailing newlines
+        ctx.content.is_empty()
+    }
+
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();
@@ -39,7 +45,7 @@ impl Rule for MD047SingleTrailingNewline {
         }
 
         // Detect the line ending style used in the document
-        let line_ending = detect_line_ending(content);
+        let line_ending = detect_line_ending(content, ctx);
 
         // Check if file ends with newline (supporting both LF and CRLF)
         let has_trailing_newline = content.ends_with('\n');
@@ -88,7 +94,7 @@ impl Rule for MD047SingleTrailingNewline {
         }
 
         // Detect the line ending style used in the document
-        let line_ending = detect_line_ending(content);
+        let line_ending = detect_line_ending(content, ctx);
 
         // Check if file already ends with a newline
         let has_trailing_newline = content.ends_with('\n');
@@ -178,13 +184,26 @@ mod tests {
 
     #[test]
     fn test_detect_line_ending() {
-        assert_eq!(detect_line_ending("Line 1\nLine 2"), "\n");
-        assert_eq!(detect_line_ending("Line 1\r\nLine 2"), "\r\n");
-        assert_eq!(detect_line_ending("Single line"), "\n");
-        assert_eq!(detect_line_ending(""), "\n");
+        let content1 = "Line 1\nLine 2";
+        let ctx1 = LintContext::new(content1, crate::config::MarkdownFlavor::Standard);
+        assert_eq!(detect_line_ending(content1, &ctx1), "\n");
+
+        let content2 = "Line 1\r\nLine 2";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
+        assert_eq!(detect_line_ending(content2, &ctx2), "\r\n");
+
+        let content3 = "Single line";
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard);
+        assert_eq!(detect_line_ending(content3, &ctx3), "\n");
+
+        let content4 = "";
+        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::Standard);
+        assert_eq!(detect_line_ending(content4, &ctx4), "\n");
 
         // Mixed line endings should detect CRLF (first match wins)
-        assert_eq!(detect_line_ending("Line 1\r\nLine 2\nLine 3"), "\r\n");
+        let content5 = "Line 1\r\nLine 2\nLine 3";
+        let ctx5 = LintContext::new(content5, crate::config::MarkdownFlavor::Standard);
+        assert_eq!(detect_line_ending(content5, &ctx5), "\r\n");
     }
 
     #[test]

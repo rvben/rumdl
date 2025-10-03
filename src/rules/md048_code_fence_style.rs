@@ -193,7 +193,7 @@ impl Rule for MD048CodeFenceStyle {
     /// Check if this rule should be skipped for performance
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or has no code fence markers
-        ctx.content.is_empty() || (!ctx.content.contains("```") && !ctx.content.contains("~~~"))
+        ctx.content.is_empty() || (!ctx.likely_has_code() && !ctx.has_char('~'))
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

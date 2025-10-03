@@ -241,7 +241,7 @@ impl Rule for MD010NoHardTabs {
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or has no tabs
-        ctx.content.is_empty() || !ctx.content.contains('\t')
+        ctx.content.is_empty() || !ctx.has_char('\t')
     }
 
     fn category(&self) -> RuleCategory {

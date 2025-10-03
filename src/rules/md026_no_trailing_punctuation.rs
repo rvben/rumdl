@@ -165,7 +165,7 @@ impl Rule for MD026NoTrailingPunctuation {
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if no heading markers
-        if !ctx.content.contains('#') {
+        if !ctx.likely_has_headings() {
             return true;
         }
         // Skip if none of the configured punctuation exists

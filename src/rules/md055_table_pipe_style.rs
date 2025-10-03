@@ -172,8 +172,8 @@ impl Rule for MD055TablePipeStyle {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if no pipe characters present (no tables)
-        !ctx.content.contains('|')
+        // Skip if no tables present (uses cached pipe count)
+        !ctx.likely_has_tables()
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -181,10 +181,7 @@ impl Rule for MD055TablePipeStyle {
         let line_index = LineIndex::new(content.to_string());
         let mut warnings = Vec::new();
 
-        // Early return for empty content or content without tables
-        if content.is_empty() || !content.contains('|') {
-            return Ok(Vec::new());
-        }
+        // Early return handled by should_skip()
 
         let lines: Vec<&str> = content.lines().collect();
 

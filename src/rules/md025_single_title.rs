@@ -448,7 +448,7 @@ impl Rule for MD025SingleTitle {
         }
 
         // Skip if no heading markers at all
-        if !ctx.content.contains('#') && !ctx.content.contains('=') && !ctx.content.contains('-') {
+        if !ctx.likely_has_headings() {
             return true;
         }
 

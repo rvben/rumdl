@@ -86,8 +86,8 @@ impl Rule for MD056TableColumnCount {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if no pipe characters present (no tables)
-        !ctx.content.contains('|')
+        // Skip if no tables present
+        !ctx.likely_has_tables()
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

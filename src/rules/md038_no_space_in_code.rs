@@ -295,7 +295,7 @@ impl Rule for MD038NoSpaceInCode {
 
     /// Check if content is likely to have code spans
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        !ctx.content.contains('`')
+        !ctx.likely_has_code()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

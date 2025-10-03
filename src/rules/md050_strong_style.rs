@@ -365,7 +365,8 @@ impl Rule for MD050StrongStyle {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || (!ctx.content.contains("**") && !ctx.content.contains("__"))
+        // Strong uses double markers, but likely_has_emphasis checks for count > 1
+        ctx.content.is_empty() || !ctx.likely_has_emphasis()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

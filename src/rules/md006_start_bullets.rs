@@ -337,8 +337,7 @@ impl Rule for MD006StartBullets {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || (!content.contains('*') && !content.contains('-') && !content.contains('+'))
+        ctx.content.is_empty() || !ctx.likely_has_lists()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

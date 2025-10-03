@@ -403,8 +403,8 @@ impl Rule for MD031BlanksAroundFences {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || (!content.contains("```") && !content.contains("~~~"))
+        // Check for fenced code blocks (backticks or tildes)
+        ctx.content.is_empty() || (!ctx.likely_has_code() && !ctx.has_char('~'))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

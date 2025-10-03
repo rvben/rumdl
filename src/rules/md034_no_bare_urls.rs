@@ -27,7 +27,7 @@ pub struct MD034NoBareUrls;
 
 impl MD034NoBareUrls {
     #[inline]
-    pub fn should_skip(&self, content: &str) -> bool {
+    pub fn should_skip_content(&self, content: &str) -> bool {
         // Skip if content has no URLs and no email addresses
         // Fast byte scanning for common URL/email indicators
         let bytes = content.as_bytes();
@@ -383,6 +383,10 @@ impl Rule for MD034NoBareUrls {
         RuleCategory::Link
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        !ctx.likely_has_links_or_images() && self.should_skip_content(ctx.content)
+    }
+
     #[inline]
     fn description(&self) -> &'static str {
         "No bare URLs - wrap URLs in angle brackets"
@@ -393,7 +397,7 @@ impl Rule for MD034NoBareUrls {
         let content = ctx.content;
 
         // Quick skip for content without URLs
-        if self.should_skip(content) {
+        if self.should_skip_content(content) {
             return Ok(warnings);
         }
 

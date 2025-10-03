@@ -290,7 +290,11 @@ impl Rule for MD018NoMissingSpaceAtx {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if no lines contain hash symbols
+        // Fast path: check if document likely has headings
+        if !ctx.likely_has_headings() {
+            return true;
+        }
+        // Verify lines with hash symbols exist
         !ctx.lines.iter().any(|line| line.content.contains('#'))
     }
 

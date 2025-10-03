@@ -2,7 +2,6 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::regex_cache::get_cached_regex;
 
 // Regex patterns
-const LINK_PATTERN_STR: &str = r"(?s)!?\[([^\]]*)\]\(([^)]*)\)";
 const ALL_WHITESPACE_STR: &str = r"^\s*$";
 
 /// Rule MD039: No space inside link text
@@ -20,14 +19,6 @@ const WARNING_MESSAGE: &str = "Remove spaces inside link text";
 impl MD039NoSpaceInLinks {
     pub fn new() -> Self {
         Self
-    }
-
-    /// Optimized fast check to see if content has any potential links or images
-    #[inline]
-    fn has_links_or_images(&self, content: &str) -> bool {
-        get_cached_regex(LINK_PATTERN_STR)
-            .map(|re| re.is_match(content))
-            .unwrap_or(false)
     }
 
     #[inline]
@@ -94,8 +85,7 @@ impl Rule for MD039NoSpaceInLinks {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || !self.has_links_or_images(content)
+        ctx.content.is_empty() || !ctx.likely_has_links_or_images()
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

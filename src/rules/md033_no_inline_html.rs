@@ -284,7 +284,7 @@ impl Rule for MD033NoInlineHtml {
         let content = ctx.content;
 
         // Early return: if no HTML tags at all, skip processing
-        if content.is_empty() || !has_html_tags(content) {
+        if content.is_empty() || !ctx.likely_has_html() {
             return Ok(Vec::new());
         }
 
@@ -434,8 +434,7 @@ impl Rule for MD033NoInlineHtml {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || !has_html_tags(content)
+        ctx.content.is_empty() || !ctx.likely_has_html()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -192,8 +192,7 @@ impl Rule for MD037NoSpaceInEmphasis {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        let content = ctx.content;
-        content.is_empty() || (!content.contains('*') && !content.contains('_'))
+        ctx.content.is_empty() || !ctx.likely_has_emphasis()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

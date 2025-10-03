@@ -516,7 +516,12 @@ impl Rule for MD022BlanksAroundHeadings {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || ctx.lines.iter().all(|line| line.heading.is_none())
+        // Fast path: check if document likely has headings
+        if ctx.content.is_empty() || !ctx.likely_has_headings() {
+            return true;
+        }
+        // Verify headings actually exist
+        ctx.lines.iter().all(|line| line.heading.is_none())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

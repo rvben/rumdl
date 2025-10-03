@@ -181,6 +181,11 @@ impl Rule for MD024NoDuplicateHeading {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Fast path: check if document likely has headings
+        if !ctx.likely_has_headings() {
+            return true;
+        }
+        // Verify headings actually exist
         ctx.lines.iter().all(|line| line.heading.is_none())
     }
 

@@ -304,12 +304,14 @@ impl Rule for MD007ULIndent {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or has no unordered list items
-        ctx.content.is_empty()
-            || !ctx
-                .lines
-                .iter()
-                .any(|line| line.list_item.as_ref().is_some_and(|item| !item.is_ordered))
+        // Fast path: check if document likely has lists
+        if ctx.content.is_empty() || !ctx.likely_has_lists() {
+            return true;
+        }
+        // Verify unordered list items actually exist
+        !ctx.lines
+            .iter()
+            .any(|line| line.list_item.as_ref().is_some_and(|item| !item.is_ordered))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

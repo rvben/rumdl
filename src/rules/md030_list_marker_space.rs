@@ -167,16 +167,7 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        if ctx.content.is_empty() {
-            return true;
-        }
-
-        // Fast byte-level check for list markers
-        let bytes = ctx.content.as_bytes();
-        !bytes.contains(&b'*')
-            && !bytes.contains(&b'-')
-            && !bytes.contains(&b'+')
-            && !bytes.iter().any(|&b| b.is_ascii_digit())
+        ctx.content.is_empty() || !ctx.likely_has_lists()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

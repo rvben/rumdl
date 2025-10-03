@@ -607,8 +607,11 @@ impl Rule for MD051LinkFragments {
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if no link fragments present
-        let bytes = ctx.content.as_bytes();
-        !bytes.contains(&b'#') || !bytes.contains(&b'[')
+        if !ctx.likely_has_links_or_images() {
+            return true;
+        }
+        // Check for # character (fragments)
+        !ctx.has_char('#')
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
