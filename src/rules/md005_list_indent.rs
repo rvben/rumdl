@@ -3,7 +3,7 @@
 //!
 //! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 // No regex patterns needed for this rule
@@ -238,7 +238,7 @@ impl MD005ListIndent {
         group: &[&crate::lint_context::ListBlock],
         warnings: &mut Vec<LintWarning>,
     ) -> Result<(), LintError> {
-        let line_index = LineIndex::new(ctx.content.to_string());
+        // Use ctx.line_offsets instead of creating new LineIndex for better performance
 
         // Collect all list items from all blocks in the group
         let mut all_list_items = Vec::new();
@@ -447,11 +447,11 @@ impl MD005ListIndent {
                         };
 
                         let fix_range = if *indent > 0 {
-                            let start_byte = line_index.line_col_to_byte_range(*line_num, 1).start;
-                            let end_byte = line_index.line_col_to_byte_range(*line_num, *indent + 1).start;
+                            let start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                            let end_byte = start_byte + *indent;
                             start_byte..end_byte
                         } else {
-                            let byte_pos = line_index.line_col_to_byte_range(*line_num, 1).start;
+                            let byte_pos = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
                             byte_pos..byte_pos
                         };
 
