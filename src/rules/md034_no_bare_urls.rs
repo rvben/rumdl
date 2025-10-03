@@ -22,6 +22,14 @@ const HTML_COMMENT_PATTERN_STR: &str = r#"<!--[\s\S]*?-->"#;
 const HTML_TAG_PATTERN_STR: &str = r#"<[^>]*>"#;
 const MULTILINE_LINK_CONTINUATION_STR: &str = r#"^[^\[]*\]\(.*\)"#;
 
+/// Reusable buffers for check_line to reduce allocations
+#[derive(Default)]
+struct LineCheckBuffers {
+    markdown_link_ranges: Vec<(usize, usize)>,
+    image_ranges: Vec<(usize, usize)>,
+    urls_found: Vec<(usize, usize, String)>,
+}
+
 #[derive(Default, Clone)]
 pub struct MD034NoBareUrls;
 
@@ -120,6 +128,7 @@ impl MD034NoBareUrls {
         content: &str,
         line_number: usize,
         code_spans: &[crate::lint_context::CodeSpan],
+        buffers: &mut LineCheckBuffers,
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
 
@@ -144,12 +153,12 @@ impl MD034NoBareUrls {
             return warnings;
         }
 
-        // Find all markdown links and angle bracket links for exclusion
-        let mut markdown_link_ranges = Vec::new();
+        // Clear and reuse buffers instead of allocating new ones
+        buffers.markdown_link_ranges.clear();
         if let Ok(re) = get_cached_regex(MARKDOWN_LINK_PATTERN_STR) {
             for cap in re.captures_iter(line) {
                 if let Some(mat) = cap.get(0) {
-                    markdown_link_ranges.push((mat.start(), mat.end()));
+                    buffers.markdown_link_ranges.push((mat.start(), mat.end()));
                 }
             }
         }
@@ -157,17 +166,17 @@ impl MD034NoBareUrls {
         if let Ok(re) = get_cached_regex(ANGLE_LINK_PATTERN_STR) {
             for cap in re.captures_iter(line) {
                 if let Some(mat) = cap.get(0) {
-                    markdown_link_ranges.push((mat.start(), mat.end()));
+                    buffers.markdown_link_ranges.push((mat.start(), mat.end()));
                 }
             }
         }
 
         // Find all markdown images for exclusion
-        let mut image_ranges = Vec::new();
+        buffers.image_ranges.clear();
         if let Ok(re) = get_cached_regex(MARKDOWN_IMAGE_PATTERN_STR) {
             for cap in re.captures_iter(line) {
                 if let Some(mat) = cap.get(0) {
-                    image_ranges.push((mat.start(), mat.end()));
+                    buffers.image_ranges.push((mat.start(), mat.end()));
                 }
             }
         }
@@ -182,13 +191,13 @@ impl MD034NoBareUrls {
         }
 
         // Find bare URLs
-        let mut urls_found = Vec::new();
+        buffers.urls_found.clear();
 
         // First, find IPv6 URLs (they need special handling)
         if let Ok(re) = get_cached_regex(IPV6_URL_REGEX_STR) {
             for mat in re.find_iter(line) {
                 let url_str = mat.as_str();
-                urls_found.push((mat.start(), mat.end(), url_str.to_string()));
+                buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
             }
         }
 
@@ -218,15 +227,15 @@ impl MD034NoBareUrls {
                     }
                 }
 
-                urls_found.push((mat.start(), mat.end(), url_str.to_string()));
+                buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
             }
         }
 
         // Process found URLs
-        for (start, end, url_str) in urls_found {
+        for &(start, end, ref url_str) in buffers.urls_found.iter() {
             // Skip custom protocols
             if get_cached_regex(CUSTOM_PROTOCOL_PATTERN_STR)
-                .map(|re| re.is_match(&url_str))
+                .map(|re| re.is_match(url_str))
                 .unwrap_or(false)
             {
                 continue;
@@ -234,14 +243,14 @@ impl MD034NoBareUrls {
 
             // Check if this URL is inside a markdown link, angle bracket, or image
             let mut is_inside_construct = false;
-            for &(link_start, link_end) in &markdown_link_ranges {
+            for &(link_start, link_end) in buffers.markdown_link_ranges.iter() {
                 if start >= link_start && end <= link_end {
                     is_inside_construct = true;
                     break;
                 }
             }
 
-            for &(img_start, img_end) in &image_ranges {
+            for &(img_start, img_end) in buffers.image_ranges.iter() {
                 if start >= img_start && end <= img_end {
                     is_inside_construct = true;
                     break;
@@ -269,7 +278,7 @@ impl MD034NoBareUrls {
             }
 
             // Clean up the URL by removing trailing punctuation
-            let trimmed_url = self.trim_trailing_punctuation(&url_str);
+            let trimmed_url = self.trim_trailing_punctuation(url_str);
 
             // Only report if we have a valid URL after trimming
             if !trimmed_url.is_empty() && trimmed_url != "//" {
@@ -309,7 +318,7 @@ impl MD034NoBareUrls {
 
                 // Check if email is inside angle brackets or markdown link
                 let mut is_inside_construct = false;
-                for &(link_start, link_end) in &markdown_link_ranges {
+                for &(link_start, link_end) in buffers.markdown_link_ranges.iter() {
                     if start >= link_start && end <= link_end {
                         is_inside_construct = true;
                         break;
@@ -404,6 +413,9 @@ impl Rule for MD034NoBareUrls {
         // Get code spans for exclusion
         let code_spans = ctx.code_spans();
 
+        // Allocate reusable buffers once instead of per-line to reduce allocations
+        let mut buffers = LineCheckBuffers::default();
+
         // Check line by line
         for (line_num, line) in content.lines().enumerate() {
             // Skip lines inside code blocks
@@ -411,7 +423,7 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
 
-            let mut line_warnings = self.check_line(line, content, line_num + 1, &code_spans);
+            let mut line_warnings = self.check_line(line, content, line_num + 1, &code_spans, &mut buffers);
 
             // Filter out warnings that are inside code spans
             line_warnings.retain(|warning| {
