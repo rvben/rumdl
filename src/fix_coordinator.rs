@@ -28,8 +28,9 @@ impl FixCoordinator {
         dependencies.insert("MD010", vec!["MD007", "MD005"]);
 
         // MD013 (line length) MUST run before:
-        // - MD009 (trailing spaces) - line wrapping might add/remove trailing spaces
+        // - MD009 (trailing spaces) - line wrapping might add trailing spaces that need cleanup
         // - MD012 (multiple blanks) - reflowing can affect blank lines
+        // Note: MD013 now trims trailing whitespace during reflow to prevent mid-line spaces
         dependencies.insert("MD013", vec!["MD009", "MD012"]);
 
         // MD004 (list style) should run before:

@@ -487,8 +487,10 @@ impl MD013LineLength {
                                 actual_indent = Some(indent);
                             }
 
-                            // Extract content (remove indentation)
-                            let content = line_info.content[indent..].to_string();
+                            // Extract content (remove indentation and trailing whitespace)
+                            // Preserve hard breaks (2 trailing spaces) while removing excessive whitespace
+                            // See: https://github.com/rvben/rumdl/issues/76
+                            let content = trim_preserving_hard_break(&line_info.content[indent..]);
                             list_item_lines.push(LineType::Content(content));
                             i += 1;
                         } else {
@@ -570,6 +572,8 @@ impl MD013LineLength {
                     })
                     .collect();
 
+                // Check if we need to reflow this list item
+                // We check the combined content to see if it exceeds length limits
                 let combined_content = content_lines.join(" ").trim().to_string();
                 let full_line = format!("{marker}{combined_content}");
 
@@ -602,28 +606,59 @@ impl MD013LineLength {
                     let mut result: Vec<String> = Vec::new();
                     let mut is_first_block = true;
 
-                    for block in &blocks {
+                    for (block_idx, block) in blocks.iter().enumerate() {
                         match block {
                             Block::Paragraph(para_lines) => {
-                                let paragraph_text = para_lines.join(" ").trim().to_string();
-                                if !paragraph_text.is_empty() {
-                                    let reflowed =
-                                        crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
+                                // Split the paragraph into segments at hard break boundaries
+                                // Each segment can be reflowed independently
+                                let segments = split_into_segments(para_lines);
 
-                                    if is_first_block {
-                                        // First block starts with marker
-                                        result.push(format!("{marker}{}", reflowed[0]));
-                                        for line in reflowed.iter().skip(1) {
-                                            result.push(format!("{expected_indent}{line}"));
+                                for (segment_idx, segment) in segments.iter().enumerate() {
+                                    // Check if this segment ends with a hard break
+                                    let has_hard_break = segment.last().is_some_and(|line| line.ends_with("  "));
+
+                                    // Join and reflow the segment (removing the hard break marker for processing)
+                                    let segment_for_reflow: Vec<String> = segment
+                                        .iter()
+                                        .map(|line| {
+                                            // Strip hard break marker (2 spaces) for reflow processing
+                                            if line.ends_with("  ") {
+                                                line[..line.len() - 2].trim_end().to_string()
+                                            } else {
+                                                line.clone()
+                                            }
+                                        })
+                                        .collect();
+
+                                    let segment_text = segment_for_reflow.join(" ").trim().to_string();
+                                    if !segment_text.is_empty() {
+                                        let reflowed =
+                                            crate::utils::text_reflow::reflow_line(&segment_text, &reflow_options);
+
+                                        if is_first_block && segment_idx == 0 {
+                                            // First segment of first block starts with marker
+                                            result.push(format!("{marker}{}", reflowed[0]));
+                                            for line in reflowed.iter().skip(1) {
+                                                result.push(format!("{expected_indent}{line}"));
+                                            }
+                                            is_first_block = false;
+                                        } else {
+                                            // Subsequent segments
+                                            for line in reflowed {
+                                                result.push(format!("{expected_indent}{line}"));
+                                            }
                                         }
-                                        is_first_block = false;
-                                    } else {
-                                        // Subsequent blocks need blank line before them
-                                        result.push(String::new());
-                                        for line in reflowed {
-                                            result.push(format!("{expected_indent}{line}"));
+
+                                        // If this segment had a hard break, add it back to the last line
+                                        if has_hard_break && let Some(last_line) = result.last_mut() {
+                                            last_line.push_str("  ");
                                         }
                                     }
+                                }
+
+                                // Add blank line after paragraph block if there's a next block
+                                if block_idx < blocks.len() - 1 {
+                                    result.push(String::new());
                                 }
                             }
                             Block::CodeBlock(code_lines) => {
@@ -912,6 +947,60 @@ impl MD013LineLength {
 }
 
 /// Extract list marker and content from a list item
+/// Trim trailing whitespace while preserving hard breaks (exactly 2 trailing spaces)
+/// Hard breaks in Markdown are indicated by 2 trailing spaces before a newline
+fn trim_preserving_hard_break(s: &str) -> String {
+    // Strip trailing \r from CRLF line endings first to handle Windows files
+    let s = s.strip_suffix('\r').unwrap_or(s);
+
+    // Check if there are at least 2 trailing spaces (potential hard break)
+    if s.ends_with("  ") {
+        // Find the position where non-space content ends
+        let content_end = s.trim_end().len();
+        if content_end == 0 {
+            // String is all whitespace
+            return String::new();
+        }
+        // Preserve exactly 2 trailing spaces for hard break
+        format!("{}  ", &s[..content_end])
+    } else {
+        // No hard break, just trim all trailing whitespace
+        s.trim_end().to_string()
+    }
+}
+
+/// Split paragraph lines into segments at hard break boundaries.
+/// Each segment is a group of lines that can be reflowed together.
+/// Lines with hard breaks (ending with 2+ spaces) form segment boundaries.
+///
+/// Example:
+///   Input:  ["Line 1", "Line 2  ", "Line 3", "Line 4"]
+///   Output: [["Line 1", "Line 2  "], ["Line 3", "Line 4"]]
+///
+/// The first segment includes "Line 2  " which has a hard break at the end.
+/// The second segment starts after the hard break.
+fn split_into_segments(para_lines: &[String]) -> Vec<Vec<String>> {
+    let mut segments: Vec<Vec<String>> = Vec::new();
+    let mut current_segment: Vec<String> = Vec::new();
+
+    for line in para_lines {
+        current_segment.push(line.clone());
+
+        // If this line has a hard break, end the current segment
+        if line.ends_with("  ") {
+            segments.push(current_segment.clone());
+            current_segment.clear();
+        }
+    }
+
+    // Add any remaining lines as the final segment
+    if !current_segment.is_empty() {
+        segments.push(current_segment);
+    }
+
+    segments
+}
+
 fn extract_list_marker_and_content(line: &str) -> (String, String) {
     // First, find the leading indentation
     let indent_len = line.len() - line.trim_start().len();
@@ -919,14 +1008,15 @@ fn extract_list_marker_and_content(line: &str) -> (String, String) {
     let trimmed = &line[indent_len..];
 
     // Handle bullet lists
+    // Trim trailing whitespace while preserving hard breaks
     if let Some(rest) = trimmed.strip_prefix("- ") {
-        return (format!("{indent}- "), rest.to_string());
+        return (format!("{indent}- "), trim_preserving_hard_break(rest));
     }
     if let Some(rest) = trimmed.strip_prefix("* ") {
-        return (format!("{indent}* "), rest.to_string());
+        return (format!("{indent}* "), trim_preserving_hard_break(rest));
     }
     if let Some(rest) = trimmed.strip_prefix("+ ") {
-        return (format!("{indent}+ "), rest.to_string());
+        return (format!("{indent}+ "), trim_preserving_hard_break(rest));
     }
 
     // Handle numbered lists on trimmed content
@@ -941,7 +1031,8 @@ fn extract_list_marker_and_content(line: &str) -> (String, String) {
                 && next == ' '
             {
                 marker_content.push(next);
-                let content = chars.as_str().to_string();
+                // Trim trailing whitespace while preserving hard breaks
+                let content = trim_preserving_hard_break(chars.as_str());
                 return (format!("{indent}{marker_content}"), content);
             }
             break;

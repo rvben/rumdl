@@ -164,6 +164,28 @@ fn is_numbered_list_item(line: &str) -> bool {
 }
 
 /// Reflow a single line of markdown text to fit within the specified line length
+/// Trim trailing whitespace while preserving hard breaks (exactly 2 trailing spaces)
+/// Hard breaks in Markdown are indicated by 2 trailing spaces before a newline
+fn trim_preserving_hard_break(s: &str) -> String {
+    // Strip trailing \r from CRLF line endings first to handle Windows files
+    let s = s.strip_suffix('\r').unwrap_or(s);
+
+    // Check if there are at least 2 trailing spaces (potential hard break)
+    if s.ends_with("  ") {
+        // Find the position where non-space content ends
+        let content_end = s.trim_end().len();
+        if content_end == 0 {
+            // String is all whitespace
+            return String::new();
+        }
+        // Preserve exactly 2 trailing spaces for hard break
+        format!("{}  ", &s[..content_end])
+    } else {
+        // No hard break, just trim all trailing whitespace
+        s.trim_end().to_string()
+    }
+}
+
 pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
@@ -876,7 +898,8 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             let marker = &line[indent..marker_end];
 
             // Collect all content for this list item (including continuation lines)
-            let mut list_content = vec![line[content_start..].to_string()];
+            // Preserve hard breaks (2 trailing spaces) while trimming excessive whitespace
+            let mut list_content = vec![trim_preserving_hard_break(&line[content_start..])];
             i += 1;
 
             // Collect continuation lines (indented lines that are part of this list item)
@@ -907,9 +930,10 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 // Check if this line is indented (continuation of list item)
                 let next_indent = next_line.len() - next_line.trim_start().len();
                 if next_indent >= content_start {
-                    // This is a continuation line - add its content (trim only leading space)
-                    // We need to preserve trailing spaces for hard breaks
-                    list_content.push(next_line.trim_start().to_string());
+                    // This is a continuation line - add its content
+                    // Preserve hard breaks while trimming excessive whitespace
+                    let trimmed_start = next_line.trim_start();
+                    list_content.push(trim_preserving_hard_break(trimmed_start));
                     i += 1;
                 } else {
                     // Not indented enough, not part of this list item
@@ -917,11 +941,20 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 }
             }
 
-            // Join all the content with spaces (if preserve_breaks is false)
+            // Join content, but respect hard breaks (lines ending with 2 spaces)
+            // Hard breaks should prevent joining with the next line
             let combined_content = if options.preserve_breaks {
                 list_content[0].clone()
             } else {
-                list_content.join(" ")
+                // Check if any lines have hard breaks - if so, preserve the structure
+                let has_hard_breaks = list_content.iter().any(|line| line.ends_with("  "));
+                if has_hard_breaks {
+                    // Don't join lines with hard breaks - keep them separate with newlines
+                    list_content.join("\n")
+                } else {
+                    // No hard breaks, safe to join with spaces
+                    list_content.join(" ")
+                }
             };
 
             // Calculate the proper indentation for continuation lines
@@ -1103,6 +1136,43 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_list_item_trailing_whitespace_removal() {
+        // Test for issue #76 - hard breaks (2 trailing spaces) should be preserved
+        // and prevent reflowing
+        let input = "1. First line with trailing spaces   \n    Second line with trailing spaces  \n    Third line\n";
+
+        let options = ReflowOptions {
+            line_length: 999999,
+            break_on_sentences: true, // MD013 uses true by default
+            preserve_breaks: false,
+            sentence_per_line: false,
+        };
+
+        let result = reflow_markdown(input, &options);
+
+        eprintln!("Input: {input:?}");
+        eprintln!("Result: {result:?}");
+
+        // Should not contain 3+ consecutive spaces (which would indicate
+        // trailing whitespace became mid-line whitespace)
+        assert!(
+            !result.contains("   "),
+            "Result should not contain 3+ consecutive spaces: {result:?}"
+        );
+
+        // Hard breaks should be preserved (exactly 2 trailing spaces)
+        assert!(result.contains("  \n"), "Hard breaks should be preserved: {result:?}");
+
+        // Should NOT be reflowed into a single line because hard breaks are present
+        // The content should maintain its line structure
+        assert!(
+            result.lines().count() >= 2,
+            "Should have multiple lines (not reflowed due to hard breaks), got: {}",
+            result.lines().count()
+        );
+    }
 
     #[test]
     fn test_reflow_simple_text() {
