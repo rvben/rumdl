@@ -216,11 +216,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            wheel-pattern: "*-manylinux*.whl"
+            wheel-path: "*wheel-x86_64-unknown-linux-*/*.whl"
           - os: macos-latest
-            wheel-pattern: "*-macosx*.whl"
+            wheel-path: "*wheel-aarch64-apple-darwin/*.whl"
           - os: windows-latest
-            wheel-pattern: "*-win*.whl"
+            wheel-path: "*wheel-x86_64-pc-windows-*/*.whl"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -237,29 +237,38 @@ jobs:
       - name: Find and install wheel
         shell: bash
         run: |
-          # Find the appropriate wheel for this platform
-          WHEEL=$(find wheels -name "${{ matrix.wheel-pattern }}" -type f | head -1)
+          # Find the appropriate wheel by matching the artifact directory path
+          WHEEL=$(find wheels -path "${{ matrix.wheel-path }}" -type f | head -1)
           if [ -z "$WHEEL" ]; then
-            echo "ERROR: No wheel found matching pattern ${{ matrix.wheel-pattern }}"
-            find wheels -name "*.whl"
+            echo "ERROR: No wheel found matching path pattern ${{ matrix.wheel-path }}"
+            echo "Available wheels:"
+            find wheels -name "*.whl" -type f
             exit 1
           fi
           echo "Installing wheel: $WHEEL"
-          uv pip install --system "$WHEEL"
+          # Create and use a virtual environment
+          uv venv .venv
+          uv pip install --python .venv "$WHEEL"
 
       - name: Test Python import and version
         shell: bash
         run: |
-          python -c "import rumdl; print(f'✅ Imported rumdl {rumdl.__version__}')"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            source .venv/Scripts/activate
+          else
+            source .venv/bin/activate
+          fi
+          python -c "import rumdl; print(f'Imported rumdl {rumdl.__version__}')"
 
       - name: Verify version matches Cargo.toml
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            source .venv/Scripts/activate
           else
-            CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            source .venv/bin/activate
           fi
+          CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           PYTHON_VERSION=$(python -c "import rumdl; print(rumdl.__version__)")
           if [ "$CARGO_VERSION" != "$PYTHON_VERSION" ]; then
             echo "❌ ERROR: Version mismatch! Cargo.toml=$CARGO_VERSION, Python=$PYTHON_VERSION"
@@ -270,6 +279,11 @@ jobs:
       - name: Test rumdl binary works
         shell: bash
         run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            source .venv/Scripts/activate
+          else
+            source .venv/bin/activate
+          fi
           echo "# Test" > test.md
           rumdl --version
           rumdl check test.md
