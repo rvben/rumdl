@@ -426,11 +426,7 @@ impl VsCodeExtension {
 
                 if output.status.success() {
                     println!("{}", "✓ Successfully updated Rumdl VS Code extension!".green());
-
-                    // Verify the update
-                    if let Ok(new_version) = self.get_installed_version() {
-                        println!("  New version: {}", new_version.cyan());
-                    }
+                    println!("  New version: {}", latest_version.cyan());
                     Ok(())
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);

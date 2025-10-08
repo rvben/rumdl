@@ -209,9 +209,75 @@ jobs:
           path: target/wheels/*.tar.gz
           name: sdist
 
+  test-python-package:
+    name: Test Python Package (${{ matrix.os }})
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            wheel-pattern: "*-manylinux*.whl"
+          - os: macos-latest
+            wheel-pattern: "*-macosx*.whl"
+          - os: windows-latest
+            wheel-pattern: "*-win*.whl"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: wheels
+
+      - name: Find and install wheel
+        shell: bash
+        run: |
+          # Find the appropriate wheel for this platform
+          WHEEL=$(find wheels -name "${{ matrix.wheel-pattern }}" -type f | head -1)
+          if [ -z "$WHEEL" ]; then
+            echo "ERROR: No wheel found matching pattern ${{ matrix.wheel-pattern }}"
+            find wheels -name "*.whl"
+            exit 1
+          fi
+          echo "Installing wheel: $WHEEL"
+          uv pip install --system "$WHEEL"
+
+      - name: Test Python import and version
+        shell: bash
+        run: |
+          python -c "import rumdl; print(f'✅ Imported rumdl {rumdl.__version__}')"
+
+      - name: Verify version matches Cargo.toml
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          else
+            CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          PYTHON_VERSION=$(python -c "import rumdl; print(rumdl.__version__)")
+          if [ "$CARGO_VERSION" != "$PYTHON_VERSION" ]; then
+            echo "❌ ERROR: Version mismatch! Cargo.toml=$CARGO_VERSION, Python=$PYTHON_VERSION"
+            exit 1
+          fi
+          echo "✅ Versions match: $CARGO_VERSION"
+
+      - name: Test rumdl binary works
+        shell: bash
+        run: |
+          echo "# Test" > test.md
+          rumdl --version
+          rumdl check test.md
+          echo "✅ Binary works correctly"
+
   release:
     runs-on: ubuntu-latest
-    needs: [build, sdist]
+    needs: [build, sdist, test-python-package]
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2

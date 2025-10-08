@@ -39,7 +39,7 @@ Repository = "https://github.com/rvben/rumdl.git"
 [tool.maturin]
 bindings = "bin"
 manifest-path = "Cargo.toml"
-python-packages = ["python/rumdl"]
+python-packages = ["rumdl"]
 strip = true
 
 [tool.black]
