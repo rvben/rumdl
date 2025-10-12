@@ -599,7 +599,7 @@ fn find_markdown_files(
     walk_builder.git_global(use_gitignore); // Enable/disable global gitignore
     walk_builder.git_exclude(use_gitignore); // Enable/disable .git/info/exclude
     walk_builder.parents(use_gitignore); // Enable/disable parent ignores
-    walk_builder.hidden(true); // Keep hidden files ignored unconditionally
+    walk_builder.hidden(false); // Include hidden files and directories
     walk_builder.require_git(false); // Process git ignores even if no repo detected
 
     // Add support for .markdownlintignore file
