@@ -639,3 +639,71 @@ fn test_mixed_multiline_links_and_bare_urls() {
         "Should not modify the second multi-line markdown link"
     );
 }
+
+#[test]
+fn test_issue_104_url_in_empty_link() {
+    // Issue #104: URL in link text with empty URL part [url]()
+    // This is the pattern from issue #104: [https://github.com/pfeif/hx-complete-generator]()
+    // The URL is in the link text with empty URL part
+    let rule = MD034NoBareUrls;
+    let content = "check it out in its new repository at [https://github.com/pfeif/hx-complete-generator]().";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // The URL in [url]() should NOT be flagged because it's part of a markdown link construct
+    // (even though the link is empty/invalid, it's still a link construct that should be handled by MD042)
+    assert_eq!(
+        result.len(),
+        0,
+        "URL in [url]() link text should not be flagged as bare URL. This is MD042 territory. Found {} warnings: {:#?}",
+        result.len(),
+        result
+    );
+}
+
+#[test]
+fn test_issue_104_url_in_empty_bracket_link() {
+    // Issue #104: Similar pattern with [url][]
+    let rule = MD034NoBareUrls;
+    let content = "Visit [https://www.google.com][] for more info.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not be flagged - it's part of a markdown link reference construct
+    assert_eq!(
+        result.len(),
+        0,
+        "URL in [url][] should not be flagged as bare URL. Found {} warnings: {:#?}",
+        result.len(),
+        result
+    );
+}
+
+#[test]
+fn test_issue_104_full_paragraph_not_corrupted() {
+    // Issue #104: Full regression test with the actual paragraph from the bug report
+    // This tests that after MD042 fixes the empty link, MD034 doesn't corrupt the text
+    let rule = MD034NoBareUrls;
+
+    // This is what the content looks like AFTER MD042 has fixed the empty link
+    let content_after_md042 = "I've never been one to implement hacky solutions because life is just easier\nwhen everything gets done \"by the book.\" So, if you're reading this and want to\nsee the code that creates this extension and prevents me from pouring needless\nhours into meticulously maintaining the files by hand, I welcome you to check it\nout in its new repository at [https://github.com/pfeif/hx-complete-generator](https://example.com).";
+
+    let ctx = LintContext::new(content_after_md042, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // MD034 should NOT flag the URL because it's properly in a markdown link now
+    assert_eq!(
+        result.len(),
+        0,
+        "After MD042 fixes empty link, MD034 should not flag the URL. Found {} warnings: {:#?}",
+        result.len(),
+        result
+    );
+
+    // Verify MD034 fix produces exactly the expected output (no modifications)
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content_after_md042,
+        "MD034 should not modify content that has properly formatted links"
+    );
+}

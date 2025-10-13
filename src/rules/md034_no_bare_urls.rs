@@ -11,6 +11,8 @@ use crate::lint_context::LintContext;
 const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?)://|@"#;
 const CUSTOM_PROTOCOL_PATTERN_STR: &str = r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#;
 const MARKDOWN_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
+const MARKDOWN_EMPTY_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(\)"#;
+const MARKDOWN_EMPTY_REF_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\[\]"#;
 const ANGLE_LINK_PATTERN_STR: &str =
     r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
 const BADGE_LINK_LINE_STR: &str = r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#;
@@ -160,6 +162,19 @@ impl MD034NoBareUrls {
                 if let Some(mat) = cap.get(0) {
                     buffers.markdown_link_ranges.push((mat.start(), mat.end()));
                 }
+            }
+        }
+
+        // Also include empty link patterns like [text]() and [text][]
+        if let Ok(re) = get_cached_regex(MARKDOWN_EMPTY_LINK_PATTERN_STR) {
+            for mat in re.find_iter(line) {
+                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
+            }
+        }
+
+        if let Ok(re) = get_cached_regex(MARKDOWN_EMPTY_REF_PATTERN_STR) {
+            for mat in re.find_iter(line) {
+                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
             }
         }
 
