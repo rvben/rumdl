@@ -1975,11 +1975,7 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
     if args._fix {
         if has_issues {
             let mut fixed_content = content.clone();
-            let warnings_fixed = if std::env::var("RUMDL_NO_FIX_COORDINATOR").is_ok() {
-                apply_fixes_stdin(rules, &all_warnings, &mut fixed_content, quiet, config)
-            } else {
-                apply_fixes_stdin_coordinated(rules, &all_warnings, &mut fixed_content, quiet, config)
-            };
+            let warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut fixed_content, quiet, config);
 
             // Denormalize back to original line ending before output (I/O boundary)
             let output_content = rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending);
@@ -2888,11 +2884,7 @@ fn process_file_with_formatter(
     if diff {
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
-        if std::env::var("RUMDL_NO_FIX_COORDINATOR").is_ok() {
-            warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, true, config);
-        } else {
-            warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, true, config);
-        }
+        warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, true, config);
 
         if warnings_fixed > 0 {
             let diff_output = generate_diff(&original_content, &content, file_path);
@@ -2904,12 +2896,8 @@ fn process_file_with_formatter(
         // Don't actually write the file in diff mode
         return (total_warnings > 0, total_warnings, 0, fixable_warnings, all_warnings);
     } else if _fix {
-        // Use Fix Coordinator by default (disable with RUMDL_NO_FIX_COORDINATOR=1)
-        if std::env::var("RUMDL_NO_FIX_COORDINATOR").is_ok() {
-            warnings_fixed = apply_fixes(rules, &all_warnings, &mut content, quiet, config);
-        } else {
-            warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, config);
-        }
+        // Apply fixes using Fix Coordinator
+        warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, config);
 
         // Write fixed content back to file
         if warnings_fixed > 0 {
@@ -3222,159 +3210,6 @@ fn apply_fixes_coordinated(
             0
         }
     }
-}
-
-// Apply fixes to content based on warnings
-fn apply_fixes(
-    rules: &[Box<dyn Rule>],
-    all_warnings: &[rumdl_lib::rule::LintWarning],
-    content: &mut String,
-    quiet: bool,
-    config: &rumdl_config::Config,
-) -> usize {
-    // Delegate to the coordinated fix approach
-    // Line ending preservation is handled in fix_coordinator
-    apply_fixes_coordinated(rules, all_warnings, content, quiet, config)
-}
-
-/// Apply fixes to stdin content using Fix Coordinator
-fn apply_fixes_stdin_coordinated(
-    rules: &[Box<dyn Rule>],
-    all_warnings: &[rumdl_lib::rule::LintWarning],
-    content: &mut String,
-    quiet: bool,
-    config: &rumdl_config::Config,
-) -> usize {
-    // Just delegate to the coordinated version
-    apply_fixes_coordinated(rules, all_warnings, content, quiet, config)
-}
-
-/// Apply fixes to stdin content (similar to apply_fixes but without file writing)
-fn apply_fixes_stdin(
-    rules: &[Box<dyn Rule>],
-    all_warnings: &[rumdl_lib::rule::LintWarning],
-    content: &mut String,
-    quiet: bool,
-    config: &rumdl_config::Config,
-) -> usize {
-    use std::time::Instant;
-    // Store the original warning count by rule
-    let mut original_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for warning in all_warnings {
-        if let Some(rule_name) = warning.rule_name {
-            *original_counts.entry(rule_name).or_insert(0) += 1;
-        }
-    }
-
-    // Track which rules actually fixed content
-    let mut rules_that_fixed = Vec::new();
-
-    let mut total_ctx_time = std::time::Duration::ZERO;
-    let mut total_fix_time = std::time::Duration::ZERO;
-    let mut ctx_creations = 0;
-
-    // Apply fixes for rules that have warnings, regardless of whether individual warnings have fixes
-    for rule in rules {
-        let rule_warnings: Vec<_> = all_warnings
-            .iter()
-            .filter(|w| w.rule_name == Some(rule.name()))
-            .collect();
-
-        if !rule_warnings.is_empty() {
-            // Check if any warnings for this rule are in non-disabled regions
-            let has_non_disabled_warnings = rule_warnings.iter().any(|w| {
-                !rumdl_lib::rule::is_rule_disabled_at_line(
-                    content,
-                    rule.name(),
-                    w.line.saturating_sub(1), // Convert to 0-based line index
-                )
-            });
-
-            if has_non_disabled_warnings {
-                // Check fixable/unfixable configuration
-                let rule_name = rule.name();
-
-                // If unfixable list contains this rule, skip fixing
-                if config
-                    .global
-                    .unfixable
-                    .iter()
-                    .any(|r| r.eq_ignore_ascii_case(rule_name))
-                {
-                    continue;
-                }
-
-                // If fixable list is specified and doesn't contain this rule, skip fixing
-                if !config.global.fixable.is_empty()
-                    && !config.global.fixable.iter().any(|r| r.eq_ignore_ascii_case(rule_name))
-                {
-                    continue;
-                }
-
-                let ctx_start = Instant::now();
-                let ctx = LintContext::new(content, config.markdown_flavor());
-                total_ctx_time += ctx_start.elapsed();
-                ctx_creations += 1;
-
-                let fix_start = Instant::now();
-                match rule.fix(&ctx) {
-                    Ok(fixed_content) => {
-                        total_fix_time += fix_start.elapsed();
-                        if fixed_content != *content {
-                            *content = fixed_content;
-                            // Track that this rule made changes
-                            rules_that_fixed.push(rule_name);
-                        }
-                    }
-                    Err(err) => {
-                        total_fix_time += fix_start.elapsed();
-                        if !quiet {
-                            eprintln!(
-                                "{} Failed to apply fix for rule {}: {}",
-                                "Warning:".yellow(),
-                                rule.name(),
-                                err
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // OPTIMIZATION: Only re-check rules that actually applied fixes or had warnings
-    let ctx_after_fixes = LintContext::new(content, config.markdown_flavor());
-    let mut remaining_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-
-    for rule in rules {
-        let rule_name = rule.name();
-        // Only re-check if this rule made changes OR if we have original warnings for it
-        if (rules_that_fixed.contains(&rule_name) || original_counts.contains_key(rule_name))
-            && let Ok(remaining_warnings) = rule.check(&ctx_after_fixes)
-        {
-            for warning in remaining_warnings {
-                if let Some(rule_name) = warning.rule_name {
-                    *remaining_counts.entry(rule_name).or_insert(0) += 1;
-                }
-            }
-        }
-    }
-
-    // Calculate the actual number of warnings fixed
-    let mut warnings_fixed = 0;
-    for (rule_name, original_count) in original_counts {
-        let remaining = remaining_counts.get(rule_name).copied().unwrap_or(0);
-        warnings_fixed += original_count.saturating_sub(remaining);
-    }
-
-    if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
-        eprintln!("DEBUG: LintContext creations: {ctx_creations}");
-        eprintln!("DEBUG: Total LintContext time: {total_ctx_time:?}");
-        eprintln!("DEBUG: Total fix() time: {total_fix_time:?}");
-        eprintln!("DEBUG: Total time: {:?}", total_ctx_time + total_fix_time);
-    }
-
-    warnings_fixed
 }
 
 fn process_file_collect_warnings(

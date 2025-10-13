@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.157] - 2025-10-13 (unreleased)
 
+### Changed
+
+- **Removed legacy fix implementation** - Removed old single-pass fix implementation and `RUMDL_NO_FIX_COORDINATOR` environment variable. Fix Coordinator is now the only fix strategy, providing ~75% faster fixes with better coverage.
+
 ### Added
 
 - **MD042**: Full support for MkDocs paragraph anchors (#100)
