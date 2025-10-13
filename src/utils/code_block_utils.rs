@@ -1,6 +1,7 @@
 //!
 //! Utility functions for detecting and handling code blocks and code spans in Markdown for rumdl.
 
+use crate::rules::blockquote_utils::BlockquoteUtils;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -44,7 +45,15 @@ impl CodeBlockUtils {
         // Find fenced code blocks
         for (i, line) in lines.iter().enumerate() {
             let line_start = line_positions[i];
-            let trimmed = line.trim_start();
+
+            // Strip ALL blockquote prefixes to properly detect fenced code blocks inside blockquotes
+            // This handles nested blockquotes by recursively stripping '>' markers
+            let mut line_without_blockquote = line.to_string();
+            while BlockquoteUtils::is_blockquote(&line_without_blockquote) {
+                line_without_blockquote = BlockquoteUtils::extract_content(&line_without_blockquote);
+            }
+
+            let trimmed = line_without_blockquote.trim_start();
 
             // Check if this line could be a code fence
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
@@ -87,21 +96,36 @@ impl CodeBlockUtils {
                 0
             };
 
-            // Check if this line is indented code
-            let is_indented = line.starts_with("    ") || line.starts_with("\t");
+            // Strip ALL blockquote prefixes to properly detect indented code blocks inside blockquotes
+            let mut line_without_blockquote = line.to_string();
+            while BlockquoteUtils::is_blockquote(&line_without_blockquote) {
+                line_without_blockquote = BlockquoteUtils::extract_content(&line_without_blockquote);
+            }
+
+            // Check if this line is indented code (after stripping blockquote markers)
+            let is_indented = line_without_blockquote.starts_with("    ") || line_without_blockquote.starts_with("\t");
 
             // Check if this looks like a list item (has list marker after indentation)
-            let trimmed = line.trim_start();
+            let trimmed = line_without_blockquote.trim_start();
             let is_list_item = trimmed.starts_with("- ")
                 || trimmed.starts_with("* ")
                 || trimmed.starts_with("+ ")
                 || trimmed.chars().next().is_some_and(|c| c.is_numeric())
                     && trimmed.chars().nth(1).is_some_and(|c| c == '.' || c == ')');
 
-            // Check if previous line was blank
-            let prev_blank = line_idx > 0 && lines[line_idx - 1].trim().is_empty();
+            // Check if previous line was blank (after stripping blockquote markers)
+            let prev_line_without_blockquote = if line_idx > 0 {
+                let mut prev = lines[line_idx - 1].to_string();
+                while BlockquoteUtils::is_blockquote(&prev) {
+                    prev = BlockquoteUtils::extract_content(&prev);
+                }
+                prev
+            } else {
+                String::new()
+            };
+            let prev_blank = line_idx > 0 && prev_line_without_blockquote.trim().is_empty();
 
-            if is_indented && !line.trim().is_empty() && !is_list_item {
+            if is_indented && !line_without_blockquote.trim().is_empty() && !is_list_item {
                 if !in_indented_block {
                     // Only start an indented code block if preceded by a blank line
                     if prev_blank {

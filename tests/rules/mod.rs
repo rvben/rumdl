@@ -34,6 +34,7 @@ mod md030_test;
 mod md031_kramdown_test;
 mod md031_test;
 mod md032_test;
+mod md033_blockquote_test;
 mod md033_kramdown_test;
 // mod md033_extended_test; // Temporarily disabled - needs LintContext fixes
 mod md033_test;
