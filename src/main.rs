@@ -1925,6 +1925,12 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
         exit::violations_found();
     }
 
+    // Detect original line ending before any processing (I/O boundary)
+    let original_line_ending = rumdl_lib::utils::detect_line_ending_enum(&content);
+
+    // Normalize to LF for all internal processing
+    content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf);
+
     // Determine the filename to use for display and context
     let display_filename = args.stdin_filename.as_deref().unwrap_or("<stdin>");
 
@@ -1975,8 +1981,11 @@ fn process_stdin(rules: &[Box<dyn Rule>], args: &CheckArgs, config: &rumdl_confi
                 apply_fixes_stdin_coordinated(rules, &all_warnings, &mut fixed_content, quiet, config)
             };
 
+            // Denormalize back to original line ending before output (I/O boundary)
+            let output_content = rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending);
+
             // Output the fixed content to stdout
-            print!("{fixed_content}");
+            print!("{output_content}");
 
             // Re-check the fixed content to see if any issues remain
             let fixed_ctx = LintContext::new(&fixed_content, config.markdown_flavor());
@@ -2841,8 +2850,8 @@ fn process_file_with_formatter(
 ) -> (bool, usize, usize, usize, Vec<rumdl_lib::rule::LintWarning>) {
     let formatter = output_format.create_formatter();
 
-    // Call the original process_file_inner to get warnings
-    let (all_warnings, mut content, total_warnings, fixable_warnings) =
+    // Call the original process_file_inner to get warnings and original line ending
+    let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending) =
         process_file_inner(file_path, rules, verbose, quiet, config);
 
     if total_warnings == 0 {
@@ -2903,16 +2912,20 @@ fn process_file_with_formatter(
         }
 
         // Write fixed content back to file
-        if warnings_fixed > 0
-            && let Err(err) = std::fs::write(file_path, &content)
-            && !quiet
-        {
-            eprintln!(
-                "{} Failed to write fixed content to file {}: {}",
-                "Error:".red().bold(),
-                file_path,
-                err
-            );
+        if warnings_fixed > 0 {
+            // Denormalize back to original line ending before writing
+            let content_to_write = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending);
+
+            if let Err(err) = std::fs::write(file_path, &content_to_write)
+                && !quiet
+            {
+                eprintln!(
+                    "{} Failed to write fixed content to file {}: {}",
+                    "Error:".red().bold(),
+                    file_path,
+                    err
+                );
+            }
         }
 
         // In fix mode, show warnings with [fixed] for issues that were fixed
@@ -2988,7 +3001,13 @@ fn process_file_inner(
     verbose: bool,
     quiet: bool,
     config: &rumdl_config::Config,
-) -> (Vec<rumdl_lib::rule::LintWarning>, String, usize, usize) {
+) -> (
+    Vec<rumdl_lib::rule::LintWarning>,
+    String,
+    usize,
+    usize,
+    rumdl_lib::utils::LineEnding,
+) {
     use std::time::Instant;
 
     let start_time = Instant::now();
@@ -2997,19 +3016,25 @@ fn process_file_inner(
     }
 
     // Read file content efficiently
-    let content = match read_file_efficiently(Path::new(file_path)) {
+    let mut content = match read_file_efficiently(Path::new(file_path)) {
         Ok(content) => content,
         Err(e) => {
             if !quiet {
                 eprintln!("Error reading file {file_path}: {e}");
             }
-            return (Vec::new(), String::new(), 0, 0);
+            return (Vec::new(), String::new(), 0, 0, rumdl_lib::utils::LineEnding::Lf);
         }
     };
 
+    // Detect original line ending before any processing
+    let original_line_ending = rumdl_lib::utils::detect_line_ending_enum(&content);
+
+    // Normalize to LF for all internal processing
+    content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf);
+
     // Early content analysis for ultra-fast skip decisions
     if content.is_empty() {
-        return (Vec::new(), String::new(), 0, 0);
+        return (Vec::new(), String::new(), 0, 0, original_line_ending);
     }
 
     let lint_start = Instant::now();
@@ -3071,7 +3096,13 @@ fn process_file_inner(
         println!("Total processing time for {file_path}: {total_time:?}");
     }
 
-    (all_warnings, content, total_warnings, fixable_warnings)
+    (
+        all_warnings,
+        content,
+        total_warnings,
+        fixable_warnings,
+        original_line_ending,
+    )
 }
 
 /// Generate a unified diff between two strings
@@ -3227,9 +3258,6 @@ fn apply_fixes_stdin(
     config: &rumdl_config::Config,
 ) -> usize {
     use std::time::Instant;
-    // Detect and preserve original line ending style (CRLF/LF) throughout all fixes
-    let original_line_ending = rumdl_lib::utils::detect_line_ending_enum(content);
-
     // Store the original warning count by rule
     let mut original_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for warning in all_warnings {
@@ -3345,9 +3373,6 @@ fn apply_fixes_stdin(
         eprintln!("DEBUG: Total fix() time: {total_fix_time:?}");
         eprintln!("DEBUG: Total time: {:?}", total_ctx_time + total_fix_time);
     }
-
-    // Normalize line endings once at the end to match original file format
-    *content = rumdl_lib::utils::normalize_line_ending(content, original_line_ending);
 
     warnings_fixed
 }

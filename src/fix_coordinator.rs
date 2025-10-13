@@ -132,11 +132,6 @@ impl FixCoordinator {
         config: &Config,
         max_iterations: usize,
     ) -> Result<(usize, usize, usize, HashSet<String>), String> {
-        use crate::utils::{detect_line_ending_enum, normalize_line_ending};
-
-        // Detect and preserve original line ending style (CRLF/LF) throughout all fixes
-        let original_line_ending = detect_line_ending_enum(content);
-
         // Get optimal rule order
         let ordered_rules = self.get_optimal_order(rules);
 
@@ -243,9 +238,6 @@ impl FixCoordinator {
                 break;
             }
         }
-
-        // Normalize line endings once at the end to match original file format
-        *content = normalize_line_ending(content, original_line_ending);
 
         Ok((total_fixed, iterations, total_ctx_creations, fixed_rule_names))
     }
