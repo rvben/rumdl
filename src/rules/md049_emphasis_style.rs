@@ -1,6 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -115,33 +116,28 @@ impl Rule for MD049EmphasisStyle {
         }
 
         // Use LintContext to skip code blocks
+        // Create LineIndex for correct byte position calculations across all line ending types
+        let line_index = LineIndex::new(content.to_string());
 
         // Collect all emphasis from the document
         let mut emphasis_info = vec![];
-
-        // Track absolute position for fixes
-        let mut abs_pos = 0;
 
         for (line_idx, line) in content.lines().enumerate() {
             let line_num = line_idx + 1;
 
             // Skip if in code block or front matter
             if ctx.is_in_code_block(line_num) || ctx.is_in_front_matter(line_num) {
-                abs_pos += line.len() + 1; // +1 for newline
                 continue;
             }
 
             // Skip if the line doesn't contain any emphasis markers
             if !line.contains('*') && !line.contains('_') {
-                abs_pos += line.len() + 1;
                 continue;
             }
 
-            // Collect emphasis with absolute positions
-            let line_start = abs_pos;
+            // Get absolute position for this line
+            let line_start = line_index.get_line_start_byte(line_num).unwrap_or(0);
             self.collect_emphasis_from_line(line, line_num, line_start, &mut emphasis_info);
-
-            abs_pos += line.len() + 1;
         }
 
         // Filter out emphasis markers that are inside links

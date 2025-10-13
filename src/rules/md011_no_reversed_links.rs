@@ -3,7 +3,7 @@
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::jinja_utils::is_in_jinja_template;
-use crate::utils::range_utils::calculate_match_range;
+use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use crate::utils::regex_cache::get_cached_regex;
 use crate::utils::skip_context::{is_in_html_comment, is_in_math_context};
 
@@ -70,14 +70,17 @@ impl Rule for MD011NoReversedLinks {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let mut warnings = Vec::new();
-        let mut byte_pos = 0;
+
+        // Create LineIndex for correct byte position calculations across all line ending types
+        let line_index = LineIndex::new(content.to_string());
 
         for (line_num, line) in content.lines().enumerate() {
             // Skip lines that are in front matter (use pre-computed info from LintContext)
             if ctx.line_info(line_num).is_some_and(|info| info.in_front_matter) {
-                byte_pos += line.len() + 1; // +1 for newline
                 continue;
             }
+
+            let byte_pos = line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
 
             let mut last_end = 0;
 
@@ -143,8 +146,6 @@ impl Rule for MD011NoReversedLinks {
 
                 last_end += match_obj.end();
             }
-
-            byte_pos += line.len() + 1; // +1 for newline
         }
 
         Ok(warnings)
@@ -155,21 +156,18 @@ impl Rule for MD011NoReversedLinks {
         let mut result = content.to_string();
         let mut offset: isize = 0;
 
+        // Create LineIndex for correct byte position calculations across all line ending types
+        let line_index = LineIndex::new(content.to_string());
+
         for (line_num, column, text, url) in Self::find_reversed_links(content) {
             // Skip if in front matter (line_num is 1-based from find_reversed_links)
             if line_num > 0 && ctx.line_info(line_num - 1).is_some_and(|info| info.in_front_matter) {
                 continue;
             }
 
-            // Calculate absolute position in original content
-            let mut pos = 0;
-            for (i, line) in content.lines().enumerate() {
-                if i + 1 == line_num {
-                    pos += column - 1;
-                    break;
-                }
-                pos += line.len() + 1;
-            }
+            // Calculate absolute position in original content using LineIndex
+            let line_start = line_index.get_line_start_byte(line_num).unwrap_or(0);
+            let pos = line_start + (column - 1);
 
             // Skip if in any skip context
             if !ctx.is_in_code_block_or_span(pos)

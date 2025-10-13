@@ -6,6 +6,7 @@ use crate::utils::emphasis_utils::{
     EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
 };
 use crate::utils::kramdown_utils::has_span_ial;
+use crate::utils::range_utils::LineIndex;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use crate::utils::skip_context::{is_in_html_comment, is_in_math_context, is_in_table_cell};
 use lazy_static::lazy_static;
@@ -80,6 +81,9 @@ impl Rule for MD037NoSpaceInEmphasis {
             return Ok(vec![]);
         }
 
+        // Create LineIndex for correct byte position calculations across all line ending types
+        let line_index = LineIndex::new(content.to_string());
+
         let mut warnings = Vec::new();
 
         // Process the content line by line
@@ -100,10 +104,10 @@ impl Rule for MD037NoSpaceInEmphasis {
 
         // Filter out warnings for emphasis markers that are inside links, HTML comments, or math
         let mut filtered_warnings = Vec::new();
-        let mut line_start_pos = 0;
 
-        for (line_idx, line) in content.lines().enumerate() {
+        for (line_idx, _line) in content.lines().enumerate() {
             let line_num = line_idx + 1;
+            let line_start_pos = line_index.get_line_start_byte(line_num).unwrap_or(0);
 
             // Find warnings for this line
             for warning in &warnings {
@@ -121,8 +125,6 @@ impl Rule for MD037NoSpaceInEmphasis {
                     }
                 }
             }
-
-            line_start_pos += line.len() + 1; // +1 for newline
         }
 
         Ok(filtered_warnings)

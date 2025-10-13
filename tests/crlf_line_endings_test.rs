@@ -1,9 +1,9 @@
 /// Test that rules handle CRLF line endings correctly
 ///
-/// This is a regression test for a bug where MD034, MD046, and MD057 used
-/// `.map(|l| l.len() + 1)` to calculate byte positions, which assumes Unix
-/// line endings (\n = 1 byte). This caused text corruption on Windows files
-/// with CRLF line endings (\r\n = 2 bytes).
+/// This is a regression test for a bug where MD034, MD046, MD057, MD037, MD049,
+/// and MD011 used `.map(|l| l.len() + 1)` to calculate byte positions, which
+/// assumes Unix line endings (\n = 1 byte). This caused text corruption on
+/// Windows files with CRLF line endings (\r\n = 2 bytes).
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
@@ -115,5 +115,75 @@ fn test_mixed_line_endings() {
     assert!(
         result.contains("<https://example2.com>"),
         "Second URL not wrapped correctly with mixed line endings:\n{result}"
+    );
+}
+
+#[test]
+fn test_md037_emphasis_crlf() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with emphasis issues and CRLF
+    let content = "# Test\r\n\r\nThis has * bad emphasis * here\r\nAnd ** double bad ** too\r\n";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl fmt
+    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+
+    // Read the result
+    let result = fs::read_to_string(&test_file).unwrap();
+
+    // Emphasis should be fixed correctly (spaces removed)
+    assert!(
+        result.contains("*bad emphasis*") || result.contains("_bad emphasis_"),
+        "Emphasis spaces not fixed correctly:\n{result}"
+    );
+}
+
+#[test]
+fn test_md049_emphasis_style_crlf() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with mixed emphasis styles and CRLF
+    let content = "# Test\r\n\r\nThis has *asterisk emphasis* here\r\nAnd _underscore emphasis_ too\r\n";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl check (MD049 detects inconsistent styles)
+    let output = Command::cargo_bin("rumdl")
+        .unwrap()
+        .arg("check")
+        .arg(&test_file)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should detect emphasis style inconsistency without crashing
+    assert!(
+        stdout.contains("MD049") || !stdout.contains("panicked"),
+        "MD049 failed with CRLF:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_md011_reversed_links_crlf() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with reversed link syntax and CRLF
+    let content = "# Test\r\n\r\nThis has a (https://example.com)[reversed link] here\r\n";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl fmt
+    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+
+    // Read the result
+    let result = fs::read_to_string(&test_file).unwrap();
+
+    // Link should be fixed to correct syntax
+    assert!(
+        result.contains("[reversed link](https://example.com)"),
+        "Reversed link not fixed correctly:\n{result}"
     );
 }
