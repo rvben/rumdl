@@ -730,83 +730,68 @@ exclude = ["excluded.md", "excluded/**"]
 "#;
     fs::write(dir_path.join(".rumdl.toml"), config)?;
 
-    // Test 1: Default behavior - explicitly provided files are NOT excluded
-    println!("--- Test 1: Default behavior (force_exclude = false) ---");
-    let (success1, stdout1, _) = run_cmd(&["check", "excluded.md", "--verbose"]);
+    // Test 1: Default behavior - explicitly provided files ARE excluded (new behavior as of v0.0.156)
+    println!("--- Test 1: Default behavior (always respect excludes) ---");
+    let (success1, stdout1, stderr1) = run_cmd(&["check", "excluded.md", "--verbose"]);
     assert!(success1, "Test 1 failed");
     let norm_stdout1 = normalize(&stdout1);
+    let norm_stderr1 = normalize(&stderr1);
     assert!(
-        norm_stdout1.contains("Processing file: excluded.md"),
-        "Default behavior: explicitly provided excluded.md should be processed"
+        norm_stderr1.contains("warning:")
+            && norm_stderr1.contains("excluded.md")
+            && norm_stderr1.contains("ignored because of exclude pattern"),
+        "Default behavior: excluded.md should show warning about exclusion. stderr: {norm_stderr1}"
+    );
+    assert!(
+        !norm_stdout1.contains("Processing file: excluded.md"),
+        "Default behavior: excluded.md should NOT be processed"
     );
 
-    // Test 2: With --force-exclude CLI flag - explicitly provided files ARE excluded
-    println!("--- Test 2: With --force-exclude CLI flag ---");
-    let (success2, stdout2, stderr2) = run_cmd(&["check", "excluded.md", "--force-exclude", "--verbose"]);
+    // Test 2: included.md should still be processed
+    println!("--- Test 2: Non-excluded files are processed ---");
+    let (success2, stdout2, _) = run_cmd(&["check", "included.md", "--verbose"]);
     assert!(success2, "Test 2 failed");
-    let norm_stderr2 = normalize(&stderr2);
     let norm_stdout2 = normalize(&stdout2);
     assert!(
-        norm_stderr2.contains("Excluding explicitly provided file due to force_exclude: excluded.md"),
-        "With --force-exclude: excluded.md should be excluded with message in stderr"
-    );
-    assert!(
-        !norm_stdout2.contains("Processing file: excluded.md"),
-        "With --force-exclude: excluded.md should NOT be processed"
+        norm_stdout2.contains("Processing file: included.md"),
+        "included.md should be processed"
     );
 
-    // Test 3: With force_exclude in config
-    println!("--- Test 3: With force_exclude in config ---");
-    let config_with_force = r#"[global]
-exclude = ["excluded.md", "excluded/**"]
-force_exclude = true
-"#;
-    fs::write(dir_path.join(".rumdl.toml"), config_with_force)?;
-    let (success3, stdout3, stderr3) = run_cmd(&["check", "excluded.md", "--verbose"]);
+    // Test 3: Multiple files - only non-excluded are processed
+    println!("--- Test 3: Multiple files with excludes ---");
+    let (success3, stdout3, stderr3) = run_cmd(&["check", "included.md", "excluded.md", "--verbose"]);
     assert!(success3, "Test 3 failed");
-    let norm_stderr3 = normalize(&stderr3);
     let norm_stdout3 = normalize(&stdout3);
+    let norm_stderr3 = normalize(&stderr3);
     assert!(
-        norm_stderr3.contains("Excluding explicitly provided file due to force_exclude: excluded.md"),
-        "With config force_exclude: excluded.md should be excluded with message in stderr"
+        norm_stdout3.contains("Processing file: included.md"),
+        "included.md should be processed"
+    );
+    assert!(
+        norm_stderr3.contains("warning:")
+            && norm_stderr3.contains("excluded.md")
+            && norm_stderr3.contains("ignored because of exclude pattern"),
+        "excluded.md should show warning about exclusion"
     );
     assert!(
         !norm_stdout3.contains("Processing file: excluded.md"),
-        "With config force_exclude: excluded.md should NOT be processed"
+        "excluded.md should NOT be processed"
     );
 
-    // Test 4: Multiple files with force_exclude
-    println!("--- Test 4: Multiple files with --force-exclude ---");
-    let (success4, stdout4, stderr4) =
-        run_cmd(&["check", "included.md", "excluded.md", "--force-exclude", "--verbose"]);
+    // Test 4: Directory patterns work
+    println!("--- Test 4: Directory patterns with excludes ---");
+    let (success4, stdout4, stderr4) = run_cmd(&["check", "excluded/test.md", "--verbose"]);
     assert!(success4, "Test 4 failed");
     let norm_stdout4 = normalize(&stdout4);
     let norm_stderr4 = normalize(&stderr4);
     assert!(
-        norm_stdout4.contains("Processing file: included.md"),
-        "included.md should be processed"
+        norm_stderr4.contains("warning:")
+            && norm_stderr4.contains("excluded/test.md")
+            && norm_stderr4.contains("ignored because of exclude pattern"),
+        "Files in excluded dir should show warning about exclusion"
     );
     assert!(
-        norm_stderr4.contains("Excluding explicitly provided file due to force_exclude: excluded.md"),
-        "Multiple files: excluded.md should be excluded with message in stderr"
-    );
-    assert!(
-        !norm_stdout4.contains("Processing file: excluded.md"),
-        "excluded.md should be excluded with force_exclude"
-    );
-
-    // Test 5: Directory patterns with force_exclude
-    println!("--- Test 5: Directory patterns with --force-exclude ---");
-    let (success5, stdout5, stderr5) = run_cmd(&["check", "excluded/test.md", "--force-exclude", "--verbose"]);
-    assert!(success5, "Test 5 failed");
-    let norm_stdout5 = normalize(&stdout5);
-    let norm_stderr5 = normalize(&stderr5);
-    assert!(
-        norm_stderr5.contains("Excluding explicitly provided file due to force_exclude: excluded/test.md"),
-        "Files in excluded dir should be excluded with force_exclude (check stderr)"
-    );
-    assert!(
-        !norm_stdout5.contains("Processing file: excluded/test.md"),
+        !norm_stdout4.contains("Processing file: excluded/test.md"),
         "excluded/test.md should NOT be processed"
     );
 

@@ -41,7 +41,8 @@ pub struct RumdlLanguageServer {
     /// Configuration for the LSP server
     config: Arc<RwLock<RumdlLspConfig>>,
     /// Rumdl core configuration
-    rumdl_config: Arc<RwLock<Config>>,
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) rumdl_config: Arc<RwLock<Config>>,
     /// Document store for open files and cached disk files
     documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
 }
@@ -118,8 +119,63 @@ impl RumdlLanguageServer {
         filtered_rules
     }
 
+    /// Check if a file URI should be excluded based on exclude patterns
+    async fn should_exclude_uri(&self, uri: &Url) -> bool {
+        // Try to convert URI to file path
+        let file_path = match uri.to_file_path() {
+            Ok(path) => path,
+            Err(_) => return false, // If we can't get a path, don't exclude
+        };
+
+        let rumdl_config = self.rumdl_config.read().await;
+        let exclude_patterns = &rumdl_config.global.exclude;
+
+        // If no exclude patterns, don't exclude
+        if exclude_patterns.is_empty() {
+            return false;
+        }
+
+        // Convert path to relative path for pattern matching
+        // This matches the CLI behavior in find_markdown_files
+        let path_to_check = if file_path.is_absolute() {
+            // Try to make it relative to the current directory
+            if let Ok(cwd) = std::env::current_dir() {
+                // Canonicalize both paths to handle symlinks
+                if let (Ok(canonical_cwd), Ok(canonical_path)) = (cwd.canonicalize(), file_path.canonicalize()) {
+                    if let Ok(relative) = canonical_path.strip_prefix(&canonical_cwd) {
+                        relative.to_string_lossy().to_string()
+                    } else {
+                        // Path is absolute but not under cwd
+                        file_path.to_string_lossy().to_string()
+                    }
+                } else {
+                    // Canonicalization failed
+                    file_path.to_string_lossy().to_string()
+                }
+            } else {
+                file_path.to_string_lossy().to_string()
+            }
+        } else {
+            // Already relative
+            file_path.to_string_lossy().to_string()
+        };
+
+        // Check if path matches any exclude pattern
+        for pattern in exclude_patterns {
+            if let Ok(glob) = globset::Glob::new(pattern) {
+                let matcher = glob.compile_matcher();
+                if matcher.is_match(&path_to_check) {
+                    log::debug!("Excluding file from LSP linting: {path_to_check}");
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Lint a document and return diagnostics
-    async fn lint_document(&self, uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
+    pub(crate) async fn lint_document(&self, uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
         let config_guard = self.config.read().await;
 
         // Skip linting if disabled
@@ -129,6 +185,11 @@ impl RumdlLanguageServer {
 
         let lsp_config = config_guard.clone();
         drop(config_guard); // Release config lock early
+
+        // Check if file should be excluded based on exclude patterns
+        if self.should_exclude_uri(uri).await {
+            return Ok(Vec::new());
+        }
 
         // Get rumdl configuration
         let rumdl_config = self.rumdl_config.read().await;
@@ -168,7 +229,12 @@ impl RumdlLanguageServer {
     }
 
     /// Apply all available fixes to a document
-    async fn apply_all_fixes(&self, _uri: &Url, text: &str) -> Result<Option<String>> {
+    async fn apply_all_fixes(&self, uri: &Url, text: &str) -> Result<Option<String>> {
+        // Check if file should be excluded based on exclude patterns
+        if self.should_exclude_uri(uri).await {
+            return Ok(None);
+        }
+
         let config_guard = self.config.read().await;
         let lsp_config = config_guard.clone();
         drop(config_guard);

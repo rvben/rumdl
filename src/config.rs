@@ -251,11 +251,12 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub flavor: MarkdownFlavor,
 
-    /// Whether to enforce exclude and extend-exclude patterns even for paths that are passed explicitly.
-    /// By default (false), rumdl will lint any paths passed in directly, even if they would typically be excluded.
-    /// Setting this to true will cause rumdl to respect exclusions unequivocally.
-    /// This is useful for pre-commit, which explicitly passes all changed files.
+    /// [DEPRECATED] Whether to enforce exclude patterns for explicitly passed paths.
+    /// This option is deprecated as of v0.0.156 and has no effect.
+    /// Exclude patterns are now always respected, even for explicitly provided files.
+    /// This prevents duplication between rumdl config and tool configs like pre-commit.
     #[serde(default)]
+    #[deprecated(since = "0.0.156", note = "Exclude patterns are now always respected")]
     pub force_exclude: bool,
 }
 
@@ -269,6 +270,7 @@ fn default_line_length() -> u64 {
 
 // Add the Default impl
 impl Default for GlobalConfig {
+    #[allow(deprecated)]
     fn default() -> Self {
         Self {
             enable: Vec::new(),
@@ -1962,6 +1964,7 @@ impl From<SourcedConfig> for Config {
             }
             rules.insert(normalized_rule_name, RuleConfig { values });
         }
+        #[allow(deprecated)]
         let global = GlobalConfig {
             enable: sourced.global.enable.value,
             disable: sourced.global.disable.value,

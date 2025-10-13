@@ -254,6 +254,10 @@ struct CheckArgs {
     #[arg(long)]
     exclude: Option<String>,
 
+    /// Disable all exclude patterns (lint all files regardless of exclude configuration)
+    #[arg(long, help = "Disable all exclude patterns")]
+    no_exclude: bool,
+
     /// Include only specific files or directories (comma-separated glob patterns).
     #[arg(long)]
     include: Option<String>,
@@ -532,8 +536,10 @@ fn find_markdown_files(
         Vec::new()
     };
 
-    // Exclude patterns: CLI > Config
-    let final_exclude_patterns: Vec<String> = if let Some(cli_exclude) = args.exclude.as_deref() {
+    // Exclude patterns: CLI > Config (but disabled if --no-exclude is set)
+    let final_exclude_patterns: Vec<String> = if args.no_exclude {
+        Vec::new() // Disable all exclusions
+    } else if let Some(cli_exclude) = args.exclude.as_deref() {
         cli_exclude
             .split(',')
             .map(|p| p.trim().to_string())
@@ -608,8 +614,7 @@ fn find_markdown_files(
     // --- Pre-check for explicit file paths ---
     // If not in discovery mode, validate that specified paths exist
     if !is_discovery_mode {
-        // Check if we should apply excludes to explicitly provided files
-        let should_force_exclude = args.force_exclude || config.global.force_exclude;
+        let mut processed_explicit_files = false;
 
         for path_str in paths {
             let path = Path::new(path_str);
@@ -621,42 +626,68 @@ fn find_markdown_files(
                 && let Some(ext) = path.extension()
                 && (ext == "md" || ext == "markdown")
             {
-                let cleaned_path = if let Some(stripped) = path_str.strip_prefix("./") {
+                processed_explicit_files = true;
+                // Convert to relative path for pattern matching
+                // This ensures patterns like "docs/*" work with both relative and absolute paths
+                let cleaned_path = if path.is_absolute() {
+                    // Try to make it relative to the current directory
+                    // Use canonicalized paths to handle symlinks (e.g., /tmp -> /private/tmp on macOS)
+                    if let Ok(cwd) = std::env::current_dir() {
+                        // Canonicalize both paths to resolve symlinks
+                        if let (Ok(canonical_cwd), Ok(canonical_path)) = (cwd.canonicalize(), path.canonicalize()) {
+                            if let Ok(relative) = canonical_path.strip_prefix(&canonical_cwd) {
+                                relative.to_string_lossy().to_string()
+                            } else {
+                                // Path is absolute but not under cwd, keep as-is
+                                path_str.clone()
+                            }
+                        } else {
+                            // Canonicalization failed, keep path as-is
+                            path_str.clone()
+                        }
+                    } else {
+                        path_str.clone()
+                    }
+                } else if let Some(stripped) = path_str.strip_prefix("./") {
                     stripped.to_string()
                 } else {
                     path_str.clone()
                 };
 
-                // If force_exclude is enabled, check if this file should be excluded
-                if should_force_exclude && !final_exclude_patterns.is_empty() {
-                    let mut should_exclude = false;
+                // Check if this file should be excluded based on exclude patterns
+                // This is the default behavior to match user expectations and avoid
+                // duplication between rumdl config and pre-commit config (issue #99)
+                if !final_exclude_patterns.is_empty() {
+                    let mut matching_pattern: Option<&str> = None;
                     for pattern in &final_exclude_patterns {
                         // Use globset for pattern matching
                         if let Ok(glob) = globset::Glob::new(pattern) {
                             let matcher = glob.compile_matcher();
                             if matcher.is_match(&cleaned_path) {
-                                should_exclude = true;
-                                if args.verbose {
-                                    eprintln!(
-                                        "Excluding explicitly provided file due to force_exclude: {cleaned_path}"
-                                    );
-                                }
+                                matching_pattern = Some(pattern);
                                 break;
                             }
                         }
                     }
-                    if !should_exclude {
+                    if let Some(pattern) = matching_pattern {
+                        // Always print a warning when excluding explicitly provided files
+                        // This matches ESLint's behavior and helps users understand why the file wasn't linted
+                        eprintln!(
+                            "warning: {cleaned_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
+                        );
+                    } else {
                         file_paths.push(cleaned_path);
                     }
                 } else {
-                    // Default behavior: add all explicitly provided files
+                    // No exclude patterns, add the file
                     file_paths.push(cleaned_path);
                 }
             }
         }
 
-        // If we found files directly, skip the walker
-        if !file_paths.is_empty() || should_force_exclude {
+        // If we processed explicit files, return the results (even if empty due to exclusions)
+        // This prevents the walker from running when explicit files were provided
+        if processed_explicit_files {
             file_paths.sort();
             file_paths.dedup();
             return Ok(file_paths);
@@ -2530,6 +2561,16 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         eprintln!("{}: --diff and --fix cannot be used together", "Error".red().bold());
         eprintln!("Use --diff to preview changes, or --fix to apply them");
         exit::tool_error();
+    }
+
+    // Warn about deprecated --force-exclude flag
+    if args.force_exclude {
+        eprintln!(
+            "{}: --force-exclude is deprecated and has no effect",
+            "warning".yellow().bold()
+        );
+        eprintln!("Exclude patterns are now always respected by default (as of v0.0.156)");
+        eprintln!("Use --no-exclude if you want to disable exclusions");
     }
 
     // Check for watch mode
