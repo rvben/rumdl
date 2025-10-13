@@ -263,3 +263,28 @@ fn test_md026_trailing_punctuation_crlf() {
         "Trailing punctuation not removed from second heading:\n{result}"
     );
 }
+
+#[test]
+fn test_code_span_detection_crlf() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with inline code and bare URLs with CRLF
+    // This tests CodeBlockInfo::is_in_code_span with CRLF line endings
+    let content = "# Test\r\n\r\nThis has `inline code` here\r\nAnd a bare URL https://example.com outside code\r\n";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl fmt (should wrap the bare URL but not touch inline code)
+    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+
+    // Read the result
+    let result = fs::read_to_string(&test_file).unwrap();
+
+    // The URL should be wrapped
+    assert!(
+        result.contains("<https://example.com>"),
+        "URL not wrapped correctly:\n{result}"
+    );
+    // Inline code should be preserved
+    assert!(result.contains("`inline code`"), "Inline code was modified:\n{result}");
+}

@@ -1,3 +1,4 @@
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::fmt;
@@ -209,6 +210,8 @@ pub struct CodeBlockInfo {
     pub code_spans: Vec<(usize, usize)>,
     /// The original content used to create this info
     content: String,
+    /// LineIndex for correct byte position calculations across all line ending types
+    line_index: LineIndex,
 }
 
 impl CodeBlockInfo {
@@ -216,11 +219,13 @@ impl CodeBlockInfo {
     pub fn new(content: &str) -> Self {
         let block_states = compute_code_blocks(content);
         let code_spans = compute_code_spans(content);
+        let line_index = LineIndex::new(content.to_string());
 
         CodeBlockInfo {
             block_states,
             code_spans,
             content: content.to_string(),
+            line_index,
         }
     }
 
@@ -235,28 +240,17 @@ impl CodeBlockInfo {
 
     /// Check if a position is inside a code span
     pub fn is_in_code_span(&self, line_index: usize, column_index: usize) -> bool {
-        // Calculate absolute position (this assumes content is ASCII-only)
-        let mut position = 0;
-        let content_lines: Vec<&str> = self.content.lines().collect();
+        // Calculate absolute position using LineIndex for correct handling of all line ending types
+        let line_start = self
+            .line_index
+            .get_line_start_byte(line_index + 1)
+            .unwrap_or(self.content.len());
+        let position = line_start + column_index;
 
-        for i in 0..line_index {
-            if i < content_lines.len() {
-                position += content_lines[i].len() + 1; // +1 for newline
-            }
-        }
-
-        if line_index < content_lines.len() {
-            // Add column position
-            let line = content_lines[line_index];
-            if column_index < line.len() {
-                position += column_index;
-
-                // Check if position is in any code span
-                for &(start, end) in &self.code_spans {
-                    if position >= start && position <= end {
-                        return true;
-                    }
-                }
+        // Check if position is in any code span
+        for &(start, end) in &self.code_spans {
+            if position >= start && position <= end {
+                return true;
             }
         }
 
