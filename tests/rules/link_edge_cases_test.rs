@@ -594,10 +594,18 @@ Another [ spaced link ](  )";
     let step3 = md042.fix(&ctx2).unwrap();
     let ctx_final = LintContext::new(&step3, rumdl_lib::config::MarkdownFlavor::Standard);
 
-    // All issues should be resolved
+    // MD034 and MD039 issues should be resolved
     assert!(md034.check(&ctx_final).unwrap().is_empty());
     assert!(md039.check(&ctx_final).unwrap().is_empty());
-    assert!(md042.check(&ctx_final).unwrap().is_empty());
+
+    // MD042: The empty links []() and [spaced link](  ) cannot be auto-fixed
+    // because they have no content to infer a URL from (empty text/whitespace-only URL)
+    let md042_remaining = md042.check(&ctx_final).unwrap();
+    assert_eq!(md042_remaining.len(), 2, "Two unfixable empty links should remain");
+
+    // Verify the unfixable links are correctly identified
+    assert!(md042_remaining[0].message.contains("Empty link found"));
+    assert!(md042_remaining[1].message.contains("Empty link found"));
 }
 
 #[test]
