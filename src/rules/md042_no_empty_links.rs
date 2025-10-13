@@ -105,7 +105,18 @@ impl Rule for MD042NoEmptyLinks {
                     let ref_part = &ctx.content[link.byte_offset + link.text.len() + 2..link.byte_end];
                     format!("[{}]{}", link.text, ref_part)
                 } else {
-                    format!("[{}](https://example.com)", link.text)
+                    // URL is empty, but text is not
+                    // Check if the link text looks like a URL - if so, use it as the destination
+                    let text_is_url = link.text.starts_with("http://")
+                        || link.text.starts_with("https://")
+                        || link.text.starts_with("ftp://")
+                        || link.text.starts_with("ftps://");
+
+                    if text_is_url {
+                        format!("[{}]({})", link.text, link.text)
+                    } else {
+                        format!("[{}](https://example.com)", link.text)
+                    }
                 };
 
                 // Extract the exact link text from the source

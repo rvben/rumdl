@@ -686,7 +686,8 @@ fn test_issue_104_full_paragraph_not_corrupted() {
     let rule = MD034NoBareUrls;
 
     // This is what the content looks like AFTER MD042 has fixed the empty link
-    let content_after_md042 = "I've never been one to implement hacky solutions because life is just easier\nwhen everything gets done \"by the book.\" So, if you're reading this and want to\nsee the code that creates this extension and prevents me from pouring needless\nhours into meticulously maintaining the files by hand, I welcome you to check it\nout in its new repository at [https://github.com/pfeif/hx-complete-generator](https://example.com).";
+    // MD042 now intelligently uses the URL from the text as the destination
+    let content_after_md042 = "I've never been one to implement hacky solutions because life is just easier\nwhen everything gets done \"by the book.\" So, if you're reading this and want to\nsee the code that creates this extension and prevents me from pouring needless\nhours into meticulously maintaining the files by hand, I welcome you to check it\nout in its new repository at [https://github.com/pfeif/hx-complete-generator](https://github.com/pfeif/hx-complete-generator).";
 
     let ctx = LintContext::new(content_after_md042, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();

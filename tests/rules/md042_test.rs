@@ -386,3 +386,62 @@ fn test_md042_mkdocs_backtick_wrapped_auto_references() {
         "Should not flag explicit backtick-wrapped reference IDs in MkDocs mode. Got: {result:?}"
     );
 }
+
+#[test]
+fn test_url_in_text_with_empty_destination() {
+    // Issue #104: When link text is a URL and destination is empty, use text as destination
+    let rule = MD042NoEmptyLinks::new();
+    let content = "[https://github.com/user/repo]()";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Should flag empty URL");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "[https://github.com/user/repo](https://github.com/user/repo)",
+        "Should use URL text as destination instead of example.com"
+    );
+}
+
+#[test]
+fn test_url_variants_in_text_with_empty_destination() {
+    let rule = MD042NoEmptyLinks::new();
+
+    // Test various URL protocols
+    let test_cases = vec![
+        ("[https://example.com]()", "[https://example.com](https://example.com)"),
+        ("[http://example.com]()", "[http://example.com](http://example.com)"),
+        ("[ftp://example.com]()", "[ftp://example.com](ftp://example.com)"),
+        ("[ftps://example.com]()", "[ftps://example.com](ftps://example.com)"),
+        // Non-URL text should still get example.com placeholder
+        ("[Click here]()", "[Click here](https://example.com)"),
+        ("[Some text]()", "[Some text](https://example.com)"),
+    ];
+
+    for (input, expected) in test_cases {
+        let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag empty URL in: {input}");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected, "Failed for input: {input}");
+    }
+}
+
+#[test]
+fn test_issue_104_regression() {
+    // Full regression test for issue #104
+    let rule = MD042NoEmptyLinks::new();
+    let content = "check it out in its new repository at [https://github.com/pfeif/hx-complete-generator]().";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "check it out in its new repository at [https://github.com/pfeif/hx-complete-generator](https://github.com/pfeif/hx-complete-generator).",
+        "Should use the URL from text as the destination"
+    );
+}
