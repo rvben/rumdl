@@ -101,7 +101,7 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
     };
 
     // Initialize rules with configuration
-    let enabled_rules = crate::get_enabled_rules_from_checkargs(args, config);
+    let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
 
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
@@ -110,7 +110,7 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
     }
 
     // Find all markdown files to check
-    let file_paths = match crate::find_markdown_files(&args.paths, args, config) {
+    let file_paths = match crate::file_processor::find_markdown_files(&args.paths, args, config) {
         Ok(paths) => paths,
         Err(e) => {
             if !args.silent {
@@ -140,7 +140,7 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
         let mut _total_issues = 0;
 
         for file_path in &file_paths {
-            let warnings = crate::process_file_collect_warnings(
+            let warnings = crate::file_processor::process_file_collect_warnings(
                 file_path,
                 &enabled_rules,
                 args._fix,
@@ -204,7 +204,7 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
             let results: Vec<_> = file_paths
                 .par_iter()
                 .map(|file_path| {
-                    crate::process_file_with_formatter(
+                    crate::file_processor::process_file_with_formatter(
                         file_path,
                         &enabled_rules_arc,
                         args._fix,
@@ -260,7 +260,7 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
 
             for file_path in &file_paths {
                 let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings) =
-                    crate::process_file_with_formatter(
+                    crate::file_processor::process_file_with_formatter(
                         file_path,
                         &enabled_rules,
                         args._fix,
