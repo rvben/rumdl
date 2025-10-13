@@ -92,18 +92,27 @@ impl Rule for MD042NoEmptyLinks {
 
             // Check for empty links
             if link.text.trim().is_empty() || effective_url.trim().is_empty() {
-                let replacement = if link.text.trim().is_empty() && effective_url.trim().is_empty() {
-                    "[Link text](https://example.com)".to_string()
-                } else if link.text.trim().is_empty() {
-                    if link.is_reference {
-                        format!("[Link text]{}", &ctx.content[link.byte_offset + 1..link.byte_end])
+                // Determine if we can provide a meaningful fix
+                let replacement = if link.text.trim().is_empty() {
+                    // Empty text - can we fix it?
+                    if !effective_url.trim().is_empty() {
+                        // Has URL but no text - add placeholder text
+                        if link.is_reference {
+                            Some(format!(
+                                "[Link text]{}",
+                                &ctx.content[link.byte_offset + 1..link.byte_end]
+                            ))
+                        } else {
+                            Some(format!("[Link text]({effective_url})"))
+                        }
                     } else {
-                        format!("[Link text]({effective_url})")
+                        // Both empty - can't meaningfully auto-fix
+                        None
                     }
                 } else if link.is_reference {
-                    // Keep the reference format
+                    // Reference links with text but no/empty reference - keep the format
                     let ref_part = &ctx.content[link.byte_offset + link.text.len() + 2..link.byte_end];
-                    format!("[{}]{}", link.text, ref_part)
+                    Some(format!("[{}]{}", link.text, ref_part))
                 } else {
                     // URL is empty, but text is not
                     // Check if the link text looks like a URL - if so, use it as the destination
@@ -113,9 +122,10 @@ impl Rule for MD042NoEmptyLinks {
                         || link.text.starts_with("ftps://");
 
                     if text_is_url {
-                        format!("[{}]({})", link.text, link.text)
+                        Some(format!("[{}]({})", link.text, link.text))
                     } else {
-                        format!("[{}](https://example.com)", link.text)
+                        // Text is not a URL - can't meaningfully auto-fix
+                        None
                     }
                 };
 
@@ -130,9 +140,9 @@ impl Rule for MD042NoEmptyLinks {
                     end_line: link.line,
                     end_column: link.end_col + 1, // Convert to 1-indexed
                     severity: Severity::Warning,
-                    fix: Some(Fix {
+                    fix: replacement.map(|r| Fix {
                         range: link.byte_offset..link.byte_end,
-                        replacement,
+                        replacement: r,
                     }),
                 });
             }
@@ -471,24 +481,34 @@ mod tests {
 
     #[test]
     fn test_fix_suggestions() {
-        let ctx = LintContext::new("[](https://example.com)", crate::config::MarkdownFlavor::Standard);
         let rule = MD042NoEmptyLinks::new();
+
+        // Case 1: Empty text, has URL - fixable (add placeholder text)
+        let ctx = LintContext::new("[](https://example.com)", crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert!(result[0].fix.is_some());
+        assert!(result[0].fix.is_some(), "Empty text with URL should be fixable");
         let fix = result[0].fix.as_ref().unwrap();
         assert_eq!(fix.replacement, "[Link text](https://example.com)");
 
+        // Case 2: Non-URL text, empty URL - NOT fixable (can't guess the URL)
         let ctx = LintContext::new("[text]()", crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert!(result[0].fix.is_some());
-        let fix = result[0].fix.as_ref().unwrap();
-        assert_eq!(fix.replacement, "[text](https://example.com)");
+        assert!(
+            result[0].fix.is_none(),
+            "Non-URL text with empty URL should NOT be fixable"
+        );
 
+        // Case 3: URL text, empty URL - fixable (use text as URL)
+        let ctx = LintContext::new("[https://example.com]()", crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result[0].fix.is_some(), "URL text with empty URL should be fixable");
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(fix.replacement, "[https://example.com](https://example.com)");
+
+        // Case 4: Both empty - NOT fixable (can't guess either)
         let ctx = LintContext::new("[]()", crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert!(result[0].fix.is_some());
-        let fix = result[0].fix.as_ref().unwrap();
-        assert_eq!(fix.replacement, "[Link text](https://example.com)");
+        assert!(result[0].fix.is_none(), "Both empty should NOT be fixable");
     }
 
     #[test]

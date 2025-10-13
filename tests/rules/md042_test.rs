@@ -29,8 +29,10 @@ fn test_empty_link_url() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
+    // Non-URL text with empty URL is not fixable - we can't guess the URL
+    assert!(result[0].fix.is_none(), "Non-URL text should not have auto-fix");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "[Link text](https://example.com)");
+    assert_eq!(fixed, content, "Should not modify unfixable links");
 }
 
 #[test]
@@ -40,8 +42,10 @@ fn test_empty_link_both() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
+    // Both empty is not fixable - we can't guess either
+    assert!(result[0].fix.is_none(), "Both empty should not have auto-fix");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "[Link text](https://example.com)");
+    assert_eq!(fixed, content, "Should not modify unfixable links");
 }
 
 #[test]
@@ -51,10 +55,13 @@ fn test_multiple_empty_links() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
+    // [Link]() - not fixable (non-URL text, no URL)
+    // []() - not fixable (both empty)
+    // [](url) - fixable (has URL, can add placeholder text)
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
-        fixed,
-        "[Link](https://example.com) and [Link text](https://example.com) and [Link text](url)"
+        fixed, "[Link]() and []() and [Link text](url)",
+        "Should only fix the link with a URL"
     );
 }
 
@@ -65,8 +72,10 @@ fn test_whitespace_only_links() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
+    // Both empty (whitespace is trimmed) - not fixable
+    assert!(result[0].fix.is_none(), "Whitespace-only should not have auto-fix");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "[Link text](https://example.com)");
+    assert_eq!(fixed, content, "Should not modify unfixable links");
 }
 
 #[test]
@@ -76,11 +85,10 @@ fn test_mixed_valid_and_empty_links() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
+    // []() is not fixable (both empty)
+    assert!(result[0].fix.is_none(), "Both empty should not have auto-fix");
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "[Valid](https://example.com) and [Link text](https://example.com) and [Another](./path)"
-    );
+    assert_eq!(fixed, content, "Should not modify unfixable links");
 }
 
 // REGRESSION TESTS: Ensure MD042 properly ignores links in code blocks and code spans
@@ -413,18 +421,29 @@ fn test_url_variants_in_text_with_empty_destination() {
         ("[http://example.com]()", "[http://example.com](http://example.com)"),
         ("[ftp://example.com]()", "[ftp://example.com](ftp://example.com)"),
         ("[ftps://example.com]()", "[ftps://example.com](ftps://example.com)"),
-        // Non-URL text should still get example.com placeholder
-        ("[Click here]()", "[Click here](https://example.com)"),
-        ("[Some text]()", "[Some text](https://example.com)"),
     ];
 
     for (input, expected) in test_cases {
         let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag empty URL in: {input}");
+        assert!(result[0].fix.is_some(), "URL text should be fixable: {input}");
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, expected, "Failed for input: {input}");
+    }
+
+    // Test non-URL text - should NOT be fixable
+    let non_url_cases = vec!["[Click here]()", "[Some text]()", "[Learn more]()"];
+
+    for input in non_url_cases {
+        let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag empty URL in: {input}");
+        assert!(result[0].fix.is_none(), "Non-URL text should NOT be fixable: {input}");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, input, "Should not modify non-URL text: {input}");
     }
 }
 
