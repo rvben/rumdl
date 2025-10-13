@@ -198,7 +198,7 @@ impl Rule for MD010NoHardTabs {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(content.to_string());
 
         let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -208,10 +208,8 @@ impl Rule for MD010NoHardTabs {
 
         // Pre-compute line positions for code block detection
         let mut line_positions = Vec::with_capacity(lines.len());
-        let mut pos = 0;
-        for line in &lines {
-            line_positions.push(pos);
-            pos += line.len() + 1; // +1 for newline
+        for i in 0..lines.len() {
+            line_positions.push(line_index.get_line_start_byte(i + 1).unwrap_or(0));
         }
 
         for (i, line) in lines.iter().enumerate() {

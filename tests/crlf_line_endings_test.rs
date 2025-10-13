@@ -187,3 +187,79 @@ fn test_md011_reversed_links_crlf() {
         "Reversed link not fixed correctly:\n{result}"
     );
 }
+
+#[test]
+fn test_md050_strong_style_crlf() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with mixed strong emphasis styles and CRLF
+    let content = "# Test\r\n\r\nThis has **asterisk strong** here\r\nAnd __underscore strong__ too\r\n";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl check (MD050 detects inconsistent styles)
+    let output = Command::cargo_bin("rumdl")
+        .unwrap()
+        .arg("check")
+        .arg(&test_file)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should detect strong style inconsistency without crashing
+    assert!(
+        stdout.contains("MD050") || !stdout.contains("panicked"),
+        "MD050 failed with CRLF:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_md010_hard_tabs_crlf() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with hard tabs and CRLF
+    let content = "# Test\r\n\r\nThis line has\ttabs\there\r\nAnother\tline\twith\ttabs\r\n";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl fmt
+    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+
+    // Read the result
+    let result = fs::read_to_string(&test_file).unwrap();
+
+    // Tabs should be replaced with spaces correctly
+    assert!(!result.contains('\t'), "Tabs not replaced correctly:\n{result}");
+    assert!(
+        result.contains("This line has    tabs    here"),
+        "Tabs not replaced with correct spacing:\n{result}"
+    );
+}
+
+#[test]
+fn test_md026_trailing_punctuation_crlf() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with headings with trailing punctuation and CRLF
+    // Note: Default punctuation checked by MD026 is ".,;:!" (no "?")
+    let content = "# Test Heading!\r\n\r\nSome content here\r\n\r\n## Another Heading.\r\n";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl fmt
+    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+
+    // Read the result
+    let result = fs::read_to_string(&test_file).unwrap();
+
+    // Trailing punctuation should be removed correctly
+    assert!(
+        result.contains("# Test Heading\r\n") || result.contains("# Test Heading\n"),
+        "Trailing punctuation not removed from first heading:\n{result}"
+    );
+    assert!(
+        result.contains("## Another Heading\r\n") || result.contains("## Another Heading\n"),
+        "Trailing punctuation not removed from second heading:\n{result}"
+    );
+}

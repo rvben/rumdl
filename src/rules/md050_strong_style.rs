@@ -200,7 +200,7 @@ impl Rule for MD050StrongStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(content.to_string());
 
         let mut warnings = Vec::new();
 
@@ -219,17 +219,15 @@ impl Rule for MD050StrongStyle {
             }
         };
 
-        // Track byte position for each line
-        let mut byte_pos = 0;
-
         for (line_num, line) in content.lines().enumerate() {
             // Skip if this line is in front matter
             if let Some(line_info) = ctx.line_info(line_num + 1)
                 && line_info.in_front_matter
             {
-                byte_pos += line.len() + 1; // +1 for newline
                 continue;
             }
+
+            let byte_pos = line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
 
             for m in strong_regex.find_iter(line) {
                 // Calculate the byte position of this match in the document
@@ -282,7 +280,7 @@ impl Rule for MD050StrongStyle {
                         message: message.to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
+                            range: line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
                             replacement: match target_style {
                                 StrongStyle::Asterisk => format!("**{text}**"),
                                 StrongStyle::Underscore => format!("__{text}__"),
@@ -296,9 +294,6 @@ impl Rule for MD050StrongStyle {
                     });
                 }
             }
-
-            // Update byte position for next line
-            byte_pos += line.len() + 1; // +1 for newline
         }
 
         Ok(warnings)

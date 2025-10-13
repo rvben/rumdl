@@ -147,13 +147,8 @@ impl Rule for MD037NoSpaceInEmphasis {
             return Ok(content.to_string());
         }
 
-        // Get all line positions to make it easier to apply fixes by warning
-        let mut line_positions = Vec::new();
-        let mut pos = 0;
-        for line in content.lines() {
-            line_positions.push(pos);
-            pos += line.len() + 1; // +1 for the newline
-        }
+        // Create LineIndex for correct byte position calculations across all line ending types
+        let line_index = LineIndex::new(content.to_string());
 
         // Apply fixes
         let mut result = content.to_string();
@@ -166,7 +161,7 @@ impl Rule for MD037NoSpaceInEmphasis {
         for warning in sorted_warnings {
             if let Some(fix) = &warning.fix {
                 // Calculate the absolute position in the file
-                let line_start = line_positions.get(warning.line - 1).copied().unwrap_or(0);
+                let line_start = line_index.get_line_start_byte(warning.line).unwrap_or(0);
                 let abs_start = line_start + warning.column - 1;
                 let abs_end = abs_start + (fix.range.end - fix.range.start);
 
