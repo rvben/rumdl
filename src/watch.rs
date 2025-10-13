@@ -105,7 +105,7 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
 
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
-        crate::process_stdin(&enabled_rules, args, config);
+        crate::stdin_processor::process_stdin(&enabled_rules, args, config);
         return false; // stdin processing handles its own exit codes
     }
 
