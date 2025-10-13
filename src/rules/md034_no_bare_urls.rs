@@ -2,7 +2,7 @@
 ///
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::calculate_url_range;
+use crate::utils::range_utils::{LineIndex, calculate_url_range};
 use crate::utils::regex_cache::{EMAIL_PATTERN, get_cached_regex};
 
 use crate::lint_context::LintContext;
@@ -131,6 +131,7 @@ impl MD034NoBareUrls {
         line_number: usize,
         code_spans: &[crate::lint_context::CodeSpan],
         buffers: &mut LineCheckBuffers,
+        line_index: &LineIndex,
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
 
@@ -282,12 +283,8 @@ impl MD034NoBareUrls {
             }
 
             // Check if we're inside an HTML comment
-            let absolute_pos = content
-                .lines()
-                .take(line_number - 1)
-                .map(|l| l.len() + 1)
-                .sum::<usize>()
-                + start;
+            let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
+            let absolute_pos = line_start_byte + start;
             if self.is_in_html_comment(content, absolute_pos) {
                 continue;
             }
@@ -311,11 +308,7 @@ impl MD034NoBareUrls {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: {
-                            let line_start_byte = content
-                                .lines()
-                                .take(line_number - 1)
-                                .map(|l| l.len() + 1)
-                                .sum::<usize>();
+                            let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
                             (line_start_byte + start)..(line_start_byte + start + trimmed_len)
                         },
                         replacement: format!("<{trimmed_url}>"),
@@ -366,11 +359,7 @@ impl MD034NoBareUrls {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: {
-                                    let line_start_byte = content
-                                        .lines()
-                                        .take(line_number - 1)
-                                        .map(|l| l.len() + 1)
-                                        .sum::<usize>();
+                                    let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
                                     (line_start_byte + start)..(line_start_byte + end)
                                 },
                                 replacement: format!("<{email}>"),
@@ -425,6 +414,9 @@ impl Rule for MD034NoBareUrls {
             return Ok(warnings);
         }
 
+        // Create LineIndex for correct byte position calculations across all line ending types
+        let line_index = LineIndex::new(content.to_string());
+
         // Get code spans for exclusion
         let code_spans = ctx.code_spans();
 
@@ -438,7 +430,8 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
 
-            let mut line_warnings = self.check_line(line, content, line_num + 1, &code_spans, &mut buffers);
+            let mut line_warnings =
+                self.check_line(line, content, line_num + 1, &code_spans, &mut buffers, &line_index);
 
             // Filter out warnings that are inside code spans
             line_warnings.retain(|warning| {

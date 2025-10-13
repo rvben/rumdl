@@ -5,6 +5,7 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::element_cache::ElementCache;
+use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -265,16 +266,8 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Use LintContext links instead of expensive regex parsing
         if !ctx.links.is_empty() {
-            // Pre-compute line positions for efficient absolute position calculation
-            let mut line_positions = Vec::new();
-            let mut pos = 0;
-            line_positions.push(0);
-            for ch in content.chars() {
-                pos += ch.len_utf8();
-                if ch == '\n' {
-                    line_positions.push(pos);
-                }
-            }
+            // Use LineIndex for correct position calculation across all line ending types
+            let line_index = LineIndex::new(content.to_string());
 
             // Create element cache once for all links
             let element_cache = ElementCache::new(content);
@@ -300,13 +293,9 @@ impl Rule for MD057ExistingRelativeLinks {
                     let start_pos = link_match.start();
                     let end_pos = link_match.end();
 
-                    // Calculate absolute position efficiently using pre-computed positions
-                    let absolute_start_pos = if line_idx < line_positions.len() {
-                        line_positions[line_idx] + start_pos
-                    } else {
-                        // Fallback for edge cases
-                        content.lines().take(line_idx).map(|l| l.len() + 1).sum::<usize>() + start_pos
-                    };
+                    // Calculate absolute position using LineIndex
+                    let line_start_byte = line_index.get_line_start_byte(line_idx + 1).unwrap_or(0);
+                    let absolute_start_pos = line_start_byte + start_pos;
 
                     // Skip if this link is in a code span
                     if element_cache.is_in_code_span(absolute_start_pos) {

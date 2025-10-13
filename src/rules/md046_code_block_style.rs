@@ -157,7 +157,7 @@ impl MD046CodeBlockStyle {
     fn check_unclosed_code_blocks(
         &self,
         ctx: &crate::lint_context::LintContext,
-        _line_index: &LineIndex,
+        line_index: &LineIndex,
     ) -> Result<Vec<LintWarning>, LintError> {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
@@ -348,7 +348,7 @@ impl MD046CodeBlockStyle {
                                     calculate_line_range(*open_line, lines[*open_line - 1]);
 
                                 // Calculate the byte position to insert closing fence before this line
-                                let line_start_byte = ctx.content.lines().take(i).map(|l| l.len() + 1).sum::<usize>();
+                                let line_start_byte = line_index.get_line_start_byte(i + 1).unwrap_or(0);
 
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name()),
