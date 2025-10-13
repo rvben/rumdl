@@ -7,6 +7,191 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.157] - 2025-10-13 (unreleased)
+
+### Added
+
+- **MD042**: Full support for MkDocs paragraph anchors (#100)
+  - Recognize Python-Markdown `attr_list` extension syntax: `[](){ #anchor }`
+  - Support for both anchor IDs (`#id`) and CSS classes (`.class`)
+  - Support optional colon syntax: `[](){: #anchor }`
+  - UTF-8 boundary validation and DoS prevention (500 char limit)
+  - 28 comprehensive tests covering edge cases
+  - Complete documentation with links to official Python-Markdown specs
+  - References: [attr_list](https://python-markdown.github.io/extensions/attr_list/), [mkdocs-autorefs](https://mkdocstrings.github.io/autorefs/)
+
+- **MD042**: Smart URL detection in empty links (#104)
+  - When link text looks like a URL (e.g., `[https://example.com]()`), use it as the destination
+  - Supports http://, https://, ftp://, ftps:// protocols
+  - More intelligent fixes than placeholder URLs
+
+- **Always respect exclude patterns by default** (#99)
+  - Exclude patterns now always respected, even for explicitly provided files
+  - Matches behavior of ESLint, Pylint, Mypy
+  - Added `--no-exclude` flag to disable all exclusions when needed
+  - LSP support for exclude patterns
+  - Shows warnings with actionable hints when excluding files
+
+- **Hidden directory scanning** (#102)
+  - Now scans hidden directories (like `.documentation`) by default
+  - More thorough markdown file discovery
+
+### Fixed
+
+- **MD033**: Code blocks in blockquotes false positives (#105)
+  - Fixed incorrect flagging of HTML tags inside fenced code blocks within blockquotes
+  - Properly strips blockquote markers before detecting fence markers
+  - 25 new tests covering nested blockquotes and edge cases
+
+- **MD034**: Empty link construct false positives (#104)
+  - Fixed incorrect flagging of URLs in `[url]()` and `[url][]` patterns
+  - Prevents text corruption during formatting
+  - Added patterns to properly exclude empty link constructs
+
+- **MD042**: Improved fix quality
+  - Removed "useless" placeholder fixes that just create new problems
+  - Only provides fixes when we have enough information for valid links
+  - No longer auto-fixes `[]()` or `[text]()` with placeholders
+
+### Changed
+
+- **BREAKING**: Exclude patterns now always respected by default
+  - Previously: `--force-exclude` flag needed to respect excludes for explicit files
+  - Now: Excludes always respected by default
+  - Migration: Use `--no-exclude` flag if you need the old behavior
+
+## [0.0.156] - 2025-10-08
+
+### Fixed
+
+- **Build**: Removed feature-gated benchmark binaries that were causing unnecessary reinstalls
+  - Benchmark binaries now only built when explicitly requested
+  - Reduces package size and installation time
+
+## [0.0.155] - 2025-10-08
+
+### Fixed
+
+- **PyPI Package**: Fixed package structure by removing unused cdylib and dependencies
+  - Removed unnecessary C dynamic library configuration
+  - Cleaner Python package distribution
+
+## [0.0.154] - 2025-10-08
+
+### Fixed
+
+- **MD013**: Implemented segment-based reflow to preserve hard breaks
+  - Properly handles double-space line breaks
+  - Integration tests updated for new behavior
+
+### Performance
+
+- **MD034**: Reuse buffers to reduce per-line allocations
+- **MD005**: Eliminate LineIndex creation overhead
+- **MD030**: Eliminate O(n²) complexity by caching line collection
+
+### Documentation
+
+- Organized LintContext optimization documentation
+
+## [0.0.153] - 2025-10-07
+
+### Performance
+
+- **Major optimization**: 54 rules now use LintContext character frequency caching
+  - Significant performance improvement across the board
+  - Reduced redundant scanning of document content
+
+- **MD051**: Optimized link fragment validation
+  - Faster processing of heading anchors and fragments
+
+### Fixed
+
+- **MD013**: Improved nested list handling in reflow mode
+  - Better preservation of list structure during reformatting
+
+## [0.0.152] - 2025-10-06
+
+### Fixed
+
+- **MD013**: Multi-paragraph list reflow improvements and refactoring
+  - Better handling of complex list structures
+  - More reliable paragraph detection within lists
+
+## [0.0.151] - 2025-10-05
+
+### Fixed
+
+- **MD007**: Fixed tab indentation and cascade behavior
+  - Properly handles tabs in list indentation
+  - Correct cascade behavior matching markdownlint
+
+## [0.0.150] - 2025-10-04
+
+### Fixed
+
+- **MD007**: Multiple fixes for list indentation
+  - Correct blockquote list handling
+  - Fixed text-aligned indentation to match markdownlint cascade behavior
+  - Updated test expectations for cascade behavior
+
+## [0.0.149] - 2025-10-03
+
+### Added
+
+- **Configuration**: JSON Schema for rumdl.toml configuration (#89)
+  - IDE autocomplete and validation support
+  - Better configuration documentation
+
+- **Configuration**: Per-file rule ignores (#92)
+  - Glob pattern support for ignoring rules on specific files
+  - Example: `[per-file-ignores] "docs/*.md" = ["MD013"]`
+
+## [0.0.148] - 2025-10-02
+
+### Fixed
+
+- **MD042**: Display improvements
+  - Show exact source text in error messages
+  - Correct display of shorthand reference links
+
+- **MkDocs**: Strip backticks from MkDocs auto-references (#97)
+  - Prevents false positives on `` [`module.Class`][] `` patterns
+
+## [0.0.147] - 2025-10-01
+
+### Added
+
+- **MkDocs**: Added mkdocstrings support (#94)
+  - Recognizes mkdocstrings YAML options
+  - Multiple rules migrated to use LintContext for better MkDocs handling
+
+### Fixed
+
+- **MD041**: Removed auto-fix capability (#93)
+  - Auto-fixing front-heading violations was unreliable
+  - Now only reports issues without attempting fixes
+
+- **MD026**: Corrected documentation to match implementation (#95)
+  - Documentation now accurately reflects punctuation handling
+
+- **Jinja2**: Added Jinja2 template support (#96)
+  - Prevents false positives in template syntax
+  - Better support for MkDocs projects using Jinja2
+
+- **MD013**: Prevent false positives for already-reflowed content
+  - Smarter detection of intentional line breaks
+
+- **MD034**: Properly excludes URLs/emails in code spans and HTML
+  - No more false positives on inline code URLs
+
+- **MD054**: Fixed column indexing bug
+  - Correct error position reporting
+
+- **MD033 & MD032**: Resolved false positives (#90, #91)
+  - More accurate HTML tag detection
+  - Better handling of code blocks
+
 ## [0.0.146] - 2025-09-24
 
 ### Added
