@@ -401,10 +401,11 @@ fn test_md042_empty_url_variations() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 5, "Should detect all empty URL variations");
 
-    // Verify fix suggestions
+    // Verify that non-URL text with empty URLs are NOT fixable
+    // (we can't guess what the URL should be)
     let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("[Click here](https://example.com)"));
-    assert!(!fixed.contains("[Click here]()"));
+    // Content should remain unchanged since these are not fixable
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -422,10 +423,11 @@ fn test_md042_both_empty() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 4, "Should detect all double-empty variations");
 
-    // Verify fix
+    // Verify that both empty text and URL are NOT fixable
+    // (we can't guess either the text or the URL)
     let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("[Link text](https://example.com)"));
-    assert!(!fixed.contains("[]()"));
+    // Content should remain unchanged since these are not fixable
+    assert_eq!(fixed, content);
 }
 
 #[test]

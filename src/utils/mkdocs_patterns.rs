@@ -1,12 +1,40 @@
 /// MkDocs pattern detection utilities
 ///
 /// Provides centralized pattern detection for MkDocs auto-references.
-/// Check if a reference is a valid MkDocs auto-reference pattern
 ///
-/// MkDocs auto-references include:
-/// - Module/class references: `module.Class`, `package.module.function`
-/// - Header anchors: `getting-started`, `api-reference`
-/// - API paths: `api/v1/endpoints`, `docs/reference`
+/// # MkDocs Auto-References
+///
+/// This module detects patterns used by MkDocs ecosystem plugins, particularly:
+/// - **mkdocs-autorefs**: Automatic cross-references in documentation
+/// - **mkdocstrings**: Python API documentation generation
+///
+/// ## Supported Patterns
+///
+/// ### Module/Class References
+/// - Format: `module.Class`, `package.module.function`
+/// - Example: [`module.MyClass`][], [`api.endpoints.get_user`][]
+/// - Used for: Python API documentation cross-references
+///
+/// ### Header Anchors
+/// - Format: `getting-started`, `api-reference`
+/// - Example: [getting-started][], [installation-guide][]
+/// - Used for: Cross-references to documentation sections
+///
+/// ### API Paths
+/// - Format: `api/v1/endpoints`, `docs/reference/guide`
+/// - Example: [api/module.Class][], [docs/getting-started][]
+/// - Used for: Navigation and documentation structure references
+///
+/// ## References
+///
+/// - [mkdocs-autorefs](https://mkdocstrings.github.io/autorefs/)
+/// - [mkdocstrings](https://mkdocstrings.github.io/)
+/// - [MkDocs discussions](https://github.com/mkdocs/mkdocs/discussions/3754)
+///
+/// ## See Also
+///
+/// - [`MD042NoEmptyLinks`](crate::rules::MD042NoEmptyLinks) - Handles MkDocs auto-references
+/// - [`is_mkdocs_attribute_anchor`](crate::rules::md042_no_empty_links::MD042NoEmptyLinks::is_mkdocs_attribute_anchor) - Handles attr_list anchors
 pub fn is_mkdocs_auto_reference(reference: &str) -> bool {
     // Reject empty or excessively long references for performance
     if reference.is_empty() || reference.len() > 200 {

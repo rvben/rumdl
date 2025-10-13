@@ -6,6 +6,44 @@ use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 /// See [docs/md042.md](../../docs/md042.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when a link has no content (text) or destination (URL).
+///
+/// # MkDocs Support
+///
+/// When `flavor = "mkdocs"` is configured, this rule recognizes two types of valid MkDocs patterns:
+///
+/// ## 1. Auto-References (via mkdocs-autorefs / mkdocstrings)
+///
+/// Backtick-wrapped Python identifiers used for cross-referencing:
+/// ```markdown
+/// [`module.Class`][]     // Python class reference
+/// [`str`][]              // Built-in type reference
+/// [`api.function`][]     // Function reference
+/// ```
+///
+/// **References:**
+/// - [mkdocs-autorefs](https://mkdocstrings.github.io/autorefs/)
+/// - [mkdocstrings](https://mkdocstrings.github.io/)
+///
+/// ## 2. Paragraph Anchors (via Python-Markdown attr_list extension)
+///
+/// Empty links combined with attributes to create anchor points:
+/// ```markdown
+/// [](){ #my-anchor }              // Basic anchor
+/// [](){ #anchor .class }          // Anchor with CSS class
+/// [](){: #anchor }                // With colon (canonical attr_list syntax)
+/// [](){ .class1 .class2 }         // Classes only
+/// ```
+///
+/// This syntax combines:
+/// - Empty link `[]()` → creates `<a href=""></a>`
+/// - attr_list syntax `{ #id }` → adds attributes to preceding element
+/// - Result: `<a href="" id="my-anchor"></a>`
+///
+/// **References:**
+/// - [Python-Markdown attr_list](https://python-markdown.github.io/extensions/attr_list/)
+/// - [MkDocs discussion](https://github.com/mkdocs/mkdocs/discussions/3754)
+///
+/// **Implementation:** See [`is_mkdocs_attribute_anchor`](Self::is_mkdocs_attribute_anchor)
 #[derive(Clone, Default)]
 pub struct MD042NoEmptyLinks {}
 
@@ -33,6 +71,59 @@ impl MD042NoEmptyLinks {
         }
 
         s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
+
+    /// Check if an empty link is followed by MkDocs attribute syntax
+    /// Pattern: []() followed by { #anchor } or { #anchor .class }
+    ///
+    /// This validates the Python-Markdown attr_list extension syntax when applied to empty links.
+    /// Empty links `[]()` combined with attributes like `{ #anchor }` create anchor points in
+    /// documentation, as documented by mkdocs-autorefs and the attr_list extension.
+    fn is_mkdocs_attribute_anchor(content: &str, link_end: usize) -> bool {
+        // UTF-8 safety: Validate byte position is at character boundary
+        if !content.is_char_boundary(link_end) {
+            return false;
+        }
+
+        // Get the content after the link
+        if let Some(rest) = content.get(link_end..) {
+            // Trim whitespace and check if it starts with {
+            // Note: trim_start() removes all whitespace including newlines
+            // This is intentionally permissive to match real-world MkDocs usage
+            let trimmed = rest.trim_start();
+
+            // Check for opening brace (with optional colon per attr_list spec)
+            let stripped = if let Some(s) = trimmed.strip_prefix("{:") {
+                s
+            } else if let Some(s) = trimmed.strip_prefix('{') {
+                s
+            } else {
+                return false;
+            };
+
+            // Look for closing brace
+            if let Some(end_brace) = stripped.find('}') {
+                // DoS prevention: Limit attribute section length
+                if end_brace > 500 {
+                    return false;
+                }
+
+                let attrs = stripped[..end_brace].trim();
+
+                // Empty attributes should not be considered valid
+                if attrs.is_empty() {
+                    return false;
+                }
+
+                // Check if it contains an anchor (starts with #) or class (starts with .)
+                // Valid patterns: { #anchor }, { #anchor .class }, { .class #anchor }
+                // At least one attribute starting with # or . is required
+                return attrs
+                    .split_whitespace()
+                    .any(|part| part.starts_with('#') || part.starts_with('.'));
+            }
+        }
+        false
     }
 }
 
@@ -92,6 +183,16 @@ impl Rule for MD042NoEmptyLinks {
 
             // Check for empty links
             if link.text.trim().is_empty() || effective_url.trim().is_empty() {
+                // In MkDocs mode, check if this is an attribute anchor: []() followed by { #anchor }
+                if mkdocs_mode
+                    && link.text.trim().is_empty()
+                    && effective_url.trim().is_empty()
+                    && Self::is_mkdocs_attribute_anchor(ctx.content, link.byte_end)
+                {
+                    // This is a valid MkDocs attribute anchor, skip it
+                    continue;
+                }
+
                 // Determine if we can provide a meaningful fix
                 let replacement = if link.text.trim().is_empty() {
                     // Empty text - can we fix it?
