@@ -111,8 +111,9 @@ impl MD022BlanksAroundHeadings {
 
     /// Fix a document by adding appropriate blank lines around headings
     fn _fix_content(&self, ctx: &crate::lint_context::LintContext) -> String {
-        let line_ending = crate::utils::detect_line_ending(ctx.content);
-        let had_trailing_newline = ctx.content.ends_with('\n') || ctx.content.ends_with("\r\n");
+        // Content is normalized to LF at I/O boundary
+        let line_ending = "\n";
+        let had_trailing_newline = ctx.content.ends_with('\n');
         let mut result = Vec::new();
         let mut in_front_matter = false;
         let mut front_matter_delimiter_count = 0;
@@ -273,15 +274,12 @@ impl MD022BlanksAroundHeadings {
         let joined = result.join(line_ending);
 
         // Preserve original trailing newline behavior
-        if had_trailing_newline && !joined.ends_with('\n') && !joined.ends_with("\r\n") {
+        // Content is normalized to LF at I/O boundary
+        if had_trailing_newline && !joined.ends_with('\n') {
             format!("{joined}{line_ending}")
-        } else if !had_trailing_newline && (joined.ends_with('\n') || joined.ends_with("\r\n")) {
+        } else if !had_trailing_newline && joined.ends_with('\n') {
             // Remove trailing newline if original didn't have one
-            if joined.ends_with("\r\n") {
-                joined[..joined.len() - 2].to_string()
-            } else {
-                joined[..joined.len() - 1].to_string()
-            }
+            joined[..joined.len() - 1].to_string()
         } else {
             joined
         }
@@ -305,7 +303,8 @@ impl Rule for MD022BlanksAroundHeadings {
             return Ok(result);
         }
 
-        let line_ending = crate::utils::detect_line_ending(ctx.content);
+        // Content is normalized to LF at I/O boundary
+        let line_ending = "\n";
 
         // Collect all headings first to batch process
         let mut heading_violations = Vec::new();

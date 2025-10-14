@@ -1199,18 +1199,19 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_with_windows_line_endings() {
-        let content = "Text\r\n- Item 1\r\n- Item 2\r\nText";
+    fn test_fix_with_normalized_line_endings() {
+        // In production, content is normalized to LF at I/O boundary
+        // Unit tests should use LF input to reflect actual runtime behavior
+        let content = "Text\n- Item 1\n- Item 2\nText";
         let warnings = lint(content);
-        assert_eq!(warnings.len(), 2, "Should detect issues with Windows line endings");
+        assert_eq!(warnings.len(), 2, "Should detect issues with normalized line endings");
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
-        // Note: Our fix uses \n, which is standard for Rust string processing
         let expected = "Text\n\n- Item 1\n- Item 2\n\nText";
-        assert_eq!(fixed_content, expected, "Fix should handle Windows line endings");
+        assert_eq!(fixed_content, expected, "Fix should work with normalized LF content");
     }
 
     #[test]

@@ -609,10 +609,10 @@ mod tests {
     }
 
     #[test]
-    fn test_windows_line_endings() {
+    fn test_normalized_line_endings() {
         let rule = MD009TrailingSpaces::default();
-        // Note: This test simulates Windows line endings behavior
-        let content = "Line with spaces  \r\nAnother line  ";
+        // In production, content is normalized to LF at I/O boundary
+        let content = "Line with spaces  \nAnother line  ";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         // Line 1 has 2 spaces (= br_spaces) so it's OK

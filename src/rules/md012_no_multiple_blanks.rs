@@ -54,7 +54,8 @@ impl Rule for MD012NoMultipleBlanks {
             .any(|pair| pair[0].trim().is_empty() && pair[1].trim().is_empty());
 
         // Also check for blanks at EOF (markdownlint behavior)
-        let ends_with_multiple_newlines = content.ends_with("\n\n") || content.ends_with("\r\n\r\n");
+        // Content is normalized to LF at I/O boundary
+        let ends_with_multiple_newlines = content.ends_with("\n\n");
 
         if !has_potential_blanks && !ends_with_multiple_newlines {
             return Ok(Vec::new());

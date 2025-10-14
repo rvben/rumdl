@@ -288,3 +288,63 @@ fn test_code_span_detection_crlf() {
     // Inline code should be preserved
     assert!(result.contains("`inline code`"), "Inline code was modified:\n{result}");
 }
+
+#[test]
+fn test_md047_crlf_trailing_newline() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with CRLF line endings but NO trailing newline
+    let content = "# Title\r\nSome content here";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl fmt to fix
+    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+
+    // Read the result
+    let result = fs::read_to_string(&test_file).unwrap();
+
+    // Should end with CRLF (original line ending preserved)
+    assert!(
+        result.ends_with("\r\n"),
+        "File should end with CRLF but got: {:?}",
+        result.as_bytes().iter().rev().take(5).collect::<Vec<_>>()
+    );
+
+    // Should be exactly one trailing newline (CRLF)
+    assert!(
+        !result.ends_with("\r\n\r\n"),
+        "File should not have multiple trailing newlines: {:?}",
+        result.as_bytes().iter().rev().take(10).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md047_lf_trailing_newline() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+
+    // Create file with LF line endings but NO trailing newline
+    let content = "# Title\nSome content here";
+    fs::write(&test_file, content).unwrap();
+
+    // Run rumdl fmt to fix
+    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+
+    // Read the result
+    let result = fs::read_to_string(&test_file).unwrap();
+
+    // Should end with LF (original line ending preserved)
+    assert!(
+        result.ends_with('\n') && !result.ends_with("\r\n"),
+        "File should end with LF but got: {:?}",
+        result.as_bytes().iter().rev().take(5).collect::<Vec<_>>()
+    );
+
+    // Should be exactly one trailing newline (LF)
+    assert!(
+        !result.ends_with("\n\n") || result.ends_with("\r\n\n"),
+        "File should not have multiple trailing newlines: {:?}",
+        result.as_bytes().iter().rev().take(10).collect::<Vec<_>>()
+    );
+}
