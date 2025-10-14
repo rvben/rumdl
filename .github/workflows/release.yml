@@ -130,10 +130,10 @@ jobs:
           if [[ "${{ matrix.target }}" == *"-linux-"* ]]; then
             # Use cargo-zigbuild for all Linux builds (both musl and gnu)
             cargo install cargo-zigbuild --locked
-            mise exec -- cargo zigbuild --release --target ${{ matrix.target }}
+            mise exec -- cargo zigbuild --release --target ${{ matrix.target }} --bin rumdl
           else
             # Native compilation for Windows and macOS
-            cargo build --release --target ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }} --bin rumdl
           fi
         shell: bash
 

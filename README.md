@@ -904,6 +904,25 @@ make build
 make test
 ```
 
+### JSON Schema Generation
+
+If you modify the configuration structures in `src/config.rs`, regenerate the JSON schema:
+
+```bash
+# Generate/update the schema
+make schema
+# Or: rumdl schema generate
+
+# Check if schema is up-to-date (useful in CI)
+make check-schema
+# Or: rumdl schema check
+
+# Print schema to stdout
+rumdl schema print
+```
+
+The schema is automatically generated from the Rust types using `schemars` and should be kept in sync with the configuration structures.
+
 ## License
 
 rumdl is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

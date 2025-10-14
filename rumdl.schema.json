@@ -83,8 +83,9 @@
           ]
         },
         "force_exclude": {
-          "description": "Whether to enforce exclude and extend-exclude patterns even for paths that are passed explicitly. By default (false), rumdl will lint any paths passed in directly, even if they would typically be excluded. Setting this to true will cause rumdl to respect exclusions unequivocally. This is useful for pre-commit, which explicitly passes all changed files.",
+          "description": "[DEPRECATED] Whether to enforce exclude patterns for explicitly passed paths. This option is deprecated as of v0.0.156 and has no effect. Exclude patterns are now always respected, even for explicitly provided files. This prevents duplication between rumdl config and tool configs like pre-commit.",
           "default": false,
+          "deprecated": true,
           "type": "boolean"
         },
         "include": {

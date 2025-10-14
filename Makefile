@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema
 
 # Development environment setup
 setup-mise:
@@ -122,6 +122,14 @@ lint-fast:
 
 check:
 	cargo check --all-targets --all-features
+
+# Generate JSON schema for rumdl.toml
+schema:
+	cargo run --bin rumdl -- schema generate
+
+# Check if JSON schema is up-to-date
+check-schema:
+	cargo run --bin rumdl -- schema check
 
 doc:
 	cargo doc --no-deps
