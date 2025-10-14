@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Internal code always works with consistent LF line endings
   - More efficient: 1 normalization per file instead of per-rule
   - Cleaner separation of concerns
+  - Simplified MD047, MD012, MD022 to always use LF internally
+  - Removed unnecessary line ending detection from rules
+  - Added comprehensive end-to-end CRLF tests
 
 ### Removed
 
