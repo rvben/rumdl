@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.159] - 2025-10-14
+
+### Added
+
+- **JSON Schema Generation**: New `rumdl schema` subcommand for generating JSON schema from configuration
+  - `rumdl schema generate` - Generate/update the schema file
+  - `rumdl schema check` - Verify schema is up-to-date (used in CI)
+  - `rumdl schema print` - Print schema to stdout
+  - Schema automatically generated from Rust types using `schemars`
+  - Prepared for SchemaStore submission to enable IDE autocomplete/validation
+
+### Fixed
+
+- **MD051 False Positives**: Fixed incorrect handling of backtick headings with angle brackets
+  - Previously treated `<FILE>` inside backticks as HTML tags and stripped them
+  - Now correctly processes headings like `` `import <FILE> [OPTIONS]` `` → `import-file-options`
+  - Removed premature `strip_html_tags()` call; anchor algorithms now handle both markdown and HTML correctly
+  - Added regression tests for backtick headings with special characters
+  - Fixes false positives in README.md table of contents
+
+### Changed
+
+- **Code Cleanup**: Removed unused `generate_schema` binary (functionality moved to `rumdl schema` subcommand)
+
 ## [0.0.158] - 2025-10-14
 
 ### Fixed
