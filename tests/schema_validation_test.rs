@@ -4,8 +4,8 @@ use std::fs;
 /// Load the generated JSON schema
 fn load_schema() -> serde_json::Value {
     let schema_path = concat!(env!("CARGO_MANIFEST_DIR"), "/rumdl.schema.json");
-    let schema_content = fs::read_to_string(schema_path)
-        .expect("Failed to read schema file - run 'cargo dev --write' first");
+    let schema_content =
+        fs::read_to_string(schema_path).expect("Failed to read schema file - run 'cargo dev --write' first");
     serde_json::from_str(&schema_content).expect("Failed to parse schema JSON")
 }
 
@@ -22,16 +22,12 @@ fn validate_toml_config(toml_str: &str) -> Result<(), String> {
     let schema = load_schema();
     let instance = toml_to_json(toml_str);
 
-    let compiled = jsonschema::validator_for(&schema)
-        .expect("Failed to compile schema");
+    let compiled = jsonschema::validator_for(&schema).expect("Failed to compile schema");
 
-    compiled.validate(&instance)
-        .map_err(|err_iter| {
-            let errors: Vec<String> = err_iter
-                .map(|e| format!("{} at {}", e, e.instance_path))
-                .collect();
-            errors.join("; ")
-        })
+    compiled.validate(&instance).map_err(|err_iter| {
+        let errors: Vec<String> = err_iter.map(|e| format!("{} at {}", e, e.instance_path)).collect();
+        errors.join("; ")
+    })
 }
 
 #[test]
@@ -134,7 +130,7 @@ tables = false
 "#;
     let result = validate_toml_config(toml);
     if let Err(error) = &result {
-        eprintln!("Validation error: {}", error);
+        eprintln!("Validation error: {error}");
     }
     assert!(result.is_ok());
 }
@@ -146,12 +142,11 @@ fn test_flavor_variants() {
         let toml = format!(
             r#"
 [global]
-flavor = "{}"
-"#,
-            flavor
+flavor = "{flavor}"
+"#
         );
         let result = validate_toml_config(&toml);
-        assert!(result.is_ok(), "Flavor '{}' should be valid", flavor);
+        assert!(result.is_ok(), "Flavor '{flavor}' should be valid");
     }
 }
 
@@ -159,12 +154,11 @@ flavor = "{}"
 fn test_example_file_validates() {
     // Validate the actual rumdl.toml.example file
     let example_path = concat!(env!("CARGO_MANIFEST_DIR"), "/rumdl.toml.example");
-    let toml_content = fs::read_to_string(example_path)
-        .expect("Failed to read rumdl.toml.example");
+    let toml_content = fs::read_to_string(example_path).expect("Failed to read rumdl.toml.example");
 
     let result = validate_toml_config(&toml_content);
     if let Err(error) = &result {
-        eprintln!("Validation error in rumdl.toml.example: {}", error);
+        eprintln!("Validation error in rumdl.toml.example: {error}");
     }
     assert!(result.is_ok(), "rumdl.toml.example should validate against schema");
 }
@@ -176,7 +170,7 @@ fn test_project_rumdl_toml_validates() {
     if let Ok(toml_content) = fs::read_to_string(config_path) {
         let result = validate_toml_config(&toml_content);
         if let Err(error) = &result {
-            eprintln!("Validation error in .rumdl.toml: {}", error);
+            eprintln!("Validation error in .rumdl.toml: {error}");
         }
         assert!(result.is_ok(), ".rumdl.toml should validate against schema");
     }
@@ -236,5 +230,8 @@ fn test_invalid_type_for_respect_gitignore() {
 respect_gitignore = "true"  # Should be boolean, not string
 "#;
     let result = validate_toml_config(toml);
-    assert!(result.is_err(), "Wrong type for respect_gitignore should fail validation");
+    assert!(
+        result.is_err(),
+        "Wrong type for respect_gitignore should fail validation"
+    );
 }
