@@ -110,9 +110,9 @@ impl MD051LinkFragments {
                     markdown_headings.insert(custom_id.to_lowercase());
                 }
 
-                // Generate standard GitHub-style anchor from heading text
-                let text_without_html = Self::strip_html_tags(&heading.text);
-                let fragment = self.anchor_style.generate_fragment(&text_without_html);
+                // Generate anchor from heading text
+                // The anchor generation algorithm handles markdown formatting and HTML tags correctly
+                let fragment = self.anchor_style.generate_fragment(&heading.text);
 
                 if !fragment.is_empty() {
                     // Handle duplicate headings by appending -1, -2, etc.
@@ -442,23 +442,6 @@ impl MD051LinkFragments {
         } else {
             result
         }
-    }
-
-    /// Strip HTML tags from heading text
-    fn strip_html_tags(text: &str) -> String {
-        if !text.contains('<') {
-            return text.to_string();
-        }
-
-        lazy_static! {
-            // Match valid HTML tags but not arrow patterns like <->
-            // Matches: <tag>, </tag>, <tag/>
-            // Excludes: <->, <--, etc.
-            static ref HTML_TAG_PATTERN: Regex = Regex::new(
-                r"</?[a-zA-Z][^>]*>|<[a-zA-Z][^>]*/>"
-            ).unwrap();
-        }
-        HTML_TAG_PATTERN.replace_all(text, "").to_string()
     }
 
     /// Strip markdown formatting from heading text (optimized for common patterns)

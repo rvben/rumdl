@@ -1129,4 +1129,46 @@ Edge cases:
 
         println!("✓ All styles passed comprehensive stress testing");
     }
+
+    /// Test headings with backticks containing special characters like <FILE>
+    /// Regression test for bug where `import <FILE> [OPTIONS]` was incorrectly
+    /// treating <FILE> as an HTML tag and stripping it before anchor generation
+    #[test]
+    fn test_backtick_headings_with_angle_brackets() {
+        let styles = [AnchorStyle::GitHub, AnchorStyle::KramdownGfm, AnchorStyle::Kramdown];
+
+        for style in &styles {
+            // Test case from README.md that was failing
+            assert_fragment_generation(
+                style,
+                "`import <FILE> [OPTIONS]`",
+                "import-file-options",
+                "Backtick heading with angle brackets and square brackets",
+            );
+
+            assert_fragment_generation(
+                style,
+                "`rule [<rule>]`",
+                "rule-rule",
+                "Backtick heading with nested angle brackets",
+            );
+
+            // Additional edge cases with backticks
+            assert_fragment_generation(
+                style,
+                "`code <Type>`",
+                "code-type",
+                "Backtick heading with single angle bracket",
+            );
+
+            assert_fragment_generation(
+                style,
+                "`config [options]`",
+                "config-options",
+                "Backtick heading with square brackets",
+            );
+        }
+
+        println!("✓ All styles correctly handle backtick headings with special characters");
+    }
 }

@@ -66,6 +66,7 @@ It offers:
     - [Stdin/Stdout Formatting](#stdinstdout-formatting)
     - [Editor Integration](#editor-integration)
   - [Pre-commit Integration](#pre-commit-integration)
+    - [Excluding Files in Pre-commit](#excluding-files-in-pre-commit)
   - [CI/CD Integration](#cicd-integration)
     - [GitHub Actions](#github-actions)
   - [Rules](#rules)
@@ -85,8 +86,10 @@ It offers:
     - [Usage Examples](#usage-examples)
   - [Configuration](#configuration)
     - [Configuration Discovery](#configuration-discovery)
+    - [Editor Support (JSON Schema)](#editor-support-json-schema)
     - [Global Configuration](#global-configuration)
     - [Markdownlint Migration](#markdownlint-migration)
+    - [Inline Configuration](#inline-configuration)
     - [Configuration File Example](#configuration-file-example)
     - [Initializing Configuration](#initializing-configuration)
     - [Configuration in pyproject.toml](#configuration-in-pyprojecttoml)
@@ -102,6 +105,7 @@ It offers:
     - [Prerequisites](#prerequisites)
     - [Building](#building)
     - [Testing](#testing)
+    - [JSON Schema Generation](#json-schema-generation)
   - [License](#license)
 
 ## Installation
@@ -328,8 +332,8 @@ This produces annotations that GitHub automatically displays in the PR's "Files 
 
 rumdl implements 54 lint rules for Markdown files. Here are some key rule categories:
 
-|  Category | Description | Example Rules |
-|-----------|-------------|---------------|
+| Category | Description | Example Rules |
+| -----------|-------------|--------------- |
 | **Headings** | Proper heading structure and formatting | MD001, MD002, MD003 |
 | **Lists** | Consistent list formatting and structure | MD004, MD005, MD007 |
 | **Whitespace** | Proper spacing and line length | MD009, MD010, MD012 |
