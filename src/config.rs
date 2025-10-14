@@ -1706,6 +1706,46 @@ impl SourcedConfig {
         None
     }
 
+    /// Internal implementation that accepts config directory for testing
+    fn user_configuration_path_impl(config_dir: &Path) -> Option<std::path::PathBuf> {
+        let config_dir = config_dir.join("rumdl");
+
+        // Check for config files in precedence order (same as project discovery)
+        const USER_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml"];
+
+        log::debug!(
+            "[rumdl-config] Checking for user configuration in: {}",
+            config_dir.display()
+        );
+
+        for filename in USER_CONFIG_FILES {
+            let config_path = config_dir.join(filename);
+
+            if config_path.exists() {
+                // For pyproject.toml, verify it contains [tool.rumdl] section
+                if *filename == "pyproject.toml" {
+                    if let Ok(content) = std::fs::read_to_string(&config_path) {
+                        if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") {
+                            log::debug!("[rumdl-config] Found user configuration at: {}", config_path.display());
+                            return Some(config_path);
+                        }
+                        log::debug!("[rumdl-config] Found user pyproject.toml but no [tool.rumdl] section");
+                        continue;
+                    }
+                } else {
+                    log::debug!("[rumdl-config] Found user configuration at: {}", config_path.display());
+                    return Some(config_path);
+                }
+            }
+        }
+
+        log::debug!(
+            "[rumdl-config] No user configuration found in: {}",
+            config_dir.display()
+        );
+        None
+    }
+
     /// Discover user-level configuration file from platform-specific config directory.
     /// Returns the first configuration file found in the user config directory.
     fn user_configuration_path() -> Option<std::path::PathBuf> {
@@ -1713,45 +1753,8 @@ impl SourcedConfig {
 
         match choose_base_strategy() {
             Ok(strategy) => {
-                let config_dir = strategy.config_dir().join("rumdl");
-
-                // Check for config files in precedence order (same as project discovery)
-                const USER_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml"];
-
-                log::debug!(
-                    "[rumdl-config] Checking for user configuration in: {}",
-                    config_dir.display()
-                );
-
-                for filename in USER_CONFIG_FILES {
-                    let config_path = config_dir.join(filename);
-
-                    if config_path.exists() {
-                        // For pyproject.toml, verify it contains [tool.rumdl] section
-                        if *filename == "pyproject.toml" {
-                            if let Ok(content) = std::fs::read_to_string(&config_path) {
-                                if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") {
-                                    log::debug!(
-                                        "[rumdl-config] Found user configuration at: {}",
-                                        config_path.display()
-                                    );
-                                    return Some(config_path);
-                                }
-                                log::debug!("[rumdl-config] Found user pyproject.toml but no [tool.rumdl] section");
-                                continue;
-                            }
-                        } else {
-                            log::debug!("[rumdl-config] Found user configuration at: {}", config_path.display());
-                            return Some(config_path);
-                        }
-                    }
-                }
-
-                log::debug!(
-                    "[rumdl-config] No user configuration found in: {}",
-                    config_dir.display()
-                );
-                None
+                let config_dir = strategy.config_dir();
+                Self::user_configuration_path_impl(&config_dir)
             }
             Err(e) => {
                 log::debug!("[rumdl-config] Failed to determine user config directory: {e}");
@@ -1760,12 +1763,13 @@ impl SourcedConfig {
         }
     }
 
-    /// Load and merge configurations from files and CLI overrides.
-    /// If skip_auto_discovery is true, only explicit config paths are loaded.
-    pub fn load_with_discovery(
+    /// Internal implementation that accepts user config directory for testing
+    #[doc(hidden)]
+    pub fn load_with_discovery_impl(
         config_path: Option<&str>,
         cli_overrides: Option<&SourcedGlobalConfig>,
         skip_auto_discovery: bool,
+        user_config_dir: Option<&Path>,
     ) -> Result<Self, ConfigError> {
         use std::env;
         log::debug!("[rumdl-config] Current working directory: {:?}", env::current_dir());
@@ -1831,7 +1835,13 @@ impl SourcedConfig {
         // Only perform auto-discovery if not skipped AND no explicit config path provided
         if !skip_auto_discovery && config_path.is_none() {
             // Step 1: Load user configuration first (as a base)
-            if let Some(user_config_path) = Self::user_configuration_path() {
+            let user_config_path = if let Some(dir) = user_config_dir {
+                Self::user_configuration_path_impl(dir)
+            } else {
+                Self::user_configuration_path()
+            };
+
+            if let Some(user_config_path) = user_config_path {
                 let path_str = user_config_path.display().to_string();
                 let filename = user_config_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
@@ -1949,6 +1959,16 @@ impl SourcedConfig {
         // TODO: Handle unknown keys collected during parsing/merging
 
         Ok(sourced_config)
+    }
+
+    /// Load and merge configurations from files and CLI overrides.
+    /// If skip_auto_discovery is true, only explicit config paths are loaded.
+    pub fn load_with_discovery(
+        config_path: Option<&str>,
+        cli_overrides: Option<&SourcedGlobalConfig>,
+        skip_auto_discovery: bool,
+    ) -> Result<Self, ConfigError> {
+        Self::load_with_discovery_impl(config_path, cli_overrides, skip_auto_discovery, None)
     }
 }
 

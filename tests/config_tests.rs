@@ -1,6 +1,7 @@
 use rumdl_lib::config::Config; // Ensure Config is imported
 use rumdl_lib::config::RuleRegistry;
 use rumdl_lib::rules::*;
+use serial_test::serial;
 use std::fs;
 use tempfile::tempdir; // For temporary directory // Add back env import // Ensure SourcedConfig is imported
 
@@ -885,11 +886,10 @@ line-length:
 }
 
 #[test]
+#[serial(cwd)]
 fn test_user_configuration_discovery() {
     use std::env;
 
-    // Save original env vars
-    let original_xdg = env::var("XDG_CONFIG_HOME").ok();
     let original_dir = env::current_dir().unwrap();
 
     // Create temporary directories
@@ -900,11 +900,6 @@ fn test_user_configuration_discovery() {
 
     fs::create_dir_all(&project_dir).unwrap();
     fs::create_dir_all(&rumdl_config_dir).unwrap();
-
-    // Set XDG_CONFIG_HOME to our temp config dir
-    unsafe {
-        env::set_var("XDG_CONFIG_HOME", &config_dir);
-    }
 
     // Create user config file
     let user_config_path = rumdl_config_dir.join("rumdl.toml");
@@ -922,8 +917,9 @@ indent = 4
     env::set_current_dir(&project_dir).unwrap();
 
     // Test that user config is loaded when no project config exists
-    let sourced =
-        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load user config");
+    // Pass the config_dir directly instead of setting XDG_CONFIG_HOME
+    let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
+        .expect("Should load user config");
 
     let config: Config = sourced.into();
 
@@ -955,7 +951,8 @@ indent = 2
 
     // Test that project config takes precedence over user config
     let sourced_with_project =
-        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load project config");
+        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
+            .expect("Should load project config");
 
     let config_with_project: Config = sourced_with_project.into();
 
@@ -973,18 +970,13 @@ indent = 2
 
     // Restore original environment
     env::set_current_dir(original_dir).unwrap();
-    match original_xdg {
-        Some(val) => unsafe { env::set_var("XDG_CONFIG_HOME", val) },
-        None => unsafe { env::remove_var("XDG_CONFIG_HOME") },
-    }
 }
 
 #[test]
+#[serial(cwd)]
 fn test_user_configuration_file_precedence() {
     use std::env;
 
-    // Save original env vars
-    let original_xdg = env::var("XDG_CONFIG_HOME").ok();
     let original_dir = env::current_dir().unwrap();
 
     // Create temporary directories
@@ -995,11 +987,6 @@ fn test_user_configuration_file_precedence() {
 
     fs::create_dir_all(&project_dir).unwrap();
     fs::create_dir_all(&rumdl_config_dir).unwrap();
-
-    // Set XDG_CONFIG_HOME to our temp config dir
-    unsafe {
-        env::set_var("XDG_CONFIG_HOME", &config_dir);
-    }
 
     // Create multiple user config files to test precedence
     // .rumdl.toml (highest precedence)
@@ -1032,9 +1019,9 @@ line-length = 99"#,
     // Change to project directory (which has no config)
     env::set_current_dir(&project_dir).unwrap();
 
-    // Test that .rumdl.toml is loaded first
-    let sourced =
-        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load user config");
+    // Test that .rumdl.toml is loaded first - pass config_dir directly
+    let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
+        .expect("Should load user config");
 
     let config: Config = sourced.into();
     assert_eq!(
@@ -1045,8 +1032,8 @@ line-length = 99"#,
     // Remove .rumdl.toml and test again
     fs::remove_file(&dot_rumdl_path).unwrap();
 
-    let sourced2 =
-        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load user config");
+    let sourced2 = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
+        .expect("Should load user config");
 
     let config2: Config = sourced2.into();
     assert_eq!(
@@ -1057,8 +1044,8 @@ line-length = 99"#,
     // Remove rumdl.toml and test again
     fs::remove_file(&rumdl_path).unwrap();
 
-    let sourced3 =
-        rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should load user config");
+    let sourced3 = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
+        .expect("Should load user config");
 
     let config3: Config = sourced3.into();
     assert_eq!(
@@ -1068,8 +1055,4 @@ line-length = 99"#,
 
     // Restore original environment
     env::set_current_dir(original_dir).unwrap();
-    match original_xdg {
-        Some(val) => unsafe { env::set_var("XDG_CONFIG_HOME", val) },
-        None => unsafe { env::remove_var("XDG_CONFIG_HOME") },
-    }
 }

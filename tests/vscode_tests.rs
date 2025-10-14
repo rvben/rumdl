@@ -108,51 +108,8 @@ fn test_find_all_editors_empty_path() {
     }
 }
 
-#[test]
-fn test_term_program_variations() {
-    let original_term = std::env::var("TERM_PROGRAM").ok();
-
-    unsafe {
-        // Test various TERM_PROGRAM values
-        let test_cases = vec![
-            ("vscode", "code"),
-            ("VSCode", "code"), // Test case insensitive
-            ("VSCODE", "code"),
-            ("cursor", "cursor"),
-            ("Cursor", "cursor"),
-            ("CURSOR", "cursor"),
-            ("windsurf", "windsurf"),
-            ("Windsurf", "windsurf"),
-            ("WINDSURF", "windsurf"),
-            ("terminal", ""), // Unknown terminal
-            ("iterm2", ""),   // Another unknown terminal
-        ];
-
-        for (term_value, expected_cmd) in test_cases {
-            std::env::set_var("TERM_PROGRAM", term_value);
-
-            let result = VsCodeExtension::current_editor_from_env();
-
-            if expected_cmd.is_empty() {
-                assert!(result.is_none(), "Expected None for TERM_PROGRAM={term_value}");
-            } else {
-                // Result depends on whether the command exists
-                // We're testing the logic, not the actual command existence
-                if let Some((cmd, _)) = result {
-                    assert_eq!(cmd, expected_cmd);
-                }
-                // Command might not exist on this system
-            }
-        }
-
-        // Restore original
-        if let Some(term) = original_term {
-            std::env::set_var("TERM_PROGRAM", term);
-        } else {
-            std::env::remove_var("TERM_PROGRAM");
-        }
-    }
-}
+// Note: test_term_program_variations is now covered by unit tests in src/vscode.rs
+// where it can test the internal implementation without modifying environment variables
 
 #[test]
 fn test_handle_vscode_command_status_flag() {

@@ -103,6 +103,7 @@ rand = "0.9.1"
 pretty_assertions = "1.4"
 unicode-segmentation = "1.12"
 unicode-width = "0.2"
+serial_test = "3.2"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"

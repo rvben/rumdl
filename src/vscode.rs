@@ -116,9 +116,10 @@ impl VsCodeExtension {
     }
 
     /// Get the current editor from TERM_PROGRAM if available
-    pub fn current_editor_from_env() -> Option<(&'static str, &'static str)> {
-        if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
-            match term_program.to_lowercase().as_str() {
+    /// Internal implementation that accepts environment as parameters for testing
+    fn current_editor_from_env_impl(term_program: Option<&str>) -> Option<(&'static str, &'static str)> {
+        if let Some(term) = term_program {
+            match term.to_lowercase().as_str() {
                 "vscode" => {
                     if Self::command_exists("code") {
                         Some(("code", "VS Code"))
@@ -145,6 +146,10 @@ impl VsCodeExtension {
         } else {
             None
         }
+    }
+
+    pub fn current_editor_from_env() -> Option<(&'static str, &'static str)> {
+        Self::current_editor_from_env_impl(std::env::var("TERM_PROGRAM").ok().as_deref())
     }
 
     /// Check if the editor uses Open VSX by default
@@ -548,57 +553,51 @@ mod tests {
 
     #[test]
     fn test_current_editor_from_env() {
-        // Save current TERM_PROGRAM if it exists
-        let original_term = std::env::var("TERM_PROGRAM").ok();
-        let original_editor = std::env::var("EDITOR").ok();
-        let original_visual = std::env::var("VISUAL").ok();
+        // Test with no TERM_PROGRAM set
+        assert!(VsCodeExtension::current_editor_from_env_impl(None).is_none());
 
-        unsafe {
-            // Clear all environment variables that could affect the test
-            std::env::remove_var("TERM_PROGRAM");
-            std::env::remove_var("EDITOR");
-            std::env::remove_var("VISUAL");
-
-            // Test with no TERM_PROGRAM set
-            assert!(VsCodeExtension::current_editor_from_env().is_none());
-
-            // Test with VS Code TERM_PROGRAM (but command might not exist)
-            std::env::set_var("TERM_PROGRAM", "vscode");
-            let _result = VsCodeExtension::current_editor_from_env();
-            // Result depends on whether 'code' command exists
-
-            // Test with cursor TERM_PROGRAM
-            std::env::set_var("TERM_PROGRAM", "cursor");
-            let _cursor_result = VsCodeExtension::current_editor_from_env();
-            // Result depends on whether 'cursor' command exists
-
-            // Test with windsurf TERM_PROGRAM
-            std::env::set_var("TERM_PROGRAM", "windsurf");
-            let _windsurf_result = VsCodeExtension::current_editor_from_env();
-            // Result depends on whether 'windsurf' command exists
-
-            // Test with unknown TERM_PROGRAM
-            std::env::set_var("TERM_PROGRAM", "unknown-editor");
-            assert!(VsCodeExtension::current_editor_from_env().is_none());
-
-            // Test with mixed case (should work due to to_lowercase)
-            std::env::set_var("TERM_PROGRAM", "VsCode");
-            let _mixed_case_result = VsCodeExtension::current_editor_from_env();
-            // Result should be same as lowercase version
-
-            // Restore original environment variables
-            if let Some(term) = original_term {
-                std::env::set_var("TERM_PROGRAM", term);
-            } else {
-                std::env::remove_var("TERM_PROGRAM");
-            }
-            if let Some(editor) = original_editor {
-                std::env::set_var("EDITOR", editor);
-            }
-            if let Some(visual) = original_visual {
-                std::env::set_var("VISUAL", visual);
-            }
+        // Test with VS Code TERM_PROGRAM (but command might not exist)
+        let vscode_result = VsCodeExtension::current_editor_from_env_impl(Some("vscode"));
+        // Result depends on whether 'code' command exists
+        if let Some((cmd, name)) = vscode_result {
+            assert_eq!(cmd, "code");
+            assert_eq!(name, "VS Code");
         }
+
+        // Test with cursor TERM_PROGRAM
+        let cursor_result = VsCodeExtension::current_editor_from_env_impl(Some("cursor"));
+        // Result depends on whether 'cursor' command exists
+        if let Some((cmd, name)) = cursor_result {
+            assert_eq!(cmd, "cursor");
+            assert_eq!(name, "Cursor");
+        }
+
+        // Test with windsurf TERM_PROGRAM
+        let windsurf_result = VsCodeExtension::current_editor_from_env_impl(Some("windsurf"));
+        // Result depends on whether 'windsurf' command exists
+        if let Some((cmd, name)) = windsurf_result {
+            assert_eq!(cmd, "windsurf");
+            assert_eq!(name, "Windsurf");
+        }
+
+        // Test with unknown TERM_PROGRAM - should always return None
+        assert!(VsCodeExtension::current_editor_from_env_impl(Some("unknown-editor")).is_none());
+
+        // Test with mixed case (should work due to to_lowercase)
+        let mixed_case_result = VsCodeExtension::current_editor_from_env_impl(Some("VsCode"));
+        // Should behave the same as lowercase version
+        assert_eq!(
+            mixed_case_result,
+            VsCodeExtension::current_editor_from_env_impl(Some("vscode"))
+        );
+
+        // Test edge cases
+        assert!(VsCodeExtension::current_editor_from_env_impl(Some("")).is_none());
+        assert!(VsCodeExtension::current_editor_from_env_impl(Some("   ")).is_none());
+        assert!(
+            VsCodeExtension::current_editor_from_env_impl(Some("VSCODE")).is_some()
+                || !VsCodeExtension::command_exists("code")
+        );
     }
 
     #[test]

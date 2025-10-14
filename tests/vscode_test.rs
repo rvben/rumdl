@@ -43,30 +43,8 @@ mod vscode_tests {
         assert!(editors.is_empty() || editors.iter().all(|(cmd, name)| !cmd.is_empty() && !name.is_empty()));
     }
 
-    #[test]
-    fn test_current_editor_from_env() {
-        // Save current TERM_PROGRAM if any
-        let original = std::env::var("TERM_PROGRAM").ok();
-
-        // Test with VS Code
-        unsafe {
-            std::env::set_var("TERM_PROGRAM", "vscode");
-        }
-        let _result = VsCodeExtension::current_editor_from_env();
-        // Result depends on whether VS Code is actually installed
-
-        // Test with unknown terminal
-        unsafe {
-            std::env::set_var("TERM_PROGRAM", "unknown");
-        }
-        assert!(VsCodeExtension::current_editor_from_env().is_none());
-
-        // Restore original
-        match original {
-            Some(val) => unsafe { std::env::set_var("TERM_PROGRAM", val) },
-            None => unsafe { std::env::remove_var("TERM_PROGRAM") },
-        }
-    }
+    // Note: test_current_editor_from_env is now in the unit tests (src/vscode.rs)
+    // where it can test the internal implementation without modifying environment variables
 
     #[test]
     fn test_with_command() {
