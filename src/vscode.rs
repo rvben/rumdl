@@ -55,7 +55,12 @@ impl VsCodeExtension {
         Self::find_working_command(cmd).is_some()
     }
 
-    fn find_code_command() -> Result<String, String> {
+    /// Internal implementation that accepts a command checker for testing
+    #[doc(hidden)]
+    pub fn find_code_command_impl<F>(command_checker: F) -> Result<String, String>
+    where
+        F: Fn(&str) -> bool,
+    {
         // First, check if we're in an integrated terminal
         if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
             let preferred_cmd = match term_program.to_lowercase().as_str() {
@@ -64,7 +69,7 @@ impl VsCodeExtension {
                     // by checking for Cursor-specific environment variables
                     if std::env::var("CURSOR_TRACE_ID").is_ok() || std::env::var("CURSOR_SETTINGS").is_ok() {
                         "cursor"
-                    } else if Self::command_exists("cursor") && !Self::command_exists("code") {
+                    } else if command_checker("cursor") && !command_checker("code") {
                         // If only cursor exists, use it
                         "cursor"
                     } else {
@@ -76,11 +81,9 @@ impl VsCodeExtension {
                 _ => "",
             };
 
-            // Verify the preferred command exists and works, return the working version
-            if !preferred_cmd.is_empty()
-                && let Some(working_cmd) = Self::find_working_command(preferred_cmd)
-            {
-                return Ok(working_cmd);
+            // Verify the preferred command exists
+            if !preferred_cmd.is_empty() && command_checker(preferred_cmd) {
+                return Ok(preferred_cmd.to_string());
             }
         }
 
@@ -88,8 +91,8 @@ impl VsCodeExtension {
         let commands = ["code", "cursor", "windsurf", "codium", "vscodium"];
 
         for cmd in &commands {
-            if let Some(working_cmd) = Self::find_working_command(cmd) {
-                return Ok(working_cmd);
+            if command_checker(cmd) {
+                return Ok(cmd.to_string());
             }
         }
 
@@ -99,8 +102,16 @@ impl VsCodeExtension {
         ))
     }
 
-    /// Find all available VS Code-compatible editors
-    pub fn find_all_editors() -> Vec<(&'static str, &'static str)> {
+    fn find_code_command() -> Result<String, String> {
+        Self::find_code_command_impl(Self::command_exists)
+    }
+
+    /// Internal implementation that accepts a command checker for testing
+    #[doc(hidden)]
+    pub fn find_all_editors_impl<F>(command_checker: F) -> Vec<(&'static str, &'static str)>
+    where
+        F: Fn(&str) -> bool,
+    {
         let editors = [
             ("code", "VS Code"),
             ("cursor", "Cursor"),
@@ -109,10 +120,12 @@ impl VsCodeExtension {
             ("vscodium", "VSCodium"),
         ];
 
-        editors
-            .into_iter()
-            .filter(|(cmd, _)| Self::command_exists(cmd))
-            .collect()
+        editors.into_iter().filter(|(cmd, _)| command_checker(cmd)).collect()
+    }
+
+    /// Find all available VS Code-compatible editors
+    pub fn find_all_editors() -> Vec<(&'static str, &'static str)> {
+        Self::find_all_editors_impl(Self::command_exists)
     }
 
     /// Get the current editor from TERM_PROGRAM if available

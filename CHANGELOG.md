@@ -7,7 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.157] - 2025-10-13 (unreleased)
+## [0.0.158] - 2025-10-14
+
+### Fixed
+
+- **CRLF Line Ending Support**: Fixed byte position calculations in multiple rules for Windows-style line endings
+  - Fixed MD034, MD046, MD057 byte position calculations
+  - Fixed MD037, MD049, MD011 byte position calculations
+  - Fixed MD050, MD037, MD010, MD026 byte position calculations
+  - Fixed code_block_utils byte position calculation in `is_in_code_span`
+  - All rules now correctly handle CRLF line endings in fixes and diagnostics
+
+- **Test Stability**: Fixed flaky tests with dependency injection pattern
+  - Eliminated race conditions from parallel test execution
+  - Tests no longer modify global environment variables
+  - Added `serial_test` crate for unavoidable global operations
+  - All 1731 tests now pass reliably in parallel execution
+
+### Changed
+
+- **Code Architecture**: Major refactoring to improve maintainability
+  - Extracted `formatter` module (397 lines) - output formatting logic
+  - Extracted `watch` module (491 lines) - watch mode functionality
+  - Extracted `file_processor` module (792 lines) - file processing logic
+  - Extracted `stdin_processor` module (212 lines) - stdin handling
+  - main.rs reduced from 3268 to 1394 lines (57% reduction)
+  - Improved code organization and testability
+
+- **Line Ending Handling**: Refactored line ending preservation
+  - Line ending detection and normalization now at I/O boundaries
+  - Internal code always works with consistent LF line endings
+  - More efficient: 1 normalization per file instead of per-rule
+  - Cleaner separation of concerns
+
+### Removed
+
+- **Legacy Fix Implementation**: Removed deprecated fix wrapper functions
+  - Removed `apply_fixes()` wrapper
+  - Removed `apply_fixes_stdin_coordinated()` wrapper
+  - Removed `apply_fixes_stdin()` legacy implementation
+  - Removed `RUMDL_NO_FIX_COORDINATOR` environment variable
+  - Fix Coordinator is now the only fix strategy (3 weeks stable, ~75% faster)
+
+## [0.0.157] - 2025-10-13
 
 ### Changed
 
