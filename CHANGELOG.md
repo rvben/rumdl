@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.161] - 2025-10-15
+
+### Added
+
+- **MD013**: Support for backslash hard line breaks for mdformat compatibility (closes #110)
+  - Backslash (`\`) at end of line now recognized as hard break alongside two-space breaks
+  - Original hard break format (backslash or spaces) preserved during reflow operations
+  - Segment-based reflow correctly handles both hard break types
+  - Comprehensive test coverage including mdformat compatibility tests
+  - Enables seamless migration from mdformat to rumdl
+
+### Fixed
+
+- **MD029**: Recognize properly indented nested content as list continuation
+  - Nested list items and paragraphs within list items now correctly identified
+  - Improved detection of list item boundaries
+  - Better handling of complex list structures
+
+- **MD013**: Preserve semantic line breaks and fix false positives in normalize mode
+  - Semantic line breaks (intentional breaks for readability) now preserved
+  - Reduced false positives when lines are intentionally kept short
+  - Better detection of paragraph boundaries in normalize mode
+
+- **MD044**: Invert code-blocks logic to match MD013 and change default to false
+  - Parameter logic now consistent: `true` = check code blocks, `false` = skip code blocks
+  - Default changed to `false` (skip code blocks) for better user experience
+  - Aligns with MD013's code block handling for consistency across rules
+
 ## [0.0.160] - 2025-10-15
 
 ### Fixed

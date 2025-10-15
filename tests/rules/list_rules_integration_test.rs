@@ -328,13 +328,11 @@ fn test_empty_lines_between_list_items() {
 
     assert!(md004_result.is_empty(), "MD004 should handle empty lines correctly");
     assert!(md005_result.is_empty(), "MD005 should handle empty lines correctly");
-    // MD029 should detect that item 4 starts a new list after the unordered list section
-    assert_eq!(md029_result.len(), 1, "MD029 should detect numbering issue");
-    assert_eq!(md029_result[0].line, 11, "Should detect issue on line 11");
-    assert!(md029_result[0].message.contains("4"), "Should mention actual number 4");
+    // MD029 should correctly recognize that the nested unordered list is part of item 3's content
+    // Therefore item "4." is correctly the 4th item in the sequence
     assert!(
-        md029_result[0].message.contains("1"),
-        "Should mention expected number 1"
+        md029_result.is_empty(),
+        "MD029 should pass - nested list is part of item 3's content"
     );
 }
 
