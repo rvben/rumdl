@@ -100,20 +100,34 @@ reflow-mode = "normalize"
     let before_code = fixed_content.split("```bash").next().unwrap_or("");
     let lines_before: Vec<&str> = before_code.lines().collect();
 
-    // Check the last line before code block is blank (the original blank line)
+    // When splitting by "```bash", we get everything before it including the indentation line
+    // So the structure is:
+    // lines_before[-3]: "   Get into the distro, then:"
+    // lines_before[-2]: "" (blank line)
+    // lines_before[-1]: "   " (indentation before code fence)
+
+    // Check the last line before code block contains only whitespace (the indent before fence)
     assert!(
         lines_before.last().map(|l| l.trim().is_empty()).unwrap_or(false),
-        "Should have a blank line immediately before code block"
+        "Should have whitespace/indent line immediately before code block marker"
     );
 
-    // Check that the second-to-last line is not blank (no extra blank added)
+    // Check that there's a blank line before the indent line
     if lines_before.len() >= 2 {
         let second_to_last = lines_before[lines_before.len() - 2];
-        // This should be the "Get into the distro, then:" line
         assert!(
-            second_to_last.contains("Get into the distro, then:"),
-            "Blank line spacing should match original structure, got: {:?}",
-            &lines_before[lines_before.len().saturating_sub(3)..]
+            second_to_last.trim().is_empty(),
+            "Should have a blank line before the code fence indent, got: '{second_to_last}'"
+        );
+    }
+
+    // Check that the line before the blank line contains our text (no extra blank added)
+    if lines_before.len() >= 3 {
+        let third_to_last = lines_before[lines_before.len() - 3];
+        assert!(
+            third_to_last.contains("Get into the distro, then:"),
+            "Text line should be 3rd from end, got: {:?}",
+            &lines_before[lines_before.len().saturating_sub(4)..]
         );
     }
 
