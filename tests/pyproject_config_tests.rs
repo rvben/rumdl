@@ -304,3 +304,81 @@ This line is much longer at 130 characters, which exceeds all three limits: 60 c
         "Should have multiple MD013 warnings with .rumdl.toml config"
     );
 }
+
+#[test]
+fn test_pyproject_init_output_is_valid_configuration() {
+    // Create a temporary directory for the test
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let temp_path = temp_dir.path();
+    let pyproject_path = temp_path.join("pyproject.toml");
+
+    // Run the init command with --pyproject flag
+    let (success, _stdout, _stderr) = run_rumdl_command(&["init", "--pyproject"], temp_path);
+
+    assert!(success, "Init command should succeed");
+
+    // Read the generated pyproject.toml file
+    let config_content = fs::read_to_string(&pyproject_path).expect("Failed to read pyproject.toml");
+
+    // Parse the entire pyproject.toml to verify it's valid TOML
+    let toml_value: toml::Value = toml::from_str(&config_content).expect("Generated pyproject.toml is not valid TOML");
+
+    // Verify it has the expected [tool.rumdl] section
+    assert!(
+        toml_value.get("tool").is_some(),
+        "pyproject.toml should have a [tool] section"
+    );
+
+    let tool_section = toml_value.get("tool").unwrap();
+    assert!(
+        tool_section.get("rumdl").is_some(),
+        "pyproject.toml should have a [tool.rumdl] section"
+    );
+
+    // Verify it has build-system section
+    assert!(
+        toml_value.get("build-system").is_some(),
+        "pyproject.toml should have a [build-system] section"
+    );
+
+    // Verify the [tool.rumdl] section has expected configuration fields
+    let rumdl_section = tool_section.get("rumdl").unwrap();
+    assert!(
+        rumdl_section.get("line-length").is_some(),
+        "[tool.rumdl] section should have line-length config"
+    );
+    assert!(
+        rumdl_section.get("exclude").is_some(),
+        "[tool.rumdl] section should have exclude config"
+    );
+}
+
+#[test]
+fn test_pyproject_init_output_can_be_used_by_linter() {
+    // Create a temporary directory for the test
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let temp_path = temp_dir.path();
+
+    // Run the init command with --pyproject flag
+    let (success, _stdout, _stderr) = run_rumdl_command(&["init", "--pyproject"], temp_path);
+
+    assert!(success, "Init command should succeed");
+
+    // Create a simple test markdown file
+    let test_md = temp_path.join("test.md");
+    fs::write(&test_md, "# Hello\n\nThis is a test.\n").expect("Failed to write test file");
+
+    // Run rumdl check with the generated pyproject.toml config
+    let (check_success, check_stdout, check_stderr) = run_rumdl_command(&["check", "test.md"], temp_path);
+
+    // Print output for debugging if the test fails
+    if !check_success {
+        println!("STDOUT:\n{check_stdout}");
+        println!("STDERR:\n{check_stderr}");
+    }
+
+    assert!(
+        check_success,
+        "rumdl check should succeed with generated pyproject.toml config"
+    );
+}

@@ -582,8 +582,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     } else {
                         // Create new pyproject.toml with basic structure
                         let basic_content = r#"[build-system]
-requires = [\"setuptools>=42\", \"wheel\"]
-build-backend = \"setuptools.build_meta\"
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
 
 "#;
                         let content = basic_content.to_owned() + &config_content;
@@ -598,19 +598,19 @@ build-backend = \"setuptools.build_meta\"
                             }
                         }
                     }
-                }
+                } else {
+                    // Create default .rumdl.toml config file
+                    match rumdl_config::create_default_config(".rumdl.toml") {
+                        Ok(_) => {
+                            println!("Created default configuration file: .rumdl.toml");
 
-                // Create default config file
-                match rumdl_config::create_default_config(".rumdl.toml") {
-                    Ok(_) => {
-                        println!("Created default configuration file: .rumdl.toml");
-
-                        // Offer to install VS Code extension
-                        offer_vscode_extension_install();
-                    }
-                    Err(e) => {
-                        eprintln!("{}: Failed to create config file: {}", "Error".red().bold(), e);
-                        exit::tool_error();
+                            // Offer to install VS Code extension
+                            offer_vscode_extension_install();
+                        }
+                        Err(e) => {
+                            eprintln!("{}: Failed to create config file: {}", "Error".red().bold(), e);
+                            exit::tool_error();
+                        }
                     }
                 }
             }
