@@ -395,6 +395,28 @@ impl MD013LineLength {
                 continue;
             }
 
+            // Helper function to detect semantic line markers
+            let is_semantic_line = |content: &str| -> bool {
+                let trimmed = content.trim_start();
+                let semantic_markers = [
+                    "NOTE:",
+                    "WARNING:",
+                    "IMPORTANT:",
+                    "CAUTION:",
+                    "TIP:",
+                    "DANGER:",
+                    "HINT:",
+                    "INFO:",
+                ];
+                semantic_markers.iter().any(|marker| trimmed.starts_with(marker))
+            };
+
+            // Helper function to detect fence markers (opening or closing)
+            let is_fence_marker = |content: &str| -> bool {
+                let trimmed = content.trim_start();
+                trimmed.starts_with("```") || trimmed.starts_with("~~~")
+            };
+
             // Check if this is a list item - handle it specially
             let trimmed = lines[i].trim();
             if is_list_item(trimmed) {
@@ -403,11 +425,13 @@ impl MD013LineLength {
                 let (marker, first_content) = extract_list_marker_and_content(lines[i]);
                 let marker_len = marker.len();
 
-                // Track lines and their types (content, code block, fence)
+                // Track lines and their types (content, code block, fence, nested list)
                 #[derive(Clone)]
                 enum LineType {
                     Content(String),
-                    CodeBlock(String, usize), // content and original indent
+                    CodeBlock(String, usize),      // content and original indent
+                    NestedListItem(String, usize), // full line content and original indent
+                    SemanticLine(String),          // Lines starting with NOTE:, WARNING:, etc that should stay separate
                     Empty,
                 }
 
@@ -468,9 +492,10 @@ impl MD013LineLength {
                             let has_blank_before = matches!(list_item_lines.last(), Some(LineType::Empty));
 
                             // Check if we've already seen nested list content (another nested item)
-                            let has_nested_content = list_item_lines
-                                .iter()
-                                .any(|line| matches!(line, LineType::Content(c) if is_list_item(c.trim())));
+                            let has_nested_content = list_item_lines.iter().any(|line| {
+                                matches!(line, LineType::Content(c) if is_list_item(c.trim()))
+                                    || matches!(line, LineType::NestedListItem(_, _))
+                            });
 
                             if !has_blank_before && !has_nested_content {
                                 // Single-paragraph context with no prior nested items: starts a new item
@@ -478,6 +503,13 @@ impl MD013LineLength {
                                 break;
                             }
                             // else: multi-paragraph context or continuation of nested list, keep collecting
+                            // Mark this as a nested list item to preserve its structure
+                            list_item_lines.push(LineType::NestedListItem(
+                                line_info.content[indent..].to_string(),
+                                indent,
+                            ));
+                            i += 1;
+                            continue;
                         }
 
                         // Normal continuation: marker_len to marker_len+3
@@ -491,7 +523,18 @@ impl MD013LineLength {
                             // Preserve hard breaks (2 trailing spaces) while removing excessive whitespace
                             // See: https://github.com/rvben/rumdl/issues/76
                             let content = trim_preserving_hard_break(&line_info.content[indent..]);
-                            list_item_lines.push(LineType::Content(content));
+
+                            // Check if this is a fence marker (opening or closing)
+                            // These should be treated as code block lines, not paragraph content
+                            if is_fence_marker(&content) {
+                                list_item_lines.push(LineType::CodeBlock(content, indent));
+                            }
+                            // Check if this is a semantic line (NOTE:, WARNING:, etc.)
+                            else if is_semantic_line(&content) {
+                                list_item_lines.push(LineType::SemanticLine(content));
+                            } else {
+                                list_item_lines.push(LineType::Content(content));
+                            }
                             i += 1;
                         } else {
                             // indent >= marker_len + 4: indented code block
@@ -508,38 +551,66 @@ impl MD013LineLength {
                 let indent_size = actual_indent.unwrap_or(marker_len);
                 let expected_indent = " ".repeat(indent_size);
 
-                // Split list_item_lines into blocks (paragraphs and code blocks)
+                // Split list_item_lines into blocks (paragraphs, code blocks, nested lists, and semantic lines)
                 #[derive(Clone)]
                 enum Block {
                     Paragraph(Vec<String>),
-                    CodeBlock(Vec<(String, usize)>), // (content, indent) pairs
+                    Code {
+                        lines: Vec<(String, usize)>, // (content, indent) pairs
+                        has_preceding_blank: bool,   // Whether there was a blank line before this block
+                    },
+                    NestedList(Vec<(String, usize)>), // (content, indent) pairs for nested list items
+                    SemanticLine(String), // Semantic markers like NOTE:, WARNING: that stay on their own line
                 }
 
                 let mut blocks: Vec<Block> = Vec::new();
                 let mut current_paragraph: Vec<String> = Vec::new();
                 let mut current_code_block: Vec<(String, usize)> = Vec::new();
+                let mut current_nested_list: Vec<(String, usize)> = Vec::new();
                 let mut in_code = false;
+                let mut in_nested_list = false;
+                let mut had_preceding_blank = false; // Track if we just saw an empty line
+                let mut code_block_has_preceding_blank = false; // Track blank before current code block
 
                 for line in &list_item_lines {
                     match line {
                         LineType::Empty => {
                             if in_code {
                                 current_code_block.push((String::new(), 0));
+                            } else if in_nested_list {
+                                current_nested_list.push((String::new(), 0));
                             } else if !current_paragraph.is_empty() {
                                 blocks.push(Block::Paragraph(current_paragraph.clone()));
                                 current_paragraph.clear();
                             }
+                            // Mark that we saw a blank line
+                            had_preceding_blank = true;
                         }
                         LineType::Content(content) => {
                             if in_code {
                                 // Switching from code to content
-                                blocks.push(Block::CodeBlock(current_code_block.clone()));
+                                blocks.push(Block::Code {
+                                    lines: current_code_block.clone(),
+                                    has_preceding_blank: code_block_has_preceding_blank,
+                                });
                                 current_code_block.clear();
                                 in_code = false;
+                            } else if in_nested_list {
+                                // Switching from nested list to content
+                                blocks.push(Block::NestedList(current_nested_list.clone()));
+                                current_nested_list.clear();
+                                in_nested_list = false;
                             }
                             current_paragraph.push(content.clone());
+                            had_preceding_blank = false; // Reset after content
                         }
                         LineType::CodeBlock(content, indent) => {
+                            if in_nested_list {
+                                // Switching from nested list to code
+                                blocks.push(Block::NestedList(current_nested_list.clone()));
+                                current_nested_list.clear();
+                                in_nested_list = false;
+                            }
                             if !in_code {
                                 // Switching from content to code
                                 if !current_paragraph.is_empty() {
@@ -547,20 +618,70 @@ impl MD013LineLength {
                                     current_paragraph.clear();
                                 }
                                 in_code = true;
+                                // Record whether there was a blank line before this code block
+                                code_block_has_preceding_blank = had_preceding_blank;
                             }
                             current_code_block.push((content.clone(), *indent));
+                            had_preceding_blank = false; // Reset after code
+                        }
+                        LineType::NestedListItem(content, indent) => {
+                            if in_code {
+                                // Switching from code to nested list
+                                blocks.push(Block::Code {
+                                    lines: current_code_block.clone(),
+                                    has_preceding_blank: code_block_has_preceding_blank,
+                                });
+                                current_code_block.clear();
+                                in_code = false;
+                            }
+                            if !in_nested_list {
+                                // Switching from content to nested list
+                                if !current_paragraph.is_empty() {
+                                    blocks.push(Block::Paragraph(current_paragraph.clone()));
+                                    current_paragraph.clear();
+                                }
+                                in_nested_list = true;
+                            }
+                            current_nested_list.push((content.clone(), *indent));
+                            had_preceding_blank = false; // Reset after nested list
+                        }
+                        LineType::SemanticLine(content) => {
+                            // Semantic lines are standalone - flush any current block and add as separate block
+                            if in_code {
+                                blocks.push(Block::Code {
+                                    lines: current_code_block.clone(),
+                                    has_preceding_blank: code_block_has_preceding_blank,
+                                });
+                                current_code_block.clear();
+                                in_code = false;
+                            } else if in_nested_list {
+                                blocks.push(Block::NestedList(current_nested_list.clone()));
+                                current_nested_list.clear();
+                                in_nested_list = false;
+                            } else if !current_paragraph.is_empty() {
+                                blocks.push(Block::Paragraph(current_paragraph.clone()));
+                                current_paragraph.clear();
+                            }
+                            // Add semantic line as its own block
+                            blocks.push(Block::SemanticLine(content.clone()));
+                            had_preceding_blank = false; // Reset after semantic line
                         }
                     }
                 }
 
                 // Push remaining block
                 if in_code && !current_code_block.is_empty() {
-                    blocks.push(Block::CodeBlock(current_code_block));
+                    blocks.push(Block::Code {
+                        lines: current_code_block,
+                        has_preceding_blank: code_block_has_preceding_blank,
+                    });
+                } else if in_nested_list && !current_nested_list.is_empty() {
+                    blocks.push(Block::NestedList(current_nested_list));
                 } else if !current_paragraph.is_empty() {
                     blocks.push(Block::Paragraph(current_paragraph));
                 }
 
-                // Check if reflowing is needed (only for content paragraphs, not code blocks)
+                // Check if reflowing is needed (only for content paragraphs, not code blocks or nested lists)
                 let content_lines: Vec<String> = list_item_lines
                     .iter()
                     .filter_map(|line| {
@@ -577,13 +698,59 @@ impl MD013LineLength {
                 let combined_content = content_lines.join(" ").trim().to_string();
                 let full_line = format!("{marker}{combined_content}");
 
-                let needs_reflow = self.calculate_effective_length(&full_line) > config.line_length
-                    || (config.reflow_mode == ReflowMode::Normalize && content_lines.len() > 1)
-                    || (config.reflow_mode == ReflowMode::SentencePerLine && {
+                // Helper to check if we should reflow in normalize mode
+                let should_normalize = || {
+                    // Don't normalize if the list item only contains nested lists, code blocks, or semantic lines
+                    // DO normalize if it has plain text content that spans multiple lines
+                    let has_nested_lists = blocks.iter().any(|b| matches!(b, Block::NestedList(_)));
+                    let has_code_blocks = blocks.iter().any(|b| matches!(b, Block::Code { .. }));
+                    let has_semantic_lines = blocks.iter().any(|b| matches!(b, Block::SemanticLine(_)));
+                    let has_paragraphs = blocks.iter().any(|b| matches!(b, Block::Paragraph(_)));
+
+                    // If we have nested lists, code blocks, or semantic lines but no paragraphs, don't normalize
+                    if (has_nested_lists || has_code_blocks || has_semantic_lines) && !has_paragraphs {
+                        return false;
+                    }
+
+                    // If we have paragraphs, check if they span multiple lines or there are multiple blocks
+                    if has_paragraphs {
+                        let paragraph_count = blocks.iter().filter(|b| matches!(b, Block::Paragraph(_))).count();
+                        if paragraph_count > 1 {
+                            // Multiple paragraph blocks should be normalized
+                            return true;
+                        }
+
+                        // Single paragraph block: normalize if it has multiple content lines
+                        if content_lines.len() > 1 {
+                            return true;
+                        }
+                    }
+
+                    false
+                };
+
+                let needs_reflow = match config.reflow_mode {
+                    ReflowMode::Normalize => {
+                        // Only reflow if:
+                        // 1. The combined line would exceed the limit, OR
+                        // 2. The list item should be normalized (has multi-line plain text)
+                        let combined_length = self.calculate_effective_length(&full_line);
+                        if combined_length > config.line_length {
+                            true
+                        } else {
+                            should_normalize()
+                        }
+                    }
+                    ReflowMode::SentencePerLine => {
                         // Check if list item has multiple sentences
                         let sentences = split_into_sentences(&combined_content);
                         sentences.len() > 1
-                    });
+                    }
+                    ReflowMode::Default => {
+                        // In default mode, only reflow if lines exceed limit
+                        self.calculate_effective_length(&full_line) > config.line_length
+                    }
+                };
 
                 if needs_reflow {
                     let start_range = line_index.whole_line_range(list_start + 1);
@@ -657,15 +824,27 @@ impl MD013LineLength {
                                 }
 
                                 // Add blank line after paragraph block if there's a next block
+                                // BUT: check if next block is a code block that doesn't want a preceding blank
                                 if block_idx < blocks.len() - 1 {
-                                    result.push(String::new());
+                                    let next_block = &blocks[block_idx + 1];
+                                    let should_add_blank = match next_block {
+                                        Block::Code {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
+                                        _ => true, // For all other blocks, add blank line
+                                    };
+                                    if should_add_blank {
+                                        result.push(String::new());
+                                    }
                                 }
                             }
-                            Block::CodeBlock(code_lines) => {
+                            Block::Code {
+                                lines: code_lines,
+                                has_preceding_blank: _,
+                            } => {
                                 // Preserve code blocks as-is with original indentation
-                                if !is_first_block {
-                                    result.push(String::new());
-                                }
+                                // NOTE: Blank line before code block is handled by the previous block
+                                // (see paragraph block's logic above)
 
                                 for (idx, (content, orig_indent)) in code_lines.iter().enumerate() {
                                     if is_first_block && idx == 0 {
@@ -679,6 +858,73 @@ impl MD013LineLength {
                                         result.push(String::new());
                                     } else {
                                         result.push(format!("{}{}", " ".repeat(*orig_indent), content));
+                                    }
+                                }
+                            }
+                            Block::NestedList(nested_items) => {
+                                // Preserve nested list items as-is with original indentation
+                                if !is_first_block {
+                                    result.push(String::new());
+                                }
+
+                                for (idx, (content, orig_indent)) in nested_items.iter().enumerate() {
+                                    if is_first_block && idx == 0 {
+                                        // First line of first block gets marker
+                                        result.push(format!(
+                                            "{marker}{}",
+                                            " ".repeat(orig_indent - marker_len) + content
+                                        ));
+                                        is_first_block = false;
+                                    } else if content.is_empty() {
+                                        result.push(String::new());
+                                    } else {
+                                        result.push(format!("{}{}", " ".repeat(*orig_indent), content));
+                                    }
+                                }
+
+                                // Add blank line after nested list if there's a next block
+                                // Check if next block is a code block that doesn't want a preceding blank
+                                if block_idx < blocks.len() - 1 {
+                                    let next_block = &blocks[block_idx + 1];
+                                    let should_add_blank = match next_block {
+                                        Block::Code {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
+                                        _ => true, // For all other blocks, add blank line
+                                    };
+                                    if should_add_blank {
+                                        result.push(String::new());
+                                    }
+                                }
+                            }
+                            Block::SemanticLine(content) => {
+                                // Preserve semantic lines (NOTE:, WARNING:, etc.) as-is on their own line
+                                // Add blank line before if not first block
+                                if !is_first_block {
+                                    result.push(String::new());
+                                }
+
+                                if is_first_block {
+                                    // First block starts with marker
+                                    result.push(format!("{marker}{content}"));
+                                    is_first_block = false;
+                                } else {
+                                    // Subsequent blocks use expected indent
+                                    result.push(format!("{expected_indent}{content}"));
+                                }
+
+                                // Add blank line after semantic line if there's a next block
+                                // Check if next block is a code block that doesn't want a preceding blank
+                                if block_idx < blocks.len() - 1 {
+                                    let next_block = &blocks[block_idx + 1];
+                                    let should_add_blank = match next_block {
+                                        Block::Code {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
+                                        _ => true, // For all other blocks, add blank line
+                                    };
+                                    if should_add_blank {
+                                        result.push(String::new());
                                     }
                                 }
                             }
@@ -699,13 +945,34 @@ impl MD013LineLength {
 
                     // Only generate a warning if the replacement is different from the original
                     if original_text != replacement {
+                        // Generate an appropriate message based on why reflow is needed
+                        let message = match config.reflow_mode {
+                            ReflowMode::SentencePerLine => {
+                                "Line contains multiple sentences (one sentence per line expected)".to_string()
+                            }
+                            ReflowMode::Normalize => {
+                                let combined_length = self.calculate_effective_length(&full_line);
+                                if combined_length > config.line_length {
+                                    format!(
+                                        "Line length {} exceeds {} characters",
+                                        combined_length, config.line_length
+                                    )
+                                } else {
+                                    "Multi-line content can be normalized".to_string()
+                                }
+                            }
+                            ReflowMode::Default => {
+                                let combined_length = self.calculate_effective_length(&full_line);
+                                format!(
+                                    "Line length {} exceeds {} characters",
+                                    combined_length, config.line_length
+                                )
+                            }
+                        };
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name()),
-                            message: if config.reflow_mode == ReflowMode::SentencePerLine {
-                                "Line contains multiple sentences (one sentence per line expected)".to_string()
-                            } else {
-                                format!("Line length exceeds {} characters", config.line_length)
-                            },
+                            message,
                             line: list_start + 1,
                             column: 1,
                             end_line: end_line + 1,
