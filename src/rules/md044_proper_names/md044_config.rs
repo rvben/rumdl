@@ -24,7 +24,7 @@ impl Default for MD044Config {
 }
 
 fn default_code_blocks() -> bool {
-    true
+    false
 }
 
 fn default_html_comments() -> bool {
@@ -83,7 +83,7 @@ mod tests {
     fn test_default_values() {
         let config = MD044Config::default();
         assert!(config.names.is_empty());
-        assert!(config.code_blocks);
+        assert!(!config.code_blocks); // Default is false (skip code blocks)
         assert!(config.html_comments);
     }
 }

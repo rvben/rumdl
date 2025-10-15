@@ -43,7 +43,7 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 /// ```yaml
 /// MD044:
 ///   names: []                # List of proper names to check for correct capitalization
-///   code-blocks: true        # Whether to exclude code blocks from checking
+///   code-blocks: false       # Whether to check code blocks (default: false)
 /// ```
 ///
 /// Example configuration:
@@ -67,7 +67,7 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 ///
 /// - **Word Boundaries**: Only matches complete words, not substrings within other words
 /// - **Case Sensitivity**: Properly handles case-specific matching
-/// - **Code Blocks**: Optionally excludes code blocks where capitalization may be intentionally different
+/// - **Code Blocks**: Optionally checks code blocks (controlled by code-blocks setting)
 /// - **Markdown Formatting**: Handles proper names within Markdown formatting elements
 ///
 /// ## Fix Behavior
@@ -237,8 +237,8 @@ impl MD044ProperNames {
                 continue;
             }
 
-            // Skip if in code block
-            if self.config.code_blocks && line_info.in_code_block {
+            // Skip if in code block (when code_blocks = false)
+            if !self.config.code_blocks && line_info.in_code_block {
                 continue;
             }
 
@@ -300,8 +300,8 @@ impl MD044ProperNames {
                             continue; // Not at word boundary
                         }
 
-                        // Skip if in inline code when code_blocks is true
-                        if self.config.code_blocks {
+                        // Skip if in inline code when code_blocks is false
+                        if !self.config.code_blocks {
                             let byte_pos = line_info.byte_offset + cap.start();
                             if ctx.is_in_code_block_or_span(byte_pos) {
                                 continue;
@@ -658,13 +658,13 @@ mod tests {
     }
 
     #[test]
-    fn test_names_in_code_blocks_ignored() {
+    fn test_names_in_code_blocks_checked_by_default() {
         let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
 
         let content = r#"Here is some text with JavaScript.
 
 ```javascript
-// This javascript should be ignored
+// This javascript should be checked
 const lang = "javascript";
 ```
 
@@ -673,16 +673,17 @@ But this javascript should be flagged."#;
         let ctx = create_context(content);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1, "Should only flag javascript outside code blocks");
-        assert_eq!(result[0].line, 8);
-        assert_eq!(result[0].message, "Proper name 'javascript' should be 'JavaScript'");
+        assert_eq!(result.len(), 3, "Should flag javascript inside and outside code blocks");
+        assert_eq!(result[0].line, 4);
+        assert_eq!(result[1].line, 5);
+        assert_eq!(result[2].line, 8);
     }
 
     #[test]
-    fn test_names_in_code_blocks_not_ignored_when_disabled() {
+    fn test_names_in_code_blocks_ignored_when_disabled() {
         let rule = MD044ProperNames::new(
             vec!["JavaScript".to_string()],
-            false, // code_blocks = false means check inside code blocks
+            false, // code_blocks = false means skip code blocks
         );
 
         let content = r#"```
@@ -694,22 +695,23 @@ javascript in code block
 
         assert_eq!(
             result.len(),
-            1,
-            "Should flag javascript in code blocks when code_blocks is false"
+            0,
+            "Should not flag javascript in code blocks when code_blocks is false"
         );
     }
 
     #[test]
-    fn test_names_in_inline_code_ignored() {
+    fn test_names_in_inline_code_checked_by_default() {
         let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
 
         let content = "This is `javascript` in inline code and javascript outside.";
         let ctx = create_context(content);
         let result = rule.check(&ctx).unwrap();
 
-        // When code_blocks=true, inline code should be excluded
-        assert_eq!(result.len(), 1, "Should only flag javascript outside inline code");
-        assert_eq!(result[0].column, 41); // javascript outside
+        // When code_blocks=true, inline code should be checked
+        assert_eq!(result.len(), 2, "Should flag javascript inside and outside inline code");
+        assert_eq!(result[0].column, 10); // javascript in inline code
+        assert_eq!(result[1].column, 41); // javascript outside
     }
 
     #[test]
@@ -839,7 +841,7 @@ javascript in code block
     }
 
     #[test]
-    fn test_fix_preserves_code_blocks() {
+    fn test_fix_checks_code_blocks_by_default() {
         let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
 
         let content = r#"I love javascript.
@@ -856,7 +858,7 @@ More javascript here."#;
         let expected = r#"I love JavaScript.
 
 ```
-const lang = "javascript";
+const lang = "JavaScript";
 ```
 
 More JavaScript here."#;
@@ -886,7 +888,7 @@ Third line with RUST and PYTHON."#;
     fn test_default_config() {
         let config = MD044Config::default();
         assert!(config.names.is_empty());
-        assert!(config.code_blocks);
+        assert!(!config.code_blocks); // Default is false (skip code blocks)
     }
 
     #[test]
@@ -949,7 +951,7 @@ Third line with RUST and PYTHON."#;
     fn test_html_comments_not_checked_when_disabled() {
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
-            code_blocks: true,
+            code_blocks: true,    // Check code blocks
             html_comments: false, // Don't check HTML comments
         };
         let rule = MD044ProperNames::from_config_struct(config);
@@ -970,7 +972,7 @@ More javascript outside."#;
     fn test_html_comments_checked_when_enabled() {
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
-            code_blocks: true,
+            code_blocks: true,   // Check code blocks
             html_comments: true, // Check HTML comments
         };
         let rule = MD044ProperNames::from_config_struct(config);
@@ -993,8 +995,8 @@ More javascript outside."#;
     fn test_multiline_html_comments() {
         let config = MD044Config {
             names: vec!["Python".to_string(), "JavaScript".to_string()],
-            code_blocks: true,
-            html_comments: false,
+            code_blocks: true,    // Check code blocks
+            html_comments: false, // Don't check HTML comments
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
@@ -1018,8 +1020,8 @@ More javascript outside."#;
     fn test_fix_preserves_html_comments_when_disabled() {
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
-            code_blocks: true,
-            html_comments: false,
+            code_blocks: true,    // Check code blocks
+            html_comments: false, // Don't check HTML comments
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
