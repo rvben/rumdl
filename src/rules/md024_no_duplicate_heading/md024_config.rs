@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub struct MD024Config {
     /// Allow duplicate headings if they're nested at different levels (default: false)
-    #[serde(default)]
+    #[serde(default, alias = "allow_different_nesting")]
     pub allow_different_nesting: bool,
 
     /// Only check siblings (same parent) for duplicates (default: false)
-    #[serde(default)]
+    #[serde(default, alias = "siblings_only")]
     pub siblings_only: bool,
 }
 

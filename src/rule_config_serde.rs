@@ -12,6 +12,9 @@ pub trait RuleConfig: Serialize + DeserializeOwned + Default + Clone {
 }
 
 /// Helper to load rule configuration from the global config
+///
+/// This function will emit warnings to stderr if the configuration is invalid,
+/// helping users identify and fix configuration errors.
 pub fn load_rule_config<T: RuleConfig>(config: &crate::config::Config) -> T {
     config
         .rules
@@ -28,7 +31,17 @@ pub fn load_rule_config<T: RuleConfig>(config: &crate::config::Config) -> T {
             let toml_table = toml::Value::Table(table);
 
             // Deserialize directly from TOML, which preserves serde attributes
-            toml_table.try_into().ok()
+            match toml_table.try_into::<T>() {
+                Ok(config) => Some(config),
+                Err(e) => {
+                    // Emit a warning about the invalid configuration
+                    eprintln!("Warning: Invalid configuration for rule {}: {}", T::RULE_NAME, e);
+                    eprintln!("Using default values for rule {}.", T::RULE_NAME);
+                    eprintln!("Hint: Check the documentation for valid configuration values.");
+
+                    None
+                }
+            }
         })
         .unwrap_or_default()
 }
@@ -352,5 +365,41 @@ mod tests {
         let valid_float = toml::Value::Float(1.23);
         let json_float = toml_value_to_json(&valid_float).unwrap();
         assert_eq!(json_float, serde_json::json!(1.23));
+    }
+
+    #[test]
+    fn test_invalid_config_returns_default() {
+        // Create config with unknown field
+        let mut config = crate::config::Config::default();
+        let mut rule_values = BTreeMap::new();
+        rule_values.insert("unknown_field".to_string(), toml::Value::Boolean(true));
+        // Use a table value for items, which expects an array
+        rule_values.insert("items".to_string(), toml::Value::Table(toml::map::Map::new()));
+
+        config
+            .rules
+            .insert("TEST001".to_string(), crate::config::RuleConfig { values: rule_values });
+
+        // Load config - should return default and print warning
+        let rule_config: TestRuleConfig = load_rule_config(&config);
+        // Should use default values since deserialization failed
+        assert_eq!(rule_config, TestRuleConfig::default());
+    }
+
+    #[test]
+    fn test_invalid_field_type() {
+        // Create config with wrong type for field
+        let mut config = crate::config::Config::default();
+        let mut rule_values = BTreeMap::new();
+        // indent should be i64, but we're providing a string
+        rule_values.insert("indent".to_string(), toml::Value::String("not_a_number".to_string()));
+
+        config
+            .rules
+            .insert("TEST001".to_string(), crate::config::RuleConfig { values: rule_values });
+
+        // Load config - should return default and print warning
+        let rule_config: TestRuleConfig = load_rule_config(&config);
+        assert_eq!(rule_config, TestRuleConfig::default());
     }
 }

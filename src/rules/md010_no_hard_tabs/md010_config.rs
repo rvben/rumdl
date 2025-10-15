@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub struct MD010Config {
     /// Number of spaces per tab (default: 4)
-    #[serde(default = "default_spaces_per_tab")]
+    #[serde(default = "default_spaces_per_tab", alias = "spaces_per_tab")]
     pub spaces_per_tab: usize,
 }
 

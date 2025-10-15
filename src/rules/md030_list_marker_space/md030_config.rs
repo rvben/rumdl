@@ -6,19 +6,19 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub struct MD030Config {
     /// Spaces for single-line unordered list items (default: 1)
-    #[serde(default = "default_spaces")]
+    #[serde(default = "default_spaces", alias = "ul_single")]
     pub ul_single: usize,
 
     /// Spaces for multi-line unordered list items (default: 1)
-    #[serde(default = "default_spaces")]
+    #[serde(default = "default_spaces", alias = "ul_multi")]
     pub ul_multi: usize,
 
     /// Spaces for single-line ordered list items (default: 1)
-    #[serde(default = "default_spaces")]
+    #[serde(default = "default_spaces", alias = "ol_single")]
     pub ol_single: usize,
 
     /// Spaces for multi-line ordered list items (default: 1)
-    #[serde(default = "default_spaces")]
+    #[serde(default = "default_spaces", alias = "ol_multi")]
     pub ol_multi: usize,
 }
 
@@ -39,4 +39,39 @@ impl Default for MD030Config {
 
 impl RuleConfig for MD030Config {
     const RULE_NAME: &'static str = "MD030";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_snake_case_backwards_compatibility() {
+        let toml_str = r#"
+            ul_single = 2
+            ol_single = 3
+            ul_multi = 4
+            ol_multi = 5
+        "#;
+        let config: MD030Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.ul_single, 2);
+        assert_eq!(config.ol_single, 3);
+        assert_eq!(config.ul_multi, 4);
+        assert_eq!(config.ol_multi, 5);
+    }
+
+    #[test]
+    fn test_kebab_case_canonical_format() {
+        let toml_str = r#"
+            ul-single = 2
+            ol-single = 3
+            ul-multi = 4
+            ol-multi = 5
+        "#;
+        let config: MD030Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.ul_single, 2);
+        assert_eq!(config.ol_single, 3);
+        assert_eq!(config.ul_multi, 4);
+        assert_eq!(config.ol_multi, 5);
+    }
 }

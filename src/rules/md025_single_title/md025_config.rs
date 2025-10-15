@@ -7,13 +7,13 @@ pub struct MD025Config {
     #[serde(default = "default_level")]
     pub level: usize,
 
-    #[serde(default = "default_front_matter_title")]
+    #[serde(default = "default_front_matter_title", alias = "front_matter_title")]
     pub front_matter_title: String,
 
-    #[serde(default = "default_allow_document_sections")]
+    #[serde(default = "default_allow_document_sections", alias = "allow_document_sections")]
     pub allow_document_sections: bool,
 
-    #[serde(default = "default_allow_with_separators")]
+    #[serde(default = "default_allow_with_separators", alias = "allow_with_separators")]
     pub allow_with_separators: bool,
 }
 
