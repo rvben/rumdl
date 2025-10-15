@@ -1,13 +1,13 @@
 //! GitHub Actions annotation format
 //!
 //! Outputs annotations in GitHub Actions workflow command format for PR annotations.
-//! See: https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions
+//! See: <https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions>
 
 use crate::output::OutputFormatter;
 use crate::rule::{LintWarning, Severity};
 
 /// GitHub Actions formatter
-/// Outputs in the format: ::<level> file=<file>,line=<line>,col=<col>,endLine=<endLine>,endColumn=<endCol>,title=<rule>::<message>
+/// Outputs in the format: `::<level> file=<file>,line=<line>,col=<col>,endLine=<endLine>,endColumn=<endCol>,title=<rule>::<message>`
 pub struct GitHubFormatter;
 
 impl Default for GitHubFormatter {

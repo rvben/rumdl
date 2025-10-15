@@ -21,7 +21,7 @@ impl StringInterner {
         }
     }
 
-    /// Intern a string, returning an Arc<str> that can be shared
+    /// Intern a string, returning an `Arc<str>` that can be shared
     pub fn intern(&mut self, s: &str) -> Arc<str> {
         if let Some(interned) = self.strings.get(s) {
             interned.clone()

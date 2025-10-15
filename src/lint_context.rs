@@ -304,9 +304,9 @@ pub struct HtmlTag {
     pub byte_end: usize,
     /// Tag name (e.g., "div", "img", "br")
     pub tag_name: String,
-    /// Whether it's a closing tag (</tag>)
+    /// Whether it's a closing tag (`</tag>`)
     pub is_closing: bool,
-    /// Whether it's self-closing (<tag />)
+    /// Whether it's self-closing (`<tag />`)
     pub is_self_closing: bool,
     /// Raw tag content
     pub raw_content: String,

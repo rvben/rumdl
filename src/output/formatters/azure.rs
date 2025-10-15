@@ -4,7 +4,7 @@ use crate::output::OutputFormatter;
 use crate::rule::LintWarning;
 
 /// Azure Pipeline formatter
-/// Outputs in the format: ##vso[task.logissue type=warning;sourcepath=<file>;linenumber=<line>;columnnumber=<col>;code=<rule>]<message>
+/// Outputs in the format: `##vso[task.logissue type=warning;sourcepath=<file>;linenumber=<line>;columnnumber=<col>;code=<rule>]<message>`
 pub struct AzureFormatter;
 
 impl Default for AzureFormatter {
