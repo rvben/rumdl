@@ -697,6 +697,12 @@ respect-gitignore = true
 # Disable specific rules
 disabled-rules = ["MD013", "MD033"]
 
+# Disable specific rules for specific files
+[per-file-ignores]
+"README.md" = ["MD033"]  # Allow HTML in README
+"SUMMARY.md" = ["MD025"]  # Allow multiple H1 in table of contents
+"docs/api/**/*.md" = ["MD013", "MD041"]  # Relax rules for generated docs
+
 # Configure individual rules
 [MD007]
 indent = 2

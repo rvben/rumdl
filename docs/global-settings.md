@@ -13,6 +13,7 @@ Global settings are configured in the `[global]` section of your configuration f
 |---------|------|---------|-------------|
 | [`enable`](#enable) | `string[]` | `[]` | Enable only specific rules |
 | [`disable`](#disable) | `string[]` | `[]` | Disable specific rules |
+| [`per-file-ignores`](#per-file-ignores) | `table` | `{}` | Disable specific rules for specific files |
 | [`exclude`](#exclude) | `string[]` | `[]` | Files/directories to exclude |
 | [`include`](#include) | `string[]` | `[]` | Files/directories to include |
 | [`respect_gitignore`](#respect_gitignore) | `boolean` | `true` | Respect .gitignore files |
@@ -55,6 +56,12 @@ line_length = 120
 
 # Set markdown flavor (standard, mkdocs)
 flavor = "mkdocs"
+
+# Disable specific rules for specific files
+[per-file-ignores]
+"README.md" = ["MD033"]  # Allow inline HTML in README
+"docs/api/**/*.md" = ["MD013", "MD041"]  # Generated API docs
+"SUMMARY.md" = ["MD025"]  # MkDocs/mdBook table of contents
 ```
 
 ### pyproject.toml Configuration
@@ -69,6 +76,11 @@ include = ["docs/*.md", "README.md"]
 respect_gitignore = true
 line_length = 120
 flavor = "standard"
+
+# Per-file rule ignores (both snake_case and kebab-case supported)
+[tool.rumdl.per-file-ignores]
+"README.md" = ["MD033"]
+"SUMMARY.md" = ["MD025"]
 ```
 
 ## Detailed Settings Reference
@@ -126,6 +138,96 @@ disable = ["MD013", "MD033", "MD041"]
 ```bash
 rumdl check --disable MD013,MD033 .
 ```
+
+### `per-file-ignores`
+
+**Type**: `table` (file patterns mapped to rule arrays)
+**Default**: `{}` (no per-file ignores)
+**CLI Equivalent**: None (configuration file only)
+
+Disables specific rules for specific files or file patterns. This is useful when certain files have different requirements than the rest of your documentation.
+
+```toml
+[per-file-ignores]
+# Disable inline HTML check for GitHub README (often has badges)
+"README.md" = ["MD033"]
+
+# Disable line length and first-line heading for generated API docs
+"docs/api/**/*.md" = ["MD013", "MD041"]
+
+# Allow multiple top-level headings in table of contents files
+"SUMMARY.md" = ["MD025"]
+"**/TOC.md" = ["MD025"]
+
+# Disable heading style check for legacy documentation
+"docs/legacy/**/*.md" = ["MD003", "MD022"]
+```
+
+**Usage Notes**:
+
+- Patterns support glob syntax (`*`, `**`, `?`)
+- Rule IDs are case-insensitive but conventionally uppercase
+- More specific patterns take precedence over general ones
+- Useful for handling special files like:
+  - `README.md` files (often contain badges, HTML, custom formatting)
+  - Generated documentation (API docs, changelogs)
+  - Table of contents files (`SUMMARY.md`, `TOC.md`)
+  - Legacy or third-party documentation
+- Combines with global `enable`/`disable` settings
+
+**Behavior**:
+
+1. Global rules are applied first
+2. Per-file ignores override global settings for matching files
+3. If a file matches multiple patterns, all ignores are combined
+
+**Example with precedence**:
+
+```toml
+[global]
+disable = ["MD013"]  # Disable line length globally
+
+[per-file-ignores]
+"README.md" = ["MD033", "MD041"]  # Also disable HTML and first-line heading for README
+"docs/**/*.md" = ["MD033"]  # Allow HTML in docs
+```
+
+Result:
+
+- `README.md`: MD013, MD033, MD041 disabled
+- `docs/guide.md`: MD013, MD033 disabled
+- `other.md`: MD013 disabled
+
+**Common Use Cases**:
+
+1. **MkDocs/mdBook Projects**:
+
+   ```toml
+   [per-file-ignores]
+   "SUMMARY.md" = ["MD025"]  # Table of contents has multiple H1 headings
+   ```
+
+2. **GitHub Projects with Badges**:
+
+   ```toml
+   [per-file-ignores]
+   "README.md" = ["MD033", "MD041"]  # Allow HTML badges, may not start with heading
+   ```
+
+3. **Generated Documentation**:
+
+   ```toml
+   [per-file-ignores]
+   "docs/api/**/*.md" = ["MD013", "MD024", "MD041"]  # Relax rules for generated files
+   ```
+
+4. **Mixed Documentation Sources**:
+
+   ```toml
+   [per-file-ignores]
+   "vendor/**/*.md" = ["MD013", "MD033", "MD041"]  # Third-party docs
+   "legacy/**/*.md" = ["MD003", "MD022", "MD032"]  # Old docs with different style
+   ```
 
 ### `exclude`
 
