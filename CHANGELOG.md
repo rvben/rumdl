@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.160] - 2025-10-15
+
+### Fixed
+
+- **Configuration**: Fixed `rumdl init --pyproject` command to no longer create `.rumdl.toml` file
+  - The command now correctly only adds rumdl configuration to `pyproject.toml`
+  - Prevents confusion from having duplicate configuration files
+
+- **MD044**: Corrected field name in templates and documentation
+  - Fixed inconsistency in proper names configuration
+  - Improved accuracy of documentation examples
+
+- **Configuration System**: Added field aliases and validation warnings for all rules
+  - Better backwards compatibility with alternative field names
+  - Helpful warnings guide users to correct configuration syntax
+  - Improved user experience when migrating configurations
+
 ## [0.0.159] - 2025-10-14
 
 ### Added
