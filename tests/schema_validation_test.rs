@@ -94,7 +94,7 @@ headings = true
 
 [MD044]
 names = ["rumdl", "Markdown", "GitHub"]
-code_blocks_excluded = true
+code-blocks = true
 "#;
     assert!(validate_toml_config(toml).is_ok());
 }

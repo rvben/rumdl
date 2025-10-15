@@ -75,4 +75,55 @@ mod init_command_tests {
         let config_content = fs::read_to_string(config_path).expect("Failed to read config file");
         assert_eq!(config_content, "# Existing config");
     }
+
+    #[test]
+    fn test_init_output_is_valid_configuration() {
+        // Create a temporary directory for the test
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+        let config_path = temp_path.join(".rumdl.toml");
+
+        // Run the init command in the temp directory
+        let mut cmd = Command::cargo_bin("rumdl").expect("Failed to find binary");
+        cmd.current_dir(temp_path).arg("init").assert().success();
+
+        // Read the generated config file
+        let config_content = fs::read_to_string(&config_path).expect("Failed to read config file");
+
+        // Parse the config to verify it's valid TOML
+        let toml_value: toml::Value = toml::from_str(&config_content).expect("Generated config is not valid TOML");
+
+        // Verify it can be deserialized into our Config struct
+        let _config: config::Config =
+            toml::from_str(&config_content).expect("Generated config cannot be deserialized into Config struct");
+
+        // Verify some expected structure
+        assert!(
+            toml_value.get("global").is_some(),
+            "Config should have a [global] section"
+        );
+    }
+
+    #[test]
+    fn test_init_output_can_be_used_by_linter() {
+        // Create a temporary directory for the test
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Run the init command
+        let mut cmd = Command::cargo_bin("rumdl").expect("Failed to find binary");
+        cmd.current_dir(temp_path).arg("init").assert().success();
+
+        // Create a simple test markdown file
+        let test_md = temp_path.join("test.md");
+        fs::write(&test_md, "# Hello\n\nThis is a test.\n").expect("Failed to write test file");
+
+        // Run rumdl check with the generated config
+        let mut cmd = Command::cargo_bin("rumdl").expect("Failed to find binary");
+        cmd.current_dir(temp_path)
+            .arg("check")
+            .arg("test.md")
+            .assert()
+            .success();
+    }
 }

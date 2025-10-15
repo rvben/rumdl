@@ -365,7 +365,7 @@ respect_gitignore = true
 
 # [MD044]
 # names = ["rumdl", "Markdown", "GitHub"]  # Proper names that should be capitalized correctly
-# code_blocks_excluded = true  # Exclude code blocks from proper name check
+# code-blocks = true  # Exclude code blocks from proper name check
 "#;
 
     // Write the default configuration to the file
@@ -459,7 +459,7 @@ respect-gitignore = true
 
 # [tool.rumdl.MD044]
 # names = ["rumdl", "Markdown", "GitHub"]  # Proper names that should be capitalized correctly
-# code_blocks_excluded = true  # Exclude code blocks from proper name check
+# code-blocks = true  # Exclude code blocks from proper name check
 "#;
 
     config_content.to_string()

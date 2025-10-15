@@ -43,7 +43,7 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 /// ```yaml
 /// MD044:
 ///   names: []                # List of proper names to check for correct capitalization
-///   code_blocks_excluded: true  # Whether to exclude code blocks from checking
+///   code-blocks: true        # Whether to exclude code blocks from checking
 /// ```
 ///
 /// Example configuration:
@@ -51,7 +51,7 @@ type WarningPosition = (usize, usize, String); // (line, column, found_name)
 /// ```yaml
 /// MD044:
 ///   names: ["JavaScript", "Node.js", "TypeScript"]
-///   code_blocks_excluded: true
+///   code-blocks: true
 /// ```
 ///
 /// ## Performance Optimizations
