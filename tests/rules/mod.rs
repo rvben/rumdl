@@ -29,6 +29,7 @@ mod md029_code_block_separation_test;
 mod md029_fix_test;
 mod md029_issue42_test;
 mod md029_markdownlint_parity_test;
+mod md029_nested_list_continuation_test;
 mod md029_test;
 mod md030_test;
 mod md031_kramdown_test;

@@ -325,8 +325,9 @@ impl MD029OrderedListPrefix {
         }
     }
 
-    /// Check if blocks are separated only by unindented list items
-    /// This helps detect the pattern: 1. item / - sub / 1. item (should be 2.)
+    /// Check if blocks are separated only by list items or properly indented list continuation content
+    /// This helps detect the pattern: 1. item / - nested sub / 1. item (should be 2.)
+    /// Now also allows indented nested lists and content that's properly indented for list continuation
     fn has_only_unindented_lists_between(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -337,6 +338,30 @@ impl MD029OrderedListPrefix {
             return false;
         }
 
+        // Calculate minimum continuation indent from the previous block's last item
+        let min_continuation_indent =
+            if let Some(prev_block) = ctx.list_blocks.iter().find(|block| block.end_line == end_line) {
+                if let Some(&last_item_line) = prev_block.item_lines.last() {
+                    if let Some(line_info) = ctx.line_info(last_item_line) {
+                        if let Some(list_item) = &line_info.list_item {
+                            if list_item.is_ordered {
+                                list_item.marker.len() + 1 // Add 1 for space after ordered markers
+                            } else {
+                                2 // Unordered lists need at least 2 spaces
+                            }
+                        } else {
+                            3 // Fallback
+                        }
+                    } else {
+                        3 // Fallback
+                    }
+                } else {
+                    3 // Fallback
+                }
+            } else {
+                3 // Fallback
+            };
+
         for line_num in (end_line + 1)..start_line {
             if let Some(line_info) = ctx.line_info(line_num) {
                 let trimmed = line_info.content.trim();
@@ -346,12 +371,40 @@ impl MD029OrderedListPrefix {
                     continue;
                 }
 
-                // If it's an unindented list item (column 0), that's what we're looking for
-                if line_info.list_item.is_some() && line_info.indent == 0 {
+                // Allow any list item (both unindented and properly indented nested lists)
+                if line_info.list_item.is_some() {
+                    // Check if nested list has sufficient indentation to be continuation
+                    if line_info.indent >= min_continuation_indent {
+                        continue; // Properly indented nested list
+                    }
+                    // Unindented or under-indented list item breaks continuity
+                    return false;
+                }
+
+                // Allow fence markers that are properly indented
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    if line_info.indent >= min_continuation_indent {
+                        continue; // Properly indented fence marker
+                    }
+                    // Under-indented fence marker breaks continuity
+                    return false;
+                }
+
+                // Allow code blocks that are properly indented
+                if line_info.in_code_block {
+                    if line_info.indent >= min_continuation_indent {
+                        continue; // Properly indented code block
+                    }
+                    // Under-indented code block breaks continuity
+                    return false;
+                }
+
+                // Allow other indented text that's part of list continuation
+                if line_info.indent >= min_continuation_indent {
                     continue;
                 }
 
-                // Any other non-empty content means it's not just unindented lists
+                // Any other content (unindented or under-indented) breaks continuity
                 return false;
             }
         }
@@ -370,15 +423,34 @@ impl MD029OrderedListPrefix {
             return false;
         }
 
+        // Calculate minimum continuation indent from the previous block's last item
+        let min_continuation_indent =
+            if let Some(prev_block) = ctx.list_blocks.iter().find(|block| block.end_line == end_line) {
+                if let Some(&last_item_line) = prev_block.item_lines.last() {
+                    if let Some(line_info) = ctx.line_info(last_item_line) {
+                        if let Some(list_item) = &line_info.list_item {
+                            if list_item.is_ordered {
+                                list_item.marker.len() + 1 // Add 1 for space after ordered markers
+                            } else {
+                                2 // Unordered lists need at least 2 spaces
+                            }
+                        } else {
+                            3 // Fallback
+                        }
+                    } else {
+                        3 // Fallback
+                    }
+                } else {
+                    3 // Fallback
+                }
+            } else {
+                3 // Fallback
+            };
+
         for line_num in (end_line + 1)..start_line {
             if let Some(line_info) = ctx.line_info(line_num) {
                 // Skip empty lines
                 if line_info.is_blank {
-                    continue;
-                }
-
-                // Skip lines in code blocks
-                if line_info.in_code_block {
                     continue;
                 }
 
@@ -387,9 +459,42 @@ impl MD029OrderedListPrefix {
                     return false;
                 }
 
-                // If there's any other non-empty content, be conservative and separate
                 let trimmed = line_info.content.trim();
-                if !trimmed.is_empty() && !trimmed.starts_with("```") && !trimmed.starts_with("~~~") {
+
+                // Allow list items if properly indented
+                if line_info.list_item.is_some() {
+                    if line_info.indent >= min_continuation_indent {
+                        continue; // Properly indented nested list
+                    }
+                    // Under-indented list breaks continuity
+                    return false;
+                }
+
+                // Allow fence markers if properly indented
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    if line_info.indent >= min_continuation_indent {
+                        continue; // Properly indented fence
+                    }
+                    // Under-indented fence breaks continuity
+                    return false;
+                }
+
+                // Allow code blocks if properly indented
+                if line_info.in_code_block {
+                    if line_info.indent >= min_continuation_indent {
+                        continue; // Properly indented code block
+                    }
+                    // Under-indented code block breaks continuity
+                    return false;
+                }
+
+                // Allow other indented text that's part of list continuation
+                if line_info.indent >= min_continuation_indent {
+                    continue;
+                }
+
+                // Any other unindented or under-indented content breaks continuity
+                if !trimmed.is_empty() {
                     return false;
                 }
             }
