@@ -26,7 +26,7 @@ fn test_incorrect_names() {
 #[test]
 fn test_code_block_excluded() {
     let names = vec!["JavaScript".to_string()];
-    let rule = MD044ProperNames::new(names, true);
+    let rule = MD044ProperNames::new(names, false); // false = skip code blocks
     let content = "# JavaScript Guide\n\n```javascript\nconst x = 'javascript';\n```";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -36,7 +36,7 @@ fn test_code_block_excluded() {
 #[test]
 fn test_code_block_included() {
     let names = vec!["JavaScript".to_string()];
-    let rule = MD044ProperNames::new(names, false);
+    let rule = MD044ProperNames::new(names, true); // true = check code blocks
     let content = "# JavaScript Guide\n\n```javascript\nconst x = 'javascript';\n```";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -51,7 +51,7 @@ fn test_code_block_included() {
 #[test]
 fn test_indented_code_block() {
     let names = vec!["JavaScript".to_string()];
-    let rule = MD044ProperNames::new(names, true);
+    let rule = MD044ProperNames::new(names, false); // false = skip code blocks
     let content = "# JavaScript Guide\n\n    const x = 'javascript';\n    console.log(x);";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -137,11 +137,11 @@ fn test_fix_multiple_on_same_line() {
 #[test]
 fn test_fix_adjacent_to_markdown() {
     let names = vec!["Markdown".to_string()];
-    let rule = MD044ProperNames::new(names, true);
+    let rule = MD044ProperNames::new(names, false); // false = skip code blocks
     let content = "*markdown* _markdown_ `markdown` [markdown](link)";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
-    // When code_blocks=true, inline code should not be fixed
+    // When code_blocks=false, inline code should not be fixed
     // With link filtering, proper names inside links should not be corrected
     assert_eq!(fixed, "*Markdown* _Markdown_ `markdown` [markdown](link)");
 }
@@ -159,7 +159,7 @@ fn test_fix_with_dots() {
 #[test]
 fn test_fix_code_block_included() {
     let names = vec!["Rust".to_string()];
-    let rule = MD044ProperNames::new(names, false); // Include code blocks
+    let rule = MD044ProperNames::new(names, true); // true = check code blocks
     let content = "```rust\nlet lang = \"rust\";\n```\n\nThis is rust code.";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
@@ -170,7 +170,7 @@ fn test_fix_code_block_included() {
 fn test_code_fence_language_identifiers_preserved() {
     // Test that language identifiers in code fences are not modified
     let names = vec!["Rust".to_string(), "Python".to_string(), "JavaScript".to_string()];
-    let rule = MD044ProperNames::new(names, false); // Include code blocks
+    let rule = MD044ProperNames::new(names, true); // true = check code blocks
 
     let content = r#"```rust
 // This is rust code
@@ -198,7 +198,7 @@ const javascript = "javascript";
         "javascript identifier should stay lowercase"
     );
 
-    // When code_blocks = false (include code blocks), content inside should be capitalized
+    // When code_blocks = true (check code blocks), content inside should be capitalized
     assert!(
         fixed.contains("let Rust = \"Rust\""),
         "Variable names should be capitalized"
@@ -221,7 +221,7 @@ const javascript = "javascript";
 fn test_tilde_fence_language_identifiers() {
     // Test with tilde fences
     let names = vec!["Ruby".to_string()];
-    let rule = MD044ProperNames::new(names, false);
+    let rule = MD044ProperNames::new(names, true); // true = check code blocks
 
     let content = "~~~ruby\nputs 'ruby'\n~~~";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
@@ -238,7 +238,7 @@ fn test_tilde_fence_language_identifiers() {
 fn test_fence_with_attributes() {
     // Test fences with additional attributes
     let names = vec!["JSON".to_string()];
-    let rule = MD044ProperNames::new(names, false);
+    let rule = MD044ProperNames::new(names, true); // true = check code blocks
 
     let content = "```json {highlight: [2]}\n{\n  \"json\": \"value\"\n}\n```";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
@@ -255,7 +255,7 @@ fn test_fence_with_attributes() {
 fn test_mixed_fence_types() {
     // Test document with both fence types
     let names = vec!["Go".to_string()];
-    let rule = MD044ProperNames::new(names, false);
+    let rule = MD044ProperNames::new(names, true);
 
     let content = "```go\nfmt.Println(\"go\")\n```\n\n~~~go\nfmt.Println(\"go\")\n~~~";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);

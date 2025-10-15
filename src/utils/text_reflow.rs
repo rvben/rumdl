@@ -163,14 +163,32 @@ fn is_numbered_list_item(line: &str) -> bool {
     false
 }
 
-/// Reflow a single line of markdown text to fit within the specified line length
-/// Trim trailing whitespace while preserving hard breaks (exactly 2 trailing spaces)
-/// Hard breaks in Markdown are indicated by 2 trailing spaces before a newline
+/// Check if a line ends with a hard break (either two spaces or backslash)
+///
+/// CommonMark supports two formats for hard line breaks:
+/// 1. Two or more trailing spaces
+/// 2. A backslash at the end of the line
+fn has_hard_break(line: &str) -> bool {
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    line.ends_with("  ") || line.ends_with('\\')
+}
+
+/// Trim trailing whitespace while preserving hard breaks (two trailing spaces or backslash)
+///
+/// Hard breaks in Markdown can be indicated by:
+/// 1. Two trailing spaces before a newline (traditional)
+/// 2. A backslash at the end of the line (mdformat style)
 fn trim_preserving_hard_break(s: &str) -> String {
     // Strip trailing \r from CRLF line endings first to handle Windows files
     let s = s.strip_suffix('\r').unwrap_or(s);
 
-    // Check if there are at least 2 trailing spaces (potential hard break)
+    // Check for backslash hard break (mdformat style)
+    if s.ends_with('\\') {
+        // Preserve the backslash exactly as-is
+        return s.to_string();
+    }
+
+    // Check if there are at least 2 trailing spaces (traditional hard break)
     if s.ends_with("  ") {
         // Find the position where non-space content ends
         let content_end = s.trim_end().len();
@@ -941,13 +959,13 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 }
             }
 
-            // Join content, but respect hard breaks (lines ending with 2 spaces)
+            // Join content, but respect hard breaks (lines ending with 2 spaces or backslash)
             // Hard breaks should prevent joining with the next line
             let combined_content = if options.preserve_breaks {
                 list_content[0].clone()
             } else {
                 // Check if any lines have hard breaks - if so, preserve the structure
-                let has_hard_breaks = list_content.iter().any(|line| line.ends_with("  "));
+                let has_hard_breaks = list_content.iter().any(|line| has_hard_break(line));
                 if has_hard_breaks {
                     // Don't join lines with hard breaks - keep them separate with newlines
                     list_content.join("\n")
@@ -1040,17 +1058,25 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         // If preserve_breaks is true, treat each line separately
         if options.preserve_breaks {
             // Don't collect consecutive lines - just reflow this single line
-            let has_hard_break = line.ends_with("  ");
+            let hard_break_type = if line.strip_suffix('\r').unwrap_or(line).ends_with('\\') {
+                Some("\\")
+            } else if line.ends_with("  ") {
+                Some("  ")
+            } else {
+                None
+            };
             let reflowed = reflow_line(line, options);
 
-            // Preserve hard breaks (two trailing spaces)
-            if has_hard_break && !reflowed.is_empty() {
-                let mut reflowed_with_break = reflowed;
-                let last_idx = reflowed_with_break.len() - 1;
-                if !reflowed_with_break[last_idx].ends_with("  ") {
-                    reflowed_with_break[last_idx].push_str("  ");
+            // Preserve hard breaks (two trailing spaces or backslash)
+            if let Some(break_marker) = hard_break_type {
+                if !reflowed.is_empty() {
+                    let mut reflowed_with_break = reflowed;
+                    let last_idx = reflowed_with_break.len() - 1;
+                    if !has_hard_break(&reflowed_with_break[last_idx]) {
+                        reflowed_with_break[last_idx].push_str(break_marker);
+                    }
+                    result.extend(reflowed_with_break);
                 }
-                result.extend(reflowed_with_break);
             } else {
                 result.extend(reflowed);
             }
@@ -1087,8 +1113,8 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     break;
                 }
 
-                // Check if previous line ends with hard break (two spaces)
-                if prev_line.ends_with("  ") {
+                // Check if previous line ends with hard break (two spaces or backslash)
+                if has_hard_break(prev_line) {
                     // Start a new part after hard break
                     paragraph_parts.push(current_part.join(" "));
                     current_part = vec![next_line];
@@ -1113,10 +1139,11 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 let reflowed = reflow_line(part, options);
                 result.extend(reflowed);
 
-                // Preserve hard break by ensuring last line of part ends with two spaces
+                // Preserve hard break by ensuring last line of part ends with hard break marker
+                // Use two spaces as the default hard break format for reflows
                 if j < paragraph_parts.len() - 1 && !result.is_empty() {
                     let last_idx = result.len() - 1;
-                    if !result[last_idx].ends_with("  ") {
+                    if !has_hard_break(&result[last_idx]) {
                         result[last_idx].push_str("  ");
                     }
                 }

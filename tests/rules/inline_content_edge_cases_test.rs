@@ -147,7 +147,7 @@ Don't match 'ago' or 'bit' or 'ai'.";
 fn test_md044_code_exclusion() {
     let rule = MD044ProperNames::new(
         vec!["JavaScript".to_string(), "Python".to_string()],
-        true, // true = exclude code blocks from checking
+        false, // false = exclude code blocks from checking
     );
 
     // Test 4: Code block and inline code exclusion

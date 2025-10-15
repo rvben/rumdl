@@ -781,15 +781,26 @@ impl MD013LineLength {
                                 let segments = split_into_segments(para_lines);
 
                                 for (segment_idx, segment) in segments.iter().enumerate() {
-                                    // Check if this segment ends with a hard break
-                                    let has_hard_break = segment.last().is_some_and(|line| line.ends_with("  "));
+                                    // Check if this segment ends with a hard break and what type
+                                    let hard_break_type = segment.last().and_then(|line| {
+                                        let line = line.strip_suffix('\r').unwrap_or(line);
+                                        if line.ends_with('\\') {
+                                            Some("\\")
+                                        } else if line.ends_with("  ") {
+                                            Some("  ")
+                                        } else {
+                                            None
+                                        }
+                                    });
 
                                     // Join and reflow the segment (removing the hard break marker for processing)
                                     let segment_for_reflow: Vec<String> = segment
                                         .iter()
                                         .map(|line| {
-                                            // Strip hard break marker (2 spaces) for reflow processing
-                                            if line.ends_with("  ") {
+                                            // Strip hard break marker (2 spaces or backslash) for reflow processing
+                                            if line.ends_with('\\') {
+                                                line[..line.len() - 1].trim_end().to_string()
+                                            } else if line.ends_with("  ") {
                                                 line[..line.len() - 2].trim_end().to_string()
                                             } else {
                                                 line.clone()
@@ -817,8 +828,11 @@ impl MD013LineLength {
                                         }
 
                                         // If this segment had a hard break, add it back to the last line
-                                        if has_hard_break && let Some(last_line) = result.last_mut() {
-                                            last_line.push_str("  ");
+                                        // Preserve the original hard break format (backslash or two spaces)
+                                        if let Some(break_marker) = hard_break_type
+                                            && let Some(last_line) = result.last_mut()
+                                        {
+                                            last_line.push_str(break_marker);
                                         }
                                     }
                                 }
@@ -1015,8 +1029,8 @@ impl MD013LineLength {
                     break;
                 }
 
-                // Check if the previous line ends with a hard break (2+ spaces)
-                if i > 0 && lines[i - 1].ends_with("  ") {
+                // Check if the previous line ends with a hard break (2+ spaces or backslash)
+                if i > 0 && has_hard_break(lines[i - 1]) {
                     // Don't include lines after hard breaks in the same paragraph
                     break;
                 }
@@ -1067,8 +1081,17 @@ impl MD013LineLength {
                 // Combine paragraph lines into a single string for reflowing
                 let paragraph_text = paragraph_lines.join(" ");
 
-                // Check if the paragraph ends with a hard break
-                let has_hard_break = paragraph_lines.last().is_some_and(|l| l.ends_with("  "));
+                // Check if the paragraph ends with a hard break and what type
+                let hard_break_type = paragraph_lines.last().and_then(|line| {
+                    let line = line.strip_suffix('\r').unwrap_or(line);
+                    if line.ends_with('\\') {
+                        Some("\\")
+                    } else if line.ends_with("  ") {
+                        Some("  ")
+                    } else {
+                        None
+                    }
+                });
 
                 // Reflow the paragraph
                 let reflow_options = crate::utils::text_reflow::ReflowOptions {
@@ -1080,10 +1103,13 @@ impl MD013LineLength {
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
                 // If the original paragraph ended with a hard break, preserve it
-                if has_hard_break && !reflowed.is_empty() {
+                // Preserve the original hard break format (backslash or two spaces)
+                if let Some(break_marker) = hard_break_type
+                    && !reflowed.is_empty()
+                {
                     let last_idx = reflowed.len() - 1;
-                    if !reflowed[last_idx].ends_with("  ") {
-                        reflowed[last_idx].push_str("  ");
+                    if !has_hard_break(&reflowed[last_idx]) {
+                        reflowed[last_idx].push_str(break_marker);
                     }
                 }
 
@@ -1213,14 +1239,33 @@ impl MD013LineLength {
     }
 }
 
+/// Check if a line ends with a hard break (either two spaces or backslash)
+///
+/// CommonMark supports two formats for hard line breaks:
+/// 1. Two or more trailing spaces
+/// 2. A backslash at the end of the line
+fn has_hard_break(line: &str) -> bool {
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    line.ends_with("  ") || line.ends_with('\\')
+}
+
 /// Extract list marker and content from a list item
-/// Trim trailing whitespace while preserving hard breaks (exactly 2 trailing spaces)
-/// Hard breaks in Markdown are indicated by 2 trailing spaces before a newline
+/// Trim trailing whitespace while preserving hard breaks (two trailing spaces or backslash)
+///
+/// Hard breaks in Markdown can be indicated by:
+/// 1. Two trailing spaces before a newline (traditional)
+/// 2. A backslash at the end of the line (mdformat style)
 fn trim_preserving_hard_break(s: &str) -> String {
     // Strip trailing \r from CRLF line endings first to handle Windows files
     let s = s.strip_suffix('\r').unwrap_or(s);
 
-    // Check if there are at least 2 trailing spaces (potential hard break)
+    // Check for backslash hard break (mdformat style)
+    if s.ends_with('\\') {
+        // Preserve the backslash exactly as-is
+        return s.to_string();
+    }
+
+    // Check if there are at least 2 trailing spaces (traditional hard break)
     if s.ends_with("  ") {
         // Find the position where non-space content ends
         let content_end = s.trim_end().len();
@@ -1238,7 +1283,7 @@ fn trim_preserving_hard_break(s: &str) -> String {
 
 /// Split paragraph lines into segments at hard break boundaries.
 /// Each segment is a group of lines that can be reflowed together.
-/// Lines with hard breaks (ending with 2+ spaces) form segment boundaries.
+/// Lines with hard breaks (ending with 2+ spaces or backslash) form segment boundaries.
 ///
 /// Example:
 ///   Input:  ["Line 1", "Line 2  ", "Line 3", "Line 4"]
@@ -1254,7 +1299,7 @@ fn split_into_segments(para_lines: &[String]) -> Vec<Vec<String>> {
         current_segment.push(line.clone());
 
         // If this line has a hard break, end the current segment
-        if line.ends_with("  ") {
+        if has_hard_break(line) {
             segments.push(current_segment.clone());
             current_segment.clear();
         }
