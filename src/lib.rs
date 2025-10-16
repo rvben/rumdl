@@ -301,7 +301,7 @@ pub fn get_cache_performance_report() -> String {
     // AST cache statistics
     report.push_str("AST Cache:\n");
     if ast_stats.is_empty() {
-        report.push_str("  No AST nodes cached\n");
+        report.push_str("  No ASTs cached\n");
     } else {
         let total_usage: u64 = ast_stats.values().sum();
         report.push_str(&format!("  Total ASTs: {}\n", ast_stats.len()));
@@ -540,7 +540,7 @@ mod tests {
         // Report should contain either usage stats or "no cache" messages
         // (depends on whether other tests have populated the cache)
         assert!(report.contains("Total patterns:") || report.contains("No regex patterns cached"));
-        assert!(report.contains("Total nodes:") || report.contains("No AST nodes cached"));
+        assert!(report.contains("Total ASTs:") || report.contains("No ASTs cached"));
     }
 
     #[test]

@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.162] - 2025-10-16
+
+### Added
+
+- **Filtered Line Iterator Architecture**: New infrastructure for rule implementation
+  - Provides consistent interface for filtering out front matter, code blocks, and HTML blocks
+  - Eliminates manual context checking in individual rules
+  - Improves code maintainability and reduces duplication
+  - Enables easier implementation of new rules
+
+### Fixed
+
+- **MD052**: Skip code blocks in blockquotes when checking references
+  - Prevents false positives for reference syntax inside code blocks within blockquotes
+  - Properly handles nested markdown structures
+
+- **MD034**: Skip URLs in front matter
+  - URLs in YAML/TOML/JSON front matter no longer flagged as bare URLs
+  - Improves compatibility with static site generators
+
+- **Tests**: Fixed flaky `profiling::tests::test_concurrent_access` test
+  - Added `#[serial_test::serial]` attribute to prevent race conditions
+  - Ensures reliable test execution in CI/CD environments
+
+- **Documentation**: Build badge now displays correctly
+
+### Performance
+
+- **MD005**: Optimized continuation detection from O(n²) to O(n)
+  - Dramatically faster processing of documents with many list items
+  - Eliminates redundant line scanning
+
+- **General**: Consolidated multiple `line_info()` calls for same line
+  - Reduced redundant lookups across multiple rules
+  - Improved overall linting performance
+
+### Changed
+
+- **Internal Refactoring**: Eliminated manual checks across all rules
+  - Removed manual front matter detection from individual rules
+  - Removed manual code block detection from individual rules
+  - Removed manual HTML block detection from individual rules
+  - All rules now use centralized filtering infrastructure
+
+### Documentation
+
+- **Per-File-Ignores**: Added comprehensive documentation for per-file-ignores feature
+  - Detailed usage examples with glob patterns
+  - Integration with both `.rumdl.toml` and `pyproject.toml`
+
 ## [0.0.161] - 2025-10-15
 
 ### Added
