@@ -298,6 +298,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_global_start_stop_timer() {
         if PROFILING_ENABLED {
             reset(); // Clear any previous measurements
@@ -322,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_global_reset() {
         if PROFILING_ENABLED {
             start_timer("test_reset");
@@ -334,6 +336,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_scoped_timer() {
         if PROFILING_ENABLED {
             reset();
@@ -396,6 +399,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_concurrent_access() {
         use std::sync::Arc;
         use std::sync::Barrier;
