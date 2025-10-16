@@ -239,7 +239,7 @@ impl Rule for MD013LineLength {
                             && ctx.line_info(line_number).is_some_and(|info| info.in_code_block))
                         || (!effective_config.tables && table_lines_set.contains(&line_number))
                         || ctx.lines[line_number - 1].blockquote.is_some()
-                        || ctx.is_in_html_block(line_number)
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
                     {
                         continue;
                     }
@@ -388,7 +388,7 @@ impl MD013LineLength {
             // Skip special structures
             if ctx.line_info(line_num).is_some_and(|info| info.in_code_block)
                 || ctx.line_info(line_num).is_some_and(|info| info.in_front_matter)
-                || ctx.is_in_html_block(line_num)
+                || ctx.line_info(line_num).is_some_and(|info| info.in_html_block)
                 || (line_num > 0 && line_num <= ctx.lines.len() && ctx.lines[line_num - 1].blockquote.is_some())
                 || lines[i].trim().starts_with('#')
                 || TableUtils::is_potential_table_row(lines[i])
@@ -1020,7 +1020,7 @@ impl MD013LineLength {
                 if next_trimmed.is_empty()
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_code_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_front_matter)
-                    || ctx.is_in_html_block(next_line_num)
+                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_html_block)
                     || (next_line_num > 0
                         && next_line_num <= ctx.lines.len()
                         && ctx.lines[next_line_num - 1].blockquote.is_some())

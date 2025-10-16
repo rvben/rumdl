@@ -516,7 +516,7 @@ impl Rule for MD046CodeBlockStyle {
             let trimmed = line.trim_start();
 
             // Skip lines that are in HTML blocks - they shouldn't be treated as indented code
-            if ctx.is_in_html_block(i + 1) {
+            if ctx.line_info(i + 1).is_some_and(|info| info.in_html_block) {
                 continue;
             }
 
