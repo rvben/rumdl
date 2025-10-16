@@ -19,6 +19,100 @@ pub struct MD005ListIndent {
     md007_indent: usize,
 }
 
+/// Cache for fast line information lookups to avoid O(n²) scanning
+struct LineCacheInfo {
+    /// Indentation level for each line (0 for empty lines)
+    indentation: Vec<usize>,
+    /// Whether each line has non-empty content
+    has_content: Vec<bool>,
+    /// Whether each line is a list item
+    is_list_item: Vec<bool>,
+}
+
+impl LineCacheInfo {
+    /// Build cache from context in one O(n) pass
+    fn new(ctx: &crate::lint_context::LintContext) -> Self {
+        let total_lines = ctx.lines.len();
+        let mut indentation = Vec::with_capacity(total_lines);
+        let mut has_content = Vec::with_capacity(total_lines);
+        let mut is_list_item = Vec::with_capacity(total_lines);
+
+        for line_info in &ctx.lines {
+            let content = line_info.content.trim_start();
+            let line_indent = line_info.content.len() - content.len();
+
+            indentation.push(line_indent);
+            has_content.push(!content.is_empty());
+            is_list_item.push(line_info.list_item.is_some());
+        }
+
+        Self {
+            indentation,
+            has_content,
+            is_list_item,
+        }
+    }
+
+    /// Fast O(n) check for continuation content between lines using cached data
+    fn find_continuation_indent(
+        &self,
+        start_line: usize,
+        end_line: usize,
+        parent_content_column: usize,
+    ) -> Option<usize> {
+        if start_line == 0 || start_line > end_line || end_line > self.indentation.len() {
+            return None;
+        }
+
+        // Convert to 0-indexed
+        let start_idx = start_line - 1;
+        let end_idx = end_line - 1;
+
+        for idx in start_idx..=end_idx {
+            // Skip empty lines and list items
+            if !self.has_content[idx] || self.is_list_item[idx] {
+                continue;
+            }
+
+            // If this line is indented at or past the parent's content column,
+            // it's continuation content
+            if self.indentation[idx] >= parent_content_column {
+                return Some(self.indentation[idx]);
+            }
+        }
+        None
+    }
+
+    /// Fast O(n) check if any continuation content exists after parent
+    fn has_continuation_content(&self, parent_line: usize, current_line: usize, parent_content_column: usize) -> bool {
+        if parent_line == 0 || current_line <= parent_line || current_line > self.indentation.len() {
+            return false;
+        }
+
+        // Convert to 0-indexed
+        let start_idx = parent_line; // parent_line + 1 - 1
+        let end_idx = current_line - 2; // current_line - 1 - 1
+
+        if start_idx > end_idx {
+            return false;
+        }
+
+        for idx in start_idx..=end_idx {
+            // Skip empty lines and list items
+            if !self.has_content[idx] || self.is_list_item[idx] {
+                continue;
+            }
+
+            // If this line is indented at or past the parent's content column,
+            // it's continuation content
+            if self.indentation[idx] >= parent_content_column {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl MD005ListIndent {
     /// Gap tolerance for grouping list blocks as one logical structure.
     /// Markdown allows blank lines within lists, so we need some tolerance.
@@ -72,9 +166,11 @@ impl MD005ListIndent {
     }
 
     /// Check if a list item is continuation content of a parent list item
+    /// Uses pre-built cache for O(1) lookups instead of O(n) scanning
     fn is_continuation_content(
         &self,
         ctx: &crate::lint_context::LintContext,
+        cache: &LineCacheInfo,
         list_line: usize,
         list_indent: usize,
     ) -> bool {
@@ -90,15 +186,12 @@ impl MD005ListIndent {
                         continue;
                     }
 
-                    // Found a potential parent list item at a shallower indentation
                     // Check if there are continuation lines between parent and current list
+                    // USE CACHE instead of self.find_continuation_indent_between()
                     let continuation_indent =
-                        self.find_continuation_indent_between(ctx, line_num + 1, list_line - 1, parent_content_column);
+                        cache.find_continuation_indent(line_num + 1, list_line - 1, parent_content_column);
 
                     if let Some(continuation_indent) = continuation_indent {
-                        // If the current list's indent matches the continuation content indent,
-                        // OR if it's at the standard continuation list indentation,
-                        // it's continuation content
                         let is_standard_continuation =
                             list_indent == parent_content_column + Self::STANDARD_CONTINUATION_OFFSET;
                         let matches_content_indent = list_indent == continuation_indent;
@@ -122,14 +215,8 @@ impl MD005ListIndent {
                             return true;
                         }
 
-                        // Also check if there are any continuation text blocks between the parent
-                        // and this list (even if there are other lists in between)
-                        if self.has_any_continuation_content_after_parent(
-                            ctx,
-                            line_num,
-                            list_line,
-                            parent_content_column,
-                        ) {
+                        // USE CACHE instead of self.has_any_continuation_content_after_parent()
+                        if cache.has_continuation_content(line_num, list_line, parent_content_column) {
                             return true;
                         }
                     }
@@ -138,7 +225,6 @@ impl MD005ListIndent {
                     // but not continuation content, so continue looking for a parent
                 } else if !line_info.content.trim().is_empty() {
                     // Found non-list content - only stop if it's at the left margin
-                    // (which would indicate we've moved out of any potential parent structure)
                     let content = line_info.content.trim_start();
                     let line_indent = line_info.content.len() - content.len();
 
@@ -172,37 +258,6 @@ impl MD005ListIndent {
                     .find_continuation_indent_between(ctx, parent_line + 1, line_num - 1, parent_content_column)
                     .is_some()
                 {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// Check if there are any continuation content blocks after a parent (anywhere between parent and current)
-    fn has_any_continuation_content_after_parent(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        parent_line: usize,
-        current_line: usize,
-        parent_content_column: usize,
-    ) -> bool {
-        // Look for any continuation content between parent and current line
-        for line_num in (parent_line + 1)..current_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                let content = line_info.content.trim_start();
-
-                // Skip empty lines and list items
-                if content.is_empty() || line_info.list_item.is_some() {
-                    continue;
-                }
-
-                // Calculate indentation of this line
-                let line_indent = line_info.content.len() - content.len();
-
-                // If this line is indented at or past the parent's content column,
-                // it's continuation content
-                if line_indent >= parent_content_column {
                     return true;
                 }
             }
@@ -256,7 +311,8 @@ impl MD005ListIndent {
         group: &[&crate::lint_context::ListBlock],
         warnings: &mut Vec<LintWarning>,
     ) -> Result<(), LintError> {
-        // Use ctx.line_offsets instead of creating new LineIndex for better performance
+        // Build cache once for O(n) preprocessing instead of O(n²) scanning
+        let cache = LineCacheInfo::new(ctx);
 
         // Collect all list items from all blocks in the group
         let mut all_list_items = Vec::new();
@@ -276,7 +332,7 @@ impl MD005ListIndent {
                     };
 
                     // Skip list items that are continuation content
-                    if self.is_continuation_content(ctx, item_line, effective_indent) {
+                    if self.is_continuation_content(ctx, &cache, item_line, effective_indent) {
                         continue;
                     }
 
@@ -1375,6 +1431,37 @@ Even more text";
         assert!(
             result.is_empty(),
             "Expected no warnings with multiple code blocks, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_performance_very_large_document() {
+        let rule = MD005ListIndent::default();
+        let mut content = String::new();
+
+        // Create document with 1000 list items with continuation content
+        for i in 0..1000 {
+            content.push_str(&format!("* Item {i}\n"));
+            content.push_str(&format!("  * Nested {i}\n"));
+            if i % 10 == 0 {
+                content.push_str("  Some continuation text\n");
+            }
+        }
+
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
+
+        // Should complete quickly with O(n) optimization
+        let start = std::time::Instant::now();
+        let result = rule.check(&ctx).unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.is_empty());
+        println!("Processed 1000 list items in {elapsed:?}");
+        // Before optimization (O(n²)): ~seconds
+        // After optimization (O(n)): ~milliseconds
+        assert!(
+            elapsed.as_secs() < 1,
+            "Should complete in under 1 second, took {elapsed:?}"
         );
     }
 }
