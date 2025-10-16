@@ -1,4 +1,5 @@
 use crate::config::MarkdownFlavor;
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::ast_utils::get_cached_ast;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use lazy_static::lazy_static;
@@ -1035,17 +1036,8 @@ impl<'a> LintContext<'a> {
         let mut lines = Vec::with_capacity(content_lines.len());
 
         // Detect front matter boundaries FIRST, before any other parsing
-        let mut in_front_matter = false;
-        let mut front_matter_end = 0;
-        if content_lines.first().map(|l| l.trim()) == Some("---") {
-            in_front_matter = true;
-            for (idx, line) in content_lines.iter().enumerate().skip(1) {
-                if line.trim() == "---" {
-                    front_matter_end = idx;
-                    break;
-                }
-            }
-        }
+        // Use FrontMatterUtils to detect all types of front matter (YAML, TOML, JSON, malformed)
+        let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
@@ -1102,7 +1094,7 @@ impl<'a> LintContext<'a> {
             let in_mkdocstrings = flavor == MarkdownFlavor::MkDocs
                 && crate::utils::mkdocstrings_refs::is_within_autodoc_block(content, byte_offset);
             let list_item =
-                if !(in_code_block || is_blank || in_mkdocstrings || in_front_matter && i <= front_matter_end) {
+                if !(in_code_block || is_blank || in_mkdocstrings || (front_matter_end > 0 && i < front_matter_end)) {
                     // Strip blockquote prefix if present for list detection
                     let (line_for_list_check, blockquote_prefix_len) =
                         if let Some(caps) = BLOCKQUOTE_REGEX.captures(line) {
@@ -1174,7 +1166,7 @@ impl<'a> LintContext<'a> {
                 indent,
                 is_blank,
                 in_code_block,
-                in_front_matter: in_front_matter && i <= front_matter_end,
+                in_front_matter: front_matter_end > 0 && i < front_matter_end,
                 in_html_block: false, // Will be populated after line creation
                 list_item,
                 heading: None,    // Will be populated in second pass for Setext headings
@@ -1190,7 +1182,7 @@ impl<'a> LintContext<'a> {
             }
 
             // Skip lines in front matter
-            if in_front_matter && i <= front_matter_end {
+            if front_matter_end > 0 && i < front_matter_end {
                 continue;
             }
 
@@ -1352,7 +1344,7 @@ impl<'a> LintContext<'a> {
                 let next_line = content_lines[i + 1];
                 if !lines[i + 1].in_code_block && SETEXT_UNDERLINE_REGEX.is_match(next_line) {
                     // Skip if next line is front matter delimiter
-                    if in_front_matter && i < front_matter_end {
+                    if front_matter_end > 0 && i < front_matter_end {
                         continue;
                     }
 

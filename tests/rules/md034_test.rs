@@ -708,3 +708,82 @@ fn test_issue_104_full_paragraph_not_corrupted() {
         "MD034 should not modify content that has properly formatted links"
     );
 }
+
+// Issue #116: URLs in front matter should not be flagged
+#[test]
+fn test_urls_in_yaml_front_matter() {
+    let rule = MD034NoBareUrls;
+    let content = "---\nurl: http://example.com\ntitle: Test\n---\n\n# Content";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "URLs in YAML front matter should not be flagged");
+}
+
+#[test]
+fn test_urls_in_toml_front_matter() {
+    let rule = MD034NoBareUrls;
+    let content = "+++\nurl = \"http://example.com\"\ntitle = \"Test\"\n+++\n\n# Content";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "URLs in TOML front matter should not be flagged");
+}
+
+#[test]
+fn test_urls_in_json_front_matter() {
+    let rule = MD034NoBareUrls;
+    let content = "{\n\"url\": \"http://example.com\",\n\"title\": \"Test\"\n}\n\n# Content";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "URLs in JSON front matter should not be flagged");
+}
+
+#[test]
+fn test_bare_url_after_front_matter() {
+    let rule = MD034NoBareUrls;
+    let content = "---\nurl: http://example.com\n---\n\nVisit http://bare-url.com";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Bare URL after front matter should be flagged");
+    assert!(result[0].message.contains("http://bare-url.com"));
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("<http://bare-url.com>"),
+        "Bare URL should be wrapped in angle brackets"
+    );
+    assert!(
+        fixed.contains("url: http://example.com"),
+        "URL in front matter should remain unchanged"
+    );
+}
+
+#[test]
+fn test_email_in_front_matter() {
+    let rule = MD034NoBareUrls;
+    let content = "---\nauthor_email: user@example.com\ncontact: admin@test.org\n---\n\n# Content";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Emails in front matter should not be flagged");
+}
+
+#[test]
+fn test_multiple_urls_in_front_matter() {
+    let rule = MD034NoBareUrls;
+    let content = "---\nurl: http://example.com\nrepository: https://github.com/user/repo\nwebsite: ftp://files.example.org\n---\n\n# Content";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Multiple URLs in front matter should not be flagged");
+}
+
+#[test]
+fn test_issue_116_exact_reproduction() {
+    // This is the exact test case from issue #116
+    let rule = MD034NoBareUrls;
+    let content = "---\nurl: http://example.com\n---\n\n# Repro";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Issue #116: URL in front matter should not be flagged"
+    );
+}

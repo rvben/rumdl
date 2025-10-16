@@ -430,6 +430,11 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
 
+            // Skip lines inside front matter
+            if ctx.is_in_front_matter(line_num + 1) {
+                continue;
+            }
+
             let mut line_warnings =
                 self.check_line(line, content, line_num + 1, &code_spans, &mut buffers, &line_index);
 
