@@ -5,6 +5,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::range_utils::{LineIndex, calculate_url_range};
 use crate::utils::regex_cache::{EMAIL_PATTERN, get_cached_regex};
 
+use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 
 // URL detection patterns
@@ -423,20 +424,17 @@ impl Rule for MD034NoBareUrls {
         // Allocate reusable buffers once instead of per-line to reduce allocations
         let mut buffers = LineCheckBuffers::default();
 
-        // Check line by line
-        for (line_num, line) in content.lines().enumerate() {
-            // Skip lines inside code blocks
-            if ctx.is_in_code_block(line_num + 1) {
-                continue;
-            }
-
-            // Skip lines inside front matter
-            if ctx.is_in_front_matter(line_num + 1) {
-                continue;
-            }
-
-            let mut line_warnings =
-                self.check_line(line, content, line_num + 1, &code_spans, &mut buffers, &line_index);
+        // Iterate over content lines, automatically skipping front matter and code blocks
+        // This uses the filtered iterator API which centralizes the skip logic
+        for line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
+            let mut line_warnings = self.check_line(
+                line.content,
+                content,
+                line.line_num,
+                &code_spans,
+                &mut buffers,
+                &line_index,
+            );
 
             // Filter out warnings that are inside code spans
             line_warnings.retain(|warning| {
