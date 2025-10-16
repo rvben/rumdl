@@ -655,6 +655,14 @@ impl MD052ReferenceLinkImages {
                             let line_start_byte = ctx.line_offsets[line_num];
                             let byte_pos = line_start_byte + col;
 
+                            // Skip if inside code block
+                            if crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block(
+                                &ctx.code_blocks,
+                                byte_pos,
+                            ) {
+                                continue;
+                            }
+
                             // Skip if inside HTML comment
                             if Self::is_in_html_comment(content, byte_pos) {
                                 continue;

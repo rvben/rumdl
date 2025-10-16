@@ -761,3 +761,89 @@ fn test_mkdocs_backtick_wrapped_auto_references() {
         "Should flag [str][] (without backticks) as undefined reference. Got: {result:?}"
     );
 }
+
+#[test]
+fn test_issue_114_code_block_in_quote() {
+    // Test for issue #114 - code block in quote creates false positives for MD052
+    let rule = MD052ReferenceLinkImages::new();
+
+    let content = r#"```rust
+#[derive(Debug)]
+struct Ok;
+```
+
+> ```rust
+> #[derive(Debug)]
+> struct NotOk;
+> ```
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not flag [derive(Debug)] inside code blocks, even if they're in block quotes
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not flag [derive(Debug)] inside code blocks (even in block quotes) as undefined references. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_code_block_in_quote_various_patterns() {
+    // Test various bracket patterns in code blocks inside block quotes
+    let rule = MD052ReferenceLinkImages::new();
+
+    let content = r#"Regular code block:
+```rust
+let x = vec![1, 2, 3];
+```
+
+> Code block in quote:
+> ```rust
+> let y = vec![4, 5, 6];
+> #[derive(Debug)]
+> struct Foo;
+> ```
+
+> Another blockquote
+> ```python
+> data = {"key": [1, 2, 3]}
+> ```
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not flag any of these as undefined references
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not flag brackets inside code blocks within blockquotes. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_actual_reference_in_quote_outside_code() {
+    // Make sure we still catch actual undefined references in blockquotes
+    let rule = MD052ReferenceLinkImages::new();
+
+    let content = r#"> This is a [reference] in a blockquote
+>
+> ```rust
+> #[derive(Debug)]
+> struct Foo;
+> ```
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag [reference] but not [derive(Debug)]
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag [reference] but not code block content. Got: {result:?}"
+    );
+    assert!(result[0].message.contains("reference"));
+}
