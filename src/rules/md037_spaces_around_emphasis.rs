@@ -1,6 +1,7 @@
 /// Rule MD037: No spaces around emphasis markers
 ///
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
+use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::emphasis_utils::{
     EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
@@ -86,20 +87,15 @@ impl Rule for MD037NoSpaceInEmphasis {
 
         let mut warnings = Vec::new();
 
-        // Process the content line by line
-        for (line_num, line) in content.lines().enumerate() {
-            // Skip if in code block or front matter
-            if ctx.is_in_code_block(line_num + 1) || ctx.is_in_front_matter(line_num + 1) {
-                continue;
-            }
-
+        // Process content lines, automatically skipping front matter and code blocks
+        for line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
             // Skip if the line doesn't contain any emphasis markers
-            if !line.contains('*') && !line.contains('_') {
+            if !line.content.contains('*') && !line.content.contains('_') {
                 continue;
             }
 
             // Check for emphasis issues on the original line
-            self.check_line_for_emphasis_issues_fast(line, line_num + 1, &mut warnings);
+            self.check_line_for_emphasis_issues_fast(line.content, line.line_num, &mut warnings);
         }
 
         // Filter out warnings for emphasis markers that are inside links, HTML comments, or math

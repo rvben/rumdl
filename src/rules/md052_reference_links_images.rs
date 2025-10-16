@@ -2,7 +2,7 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::{HTML_COMMENT_PATTERN, SHORTCUT_REF_REGEX};
-use crate::utils::skip_context::{is_in_front_matter, is_in_math_context, is_in_table_cell};
+use crate::utils::skip_context::{is_in_math_context, is_in_table_cell};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -318,8 +318,8 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
-            // Skip links inside frontmatter (convert from 1-based to 0-based line numbers)
-            if is_in_front_matter(content, link.line.saturating_sub(1)) {
+            // Skip links inside frontmatter
+            if ctx.line_info(link.line).is_some_and(|info| info.in_front_matter) {
                 continue;
             }
 
@@ -403,8 +403,8 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
-            // Skip images inside frontmatter (convert from 1-based to 0-based line numbers)
-            if is_in_front_matter(content, image.line.saturating_sub(1)) {
+            // Skip images inside frontmatter
+            if ctx.line_info(image.line).is_some_and(|info| info.in_front_matter) {
                 continue;
             }
 
@@ -479,8 +479,8 @@ impl MD052ReferenceLinkImages {
         in_example_section = false; // Reset for line-by-line processing
 
         for (line_num, line) in lines.iter().enumerate() {
-            // Skip lines in frontmatter (line_num is already 0-based)
-            if is_in_front_matter(content, line_num) {
+            // Skip lines in frontmatter (convert 0-based to 1-based for line_info)
+            if ctx.line_info(line_num + 1).is_some_and(|info| info.in_front_matter) {
                 continue;
             }
 

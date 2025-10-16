@@ -443,9 +443,39 @@ impl VsCodeExtension {
                     .map_err(|e| format!("Failed to run VS Code command: {e}"))?;
 
                 if output.status.success() {
-                    println!("{}", "✓ Successfully updated Rumdl VS Code extension!".green());
-                    println!("  New version: {}", latest_version.cyan());
-                    Ok(())
+                    // Verify the actual installed version after update
+                    match self.get_installed_version() {
+                        Ok(new_version) => {
+                            println!("{}", "✓ Successfully updated Rumdl VS Code extension!".green());
+                            println!("  New version: {}", new_version.cyan());
+
+                            // Warn if the update didn't reach the latest version
+                            if new_version != latest_version {
+                                println!();
+                                println!(
+                                    "{}",
+                                    format!("⚠ Expected version {latest_version}, but {new_version} is installed")
+                                        .yellow()
+                                );
+                                println!("  This might indicate a caching issue or delayed marketplace propagation.");
+                                println!(
+                                    "  Try restarting your editor or running {} again later",
+                                    "rumdl vscode --update".cyan()
+                                );
+                            }
+                            Ok(())
+                        }
+                        Err(e) => {
+                            // Update succeeded but we can't verify the version
+                            println!("{}", "✓ Successfully updated Rumdl VS Code extension!".green());
+                            println!(
+                                "  {} {}",
+                                "Note:".dimmed(),
+                                format!("Could not verify version: {e}").dimmed()
+                            );
+                            Ok(())
+                        }
+                    }
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
 

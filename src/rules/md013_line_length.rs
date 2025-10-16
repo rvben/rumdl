@@ -383,7 +383,7 @@ impl MD013LineLength {
 
             // Skip special structures
             if ctx.is_in_code_block(line_num)
-                || ctx.is_in_front_matter(line_num)
+                || ctx.line_info(line_num).is_some_and(|info| info.in_front_matter)
                 || ctx.is_in_html_block(line_num)
                 || (line_num > 0 && line_num <= ctx.lines.len() && ctx.lines[line_num - 1].blockquote.is_some())
                 || lines[i].trim().starts_with('#')
@@ -1015,7 +1015,7 @@ impl MD013LineLength {
                 // Stop at paragraph boundaries
                 if next_trimmed.is_empty()
                     || ctx.is_in_code_block(next_line_num)
-                    || ctx.is_in_front_matter(next_line_num)
+                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_front_matter)
                     || ctx.is_in_html_block(next_line_num)
                     || (next_line_num > 0
                         && next_line_num <= ctx.lines.len()

@@ -215,7 +215,7 @@ impl MD053LinkImageReferenceDefinitions {
             let line = &line_info.content;
 
             // Skip code blocks and front matter using line info
-            if line_info.in_code_block || ctx.is_in_front_matter(i + 1) {
+            if line_info.in_code_block || line_info.in_front_matter {
                 i += 1;
                 continue;
             }
@@ -282,11 +282,9 @@ impl MD053LinkImageReferenceDefinitions {
         // Cache code spans once before the loop
         let code_spans = ctx.code_spans();
 
-        for (i, line_info) in ctx.lines.iter().enumerate() {
-            let line_num = i + 1; // 1-indexed
-
+        for line_info in ctx.lines.iter() {
             // Skip lines in code blocks or front matter
-            if line_info.in_code_block || ctx.is_in_front_matter(line_num) {
+            if line_info.in_code_block || line_info.in_front_matter {
                 continue;
             }
 
