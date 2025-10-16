@@ -386,9 +386,11 @@ impl MD013LineLength {
             let line_num = i + 1;
 
             // Skip special structures
-            if ctx.line_info(line_num).is_some_and(|info| info.in_code_block)
-                || ctx.line_info(line_num).is_some_and(|info| info.in_front_matter)
-                || ctx.line_info(line_num).is_some_and(|info| info.in_html_block)
+            let should_skip_due_to_line_info = ctx
+                .line_info(line_num)
+                .is_some_and(|info| info.in_code_block || info.in_front_matter || info.in_html_block);
+
+            if should_skip_due_to_line_info
                 || (line_num > 0 && line_num <= ctx.lines.len() && ctx.lines[line_num - 1].blockquote.is_some())
                 || lines[i].trim().starts_with('#')
                 || TableUtils::is_potential_table_row(lines[i])
