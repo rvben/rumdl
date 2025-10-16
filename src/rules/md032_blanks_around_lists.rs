@@ -106,7 +106,8 @@ impl MD032BlanksAroundLists {
         let trimmed_prev = prev_line.trim();
 
         // Always require blank lines after code blocks, front matter, etc.
-        if ctx.is_in_code_block(prev_line_num) || ctx.line_info(prev_line_num).is_some_and(|info| info.in_front_matter)
+        if ctx.line_info(prev_line_num).is_some_and(|info| info.in_code_block)
+            || ctx.line_info(prev_line_num).is_some_and(|info| info.in_front_matter)
         {
             return true;
         }
@@ -320,7 +321,9 @@ impl MD032BlanksAroundLists {
             }
 
             // Skip if in code block or front matter
-            if ctx.is_in_code_block(line_num) || ctx.line_info(line_num).is_some_and(|info| info.in_front_matter) {
+            if ctx.line_info(line_num).is_some_and(|info| info.in_code_block)
+                || ctx.line_info(line_num).is_some_and(|info| info.in_front_matter)
+            {
                 continue;
             }
 
@@ -330,7 +333,7 @@ impl MD032BlanksAroundLists {
                 if line_idx > 0 {
                     let prev_line = lines[line_idx - 1];
                     let prev_is_blank = is_blank_in_context(prev_line);
-                    let prev_excluded = ctx.is_in_code_block(line_idx)
+                    let prev_excluded = ctx.line_info(line_idx).is_some_and(|info| info.in_code_block)
                         || ctx.line_info(line_idx).is_some_and(|info| info.in_front_matter);
 
                     if !prev_is_blank && !prev_excluded {
@@ -360,7 +363,9 @@ impl MD032BlanksAroundLists {
                 let prev_line_actual_idx_0 = start_line - 2;
                 let prev_line_actual_idx_1 = start_line - 1;
                 let prev_line_str = lines[prev_line_actual_idx_0];
-                let is_prev_excluded = ctx.is_in_code_block(prev_line_actual_idx_1)
+                let is_prev_excluded = ctx
+                    .line_info(prev_line_actual_idx_1)
+                    .is_some_and(|info| info.in_code_block)
                     || ctx
                         .line_info(prev_line_actual_idx_1)
                         .is_some_and(|info| info.in_front_matter);
@@ -538,7 +543,9 @@ impl MD032BlanksAroundLists {
             if start_line > 1 {
                 let prev_line_actual_idx_0 = start_line - 2;
                 let prev_line_actual_idx_1 = start_line - 1;
-                let is_prev_excluded = ctx.is_in_code_block(prev_line_actual_idx_1)
+                let is_prev_excluded = ctx
+                    .line_info(prev_line_actual_idx_1)
+                    .is_some_and(|info| info.in_code_block)
                     || ctx
                         .line_info(prev_line_actual_idx_1)
                         .is_some_and(|info| info.in_front_matter);
@@ -568,7 +575,9 @@ impl MD032BlanksAroundLists {
                 let line_after_block_content_str = lines[after_block_line_idx_0];
                 // Check if next line is excluded - in code block, front matter, or starts an indented code block
                 // Only exclude code fence lines if they're indented (part of list content)
-                let is_line_after_excluded = ctx.is_in_code_block(after_block_line_idx_1)
+                let is_line_after_excluded = ctx
+                    .line_info(after_block_line_idx_1)
+                    .is_some_and(|info| info.in_code_block)
                     || ctx
                         .line_info(after_block_line_idx_1)
                         .is_some_and(|info| info.in_front_matter)

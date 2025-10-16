@@ -111,7 +111,9 @@ impl MD036NoEmphasisAsHeading {
         }
 
         // Skip if line is in a list, blockquote, or code block
-        if LIST_MARKER.is_match(line) || BLOCKQUOTE_MARKER.is_match(line) || ctx.is_in_code_block(line_num + 1)
+        if LIST_MARKER.is_match(line)
+            || BLOCKQUOTE_MARKER.is_match(line)
+            || ctx.line_info(line_num + 1).is_some_and(|info| info.in_code_block)
         // line_num is 0-based, but LintContext expects 1-based
         {
             return None;

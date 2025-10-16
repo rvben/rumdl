@@ -259,7 +259,7 @@ impl MD053LinkImageReferenceDefinitions {
                 && let Some(ref_id) = &link.reference_id
             {
                 // Ensure the link itself is not inside a code block line
-                if !ctx.is_in_code_block(link.line) {
+                if !ctx.line_info(link.line).is_some_and(|info| info.in_code_block) {
                     usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                 }
             }
@@ -271,7 +271,7 @@ impl MD053LinkImageReferenceDefinitions {
                 && let Some(ref_id) = &image.reference_id
             {
                 // Ensure the image itself is not inside a code block line
-                if !ctx.is_in_code_block(image.line) {
+                if !ctx.line_info(image.line).is_some_and(|info| info.in_code_block) {
                     usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                 }
             }

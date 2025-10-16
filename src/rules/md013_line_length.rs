@@ -69,7 +69,10 @@ impl MD013LineLength {
         }
 
         // Code blocks with long strings (only check if in code block)
-        if ctx.is_in_code_block(current_line + 1) && !trimmed.is_empty() && !line.contains(' ') && !line.contains('\t')
+        if ctx.line_info(current_line + 1).is_some_and(|info| info.in_code_block)
+            && !trimmed.is_empty()
+            && !line.contains(' ')
+            && !line.contains('\t')
         {
             return true;
         }
@@ -232,7 +235,8 @@ impl Rule for MD013LineLength {
                     // The flags mean: true = check these elements, false = skip these elements
                     // So we skip when the flag is FALSE and the line is in that element type
                     if (!effective_config.headings && heading_lines_set.contains(&line_number))
-                        || (!effective_config.code_blocks && ctx.is_in_code_block(line_number))
+                        || (!effective_config.code_blocks
+                            && ctx.line_info(line_number).is_some_and(|info| info.in_code_block))
                         || (!effective_config.tables && table_lines_set.contains(&line_number))
                         || ctx.lines[line_number - 1].blockquote.is_some()
                         || ctx.is_in_html_block(line_number)
@@ -382,7 +386,7 @@ impl MD013LineLength {
             let line_num = i + 1;
 
             // Skip special structures
-            if ctx.is_in_code_block(line_num)
+            if ctx.line_info(line_num).is_some_and(|info| info.in_code_block)
                 || ctx.line_info(line_num).is_some_and(|info| info.in_front_matter)
                 || ctx.is_in_html_block(line_num)
                 || (line_num > 0 && line_num <= ctx.lines.len() && ctx.lines[line_num - 1].blockquote.is_some())
@@ -1014,7 +1018,7 @@ impl MD013LineLength {
 
                 // Stop at paragraph boundaries
                 if next_trimmed.is_empty()
-                    || ctx.is_in_code_block(next_line_num)
+                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_code_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_front_matter)
                     || ctx.is_in_html_block(next_line_num)
                     || (next_line_num > 0

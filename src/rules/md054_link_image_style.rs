@@ -149,7 +149,7 @@ impl Rule for MD054LinkImageStyle {
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip code blocks and reference definitions early
-            if ctx.is_in_code_block(line_num + 1) {
+            if ctx.line_info(line_num + 1).is_some_and(|info| info.in_code_block) {
                 continue;
             }
             if REFERENCE_DEF_RE.is_match(line) {

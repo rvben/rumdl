@@ -181,7 +181,7 @@ impl MD033NoInlineHtml {
             let line_num = i + 1;
 
             // Skip code blocks and empty lines
-            if line.trim().is_empty() || ctx.is_in_code_block(line_num) {
+            if line.trim().is_empty() || ctx.line_info(line_num).is_some_and(|info| info.in_code_block) {
                 continue;
             }
 
@@ -211,7 +211,7 @@ impl MD033NoInlineHtml {
                     let next_line_num = j + 1;
 
                     // Stop if we hit a code block
-                    if ctx.is_in_code_block(next_line_num) {
+                    if ctx.line_info(next_line_num).is_some_and(|info| info.in_code_block) {
                         break;
                     }
 
@@ -334,7 +334,7 @@ impl Rule for MD033NoInlineHtml {
             if line.trim().is_empty() {
                 continue;
             }
-            if ctx.is_in_code_block(line_num) {
+            if ctx.line_info(line_num).is_some_and(|info| info.in_code_block) {
                 continue;
             }
             // Skip lines that are indented code blocks (4+ spaces or tab) per CommonMark spec
