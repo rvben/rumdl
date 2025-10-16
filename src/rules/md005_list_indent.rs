@@ -20,6 +20,23 @@ pub struct MD005ListIndent {
 }
 
 impl MD005ListIndent {
+    /// Gap tolerance for grouping list blocks as one logical structure.
+    /// Markdown allows blank lines within lists, so we need some tolerance.
+    /// 2 lines handles: 1 blank line + potential interruption
+    const LIST_GROUP_GAP_TOLERANCE: usize = 2;
+
+    /// Minimum indentation increase to be considered a child (not same level).
+    /// Per Markdown convention, nested items need at least 2 more spaces.
+    const MIN_CHILD_INDENT_INCREASE: usize = 2;
+
+    /// Tolerance for considering items at "same level" despite minor indent differences.
+    /// Allows for 1 space difference to accommodate inconsistent formatting.
+    const SAME_LEVEL_TOLERANCE: i32 = 1;
+
+    /// Standard continuation list indentation offset from parent content column.
+    /// Lists that are continuation content typically indent 2 spaces from parent content.
+    const STANDARD_CONTINUATION_OFFSET: usize = 2;
+
     /// Group related list blocks that should be treated as one logical list structure
     fn group_related_list_blocks<'a>(
         &self,
@@ -39,9 +56,9 @@ impl MD005ListIndent {
             // Check if blocks are consecutive (no significant gap between them)
             let line_gap = current_block.start_line.saturating_sub(prev_block.end_line);
 
-            // Group blocks if they are close together (within 2 lines)
+            // Group blocks if they are close together
             // This handles cases where mixed list types are split but should be treated together
-            if line_gap <= 2 {
+            if line_gap <= Self::LIST_GROUP_GAP_TOLERANCE {
                 current_group.push(current_block);
             } else {
                 // Start a new group
@@ -78,12 +95,13 @@ impl MD005ListIndent {
                     let continuation_indent =
                         self.find_continuation_indent_between(ctx, line_num + 1, list_line - 1, parent_content_column);
 
-                    if let Some(cont_indent) = continuation_indent {
+                    if let Some(continuation_indent) = continuation_indent {
                         // If the current list's indent matches the continuation content indent,
-                        // OR if it's at the standard continuation list indentation (parent_content + 2),
+                        // OR if it's at the standard continuation list indentation,
                         // it's continuation content
-                        let is_standard_continuation = list_indent == parent_content_column + 2;
-                        let matches_content_indent = list_indent == cont_indent;
+                        let is_standard_continuation =
+                            list_indent == parent_content_column + Self::STANDARD_CONTINUATION_OFFSET;
+                        let matches_content_indent = list_indent == continuation_indent;
 
                         if matches_content_indent || is_standard_continuation {
                             return true;
@@ -182,9 +200,9 @@ impl MD005ListIndent {
                 // Calculate indentation of this line
                 let line_indent = line_info.content.len() - content.len();
 
-                // If this line is indented more than the parent's content column,
+                // If this line is indented at or past the parent's content column,
                 // it's continuation content
-                if line_indent > parent_content_column {
+                if line_indent >= parent_content_column {
                     return true;
                 }
             }
@@ -221,9 +239,9 @@ impl MD005ListIndent {
                 // Calculate indentation of this line
                 let line_indent = line_info.content.len() - content.len();
 
-                // If this line is indented more than the parent's content column,
+                // If this line is indented at or past the parent's content column,
                 // it's continuation content - return its indentation level
-                if line_indent > parent_content_column {
+                if line_indent >= parent_content_column {
                     return Some(line_indent);
                 }
             }
@@ -307,13 +325,13 @@ impl MD005ListIndent {
                         let (prev_line, prev_indent, _, _) = &all_list_items[j];
                         let prev_level = level_map[prev_line];
 
-                        // A clear parent has at least 2 spaces less indentation
-                        if *prev_indent + 2 <= *indent {
+                        // A clear parent has at least MIN_CHILD_INDENT_INCREASE spaces less indentation
+                        if *prev_indent + Self::MIN_CHILD_INDENT_INCREASE <= *indent {
                             // This is a child of prev_item
                             determined_level = prev_level + 1;
                             break;
-                        } else if (*prev_indent as i32 - *indent as i32).abs() <= 1 {
-                            // Within 1 space - likely meant to be same level but inconsistent
+                        } else if (*prev_indent as i32 - *indent as i32).abs() <= Self::SAME_LEVEL_TOLERANCE {
+                            // Within SAME_LEVEL_TOLERANCE - likely meant to be same level but inconsistent
                             determined_level = prev_level;
                             break;
                         } else if *prev_indent < *indent {
@@ -321,10 +339,10 @@ impl MD005ListIndent {
                             // This is ambiguous - could be same level or child
                             // Look at the pattern: if prev_level already has items with similar indent,
                             // this is probably meant to be at the same level
-                            if let Some(level_indents_list) = level_indents.get(&prev_level) {
+                            if let Some(indents_at_level) = level_indents.get(&prev_level) {
                                 // Check if any indent at prev_level is close to this indent
-                                for &lvl_indent in level_indents_list {
-                                    if (lvl_indent as i32 - *indent as i32).abs() <= 1 {
+                                for &level_indent in indents_at_level {
+                                    if (level_indent as i32 - *indent as i32).abs() <= Self::SAME_LEVEL_TOLERANCE {
                                         // Close to an existing indent at prev_level
                                         determined_level = prev_level;
                                         break;
@@ -1177,6 +1195,34 @@ Even more text";
         assert!(
             result.is_empty(),
             "MD005 should not flag continuation content lists, got {} warnings: {:?}",
+            result.len(),
+            result
+        );
+    }
+
+    #[test]
+    fn test_issue_115_sublist_after_code_block() {
+        let rule = MD005ListIndent::default();
+        let content = "\
+1. List item 1
+
+   ```rust
+   fn foo() {}
+   ```
+
+   Sublist:
+
+   - A
+   - B
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        // Sub-list items A and B are continuation content (3-space indent is correct)
+        // because they appear after continuation content (code block and text) that is
+        // indented at the parent's content_column (3 spaces)
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for sub-list after code block in list item, got {} warnings: {:?}",
             result.len(),
             result
         );
