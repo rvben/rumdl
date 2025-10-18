@@ -293,7 +293,10 @@ Some content.
 
 This has the same text but different level."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -358,7 +361,10 @@ Same with punctuation.
 
 Without punctuation."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -388,7 +394,10 @@ Code formatted.
 
 Duplicate code formatted."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -411,7 +420,10 @@ Some content.
 
 Same subsection name in different section."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -434,7 +446,10 @@ Same subsection name in different section."#;
 
 ### Subtitle"#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -501,7 +516,10 @@ Duplicate emojis.
 
 Duplicate special chars."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -557,7 +575,10 @@ More content.
 
 Duplicate with different style."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -620,7 +641,10 @@ Different amount of spaces.
 
 Exact match."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -640,7 +664,10 @@ Exact match."#;
 
 ### First"#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -746,7 +773,10 @@ Duplicate heading with link.
 
 Not a duplicate."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -768,7 +798,10 @@ Not a duplicate."#;
 
 Three in a row."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -845,7 +878,10 @@ Some content.
 
 Duplicate with code span."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -859,7 +895,10 @@ Duplicate with code span."#;
         let long_text = "This is a very long heading that goes on and on and on and contains many words to test how the rule handles long headings";
         let content = format!("# {long_text}\n\nSome content.\n\n## {long_text}\n\nDuplicate long heading.");
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(&content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
@@ -878,7 +917,10 @@ Some content.
 
 Duplicate with HTML entity."#;
 
-        let config = MD024Config::default();
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+        };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
