@@ -10,25 +10,25 @@ lazy_static! {
     // Comprehensive link pattern that captures both inline and reference links
     // Use (?s) flag to make . match newlines
     static ref LINK_PATTERN: Regex = Regex::new(
-        r"(?sx)
+        r#"(?sx)
         \[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]          # Link text in group 1 (handles nested brackets)
         (?:
-            \(([^)]*)\)       # Inline URL in group 2 (can be empty)
+            \((?:<([^<>\n]*)>|([^)"']*))(?:\s+(?:"([^"]*)"|'([^']*)'))?\)  # URL in group 2 (angle) or 3 (bare), title in 4/5
             |
-            \[([^\]]*)\]      # Reference ID in group 3
-        )"
+            \[([^\]]*)\]      # Reference ID in group 6
+        )"#
     ).unwrap();
 
     // Image pattern (similar to links but with ! prefix)
     // Use (?s) flag to make . match newlines
     static ref IMAGE_PATTERN: Regex = Regex::new(
-        r"(?sx)
+        r#"(?sx)
         !\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]         # Alt text in group 1 (handles nested brackets)
         (?:
-            \(([^)]*)\)       # Inline URL in group 2 (can be empty)
+            \((?:<([^<>\n]*)>|([^)"']*))(?:\s+(?:"([^"]*)"|'([^']*)'))?\)  # URL in group 2 (angle) or 3 (bare), title in 4/5
             |
-            \[([^\]]*)\]      # Reference ID in group 3
-        )"
+            \[([^\]]*)\]      # Reference ID in group 6
+        )"#
     ).unwrap();
 
     // Reference definition pattern
@@ -832,7 +832,10 @@ impl<'a> LintContext<'a> {
 
             let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
 
-            if let Some(inline_url) = cap.get(2) {
+            // URL can be in group 2 (angle brackets) or group 3 (bare)
+            let inline_url = cap.get(2).or_else(|| cap.get(3));
+
+            if let Some(url_match) = inline_url {
                 // Inline link
                 links.push(ParsedLink {
                     line: line_num,
@@ -841,11 +844,11 @@ impl<'a> LintContext<'a> {
                     byte_offset: match_start,
                     byte_end: match_end,
                     text,
-                    url: inline_url.as_str().to_string(),
+                    url: url_match.as_str().to_string(),
                     is_reference: false,
                     reference_id: None,
                 });
-            } else if let Some(ref_id) = cap.get(3) {
+            } else if let Some(ref_id) = cap.get(6) {
                 // Reference link
                 let ref_id_str = ref_id.as_str();
                 let normalized_ref = if ref_id_str.is_empty() {
@@ -939,7 +942,10 @@ impl<'a> LintContext<'a> {
 
             let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
 
-            if let Some(inline_url) = cap.get(2) {
+            // URL can be in group 2 (angle brackets) or group 3 (bare)
+            let inline_url = cap.get(2).or_else(|| cap.get(3));
+
+            if let Some(url_match) = inline_url {
                 // Inline image
                 images.push(ParsedImage {
                     line: line_num,
@@ -948,11 +954,11 @@ impl<'a> LintContext<'a> {
                     byte_offset: match_start,
                     byte_end: match_end,
                     alt_text,
-                    url: inline_url.as_str().to_string(),
+                    url: url_match.as_str().to_string(),
                     is_reference: false,
                     reference_id: None,
                 });
-            } else if let Some(ref_id) = cap.get(3) {
+            } else if let Some(ref_id) = cap.get(6) {
                 // Reference image
                 let ref_id_str = ref_id.as_str();
                 let normalized_ref = if ref_id_str.is_empty() {

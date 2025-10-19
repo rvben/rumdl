@@ -553,3 +553,32 @@ fn test_issue_27_html_blocks_not_indented_code() {
         "HTML blocks with indentation should not be flagged as indented code blocks (issue #27)"
     );
 }
+
+#[test]
+fn test_issue_118_content_inside_fenced_blocks() {
+    // Regression test for Issue #118
+    // MD046 should not flag content inside fenced code blocks
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"Here is **example 1**:
+
+```bash
+$ python one_up.py
+What's your favorite number? 7
+I can one up that.
+Traceback (most recent call last):
+  File "/home/trey/one_up.py", line 3, in <module>
+    print(favorite_number+1)
+          ~~~~~~~~~~~~~~~^~
+TypeError: can only concatenate str (not "int") to str
+```"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not flag the ~~~ or ^ characters inside the fenced block
+    assert_eq!(
+        result.len(),
+        0,
+        "MD046 should not flag content inside fenced code blocks (issue #118)"
+    );
+}

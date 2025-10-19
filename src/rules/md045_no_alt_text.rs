@@ -428,7 +428,8 @@ mod tests {
     #[test]
     fn test_image_with_spaces_in_url() {
         let rule = MD045NoAltText::new();
-        let content = "![](my image.jpg)";
+        // Use angle bracket syntax for URLs with spaces (CommonMark spec)
+        let content = "![](<my image.jpg>)";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 

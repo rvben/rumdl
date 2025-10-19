@@ -509,9 +509,30 @@ impl Rule for MD046CodeBlockStyle {
         };
 
         // Process each line to find style inconsistencies
-        let mut in_fenced_block = false;
         let line_index = LineIndex::new(ctx.content.to_string());
 
+        // Pre-compute which lines are inside FENCED code blocks (not indented)
+        // We detect all code blocks, then filter for fenced ones only
+        let code_blocks = crate::utils::code_block_utils::CodeBlockUtils::detect_code_blocks(ctx.content);
+        let mut in_fenced_block = vec![false; lines.len()];
+        for &(start, end) in &code_blocks {
+            // Check if this block is fenced by examining its content
+            if start < ctx.content.len() && end <= ctx.content.len() {
+                let block_content = &ctx.content[start..end];
+                let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
+
+                if is_fenced {
+                    // Mark all lines in this fenced block
+                    for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+                        if line_info.byte_offset >= start && line_info.byte_offset < end {
+                            in_fenced_block[line_idx] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut in_fence = false;
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
 
@@ -526,12 +547,11 @@ impl Rule for MD046CodeBlockStyle {
                 continue;
             }
 
-            // Track fenced code blocks
+            // Check for fenced code block markers (for style checking)
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                in_fenced_block = !in_fenced_block;
-
-                if target_style == CodeBlockStyle::Indented && !in_fenced_block {
-                    // This is starting a fenced block but we want indented style
+                if target_style == CodeBlockStyle::Indented && !in_fence {
+                    // This is an opening fence marker but we want indented style
+                    // Only flag the opening marker, not the closing one
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
                     warnings.push(LintWarning {
                         rule_name: Some(self.name()),
@@ -547,12 +567,19 @@ impl Rule for MD046CodeBlockStyle {
                         }),
                     });
                 }
+                // Toggle fence state
+                in_fence = !in_fence;
+                continue;
             }
-            // Check for indented code blocks (when not in a fenced block)
-            else if !in_fenced_block
-                && self.is_indented_code_block(&lines, i, is_mkdocs)
-                && target_style == CodeBlockStyle::Fenced
-            {
+
+            // Skip content lines inside fenced blocks
+            // This prevents false positives like flagging ~~~~ inside bash output
+            if in_fenced_block[i] {
+                continue;
+            }
+
+            // Check for indented code blocks (when not inside a fenced block)
+            if self.is_indented_code_block(&lines, i, is_mkdocs) && target_style == CodeBlockStyle::Fenced {
                 // Check if this is the start of a new indented block
                 let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1, is_mkdocs);
 

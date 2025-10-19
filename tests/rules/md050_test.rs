@@ -306,3 +306,91 @@ fn test_md050_complex_html_structure() {
     assert_eq!(warnings[0].line, 5);
     assert_eq!(warnings[1].line, 8);
 }
+
+#[test]
+fn test_issue_118_underscores_in_link_title_with_code() {
+    // Regression test for Issue #118
+    // MD050 should not flag underscores in link titles that contain code
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let content = r#"Here is a link with code in the hover text:
+
+- [An odd but sensible use of `super`](https://www.pythonmorsels.com/how-not-to-use-super/#an-odd-but-sensible-use-of-super "Calling `super().__setitem__` might make sense, depending on how you've implemented your class")
+"#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not flag __setitem__ inside the quoted title attribute
+    assert_eq!(
+        result.len(),
+        0,
+        "MD050 should not flag code with underscores in link title attributes (issue #118)"
+    );
+}
+
+#[test]
+fn test_issue_118_parentheses_in_link_titles() {
+    // Regression test for Issue #118
+    // MD050 should handle link titles containing parentheses
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let content = r#"[Link text](https://example.com "Title (with parentheses)")
+
+[Another link](https://example.com "Function call like `func()`")
+"#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not flag anything - parentheses in titles are valid
+    assert_eq!(
+        result.len(),
+        0,
+        "MD050 should handle parentheses in link titles (issue #118)"
+    );
+}
+
+#[test]
+fn test_issue_118_full_document() {
+    // Regression test for Issue #118
+    // Test the complete document from the issue report
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let content = r#"Here is **example 1**:
+
+```bash
+$ python one_up.py
+What's your favorite number? 7
+I can one up that.
+Traceback (most recent call last):
+  File "/home/trey/one_up.py", line 3, in <module>
+    print(favorite_number+1)
+          ~~~~~~~~~~~~~~~^~
+TypeError: can only concatenate str (not "int") to str
+```
+
+Here is **example 2**:
+
+```bash
+$ python one_up.py
+What's your favorite number? 7.82
+Traceback (most recent call last):
+  File "/home/trey/one_up.py", line 1, in <module>
+    favorite_number = int(input("What's your favorite number? "))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: invalid literal for int() with base 10: '7.82'
+```
+
+Here is a link with code in the hover text:
+
+- [An odd but sensible use of `super`](https://www.pythonmorsels.com/how-not-to-use-super/#an-odd-but-sensible-use-of-super "Calling `super().__setitem__` might make sense, depending on how you've implemented your class")
+"#;
+
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not report any issues with the full document
+    assert_eq!(
+        result.len(),
+        0,
+        "MD050 should not report any issues with Issue #118 document"
+    );
+}

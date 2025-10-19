@@ -158,16 +158,60 @@ impl MD052ReferenceLinkImages {
             return true;
         }
 
+        // Skip footnote syntax like [^1], [^note], etc.
+        // Footnotes start with ^ and are a common markdown extension
+        if text.starts_with('^') {
+            return true;
+        }
+
+        // Skip table of contents markers like [TOC]
+        // Used by Python-Markdown and other processors
+        if text == "TOC" {
+            return true;
+        }
+
         // Skip single uppercase letters (likely type parameters) like [T], [U], [K], [V]
         if text.len() == 1 && text.chars().all(|c| c.is_ascii_uppercase()) {
             return true;
         }
 
-        // Skip common programming type names and short identifiers
+        // Skip common programming type names, literals, and short identifiers
         // that are likely not markdown references
         let common_non_refs = [
-            "object", "Object", "any", "Any", "inv", "void", "bool", "int", "float", "str", "char", "i8", "i16", "i32",
-            "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64",
+            // Programming types
+            "object",
+            "Object",
+            "any",
+            "Any",
+            "inv",
+            "void",
+            "bool",
+            "int",
+            "float",
+            "str",
+            "char",
+            "i8",
+            "i16",
+            "i32",
+            "i64",
+            "i128",
+            "isize",
+            "u8",
+            "u16",
+            "u32",
+            "u64",
+            "u128",
+            "usize",
+            "f32",
+            "f64",
+            // JavaScript/JSON literals (excluding "undefined" which is too ambiguous)
+            "null",
+            "true",
+            "false",
+            "NaN",
+            "Infinity",
+            // Common JavaScript output patterns
+            "object Object",
         ];
 
         if common_non_refs.contains(&text) {
