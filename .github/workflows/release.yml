@@ -216,7 +216,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            wheel-path: "*wheel-x86_64-unknown-linux-*/*.whl"
+            wheel-path: "*wheel-x86_64-unknown-linux-gnu/*.whl"
           - os: macos-latest
             wheel-path: "*wheel-aarch64-apple-darwin/*.whl"
           - os: windows-latest
