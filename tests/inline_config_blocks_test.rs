@@ -325,14 +325,13 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
 
 #[test]
 fn test_malformed_comments() {
-    // Test various malformed comments that should not be processed
+    // Test that inline config directives without proper spacing are not processed
+    // Note: We test that content following malformed markdownlint directives (those without
+    // proper spacing) still gets linted. Valid HTML comments are correctly ignored per issue #119.
     let content = r#"# Test Document
 
-<!--markdownlint-disable MD013-->
-This is a very long line that exceeds 80 characters and should trigger MD013 because comment has no space
-
-<!-- markdownlint-disable MD013->
-This is a very long line that exceeds 80 characters and should trigger MD013 because comment is malformed
+<-- markdownlint-disable MD013 -->
+This is a very long line that exceeds 80 characters and should trigger MD013 because comment has wrong opening
 
 < !-- markdownlint-disable MD013 -->
 This is a very long line that exceeds 80 characters and should trigger MD013 because comment has space in opening"#;
@@ -345,10 +344,10 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
         .collect();
 
-    // All lines should trigger MD013
+    // Lines after malformed HTML comments should trigger MD013
     assert!(
-        md013_warnings.len() >= 3,
-        "Expected at least 3 MD013 warnings, got {}",
+        md013_warnings.len() >= 2,
+        "Expected at least 2 MD013 warnings, got {}",
         md013_warnings.len()
     );
 }

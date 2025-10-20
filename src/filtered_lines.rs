@@ -55,7 +55,8 @@ pub struct FilteredLine<'a> {
 /// let config = LineFilterConfig::new()
 ///     .skip_front_matter()
 ///     .skip_code_blocks()
-///     .skip_html_blocks();
+///     .skip_html_blocks()
+///     .skip_html_comments();
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct LineFilterConfig {
@@ -65,6 +66,8 @@ pub struct LineFilterConfig {
     pub skip_code_blocks: bool,
     /// Skip lines inside HTML blocks
     pub skip_html_blocks: bool,
+    /// Skip lines inside HTML comments
+    pub skip_html_comments: bool,
 }
 
 impl LineFilterConfig {
@@ -104,11 +107,22 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside HTML comments
+    ///
+    /// HTML comments (<!-- ... -->) are metadata and should not be processed
+    /// by most markdown linting rules.
+    #[must_use]
+    pub fn skip_html_comments(mut self) -> Self {
+        self.skip_html_comments = true;
+        self
+    }
+
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         (self.skip_front_matter && line_info.in_front_matter)
             || (self.skip_code_blocks && line_info.in_code_block)
             || (self.skip_html_blocks && line_info.in_html_block)
+            || (self.skip_html_comments && line_info.in_html_comment)
     }
 }
 
@@ -243,6 +257,13 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_html_blocks(mut self) -> Self {
         self.config = self.config.skip_html_blocks();
+        self
+    }
+
+    /// Skip lines inside HTML comments
+    #[must_use]
+    pub fn skip_html_comments(mut self) -> Self {
+        self.config = self.config.skip_html_comments();
         self
     }
 }

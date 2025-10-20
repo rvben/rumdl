@@ -78,6 +78,8 @@ pub struct LineInfo {
     pub in_front_matter: bool,
     /// Whether this line is inside an HTML block
     pub in_html_block: bool,
+    /// Whether this line is inside an HTML comment
+    pub in_html_comment: bool,
     /// List item information if this line starts a list item
     pub list_item: Option<ListItemInfo>,
     /// Heading information if this line is a heading
@@ -1190,6 +1192,7 @@ impl<'a> LintContext<'a> {
                 in_code_block,
                 in_front_matter: front_matter_end > 0 && i < front_matter_end,
                 in_html_block: false, // Will be populated after line creation
+                in_html_comment,
                 list_item,
                 heading: None,    // Will be populated in second pass for Setext headings
                 blockquote: None, // Will be populated after line creation
