@@ -6,7 +6,6 @@ use colored::*;
 use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
 use rumdl_lib::config as rumdl_config;
-use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::str::FromStr;
@@ -179,19 +178,10 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
 
     let start_time = Instant::now();
 
-    // Choose processing strategy based on file count and fix mode
-    // Also check if it's a single small file to avoid parallel overhead
-    let single_small_file = if file_paths.len() == 1 {
-        if let Ok(metadata) = fs::metadata(&file_paths[0]) {
-            metadata.len() < 10_000 // 10KB threshold
-        } else {
-            false
-        }
-    } else {
-        false
-    };
-
-    let use_parallel = file_paths.len() > 1 && !args._fix && !single_small_file; // Don't parallelize fixes or small files
+    // Enable parallel processing for both check and fix modes when there are multiple files
+    // Each file is processed independently (with all its fix iterations), so parallel processing is safe
+    // Single files cannot be parallelized at the file level (would need rule-level parallelization)
+    let use_parallel = file_paths.len() > 1;
 
     // Collect all warnings for statistics if requested
     let mut all_warnings_for_stats = Vec::new();
