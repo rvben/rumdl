@@ -26,10 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Cleaned up warning messages by removing verbose parentheticals
   - Maintains semantic integrity (won't split mid-sentence) while respecting configured line_length
 
-- **Parsing**: Ignore content inside HTML comments (fixes #119, #20)
-  - Content within HTML comment blocks (`<!-- ... -->`) now properly ignored
-  - Prevents false positives from commented-out markdown
-  - Better handling of multi-line HTML comments
+- **HTML Comments**: Complete fix to ignore all content inside HTML comments (fixes #119, #20)
+  - All rules now properly ignore content within HTML comment blocks (`<!-- ... -->`)
+  - Added `in_html_comment` field to `LineInfo` for comprehensive tracking
+  - Extended filtered lines API with `skip_html_comments()` method
+  - Updated MD013, MD049, and other rules to skip HTML comment content
+  - Prevents false positives from commented-out markdown (MD013, MD049, MD005, MD006, MD039, MD042)
+  - Better handling of multi-line HTML comments across all linting rules
 
 - **MD046**: Resolve false positives from Issue #118
   - Fixed incorrect flagging of valid code block syntax
@@ -38,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MD050**: Resolve false positives from Issue #118
   - Fixed incorrect strong style detection in edge cases
   - Better handling of emphasis patterns
+
+- **Tests**: Fixed sentence_per_line_detection test assertion
+  - Updated test to match simplified warning message from MD013
+  - Test was expecting verbose message after message was simplified in earlier commit
 
 ## [0.0.162] - 2025-10-16
 
