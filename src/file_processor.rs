@@ -713,9 +713,9 @@ pub fn apply_fixes_coordinated(
     let start = Instant::now();
     let coordinator = FixCoordinator::new();
 
-    // Apply fixes iteratively (up to 10 iterations to ensure convergence)
-    match coordinator.apply_fixes_iterative(rules, all_warnings, content, config, 10) {
-        Ok((rules_applied, iterations, ctx_creations, fixed_rule_names)) => {
+    // Apply fixes iteratively (up to 100 iterations to ensure convergence, same as Ruff)
+    match coordinator.apply_fixes_iterative(rules, all_warnings, content, config, 100) {
+        Ok((rules_applied, iterations, ctx_creations, fixed_rule_names, converged)) => {
             let elapsed = start.elapsed();
 
             if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
@@ -723,7 +723,19 @@ pub fn apply_fixes_coordinated(
                 eprintln!("DEBUG: Iterations: {iterations}");
                 eprintln!("DEBUG: Rules applied: {rules_applied}");
                 eprintln!("DEBUG: LintContext creations: {ctx_creations}");
+                eprintln!("DEBUG: Converged: {converged}");
                 eprintln!("DEBUG: Total time: {elapsed:?}");
+            }
+
+            // Warn if convergence failed (Ruff-style)
+            if !converged && !quiet {
+                eprintln!("Warning: Failed to converge after {iterations} iterations.");
+                eprintln!("This likely indicates a bug in rumdl.");
+                if !fixed_rule_names.is_empty() {
+                    let rule_codes: Vec<&str> = fixed_rule_names.iter().map(|s| s.as_str()).collect();
+                    eprintln!("Rule codes: {}", rule_codes.join(", "));
+                }
+                eprintln!("Please report at: https://github.com/rvben/rumdl/issues/new");
             }
 
             // Count warnings for the rules that were successfully applied

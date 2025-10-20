@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.164] - 2025-10-20
+
+### Changed
+
+- **Auto-fix Iteration**: Automatic iteration until convergence (fixes #88)
+  - `--fix` now automatically iterates up to 100 passes until content stabilizes (same as Ruff)
+  - No need to manually re-run `rumdl check --fix` multiple times
+  - Hash-based convergence detection prevents unnecessary iterations
+  - Significantly improves user experience for multi-pass fix scenarios
+
+### Added
+
+- **Convergence Detection**: Added hash-based detection to identify when fixes have stabilized
+  - Stops iteration when content hash remains unchanged
+  - More efficient than counting rule applications
+  - Returns convergence status in fix results
+
+- **Convergence Failure Warnings**: Report when auto-fix doesn't converge (Ruff-style)
+  - Warns if 100 iteration limit reached without convergence
+  - Shows rule codes involved in potential infinite loop
+  - Encourages bug reports for convergence failures
+  - Available via `RUMDL_DEBUG_FIX_PERF` environment variable
+
+### Fixed
+
+- **Multi-pass Fixes**: No longer require manual re-runs to apply all possible fixes
+  - Previously users had to run `rumdl check --fix` multiple times
+  - Now automatically handles dependent rule fixes in single command
+  - Examples: MD010 (tabs) before MD007 (list indent), MD013 (line length) before MD009 (trailing spaces)
+
 ## [0.0.163] - 2025-10-20
 
 ### Changed
