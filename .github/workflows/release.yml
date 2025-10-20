@@ -227,6 +227,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: false
 
       - name: Download wheel artifacts
         uses: actions/download-artifact@v4
