@@ -139,6 +139,19 @@ uv tool install rumdl
 uv tool run rumdl check .
 ```
 
+### Using Nix (macOS/Linux)
+
+```bash
+nix-channel --update
+nix-env --install --attr nixpkgs.rumdl
+```
+
+Alternatively, you can use flakes to run it without installation.
+
+```bash
+nix run --extra-experimental-features 'flakes nix-command' nixpkgs/nixpkgs-unstable#rumdl -- --version
+```
+
 ### Download binary
 
 ```bash
