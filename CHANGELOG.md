@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.163] - 2025-10-20
+
+### Changed
+
+- **MD024**: Default `siblings_only` to true for better usability
+  - Multiple headings with same text now only flagged if they're direct siblings
+  - Reduces false positives in documents with common section headings
+  - More intuitive default behavior matching common use cases
+
+### Fixed
+
+- **MD013**: Enforce line length in sentence_per_line mode (fixes #111)
+  - Previously, sentence_per_line mode completely ignored line_length setting
+  - Now warns about single sentences exceeding configured line_length
+  - No auto-fix for long single sentences (requires manual rephrasing)
+  - Still auto-fixes multi-sentence lines by splitting on sentence boundaries
+  - Cleaned up warning messages by removing verbose parentheticals
+  - Maintains semantic integrity (won't split mid-sentence) while respecting configured line_length
+
+- **Parsing**: Ignore content inside HTML comments (fixes #119, #20)
+  - Content within HTML comment blocks (`<!-- ... -->`) now properly ignored
+  - Prevents false positives from commented-out markdown
+  - Better handling of multi-line HTML comments
+
+- **MD046**: Resolve false positives from Issue #118
+  - Fixed incorrect flagging of valid code block syntax
+  - Improved code block style detection accuracy
+
+- **MD050**: Resolve false positives from Issue #118
+  - Fixed incorrect strong style detection in edge cases
+  - Better handling of emphasis patterns
+
 ## [0.0.162] - 2025-10-16
 
 ### Added
@@ -1108,7 +1140,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.144...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.163...HEAD
+[0.0.163]: https://github.com/rvben/rumdl/compare/v0.0.162...v0.0.163
+[0.0.162]: https://github.com/rvben/rumdl/compare/v0.0.161...v0.0.162
+[0.0.161]: https://github.com/rvben/rumdl/compare/v0.0.160...v0.0.161
+[0.0.160]: https://github.com/rvben/rumdl/compare/v0.0.159...v0.0.160
+[0.0.159]: https://github.com/rvben/rumdl/compare/v0.0.158...v0.0.159
+[0.0.158]: https://github.com/rvben/rumdl/compare/v0.0.157...v0.0.158
+[0.0.157]: https://github.com/rvben/rumdl/compare/v0.0.156...v0.0.157
+[0.0.156]: https://github.com/rvben/rumdl/compare/v0.0.155...v0.0.156
+[0.0.155]: https://github.com/rvben/rumdl/compare/v0.0.154...v0.0.155
+[0.0.154]: https://github.com/rvben/rumdl/compare/v0.0.153...v0.0.154
+[0.0.153]: https://github.com/rvben/rumdl/compare/v0.0.152...v0.0.153
+[0.0.152]: https://github.com/rvben/rumdl/compare/v0.0.151...v0.0.152
+[0.0.151]: https://github.com/rvben/rumdl/compare/v0.0.150...v0.0.151
+[0.0.150]: https://github.com/rvben/rumdl/compare/v0.0.149...v0.0.150
+[0.0.149]: https://github.com/rvben/rumdl/compare/v0.0.148...v0.0.149
+[0.0.148]: https://github.com/rvben/rumdl/compare/v0.0.147...v0.0.148
+[0.0.147]: https://github.com/rvben/rumdl/compare/v0.0.146...v0.0.147
+[0.0.146]: https://github.com/rvben/rumdl/compare/v0.0.145...v0.0.146
+[0.0.145]: https://github.com/rvben/rumdl/compare/v0.0.144...v0.0.145
 [0.0.144]: https://github.com/rvben/rumdl/compare/v0.0.143...v0.0.144
 [0.0.142]: https://github.com/rvben/rumdl/compare/v0.0.141...v0.0.142
 [0.0.140]: https://github.com/rvben/rumdl/compare/v0.0.139...v0.0.140
