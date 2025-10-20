@@ -201,75 +201,99 @@ impl Rule for MD013LineLength {
             std::collections::HashSet::new()
         };
 
-        // Only process candidate lines that were pre-filtered
-        // Skip line length checks entirely in sentence-per-line mode
-        if effective_config.reflow_mode != ReflowMode::SentencePerLine {
-            for &line_idx in &candidate_lines {
-                let line_number = line_idx + 1;
-                let line = lines[line_idx];
+        // Process candidate lines for line length checks
+        for &line_idx in &candidate_lines {
+            let line_number = line_idx + 1;
+            let line = lines[line_idx];
 
-                // Calculate effective length excluding unbreakable URLs
-                let effective_length = self.calculate_effective_length(line);
+            // Calculate effective length excluding unbreakable URLs
+            let effective_length = self.calculate_effective_length(line);
 
-                // Use single line length limit for all content
-                let line_limit = effective_config.line_length;
+            // Use single line length limit for all content
+            let line_limit = effective_config.line_length;
 
-                // Skip short lines immediately (double-check after effective length calculation)
-                if effective_length <= line_limit {
-                    continue;
-                }
-
-                // Skip mkdocstrings blocks (already handled by LintContext)
-                if ctx.lines[line_idx].in_mkdocstrings {
-                    continue;
-                }
-
-                // Skip various block types efficiently
-                if !effective_config.strict {
-                    // Skip setext heading underlines
-                    if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
-                        continue;
-                    }
-
-                    // Skip block elements according to config flags
-                    // The flags mean: true = check these elements, false = skip these elements
-                    // So we skip when the flag is FALSE and the line is in that element type
-                    if (!effective_config.headings && heading_lines_set.contains(&line_number))
-                        || (!effective_config.code_blocks
-                            && ctx.line_info(line_number).is_some_and(|info| info.in_code_block))
-                        || (!effective_config.tables && table_lines_set.contains(&line_number))
-                        || ctx.lines[line_number - 1].blockquote.is_some()
-                        || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
-                    {
-                        continue;
-                    }
-
-                    // Skip lines that are only a URL, image ref, or link ref
-                    if self.should_ignore_line(line, &lines, line_idx, ctx) {
-                        continue;
-                    }
-                }
-
-                // Don't provide fix for individual lines when reflow is enabled
-                // Paragraph-based fixes will be handled separately
-                let fix = None;
-
-                let message = format!("Line length {effective_length} exceeds {line_limit} characters");
-
-                // Calculate precise character range for the excess portion
-                let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
-                    message,
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix,
-                });
+            // Skip short lines immediately (double-check after effective length calculation)
+            if effective_length <= line_limit {
+                continue;
             }
+
+            // Skip mkdocstrings blocks (already handled by LintContext)
+            if ctx.lines[line_idx].in_mkdocstrings {
+                continue;
+            }
+
+            // Skip various block types efficiently
+            if !effective_config.strict {
+                // Skip setext heading underlines
+                if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
+                    continue;
+                }
+
+                // Skip block elements according to config flags
+                // The flags mean: true = check these elements, false = skip these elements
+                // So we skip when the flag is FALSE and the line is in that element type
+                if (!effective_config.headings && heading_lines_set.contains(&line_number))
+                    || (!effective_config.code_blocks
+                        && ctx.line_info(line_number).is_some_and(|info| info.in_code_block))
+                    || (!effective_config.tables && table_lines_set.contains(&line_number))
+                    || ctx.lines[line_number - 1].blockquote.is_some()
+                    || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
+                {
+                    continue;
+                }
+
+                // Skip lines that are only a URL, image ref, or link ref
+                if self.should_ignore_line(line, &lines, line_idx, ctx) {
+                    continue;
+                }
+            }
+
+            // In sentence-per-line mode, check if this is a single long sentence
+            // If so, emit a warning without a fix (user must manually rephrase)
+            if effective_config.reflow_mode == ReflowMode::SentencePerLine {
+                let sentences = split_into_sentences(line.trim());
+                if sentences.len() == 1 {
+                    // Single sentence that's too long - warn but don't auto-fix
+                    let message = format!("Line length {effective_length} exceeds {line_limit} characters");
+
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_excess_range(line_number, line, line_limit);
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name()),
+                        message,
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        severity: Severity::Warning,
+                        fix: None, // No auto-fix for long single sentences
+                    });
+                    continue;
+                }
+                // Multiple sentences will be handled by paragraph-based reflow
+                continue;
+            }
+
+            // Don't provide fix for individual lines when reflow is enabled
+            // Paragraph-based fixes will be handled separately
+            let fix = None;
+
+            let message = format!("Line length {effective_length} exceeds {line_limit} characters");
+
+            // Calculate precise character range for the excess portion
+            let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
+
+            warnings.push(LintWarning {
+                rule_name: Some(self.name()),
+                message,
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                severity: Severity::Warning,
+                fix,
+            });
         }
 
         // If reflow is enabled, generate paragraph-based fixes
@@ -967,9 +991,7 @@ impl MD013LineLength {
                     if original_text != replacement {
                         // Generate an appropriate message based on why reflow is needed
                         let message = match config.reflow_mode {
-                            ReflowMode::SentencePerLine => {
-                                "Line contains multiple sentences (one sentence per line expected)".to_string()
-                            }
+                            ReflowMode::SentencePerLine => "Line contains multiple sentences".to_string(),
                             ReflowMode::Normalize => {
                                 let combined_length = self.calculate_effective_length(&full_line);
                                 if combined_length > config.line_length {
@@ -1171,9 +1193,7 @@ impl MD013LineLength {
                                 "Paragraph could be normalized to use line length of {} characters",
                                 config.line_length
                             ),
-                            ReflowMode::SentencePerLine => {
-                                "Line contains multiple sentences (one sentence per line expected)".to_string()
-                            }
+                            ReflowMode::SentencePerLine => "Line contains multiple sentences".to_string(),
                             ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length),
                         },
                         line: warning_line,
@@ -2901,10 +2921,7 @@ with multiple lines."#;
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "Should detect multiple sentences on one line");
-        assert_eq!(
-            result[0].message,
-            "Line contains multiple sentences (one sentence per line expected)"
-        );
+        assert_eq!(result[0].message, "Line contains multiple sentences");
     }
 
     #[test]
