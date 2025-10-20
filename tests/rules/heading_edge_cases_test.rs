@@ -386,6 +386,7 @@ fn test_md024_edge_cases() {
     assert!(result.is_empty(), "MD024 doesn't flag empty headings as duplicates");
 
     // Test 5: Unicode and special characters
+    let rule = MD024NoDuplicateHeading::new(false, false); // siblings_only=false to check all duplicates
     let content = "\
 # 标题 🚀
 ## 标题 🎯
@@ -406,16 +407,17 @@ fn test_md024_edge_cases() {
     assert!(result.is_empty(), "Same text at different levels should be allowed");
 
     // Test 7: HTML entities
+    let rule = MD024NoDuplicateHeading::new(false, false); // siblings_only=false to check all duplicates
     let content = "\
 # Title &amp; More
 ## Title & More
 ### Title &amp; More";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
-    let rule = MD024NoDuplicateHeading::default();
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect duplicate with HTML entities");
 
     // Test 8: Very long headings
+    let rule = MD024NoDuplicateHeading::new(false, false); // siblings_only=false to check all duplicates
     let long_text = "a".repeat(200);
     let content = format!("# {long_text}\n## {long_text}");
     let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);

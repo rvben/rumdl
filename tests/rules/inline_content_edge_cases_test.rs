@@ -754,7 +754,12 @@ Regular ![](outside.png) image.
     let result052 = md052.check(&ctx).unwrap();
 
     // Should handle mixed content appropriately
-    assert_eq!(result045.len(), 3, "Should detect Markdown images in HTML");
+    // Note: Images inside HTML comments are correctly ignored (was 3, now 2)
+    assert_eq!(
+        result045.len(),
+        2,
+        "Should detect Markdown images in HTML but ignore those in HTML comments"
+    );
     assert_eq!(result052.len(), 0, "All references should be defined");
 }
 

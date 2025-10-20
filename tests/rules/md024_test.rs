@@ -14,7 +14,7 @@ fn test_no_duplicate_headings() {
 
 #[test]
 fn test_duplicate_headings() {
-    let rule = MD024NoDuplicateHeading::default();
+    let rule = MD024NoDuplicateHeading::new(false, false); // siblings_only=false to check all duplicates
     let content = "# Heading\n## Heading\n### Heading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -39,7 +39,7 @@ fn test_fix_duplicate_headings() {
 
 #[test]
 fn test_md024_different_levels() {
-    let rule = MD024NoDuplicateHeading::default();
+    let rule = MD024NoDuplicateHeading::new(false, false); // siblings_only=false to check all duplicates
     let content = "# Heading\n## Heading\n### Heading\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
