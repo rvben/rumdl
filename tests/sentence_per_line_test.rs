@@ -24,10 +24,7 @@ fn test_sentence_per_line_detection() {
 
     // Should detect violations on lines with multiple sentences
     assert!(!result.is_empty(), "Should detect multiple sentences on one line");
-    assert_eq!(
-        result[0].message,
-        "Line contains multiple sentences (one sentence per line expected)"
-    );
+    assert_eq!(result[0].message, "Line contains multiple sentences");
 }
 
 #[test]
