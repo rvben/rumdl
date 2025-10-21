@@ -398,6 +398,14 @@ pub struct CheckArgs {
     /// This is useful for pre-commit, which explicitly passes all changed files.
     #[arg(long, help = "Enforce exclude patterns even for explicitly specified files")]
     force_exclude: bool,
+
+    /// Disable caching of lint results
+    #[arg(long, help = "Disable caching (re-check all files)")]
+    no_cache: bool,
+
+    /// Directory to store cache files
+    #[arg(long, help = "Directory to store cache files (default: .rumdl-cache)")]
+    cache_dir: Option<String>,
 }
 
 /// Offer to install the VS Code extension during init
