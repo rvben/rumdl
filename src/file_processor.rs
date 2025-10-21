@@ -454,7 +454,7 @@ pub fn process_file_with_formatter(
     output_format: &rumdl_lib::output::OutputFormat,
     output_writer: &rumdl_lib::output::OutputWriter,
     config: &rumdl_config::Config,
-    cache: Option<&mut LintCache>,
+    cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
 ) -> (bool, usize, usize, usize, Vec<rumdl_lib::rule::LintWarning>) {
     let formatter = output_format.create_formatter();
 
@@ -599,7 +599,7 @@ pub fn process_file_inner(
     verbose: bool,
     quiet: bool,
     config: &rumdl_config::Config,
-    mut cache: Option<&mut LintCache>,
+    cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
 ) -> (
     Vec<rumdl_lib::rule::LintWarning>,
     String,
@@ -639,26 +639,30 @@ pub fn process_file_inner(
     // Compute config hash for cache
     let config_hash = LintCache::hash_config(config);
 
-    // Try to get from cache first
-    if let Some(ref mut cache_ref) = cache
-        && let Some(cached_warnings) = cache_ref.get(&content, &config_hash)
-    {
-        if verbose && !quiet {
-            println!("Cache hit for {file_path}");
-        }
-        // Count fixable warnings from cache
-        let fixable_warnings = cached_warnings
-            .iter()
-            .filter(|w| w.fix.is_some() && w.rule_name.is_some_and(|name| is_rule_actually_fixable(config, name)))
-            .count();
+    // Try to get from cache first (lock briefly for cache read)
+    if let Some(ref cache_arc) = cache {
+        let mut cache_guard = cache_arc.lock().unwrap();
+        if let Some(cached_warnings) = cache_guard.get(&content, &config_hash) {
+            drop(cache_guard); // Release lock immediately
 
-        return (
-            cached_warnings.clone(),
-            content,
-            cached_warnings.len(),
-            fixable_warnings,
-            original_line_ending,
-        );
+            if verbose && !quiet {
+                println!("Cache hit for {file_path}");
+            }
+            // Count fixable warnings from cache
+            let fixable_warnings = cached_warnings
+                .iter()
+                .filter(|w| w.fix.is_some() && w.rule_name.is_some_and(|name| is_rule_actually_fixable(config, name)))
+                .count();
+
+            return (
+                cached_warnings.clone(),
+                content,
+                cached_warnings.len(),
+                fixable_warnings,
+                original_line_ending,
+            );
+        }
+        // Unlock happens automatically when cache_guard goes out of scope
     }
 
     let lint_start = Instant::now();
@@ -720,9 +724,11 @@ pub fn process_file_inner(
         println!("Total processing time for {file_path}: {total_time:?}");
     }
 
-    // Store in cache before returning
-    if let Some(ref mut cache_ref) = cache {
-        cache_ref.set(&content, &config_hash, all_warnings.clone());
+    // Store in cache before returning (lock briefly for cache write)
+    if let Some(ref cache_arc) = cache {
+        let mut cache_guard = cache_arc.lock().unwrap();
+        cache_guard.set(&content, &config_hash, all_warnings.clone());
+        // Unlock happens automatically when cache_guard goes out of scope
     }
 
     (
@@ -792,7 +798,7 @@ pub fn process_file_collect_warnings(
     verbose: bool,
     quiet: bool,
     config: &rumdl_config::Config,
-    cache: Option<&mut LintCache>,
+    cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     // Simply use process_file_inner and extract warnings
     // This unifies all linting logic and cache handling in one place

@@ -1353,19 +1353,26 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from(".rumdl-cache"));
 
-    let mut cache = cache::LintCache::new(cache_dir.clone(), cache_enabled);
+    let cache = if cache_enabled {
+        let cache_instance = cache::LintCache::new(cache_dir.clone(), cache_enabled);
 
-    // Initialize cache directory structure
-    if cache_enabled
-        && let Err(e) = cache.init()
-        && !quiet
-    {
-        eprintln!("Warning: Failed to initialize cache: {e}");
-        // Continue without cache
-    }
+        // Initialize cache directory structure
+        if let Err(e) = cache_instance.init() {
+            if !quiet {
+                eprintln!("Warning: Failed to initialize cache: {e}");
+            }
+            // Continue without cache
+            None
+        } else {
+            // Wrap in Arc<Mutex<>> for thread-safe sharing across parallel workers
+            Some(std::sync::Arc::new(std::sync::Mutex::new(cache_instance)))
+        }
+    } else {
+        None
+    };
 
     // Perform the check and exit if issues were found
-    let has_issues = watch::perform_check_run(args, &config, quiet, Some(&mut cache));
+    let has_issues = watch::perform_check_run(args, &config, quiet, cache);
     if has_issues {
         exit::violations_found();
     }

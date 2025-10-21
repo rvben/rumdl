@@ -78,7 +78,7 @@ pub fn perform_check_run(
     args: &crate::CheckArgs,
     config: &rumdl_config::Config,
     quiet: bool,
-    mut cache: Option<&mut crate::cache::LintCache>,
+    cache: Option<Arc<std::sync::Mutex<crate::cache::LintCache>>>,
 ) -> bool {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
 
@@ -151,7 +151,7 @@ pub fn perform_check_run(
                 args.verbose && !args.silent,
                 quiet,
                 config,
-                cache.as_deref_mut(),
+                cache.as_ref().map(Arc::clone),
             );
 
             if !warnings.is_empty() {
@@ -187,21 +187,23 @@ pub fn perform_check_run(
     // Enable parallel processing for both check and fix modes when there are multiple files
     // Each file is processed independently (with all its fix iterations), so parallel processing is safe
     // Single files cannot be parallelized at the file level (would need rule-level parallelization)
-    // Note: Disable parallel processing when cache is enabled to allow cache sharing
-    // TODO: Implement Arc<Mutex<LintCache>> for thread-safe parallel caching
-    let use_parallel = file_paths.len() > 1 && cache.is_none();
+    // Cache is thread-safe (Arc<Mutex<>>) so parallel processing works with caching enabled
+    let use_parallel = file_paths.len() > 1;
 
     // Collect all warnings for statistics if requested
     let mut all_warnings_for_stats = Vec::new();
 
     let (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed) =
         if use_parallel {
-            // Parallel processing for multiple files (only used when cache is disabled)
+            // Parallel processing for multiple files with thread-safe cache
+            // Each worker locks the mutex ONLY for brief cache get/set operations
             let enabled_rules_arc = Arc::new(enabled_rules);
 
             let results: Vec<_> = file_paths
                 .par_iter()
                 .map(|file_path| {
+                    // Clone Arc (cheap - just increments reference count)
+                    // process_file_with_formatter locks mutex briefly for cache operations
                     crate::file_processor::process_file_with_formatter(
                         file_path,
                         &enabled_rules_arc,
@@ -212,7 +214,7 @@ pub fn perform_check_run(
                         &output_format,
                         &output_writer,
                         config,
-                        None, // No cache in parallel mode (would require Arc<Mutex<>>)
+                        cache.as_ref().map(Arc::clone),
                     )
                 })
                 .collect();
@@ -269,7 +271,7 @@ pub fn perform_check_run(
                         &output_format,
                         &output_writer,
                         config,
-                        cache.as_deref_mut(),
+                        cache.as_ref().map(Arc::clone),
                     );
 
                 total_files_processed += 1;
