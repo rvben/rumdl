@@ -187,21 +187,21 @@ pub fn perform_check_run(
     // Enable parallel processing for both check and fix modes when there are multiple files
     // Each file is processed independently (with all its fix iterations), so parallel processing is safe
     // Single files cannot be parallelized at the file level (would need rule-level parallelization)
-    let use_parallel = file_paths.len() > 1;
+    // Note: Disable parallel processing when cache is enabled to allow cache sharing
+    // TODO: Implement Arc<Mutex<LintCache>> for thread-safe parallel caching
+    let use_parallel = file_paths.len() > 1 && cache.is_none();
 
     // Collect all warnings for statistics if requested
     let mut all_warnings_for_stats = Vec::new();
 
     let (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed) =
         if use_parallel {
-            // Parallel processing for multiple files without fixes
+            // Parallel processing for multiple files (only used when cache is disabled)
             let enabled_rules_arc = Arc::new(enabled_rules);
 
             let results: Vec<_> = file_paths
                 .par_iter()
                 .map(|file_path| {
-                    // Note: Parallel processing doesn't use cache due to Rust borrowing rules
-                    // (can't share mutable cache across threads). Cache is used in sequential mode.
                     crate::file_processor::process_file_with_formatter(
                         file_path,
                         &enabled_rules_arc,
@@ -212,7 +212,7 @@ pub fn perform_check_run(
                         &output_format,
                         &output_writer,
                         config,
-                        None, // No cache in parallel mode
+                        None, // No cache in parallel mode (would require Arc<Mutex<>>)
                     )
                 })
                 .collect();
