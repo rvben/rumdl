@@ -1,5 +1,6 @@
 //! File processing and linting logic
 
+use crate::cache::LintCache;
 use crate::formatter;
 use colored::*;
 use ignore::WalkBuilder;
@@ -759,6 +760,7 @@ pub fn process_file_collect_warnings(
     verbose: bool,
     quiet: bool,
     config: &rumdl_config::Config,
+    mut cache: Option<&mut LintCache>,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     if verbose && !quiet {
         println!("Processing file: {file_path}");
@@ -774,6 +776,19 @@ pub fn process_file_collect_warnings(
             return Vec::new();
         }
     };
+
+    // Compute config hash once (used for both cache get and set)
+    let config_hash = LintCache::hash_config(config);
+
+    // Try to get from cache first
+    if let Some(ref mut cache_ref) = cache
+        && let Some(cached_warnings) = cache_ref.get(&content, &config_hash)
+    {
+        if verbose && !quiet {
+            println!("Cache hit for {file_path}");
+        }
+        return cached_warnings;
+    }
 
     // Filter rules based on per-file-ignores configuration
     let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
@@ -802,5 +817,10 @@ pub fn process_file_collect_warnings(
             a.line.cmp(&b.line)
         }
     });
+
+    // Store in cache
+    if let Some(ref mut cache_ref) = cache {
+        cache_ref.set(&content, &config_hash, all_warnings.clone());
+    }
     all_warnings
 }

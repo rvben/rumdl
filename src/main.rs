@@ -26,6 +26,7 @@ use rumdl_lib::rules::strong_style::StrongStyle;
 use rumdl_config::ConfigSource;
 use rumdl_config::normalize_key;
 
+mod cache;
 mod file_processor;
 mod formatter;
 mod stdin_processor;

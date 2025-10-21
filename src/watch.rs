@@ -146,6 +146,7 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
                 args.verbose && !args.silent,
                 quiet,
                 config,
+                None, // TODO: Add caching support to watch mode
             );
 
             if !warnings.is_empty() {

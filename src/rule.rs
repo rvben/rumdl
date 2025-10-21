@@ -3,7 +3,7 @@
 //! Includes rule categories, dynamic dispatch helpers, and inline comment handling for rule enable/disable.
 
 use dyn_clone::DynClone;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use thiserror::Error;
 
@@ -39,7 +39,7 @@ pub enum LintError {
 
 pub type LintResult = Result<Vec<LintWarning>, LintError>;
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct LintWarning {
     pub message: String,
     pub line: usize,       // 1-indexed start line
@@ -48,16 +48,17 @@ pub struct LintWarning {
     pub end_column: usize, // 1-indexed end column
     pub severity: Severity,
     pub fix: Option<Fix>,
+    #[serde(skip)]
     pub rule_name: Option<&'static str>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Fix {
     pub range: Range<usize>,
     pub replacement: String,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Serialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum Severity {
     Error,
     Warning,

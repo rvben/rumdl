@@ -87,6 +87,7 @@ num_cpus = "1.16"
 chrono = { version = "0.4", features = ["serde"] }
 notify = "6.1"
 etcetera = "0.8"
+blake3 = "1.5"
 
 [features]
 default = ["parallel"]
