@@ -1,0 +1,115 @@
+# git-cliff configuration for rumdl
+# Generates changelog in Keep a Changelog format from conventional commits
+# https://git-cliff.org/docs/configuration
+# https://keepachangelog.com/en/1.1.0/
+
+[changelog]
+# Template that matches Keep a Changelog format
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+"""
+# Template for each release
+body = """
+{% if version %}\
+    {% if version | trim_start_matches(pat="v") == "Unreleased" %}\
+        ## [Unreleased]
+    {% else %}\
+        ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+    {% endif %}\
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim }}
+    {% for commit in commits
+       | filter(attribute="scope")
+       | unique(attribute="message") -%}
+        - {% if commit.scope %}**{{ commit.scope }}**: {% endif %}\
+          {{ commit.message | upper_first | trim }}\
+          {% if commit.breaking %} **[BREAKING]**{% endif %}
+    {% endfor -%}
+    {% for commit in commits -%}
+        {% if not commit.scope -%}
+            - {{ commit.message | upper_first | trim }}\
+              {% if commit.breaking %} **[BREAKING]**{% endif %}
+        {% endif -%}
+    {% endfor -%}
+{% endfor %}
+"""
+# Remove leading and trailing whitespaces
+trim = true
+# Changelog footer (empty for Keep a Changelog)
+footer = ""
+
+[git]
+# Parse commits according to conventional commits specification
+conventional_commits = true
+# Filter out commits that don't follow conventional commits
+filter_unconventional = true
+# Don't split multi-line commits
+split_commits = false
+
+# Preprocessors to clean up commit messages
+commit_preprocessors = [
+    # Remove issue/PR references from commit messages (they're in git history)
+    { pattern = '\s*\(#\d+\)', replace = "" },
+]
+
+# Protect breaking commits from being filtered
+protect_breaking_commits = true
+
+# Commit parsers - map conventional commit types to Keep a Changelog sections
+commit_parsers = [
+    # Features -> Added section
+    { message = "^feat", group = "Added" },
+
+    # Bug fixes -> Fixed section
+    { message = "^fix", group = "Fixed" },
+
+    # Performance improvements -> Performance section
+    { message = "^perf", group = "Performance" },
+
+    # Refactoring and improvements -> Changed section
+    { message = "^refactor", group = "Changed" },
+    { message = "^improvement", group = "Changed" },
+
+    # Documentation updates -> Changed section (or skip if not user-facing)
+    { message = "^docs?", group = "Changed" },
+
+    # Breaking changes -> Breaking section (also marked in commit message)
+    { body = ".*BREAKING[- ]CHANGE.*", group = "Breaking" },
+
+    # Skip non-user-facing commits
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore\\(deps", skip = true },
+    { message = "^chore\\(pr\\)", skip = true },
+    { message = "^chore\\(changelog\\)", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^test", skip = true },
+    { message = "^style", skip = true },
+    { message = "^build", skip = true },
+
+    # Other chores can go to Changed if they're user-visible
+    { message = "^chore", group = "Changed" },
+]
+
+# Filter out commits that don't match any parser
+filter_commits = false
+
+# Topological ordering for consistent history
+topo_order = false
+
+# Sort commits within each group (oldest first matches manual style)
+sort_commits = "oldest"
+
+# Tag pattern (semantic versioning)
+tag_pattern = "v[0-9].*"
+
+# Ignore tags that don't match semantic versioning
+skip_tags = ".*-rc.*|.*-alpha.*|.*-beta.*"

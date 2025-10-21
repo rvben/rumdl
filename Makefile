@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help
 
 # Development environment setup
 setup-mise:
@@ -186,6 +186,36 @@ update-changelog:
 	else \
 		echo "Warning: CHANGELOG.md not found"; \
 	fi
+
+# Changelog generation with git-cliff (from conventional commits)
+changelog-draft:
+	@echo "Generating changelog draft for unreleased commits..."
+	@mise exec -- git-cliff --unreleased
+
+changelog-latest:
+	@echo "Generating changelog for latest release..."
+	@mise exec -- git-cliff --latest
+
+changelog-all:
+	@echo "Generating full changelog..."
+	@mise exec -- git-cliff
+
+changelog-help:
+	@echo "Changelog generation targets:"
+	@echo "  make changelog-draft   - Preview unreleased changes (does not modify files)"
+	@echo "  make changelog-latest  - Show latest release changelog"
+	@echo "  make changelog-all     - Show full changelog"
+	@echo ""
+	@echo "Note: These targets generate drafts from conventional commits."
+	@echo "      Review and enhance with details before committing to CHANGELOG.md"
+	@echo ""
+	@echo "Conventional commit format:"
+	@echo "  feat(scope): description       -> Added section"
+	@echo "  fix(scope): description        -> Fixed section"
+	@echo "  perf(scope): description       -> Performance section"
+	@echo "  refactor(scope): description   -> Changed section"
+	@echo ""
+	@echo "Configuration: cliff.toml"
 
 version-major:
 	@echo "Creating new major version tag..."
