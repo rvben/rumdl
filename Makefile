@@ -95,8 +95,8 @@ test-pre-commit:
 	cargo nextest run --profile pre-commit
 
 test-push:
-	@echo "Running full test suite (this may take a few minutes)..."
-	cargo nextest run
+	@echo "Running comprehensive test suite (~30s, excludes slow/performance tests)..."
+	cargo nextest run --profile dev
 
 test-ci:
 	cargo nextest run --profile ci
