@@ -149,50 +149,10 @@ impl Rule for MD040FencedCodeLanguage {
 
         let lines: Vec<&str> = content.lines().collect();
 
-        // Helper function to check if we're in a nested context
-        let is_in_nested_context = |line_idx: usize| -> bool {
-            // Look for blockquote or list context above this line
-            for i in (0..line_idx).rev() {
-                let line = lines.get(i).unwrap_or(&"");
-                let trimmed = line.trim();
-
-                // If we hit a blank line, check if context continues
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                // Check for blockquote markers
-                if line.trim_start().starts_with('>') {
-                    return true;
-                }
-
-                // Check for list markers with sufficient indentation
-                if line.len() - line.trim_start().len() >= 2 {
-                    let after_indent = line.trim_start();
-                    if after_indent.starts_with("- ")
-                        || after_indent.starts_with("* ")
-                        || after_indent.starts_with("+ ")
-                        || (after_indent.len() > 2
-                            && after_indent.as_bytes().first().is_some_and(|&b| b.is_ascii_digit())
-                            && after_indent.as_bytes().get(1) == Some(&b'.')
-                            && after_indent.as_bytes().get(2) == Some(&b' '))
-                    {
-                        return true;
-                    }
-                }
-
-                // If we find content that's not indented, we're not in nested context
-                if line.starts_with(|c: char| !c.is_whitespace()) {
-                    break;
-                }
-            }
-            false
-        };
-
         // Pre-compute disabled state to avoid O(n²) complexity
         let mut is_disabled = false;
 
-        for (i, line) in lines.iter().enumerate() {
+        for line in lines.iter() {
             let trimmed = line.trim();
 
             // Update disabled state incrementally
@@ -279,27 +239,13 @@ impl Rule for MD040FencedCodeLanguage {
                         ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
 
                     if after_fence.is_empty() || has_title_only {
-                        // Decide whether to preserve indentation based on context
-                        let should_preserve_indent = is_in_nested_context(i);
-
-                        if should_preserve_indent {
-                            // Preserve indentation for nested contexts
-                            original_indent = line_indent;
-                            if has_title_only {
-                                // Insert language before title attribute
-                                result.push_str(&format!("{original_indent}{fence_marker}text {after_fence}\n"));
-                            } else {
-                                result.push_str(&format!("{original_indent}{fence_marker}text\n"));
-                            }
+                        // Always preserve the original indentation - adding a language tag should not change indentation
+                        original_indent = line_indent;
+                        if has_title_only {
+                            // Insert language before title attribute
+                            result.push_str(&format!("{original_indent}{fence_marker}text {after_fence}\n"));
                         } else {
-                            // Remove indentation for standalone code blocks
-                            original_indent = String::new();
-                            if has_title_only {
-                                // Insert language before title attribute
-                                result.push_str(&format!("{fence_marker}text {after_fence}\n"));
-                            } else {
-                                result.push_str(&format!("{fence_marker}text\n"));
-                            }
+                            result.push_str(&format!("{original_indent}{fence_marker}text\n"));
                         }
                         fence_needs_language = true;
                     } else {
@@ -626,11 +572,65 @@ another block without
   ```
 "#;
         let fixed = run_fix(content).unwrap();
-        // The implementation appears to remove indentation for standalone blocks
-        // but preserve it for nested contexts. This test case seems to be treating
-        // it as a standalone block.
-        assert!(fixed.contains("```text"));
+        // Should preserve indentation for list items
+        assert!(fixed.contains("  ```text"));
         assert!(fixed.contains("  indented code block"));
+    }
+
+    #[test]
+    fn test_fix_preserves_indentation_numbered_list() {
+        // Test case from issue #122
+        let content = r#"1. Step 1
+
+    ```
+    foo
+    bar
+    ```
+"#;
+        let fixed = run_fix(content).unwrap();
+        // Should preserve 4-space indentation for numbered list content
+        assert!(fixed.contains("    ```text"));
+        assert!(fixed.contains("    foo"));
+        assert!(fixed.contains("    bar"));
+        // Should not remove indentation
+        assert!(!fixed.contains("\n```text\n"));
+    }
+
+    #[test]
+    fn test_fix_preserves_all_indentation() {
+        let content = r#"# Test
+
+Top-level code block:
+```
+top level
+```
+
+1. List item
+
+    ```
+    nested in list
+    ```
+
+Indented by 2 spaces:
+  ```
+  content
+  ```
+"#;
+        let fixed = run_fix(content).unwrap();
+
+        // All indentation should be preserved exactly as-is
+        assert!(
+            fixed.contains("```text\ntop level"),
+            "Top-level code block indentation preserved"
+        );
+        assert!(
+            fixed.contains("    ```text\n    nested in list"),
+            "List item code block indentation preserved"
+        );
+        assert!(
+            fixed.contains("  ```text\n  content"),
+            "2-space indented code block indentation preserved"
+        );
     }
 
     #[test]
