@@ -7,17 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.164] - 2025-10-20
-
-### Changed
-
-- **Auto-fix Iteration**: Automatic iteration until convergence (fixes #88)
-  - `--fix` now automatically iterates up to 100 passes until content stabilizes (same as Ruff)
-  - No need to manually re-run `rumdl check --fix` multiple times
-  - Hash-based convergence detection prevents unnecessary iterations
-  - Significantly improves user experience for multi-pass fix scenarios
+## [0.0.164] - 2025-10-21
 
 ### Added
+
+- **File-Level Caching (Ruff-inspired)**: Dramatic performance improvements for repeat runs
+  - Blake3-based content hashing for fast cache lookups
+  - Automatic cache invalidation on content, config, or version changes
+  - Cache stored in `.rumdl-cache/{version}/{hash}.json`
+  - CLI flags: `--no-cache` to disable, `--cache-dir` to customize location
+  - Enabled by default for instant subsequent runs
+
+- **Thread-Safe Parallel Caching**: Best of both worlds - parallelization AND caching
+  - Implemented Arc<Mutex<LintCache>> for safe cache sharing across threads
+  - Mutex locked ONLY for brief cache get/set operations
+  - Full parallelization during expensive linting operations
+  - Matches Ruff's architecture for optimal performance
 
 - **Convergence Detection**: Added hash-based detection to identify when fixes have stabilized
   - Stops iteration when content hash remains unchanged
@@ -30,12 +35,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Encourages bug reports for convergence failures
   - Available via `RUMDL_DEBUG_FIX_PERF` environment variable
 
+### Changed
+
+- **Auto-fix Iteration**: Automatic iteration until convergence (fixes #88)
+  - `--fix` now automatically iterates up to 100 passes until content stabilizes (same as Ruff)
+  - No need to manually re-run `rumdl check --fix` multiple times
+  - Hash-based convergence detection prevents unnecessary iterations
+  - Significantly improves user experience for multi-pass fix scenarios
+
+- **Unified Linting Architecture**: Removed ~60 lines of duplicate linting logic
+  - Refactored `process_file_collect_warnings` to use `process_file_inner`
+  - Single code path for all file processing
+  - Cache works for ALL output formats (text, JSON, GitLab, SARIF, JUnit)
+
+- **Parallel File Processing for Fix Mode**: 4.8x speedup on multi-file fixes
+  - Previously fix mode was always sequential
+  - Now uses parallel processing when safe (multiple independent files)
+  - Each file processes all its fix iterations independently
+
 ### Fixed
 
 - **Multi-pass Fixes**: No longer require manual re-runs to apply all possible fixes
   - Previously users had to run `rumdl check --fix` multiple times
   - Now automatically handles dependent rule fixes in single command
   - Examples: MD010 (tabs) before MD007 (list indent), MD013 (line length) before MD009 (trailing spaces)
+
+- **Cache Correctness**: Include enabled rules in cache key (Ruff-style)
+  - Cache now respects `--enable`/`--disable` CLI flags
+  - Different rule configurations create separate cache entries
+  - Prevents incorrect cached results when switching rule sets
+  - Changed `LintWarning.rule_name` from `Option<&'static str>` to `Option<String>` for proper serialization
+
+- **Cache Parallelization**: Cache now works correctly with parallel processing
+  - No mutex contention during parallel file processing
+  - All output formats benefit from caching (previously only JSON/GitLab/SARIF/JUnit)
+
+### Performance
+
+- **Single file with cache**: 943ms → 7ms (135x faster)
+- **Multi-file (21 files) cold cache**: 14.4s → 4s (parallel processing)
+- **Multi-file (21 files) warm cache**: 14.4s → 0.019s (757x faster!)
+- **JSON format (17 files) with cache**: 13.9s → 60ms (231x faster)
 
 ## [0.0.163] - 2025-10-20
 
