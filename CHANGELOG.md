@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.165] - 2025-10-21
+
+### Fixed
+
+- **MD040: Always preserve indentation when adding language tags** (fixes #122)
+  - The MD040 rule was incorrectly removing indentation from code blocks when adding language tags
+  - This broke list structure when code blocks were part of list items
+  - Root cause: The fix logic had conditional behavior that would remove indentation for "standalone" code blocks
+  - Now always preserves original indentation regardless of context
+  - Removed 50+ lines of unnecessary `is_in_nested_context()` helper logic
+  - Added comprehensive tests for various indentation scenarios (0, 2, 4, 6 spaces)
+
+### Added
+
+- **Conventional Commits validation hook**: Git commit-msg hook validates commit message format
+  - Enforces Conventional Commits specification for all commits
+  - Provides helpful error messages for invalid formats
+  - Ensures consistent commit history for changelog generation
+
+- **Automated changelog generation with git-cliff**:
+  - Added `make changelog-draft` for previewing CHANGELOG updates
+  - Semi-automated workflow: generate draft, enhance with details, commit
+  - Conventional Commits integration for automatic categorization
+
+### Changed
+
+- **Pre-push hook optimization**: Use dev profile instead of full suite for faster testing
+  - Prevents pre-push hook from hanging on slower machines
+  - Maintains adequate test coverage while improving developer experience
+
 ## [0.0.164] - 2025-10-21
 
 ### Added
