@@ -454,12 +454,13 @@ pub fn process_file_with_formatter(
     output_format: &rumdl_lib::output::OutputFormat,
     output_writer: &rumdl_lib::output::OutputWriter,
     config: &rumdl_config::Config,
+    cache: Option<&mut LintCache>,
 ) -> (bool, usize, usize, usize, Vec<rumdl_lib::rule::LintWarning>) {
     let formatter = output_format.create_formatter();
 
     // Call the original process_file_inner to get warnings and original line ending
     let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending) =
-        process_file_inner(file_path, rules, verbose, quiet, config);
+        process_file_inner(file_path, rules, verbose, quiet, config, cache);
 
     if total_warnings == 0 {
         return (false, 0, 0, 0, Vec::new());
@@ -598,6 +599,7 @@ pub fn process_file_inner(
     verbose: bool,
     quiet: bool,
     config: &rumdl_config::Config,
+    mut cache: Option<&mut LintCache>,
 ) -> (
     Vec<rumdl_lib::rule::LintWarning>,
     String,
@@ -632,6 +634,31 @@ pub fn process_file_inner(
     // Early content analysis for ultra-fast skip decisions
     if content.is_empty() {
         return (Vec::new(), String::new(), 0, 0, original_line_ending);
+    }
+
+    // Compute config hash for cache
+    let config_hash = LintCache::hash_config(config);
+
+    // Try to get from cache first
+    if let Some(ref mut cache_ref) = cache
+        && let Some(cached_warnings) = cache_ref.get(&content, &config_hash)
+    {
+        if verbose && !quiet {
+            println!("Cache hit for {file_path}");
+        }
+        // Count fixable warnings from cache
+        let fixable_warnings = cached_warnings
+            .iter()
+            .filter(|w| w.fix.is_some() && w.rule_name.is_some_and(|name| is_rule_actually_fixable(config, name)))
+            .count();
+
+        return (
+            cached_warnings.clone(),
+            content,
+            cached_warnings.len(),
+            fixable_warnings,
+            original_line_ending,
+        );
     }
 
     let lint_start = Instant::now();
@@ -691,6 +718,11 @@ pub fn process_file_inner(
     let total_time = start_time.elapsed();
     if verbose && !quiet {
         println!("Total processing time for {file_path}: {total_time:?}");
+    }
+
+    // Store in cache before returning
+    if let Some(ref mut cache_ref) = cache {
+        cache_ref.set(&content, &config_hash, all_warnings.clone());
     }
 
     (
@@ -760,67 +792,10 @@ pub fn process_file_collect_warnings(
     verbose: bool,
     quiet: bool,
     config: &rumdl_config::Config,
-    mut cache: Option<&mut LintCache>,
+    cache: Option<&mut LintCache>,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
-    if verbose && !quiet {
-        println!("Processing file: {file_path}");
-    }
-
-    // Read file content efficiently
-    let content = match crate::read_file_efficiently(Path::new(file_path)) {
-        Ok(content) => content,
-        Err(e) => {
-            if !quiet {
-                eprintln!("Error reading file {file_path}: {e}");
-            }
-            return Vec::new();
-        }
-    };
-
-    // Compute config hash once (used for both cache get and set)
-    let config_hash = LintCache::hash_config(config);
-
-    // Try to get from cache first
-    if let Some(ref mut cache_ref) = cache
-        && let Some(cached_warnings) = cache_ref.get(&content, &config_hash)
-    {
-        if verbose && !quiet {
-            println!("Cache hit for {file_path}");
-        }
-        return cached_warnings;
-    }
-
-    // Filter rules based on per-file-ignores configuration
-    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
-    let filtered_rules: Vec<_> = if !ignored_rules_for_file.is_empty() {
-        rules
-            .iter()
-            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
-            .map(|r| dyn_clone::clone_box(&**r))
-            .collect()
-    } else {
-        rules.to_vec()
-    };
-
-    unsafe {
-        std::env::set_var("RUMDL_FILE_PATH", file_path);
-    }
-    let warnings_result = rumdl_lib::lint(&content, &filtered_rules, verbose, config.markdown_flavor());
-    unsafe {
-        std::env::remove_var("RUMDL_FILE_PATH");
-    }
-    let mut all_warnings = warnings_result.unwrap_or_default();
-    all_warnings.sort_by(|a, b| {
-        if a.line == b.line {
-            a.column.cmp(&b.column)
-        } else {
-            a.line.cmp(&b.line)
-        }
-    });
-
-    // Store in cache
-    if let Some(ref mut cache_ref) = cache {
-        cache_ref.set(&content, &config_hash, all_warnings.clone());
-    }
-    all_warnings
+    // Simply use process_file_inner and extract warnings
+    // This unifies all linting logic and cache handling in one place
+    let (warnings, _, _, _, _) = process_file_inner(file_path, rules, verbose, quiet, config, cache);
+    warnings
 }

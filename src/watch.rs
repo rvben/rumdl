@@ -200,6 +200,8 @@ pub fn perform_check_run(
             let results: Vec<_> = file_paths
                 .par_iter()
                 .map(|file_path| {
+                    // Note: Parallel processing doesn't use cache due to Rust borrowing rules
+                    // (can't share mutable cache across threads). Cache is used in sequential mode.
                     crate::file_processor::process_file_with_formatter(
                         file_path,
                         &enabled_rules_arc,
@@ -210,6 +212,7 @@ pub fn perform_check_run(
                         &output_format,
                         &output_writer,
                         config,
+                        None, // No cache in parallel mode
                     )
                 })
                 .collect();
@@ -266,6 +269,7 @@ pub fn perform_check_run(
                         &output_format,
                         &output_writer,
                         config,
+                        cache.as_deref_mut(),
                     );
 
                 total_files_processed += 1;
