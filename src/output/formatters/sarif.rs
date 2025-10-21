@@ -25,7 +25,7 @@ impl OutputFormatter for SarifFormatter {
         let results: Vec<_> = warnings
             .iter()
             .map(|warning| {
-                let rule_id = warning.rule_name.unwrap_or("unknown");
+                let rule_id = warning.rule_name.as_deref().unwrap_or("unknown");
                 json!({
                     "ruleId": rule_id,
                     "level": "warning",
@@ -74,7 +74,7 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
     // Collect all results and build rule index
     for (file_path, warnings) in all_warnings {
         for warning in warnings {
-            let rule_id = warning.rule_name.unwrap_or("unknown");
+            let rule_id = warning.rule_name.as_deref().unwrap_or("unknown");
 
             // Add rule to index if not already present
             rules.entry(rule_id).or_insert_with(|| {
@@ -177,7 +177,7 @@ mod tests {
             column: 5,
             end_line: 10,
             end_column: 15,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Heading levels should only increment by one level at a time".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -212,7 +212,7 @@ mod tests {
             column: 5,
             end_line: 10,
             end_column: 15,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Heading levels should only increment by one level at a time".to_string(),
             severity: Severity::Warning,
             fix: Some(Fix {
@@ -239,7 +239,7 @@ mod tests {
                 column: 1,
                 end_line: 5,
                 end_column: 10,
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 message: "First warning".to_string(),
                 severity: Severity::Warning,
                 fix: None,
@@ -249,7 +249,7 @@ mod tests {
                 column: 3,
                 end_line: 10,
                 end_column: 20,
-                rule_name: Some("MD013"),
+                rule_name: Some("MD013".to_string()),
                 message: "Second warning".to_string(),
                 severity: Severity::Error,
                 fix: None,
@@ -324,7 +324,7 @@ mod tests {
                 column: 5,
                 end_line: 10,
                 end_column: 15,
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 message: "Test warning".to_string(),
                 severity: Severity::Warning,
                 fix: None,
@@ -357,7 +357,7 @@ mod tests {
                     column: 1,
                     end_line: 1,
                     end_column: 5,
-                    rule_name: Some("MD001"),
+                    rule_name: Some("MD001".to_string()),
                     message: "Warning in file 1".to_string(),
                     severity: Severity::Warning,
                     fix: None,
@@ -371,7 +371,7 @@ mod tests {
                         column: 1,
                         end_line: 5,
                         end_column: 10,
-                        rule_name: Some("MD013"),
+                        rule_name: Some("MD013".to_string()),
                         message: "Warning 1 in file 2".to_string(),
                         severity: Severity::Warning,
                         fix: None,
@@ -381,7 +381,7 @@ mod tests {
                         column: 1,
                         end_line: 10,
                         end_column: 10,
-                        rule_name: Some("MD022"),
+                        rule_name: Some("MD022".to_string()),
                         message: "Warning 2 in file 2".to_string(),
                         severity: Severity::Error,
                         fix: None,
@@ -416,7 +416,7 @@ mod tests {
                     column: 1,
                     end_line: 1,
                     end_column: 5,
-                    rule_name: Some("MD001"),
+                    rule_name: Some("MD001".to_string()),
                     message: "First MD001".to_string(),
                     severity: Severity::Warning,
                     fix: None,
@@ -426,7 +426,7 @@ mod tests {
                     column: 1,
                     end_line: 10,
                     end_column: 5,
-                    rule_name: Some("MD001"),
+                    rule_name: Some("MD001".to_string()),
                     message: "Second MD001".to_string(),
                     severity: Severity::Warning,
                     fix: None,
@@ -457,7 +457,7 @@ mod tests {
                 column: 1,
                 end_line: 1,
                 end_column: 5,
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 message: "Warning severity".to_string(),
                 severity: Severity::Warning,
                 fix: None,
@@ -467,7 +467,7 @@ mod tests {
                 column: 1,
                 end_line: 2,
                 end_column: 5,
-                rule_name: Some("MD002"),
+                rule_name: Some("MD002".to_string()),
                 message: "Error severity".to_string(),
                 severity: Severity::Error,
                 fix: None,
@@ -491,7 +491,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Warning with \"quotes\" and 'apostrophes' and \n newline".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -516,7 +516,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Test".to_string(),
             severity: Severity::Warning,
             fix: None,

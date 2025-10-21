@@ -261,7 +261,7 @@ impl Rule for MD013LineLength {
                         calculate_excess_range(line_number, line, line_limit);
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         message,
                         line: start_line,
                         column: start_col,
@@ -286,7 +286,7 @@ impl Rule for MD013LineLength {
             let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
 
             warnings.push(LintWarning {
-                rule_name: Some(self.name()),
+                rule_name: Some(self.name().to_string()),
                 message,
                 line: start_line,
                 column: start_col,
@@ -1014,7 +1014,7 @@ impl MD013LineLength {
                         };
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message,
                             line: list_start + 1,
                             column: 1,
@@ -1189,7 +1189,7 @@ impl MD013LineLength {
                     };
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         message: match config.reflow_mode {
                             ReflowMode::Normalize => format!(
                                 "Paragraph could be normalized to use line length of {} characters",

@@ -74,10 +74,10 @@ fn test_per_file_ignores_integration_actual_linting() {
     .unwrap();
 
     // README should have no MD033 warnings (rule is ignored)
-    assert!(!readme_warnings.iter().any(|w| w.rule_name == Some("MD033")));
+    assert!(!readme_warnings.iter().any(|w| w.rule_name.as_deref() == Some("MD033")));
 
     // docs.md should have MD033 warnings (rule is active)
-    assert!(docs_warnings.iter().any(|w| w.rule_name == Some("MD033")));
+    assert!(docs_warnings.iter().any(|w| w.rule_name.as_deref() == Some("MD033")));
 }
 
 #[test]

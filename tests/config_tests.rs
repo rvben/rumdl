@@ -180,7 +180,10 @@ style = "asterisk"
         .expect("Linting should succeed");
 
     // Verify no MD013 warnings because line_length is set to 150
-    let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
+    let md013_warnings = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .count();
 
     assert_eq!(
         md013_warnings, 0,
@@ -310,11 +313,11 @@ style = "dash"
     .unwrap();
 
     assert!(
-        warnings_short.iter().all(|w| w.rule_name != Some("MD013")),
+        warnings_short.iter().all(|w| w.rule_name.as_deref() != Some("MD013")),
         "MD013 should not trigger for short line with config"
     );
     assert!(
-        warnings_long.iter().any(|w| w.rule_name == Some("MD013")),
+        warnings_long.iter().any(|w| w.rule_name.as_deref() == Some("MD013")),
         "MD013 should trigger for long line with config"
     );
 

@@ -913,7 +913,7 @@ mod tests {
             end_column: 10,
             severity: crate::rule::Severity::Warning,
             fix: None,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
         };
 
         // Test diagnostic conversion

@@ -234,7 +234,7 @@ impl Rule for MD042NoEmptyLinks {
                 let link_display = &ctx.content[link.byte_offset..link.byte_end];
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     message: format!("Empty link found: {link_display}"),
                     line: link.line,
                     column: link.start_col + 1, // Convert to 1-indexed

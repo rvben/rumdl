@@ -320,7 +320,7 @@ impl MD037NoSpaceInEmphasis {
                 let fixed_text = format!("{marker_str}{trimmed_content}{marker_str}");
 
                 let warning = LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     message: format!("Spaces inside emphasis markers: {full_text:?}"),
                     line: line_num,
                     column: offset + full_start + 1, // +1 because columns are 1-indexed

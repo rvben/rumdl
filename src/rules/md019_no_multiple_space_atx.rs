@@ -81,7 +81,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
                             let extra_spaces_end = marker_byte_pos + space_bytes;
 
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
+                                rule_name: Some(self.name().to_string()),
                                 message: format!(
                                     "Multiple spaces ({}) after {} in heading",
                                     space_count,

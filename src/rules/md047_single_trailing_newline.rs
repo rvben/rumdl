@@ -50,7 +50,7 @@ impl Rule for MD047SingleTrailingNewline {
             );
 
             warnings.push(LintWarning {
-                rule_name: Some(self.name()),
+                rule_name: Some(self.name().to_string()),
                 message: String::from("File should end with a single newline character"),
                 line: start_line,
                 column: start_col,

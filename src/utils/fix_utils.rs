@@ -157,7 +157,7 @@ mod tests {
                 range: 2..4,                  // "  " (two spaces)
                 replacement: " ".to_string(), // single space
             }),
-            rule_name: Some("MD030"),
+            rule_name: Some("MD030".to_string()),
         };
 
         let result = apply_warning_fixes(content, &[warning]).unwrap();
@@ -179,7 +179,7 @@ mod tests {
                     range: 2..4, // First line "  "
                     replacement: " ".to_string(),
                 }),
-                rule_name: Some("MD030"),
+                rule_name: Some("MD030".to_string()),
             },
             LintWarning {
                 message: "Too many spaces".to_string(),
@@ -192,7 +192,7 @@ mod tests {
                     range: 11..14, // Second line "   " (after newline + "*")
                     replacement: " ".to_string(),
                 }),
-                rule_name: Some("MD030"),
+                rule_name: Some("MD030".to_string()),
             },
         ];
 
@@ -219,7 +219,7 @@ mod tests {
                     range: 4..6, // "  " after "Test"
                     replacement: " ".to_string(),
                 }),
-                rule_name: Some("MD009"),
+                rule_name: Some("MD009".to_string()),
             },
             LintWarning {
                 message: "Too many spaces".to_string(),
@@ -232,7 +232,7 @@ mod tests {
                     range: 14..18, // "    " after "multiple"
                     replacement: " ".to_string(),
                 }),
-                rule_name: Some("MD009"),
+                rule_name: Some("MD009".to_string()),
             },
         ];
 
@@ -255,7 +255,7 @@ mod tests {
                     range: 4..6,
                     replacement: " ".to_string(),
                 }),
-                rule_name: Some("MD009"),
+                rule_name: Some("MD009".to_string()),
             },
             LintWarning {
                 message: "Fix 2 (duplicate)".to_string(),
@@ -268,7 +268,7 @@ mod tests {
                     range: 4..6,
                     replacement: " ".to_string(),
                 }),
-                rule_name: Some("MD009"),
+                rule_name: Some("MD009".to_string()),
             },
         ];
 
@@ -292,7 +292,7 @@ mod tests {
                     range: 2..4,
                     replacement: " ".to_string(),
                 }),
-                rule_name: Some("MD030"),
+                rule_name: Some("MD030".to_string()),
             },
             LintWarning {
                 message: "Too many spaces".to_string(),
@@ -305,7 +305,7 @@ mod tests {
                     range: 12..15, // Account for \r\n
                     replacement: " ".to_string(),
                 }),
-                rule_name: Some("MD030"),
+                rule_name: Some("MD030".to_string()),
             },
         ];
 
@@ -330,7 +330,7 @@ mod tests {
                 range: 0..100, // Out of bounds
                 replacement: "Replacement".to_string(),
             }),
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
         };
 
         let result = apply_warning_fixes(content, &[warning]);
@@ -353,7 +353,7 @@ mod tests {
                 range: 10..5, // start > end - intentionally invalid for testing
                 replacement: "Test".to_string(),
             }),
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
         };
 
         let result = apply_warning_fixes(content, &[warning]);
@@ -372,7 +372,7 @@ mod tests {
             end_column: 5,
             severity: Severity::Warning,
             fix: None,
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
         }];
 
         let result = apply_warning_fixes(content, &warnings).unwrap();
@@ -393,7 +393,7 @@ mod tests {
                 range: 0..5,
                 replacement: "Hi".to_string(),
             }),
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
         };
 
         let edit = warning_fix_to_edit(content, &warning).unwrap();
@@ -411,7 +411,7 @@ mod tests {
             end_column: 5,
             severity: Severity::Warning,
             fix: None,
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
         };
 
         let result = warning_fix_to_edit(content, &warning);
@@ -433,7 +433,7 @@ mod tests {
                 range: 0..100,
                 replacement: "Long replacement".to_string(),
             }),
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
         };
 
         let result = warning_fix_to_edit(content, &warning);
@@ -520,7 +520,7 @@ mod tests {
                     range: 5..12, // "content"
                     replacement: "stuff".to_string(),
                 }),
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
             },
             LintWarning {
                 message: "Second warning".to_string(),
@@ -533,7 +533,7 @@ mod tests {
                     range: 5..12, // Same range
                     replacement: "stuff".to_string(),
                 }),
-                rule_name: Some("MD002"),
+                rule_name: Some("MD002".to_string()),
             },
         ];
 
@@ -557,7 +557,7 @@ mod tests {
                 range: 6..6,
                 replacement: " added".to_string(),
             }),
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
         };
 
         let result = apply_warning_fixes(content_unix, &[warning]).unwrap();
@@ -576,7 +576,7 @@ mod tests {
                 range: 6..6,
                 replacement: " added".to_string(),
             }),
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
         };
 
         let result_windows = apply_warning_fixes(content_windows, &[warning_windows]).unwrap();

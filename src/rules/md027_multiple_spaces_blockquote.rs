@@ -87,7 +87,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                             calculate_match_range(line_num, &line_info.content, byte_pos, extra_spaces_bytes);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             line: start_line,
                             column: start_col,
                             end_line,
@@ -114,7 +114,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         calculate_match_range(line_num, &line_info.content, start, len);
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
                         end_line,

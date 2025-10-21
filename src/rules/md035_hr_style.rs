@@ -139,7 +139,7 @@ impl Rule for MD035HRStyle {
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
                         end_line,

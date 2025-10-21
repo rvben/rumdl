@@ -331,7 +331,10 @@ Lazy continuation (not indented)
 
     // MD029 should treat lazy continuation conservatively and break list continuity
     // This is a trade-off: lazy continuation is valid but ambiguous for numbering
-    let numbering_errors: Vec<_> = warnings.iter().filter(|w| w.rule_name == Some("MD029")).collect();
+    let numbering_errors: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD029"))
+        .collect();
 
     assert_eq!(
         numbering_errors.len(),

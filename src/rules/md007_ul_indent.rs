@@ -251,7 +251,7 @@ impl Rule for MD007ULIndent {
                         };
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message: format!(
                                 "Expected {expected_indent} spaces for indent depth {nesting_level}, found {visual_marker_column}"
                             ),

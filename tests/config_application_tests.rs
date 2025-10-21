@@ -111,11 +111,17 @@ This is a line that exceeds the default 80 characters but is less than the confi
     .expect("Linting should succeed");
 
     // Check MD013 behavior - should not trigger on >80 but <120 chars
-    let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
+    let md013_warnings = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .count();
     assert_eq!(md013_warnings, 0, "MD013 should not trigger with line_length 120");
 
     // Check MD004 behavior - should warn on dash and plus (not asterisk)
-    let md004_warnings: Vec<_> = warnings.iter().filter(|w| w.rule_name == Some("MD004")).collect();
+    let md004_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD004"))
+        .collect();
     assert_eq!(
         md004_warnings.len(),
         2,
@@ -123,7 +129,10 @@ This is a line that exceeds the default 80 characters but is less than the confi
     );
 
     // Make sure the non-configured rule (MD001) still works normally
-    let md001_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD001")).count();
+    let md001_warnings = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD001"))
+        .count();
     assert_eq!(
         md001_warnings,
         0, // MD001 doesn't trigger on this content anyway
@@ -161,7 +170,10 @@ fn test_config_priority() {
     .expect("Linting should succeed");
 
     // Should not trigger MD013 because config value is 120
-    let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
+    let md013_warnings = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .count();
     assert_eq!(
         md013_warnings, 0,
         "MD013 should not trigger with configured line_length 120"
@@ -185,7 +197,10 @@ fn test_config_priority() {
         rumdl_lib::config::MarkdownFlavor::Standard,
     )
     .expect("Linting should succeed");
-    let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
+    let md013_warnings = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .count();
     assert_eq!(md013_warnings, 1, "MD013 should trigger with configured line_length 50");
 }
 
@@ -228,7 +243,10 @@ fn test_partial_rule_config() {
     .expect("Linting should succeed");
 
     // Should NOT trigger MD013 because line_length is set to 100
-    let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
+    let md013_warnings = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .count();
     assert_eq!(md013_warnings, 0, "MD013 should not trigger with line_length 100");
 
     // Now update config to set line_length to 60
@@ -258,7 +276,10 @@ fn test_partial_rule_config() {
     .expect("Linting should succeed");
 
     // Now should trigger MD013 because line_length is less than the line length
-    let md013_warnings = warnings.iter().filter(|w| w.rule_name == Some("MD013")).count();
+    let md013_warnings = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .count();
     assert_eq!(md013_warnings, 1, "MD013 should trigger with line_length 60");
 }
 
@@ -308,14 +329,20 @@ This line exceeds 20 characters.
     .expect("Linting should succeed");
 
     // Verify MD001 WAS triggered (as filtering is not tested here)
-    let md001_warnings_1 = warnings_1.iter().filter(|w| w.rule_name == Some("MD001")).count();
+    let md001_warnings_1 = warnings_1
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD001"))
+        .count();
     assert_eq!(
         md001_warnings_1, 1,
         "MD001 should run and trigger (filtering not tested)"
     );
 
     // Verify MD013 WAS triggered with the configured length
-    let md013_warnings_1 = warnings_1.iter().filter(|w| w.rule_name == Some("MD013")).count();
+    let md013_warnings_1 = warnings_1
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .count();
     assert_eq!(md013_warnings_1, 1, "MD013 should trigger once with line_length 20");
 
     // Config 2: Enable only MD013, Configure MD013
@@ -347,14 +374,20 @@ line_length = 20 # Set a low limit to trigger it
     .expect("Linting should succeed");
 
     // Verify MD013 triggers with configured length
-    let md013_warnings_2 = warnings_2.iter().filter(|w| w.rule_name == Some("MD013")).count();
+    let md013_warnings_2 = warnings_2
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .count();
     assert_eq!(
         md013_warnings_2, 1,
         "MD013 should trigger once with line_length 20 (enable doesn't affect application)"
     );
 
     // Verify MD001 also triggers (filtering not tested here)
-    let md001_warnings_2 = warnings_2.iter().filter(|w| w.rule_name == Some("MD001")).count();
+    let md001_warnings_2 = warnings_2
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD001"))
+        .count();
     assert_eq!(
         md001_warnings_2, 1,
         "MD001 should run and trigger (filtering not tested)"
@@ -418,7 +451,7 @@ This line > 10.
     // Verify MD013 triggered with its configured value (10)
     let md013_warnings = warnings
         .iter()
-        .filter(|w| w.rule_name == Some("MD013"))
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
         .collect::<Vec<_>>();
 
     assert_eq!(

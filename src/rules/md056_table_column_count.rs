@@ -128,7 +128,7 @@ impl Rule for MD056TableColumnCount {
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         message: format!("Table row has {count} cells, but expected {expected_count}"),
                         line: start_line,
                         column: start_col,

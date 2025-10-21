@@ -47,7 +47,7 @@ impl OutputFormatter for JunitFormatter {
 
         // Add failures for each warning
         for warning in warnings {
-            let rule_name = warning.rule_name.unwrap_or("unknown");
+            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
             let message = xml_escape(&warning.message);
 
             xml.push_str(&format!(
@@ -102,7 +102,7 @@ pub fn format_junit_report(all_warnings: &[(String, Vec<LintWarning>)], duration
 
         // Add failures for each warning
         for warning in warnings {
-            let rule_name = warning.rule_name.unwrap_or("unknown");
+            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
             let message = xml_escape(&warning.message);
 
             xml.push_str(&format!(
@@ -169,7 +169,7 @@ mod tests {
             column: 5,
             end_line: 10,
             end_column: 15,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Heading levels should only increment by one level at a time".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -195,7 +195,7 @@ mod tests {
             column: 5,
             end_line: 10,
             end_column: 15,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Heading levels should only increment by one level at a time".to_string(),
             severity: Severity::Warning,
             fix: Some(Fix {
@@ -220,7 +220,7 @@ mod tests {
                 column: 1,
                 end_line: 5,
                 end_column: 10,
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 message: "First warning".to_string(),
                 severity: Severity::Warning,
                 fix: None,
@@ -230,7 +230,7 @@ mod tests {
                 column: 3,
                 end_line: 10,
                 end_column: 20,
-                rule_name: Some("MD013"),
+                rule_name: Some("MD013".to_string()),
                 message: "Second warning".to_string(),
                 severity: Severity::Error,
                 fix: None,
@@ -295,7 +295,7 @@ mod tests {
                 column: 5,
                 end_line: 10,
                 end_column: 15,
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 message: "Test warning".to_string(),
                 severity: Severity::Warning,
                 fix: None,
@@ -318,7 +318,7 @@ mod tests {
                     column: 1,
                     end_line: 1,
                     end_column: 5,
-                    rule_name: Some("MD001"),
+                    rule_name: Some("MD001".to_string()),
                     message: "Warning in file 1".to_string(),
                     severity: Severity::Warning,
                     fix: None,
@@ -332,7 +332,7 @@ mod tests {
                         column: 1,
                         end_line: 5,
                         end_column: 10,
-                        rule_name: Some("MD013"),
+                        rule_name: Some("MD013".to_string()),
                         message: "Warning 1 in file 2".to_string(),
                         severity: Severity::Warning,
                         fix: None,
@@ -342,7 +342,7 @@ mod tests {
                         column: 1,
                         end_line: 10,
                         end_column: 10,
-                        rule_name: Some("MD022"),
+                        rule_name: Some("MD022".to_string()),
                         message: "Warning 2 in file 2".to_string(),
                         severity: Severity::Error,
                         fix: None,
@@ -367,7 +367,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Warning with < > & \" ' special chars".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -387,7 +387,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Test".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -407,7 +407,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Test".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -436,7 +436,7 @@ mod tests {
                 column: 1,
                 end_line: 1,
                 end_column: 5,
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 message: "Test".to_string(),
                 severity: Severity::Warning,
                 fix: None,

@@ -132,7 +132,7 @@ impl Rule for MD043RequiredHeadings {
             // If no headings found but we have required headings, create a warning
             if actual_headings.is_empty() && !self.config.headings.is_empty() {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     line: 1,
                     column: 1,
                     end_line: 1,
@@ -151,7 +151,7 @@ impl Rule for MD043RequiredHeadings {
                     let (start_line, start_col, end_line, end_col) = calculate_heading_range(i + 1, &line_info.content);
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
                         end_line,
@@ -167,7 +167,7 @@ impl Rule for MD043RequiredHeadings {
             // add a warning at the beginning of the file
             if warnings.is_empty() {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     line: 1,
                     column: 1,
                     end_line: 1,

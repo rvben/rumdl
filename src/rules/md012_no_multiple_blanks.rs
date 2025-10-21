@@ -100,7 +100,7 @@ impl Rule for MD012NoMultipleBlanks {
                             let (start_line, start_col, end_line, end_col) =
                                 calculate_line_range(excess_line, excess_line_content);
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
+                                rule_name: Some(self.name().to_string()),
                                 severity: Severity::Warning,
                                 message: format!("Multiple consecutive blank lines {location}"),
                                 line: start_line,
@@ -143,7 +143,7 @@ impl Rule for MD012NoMultipleBlanks {
                             let (start_line, start_col, end_line, end_col) =
                                 calculate_line_range(excess_line, excess_line_content);
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
+                                rule_name: Some(self.name().to_string()),
                                 severity: Severity::Warning,
                                 message: format!("Multiple consecutive blank lines {location}"),
                                 line: start_line,
@@ -204,7 +204,7 @@ impl Rule for MD012NoMultipleBlanks {
                             let (start_line, start_col, end_line, end_col) =
                                 calculate_line_range(excess_line, excess_line_content);
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
+                                rule_name: Some(self.name().to_string()),
                                 severity: Severity::Warning,
                                 message: format!("Multiple consecutive blank lines {location}"),
                                 line: start_line,
@@ -260,7 +260,7 @@ impl Rule for MD012NoMultipleBlanks {
                                 calculate_line_range(excess_line, excess_line_content);
 
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
+                                rule_name: Some(self.name().to_string()),
                                 severity: Severity::Warning,
                                 message: format!("Multiple consecutive blank lines {location}"),
                                 line: start_line,
@@ -320,7 +320,7 @@ impl Rule for MD012NoMultipleBlanks {
 
             // Report one warning for the excess blank lines at EOF
             warnings.push(LintWarning {
-                rule_name: Some(self.name()),
+                rule_name: Some(self.name().to_string()),
                 severity: Severity::Warning,
                 message: format!("Multiple consecutive blank lines {location}"),
                 line: report_line,

@@ -649,7 +649,7 @@ impl Rule for MD051LinkFragments {
 
             if !found {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     message: format!("Link anchor '#{fragment}' does not exist in document headings"),
                     line: link.line,
                     column: link.start_col + 1,

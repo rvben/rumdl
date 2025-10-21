@@ -160,7 +160,7 @@ impl Rule for MD049EmphasisStyle {
                         let emphasis_len = 1 + content.len() + 1;
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             line: *line_num,
                             column: *col,
                             end_line: *line_num,
@@ -192,7 +192,7 @@ impl Rule for MD049EmphasisStyle {
                         let emphasis_len = 1 + content.len() + 1;
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             line: *line_num,
                             column: *col,
                             end_line: *line_num,

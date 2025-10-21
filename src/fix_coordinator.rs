@@ -153,8 +153,8 @@ impl FixCoordinator {
         // Group warnings by rule for quick lookup
         let mut warnings_by_rule: HashMap<&str, Vec<&LintWarning>> = HashMap::new();
         for warning in all_warnings {
-            if let Some(rule_name) = warning.rule_name {
-                warnings_by_rule.entry(rule_name).or_default().push(warning);
+            if let Some(ref rule_name) = warning.rule_name {
+                warnings_by_rule.entry(rule_name.as_str()).or_default().push(warning);
             }
         }
 
@@ -368,7 +368,7 @@ mod tests {
                 end_line: 1,
                 end_column: 10,
                 message: "Test warning".to_string(),
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 severity: crate::rule::Severity::Error,
                 fix: None,
             }],
@@ -381,7 +381,7 @@ mod tests {
             end_line: 1,
             end_column: 10,
             message: "Test warning".to_string(),
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             severity: crate::rule::Severity::Error,
             fix: None,
         }];
@@ -417,7 +417,7 @@ mod tests {
                     end_line: 1,
                     end_column: 10,
                     message: "Tabs".to_string(),
-                    rule_name: Some("MD010"),
+                    rule_name: Some("MD010".to_string()),
                     severity: crate::rule::Severity::Error,
                     fix: None,
                 }],
@@ -431,7 +431,7 @@ mod tests {
                     end_line: 1,
                     end_column: 10,
                     message: "Indentation".to_string(),
-                    rule_name: Some("MD007"),
+                    rule_name: Some("MD007".to_string()),
                     severity: crate::rule::Severity::Error,
                     fix: None,
                 }],
@@ -446,7 +446,7 @@ mod tests {
                 end_line: 1,
                 end_column: 10,
                 message: "Tabs".to_string(),
-                rule_name: Some("MD010"),
+                rule_name: Some("MD010".to_string()),
                 severity: crate::rule::Severity::Error,
                 fix: None,
             },
@@ -456,7 +456,7 @@ mod tests {
                 end_line: 1,
                 end_column: 10,
                 message: "Indentation".to_string(),
-                rule_name: Some("MD007"),
+                rule_name: Some("MD007".to_string()),
                 severity: crate::rule::Severity::Error,
                 fix: None,
             },
@@ -491,7 +491,7 @@ mod tests {
                 end_line: 1,
                 end_column: 10,
                 message: "Test".to_string(),
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 severity: crate::rule::Severity::Error,
                 fix: None,
             }],
@@ -504,7 +504,7 @@ mod tests {
             end_line: 1,
             end_column: 10,
             message: "Test".to_string(),
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             severity: crate::rule::Severity::Error,
             fix: None,
         }];
@@ -545,7 +545,7 @@ mod tests {
                     end_line: 1,
                     end_column: 10,
                     message: "Always warns".to_string(),
-                    rule_name: Some("MD999"),
+                    rule_name: Some("MD999".to_string()),
                     severity: crate::rule::Severity::Error,
                     fix: None,
                 }])
@@ -571,7 +571,7 @@ mod tests {
             end_line: 1,
             end_column: 10,
             message: "Always warns".to_string(),
-            rule_name: Some("MD999"),
+            rule_name: Some("MD999".to_string()),
             severity: crate::rule::Severity::Error,
             fix: None,
         }];

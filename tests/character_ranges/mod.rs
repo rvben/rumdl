@@ -267,7 +267,7 @@ mod tests {
     fn test_extract_highlighted_text_single_line() {
         let content = "This is a test line";
         let warning = LintWarning {
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
             line: 1,
             column: 6,
             end_line: 1,
@@ -285,7 +285,7 @@ mod tests {
     fn test_extract_highlighted_text_multi_line() {
         let content = "Line 1\nLine 2\nLine 3";
         let warning = LintWarning {
-            rule_name: Some("TEST"),
+            rule_name: Some("TEST".to_string()),
             line: 1,
             column: 6,
             end_line: 2,

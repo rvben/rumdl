@@ -174,7 +174,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                             );
 
                             warnings.push(LintWarning {
-                                rule_name: Some(self.name()),
+                                rule_name: Some(self.name().to_string()),
                                 message: format!("No space after {} in heading", "#".repeat(heading.level as usize)),
                                 line: start_line,
                                 column: start_col,
@@ -204,7 +204,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                     );
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         message: "No space after hash in heading".to_string(),
                         line: start_line,
                         column: start_col,

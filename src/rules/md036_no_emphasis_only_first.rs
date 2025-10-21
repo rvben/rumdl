@@ -197,7 +197,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                     calculate_emphasis_range(i + 1, line, start_pos, end_pos);
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     line: start_line,
                     column: start_col,
                     end_line,

@@ -59,7 +59,7 @@ fn test_warning_to_diagnostic_conversion() {
         end_column: 15,
         severity: Severity::Warning,
         fix: None,
-        rule_name: Some("MD001"),
+        rule_name: Some("MD001".to_string()),
     };
 
     let diagnostic = warning_to_diagnostic(&warning);
@@ -94,7 +94,7 @@ fn test_warning_to_diagnostic_error_severity() {
         end_column: 5,
         severity: Severity::Error,
         fix: None,
-        rule_name: Some("MD999"),
+        rule_name: Some("MD999".to_string()),
     };
 
     let diagnostic = warning_to_diagnostic(&warning);
@@ -115,7 +115,7 @@ fn test_warning_to_code_action_with_fix() {
             range: 0..47,
             replacement: "shorter text".to_string(),
         }),
-        rule_name: Some("MD013"),
+        rule_name: Some("MD013".to_string()),
     };
 
     let uri = Url::parse("file:///test.md").expect("Invalid URI");
@@ -153,7 +153,7 @@ fn test_warning_to_code_action_without_fix() {
         end_column: 5,
         severity: Severity::Warning,
         fix: None,
-        rule_name: Some("MD001"),
+        rule_name: Some("MD001".to_string()),
     };
 
     let uri = Url::parse("file:///test.md").expect("Invalid URI");
@@ -564,7 +564,7 @@ mod edge_cases {
             end_column: 5,
             severity: Severity::Warning,
             fix: None,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
         };
 
         let diagnostic = warning_to_diagnostic(&warning);

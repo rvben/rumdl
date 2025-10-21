@@ -351,7 +351,7 @@ impl MD046CodeBlockStyle {
                                 let line_start_byte = line_index.get_line_start_byte(i + 1).unwrap_or(0);
 
                                 warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
+                                    rule_name: Some(self.name().to_string()),
                                     line: opening_start_line,
                                     column: opening_start_col,
                                     end_line: opening_end_line,
@@ -403,7 +403,7 @@ impl MD046CodeBlockStyle {
                     calculate_line_range(opening_line, lines[opening_line - 1]);
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     line: start_line,
                     column: start_col,
                     end_line,
@@ -554,7 +554,7 @@ impl Rule for MD046CodeBlockStyle {
                     // Only flag the opening marker, not the closing one
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
                         end_line,
@@ -586,7 +586,7 @@ impl Rule for MD046CodeBlockStyle {
                 if !prev_line_is_indented {
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
                         end_line,

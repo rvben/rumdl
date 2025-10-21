@@ -148,7 +148,7 @@ impl Rule for MD030ListMarkerSpace {
                         format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})");
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         severity: Severity::Warning,
                         line: start_line,
                         column: start_col,

@@ -160,7 +160,7 @@ impl MD006StartBullets {
                             end_column: end_col,
                             message,
                             severity: Severity::Warning,
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             fix: Some(Fix {
                                 range: fix_range,
                                 replacement: bullet_part,

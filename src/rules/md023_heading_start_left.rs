@@ -50,7 +50,7 @@ impl Rule for MD023HeadingStartLeft {
 
                         // Add warning for the heading text line
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             line: start_line_calc,
                             column: start_col,
                             end_line,
@@ -80,7 +80,7 @@ impl Rule for MD023HeadingStartLeft {
                                     );
 
                                 warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
+                                    rule_name: Some(self.name().to_string()),
                                     line: underline_start_line,
                                     column: underline_start_col,
                                     end_line: underline_end_line,
@@ -109,7 +109,7 @@ impl Rule for MD023HeadingStartLeft {
                         );
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             line: atx_start_line,
                             column: atx_start_col,
                             end_line: atx_end_line,

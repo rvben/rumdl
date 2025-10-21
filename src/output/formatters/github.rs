@@ -45,7 +45,7 @@ impl OutputFormatter for GitHubFormatter {
         let mut output = String::new();
 
         for warning in warnings {
-            let rule_name = warning.rule_name.unwrap_or("unknown");
+            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
 
             // Map severity to GitHub Actions annotation level
             let level = match warning.severity {
@@ -126,7 +126,7 @@ mod tests {
             column: 5,
             end_line: 10,
             end_column: 15,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Heading levels should only increment by one level at a time".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -148,7 +148,7 @@ mod tests {
                 column: 1,
                 end_line: 5,
                 end_column: 10,
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 message: "First warning".to_string(),
                 severity: Severity::Warning,
                 fix: None,
@@ -158,7 +158,7 @@ mod tests {
                 column: 3,
                 end_line: 10,
                 end_column: 20,
-                rule_name: Some("MD013"),
+                rule_name: Some("MD013".to_string()),
                 message: "Second warning".to_string(),
                 severity: Severity::Error,
                 fix: None,
@@ -178,7 +178,7 @@ mod tests {
             column: 1,
             end_line: 15,
             end_column: 10,
-            rule_name: Some("MD022"),
+            rule_name: Some("MD022".to_string()),
             message: "Headings should be surrounded by blank lines".to_string(),
             severity: Severity::Warning,
             fix: Some(Fix {
@@ -226,7 +226,7 @@ mod tests {
             column: 12345,
             end_line: 100000,
             end_column: 12350,
-            rule_name: Some("MD999"),
+            rule_name: Some("MD999".to_string()),
             message: "Edge case warning".to_string(),
             severity: Severity::Error,
             fix: None,
@@ -247,7 +247,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Warning with \"quotes\" and 'apostrophes' and \n newline".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -269,7 +269,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 1,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "100% complete\r\nNew line".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -291,7 +291,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Test".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -312,7 +312,7 @@ mod tests {
             column: 7,
             end_line: 42,
             end_column: 10,
-            rule_name: Some("MD010"),
+            rule_name: Some("MD010".to_string()),
             message: "Hard tabs".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -342,7 +342,7 @@ mod tests {
                 column: 1,
                 end_line: 1,
                 end_column: 5,
-                rule_name: Some("MD001"),
+                rule_name: Some("MD001".to_string()),
                 message: "Warning severity".to_string(),
                 severity: Severity::Warning,
                 fix: None,
@@ -352,7 +352,7 @@ mod tests {
                 column: 1,
                 end_line: 2,
                 end_column: 5,
-                rule_name: Some("MD002"),
+                rule_name: Some("MD002".to_string()),
                 message: "Error severity".to_string(),
                 severity: Severity::Error,
                 fix: None,
@@ -377,7 +377,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD,001"), // Unlikely but test edge case
+            rule_name: Some("MD,001".to_string()), // Unlikely but test edge case
             message: "Test message, with comma".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -401,7 +401,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD:001"), // Unlikely but test edge case
+            rule_name: Some("MD:001".to_string()), // Unlikely but test edge case
             message: "Test message: with colon".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -425,7 +425,7 @@ mod tests {
             column: 10,
             end_line: 5,
             end_column: 10,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Single position warning".to_string(),
             severity: Severity::Warning,
             fix: None,
@@ -448,7 +448,7 @@ mod tests {
             column: 1,
             end_line: 1,
             end_column: 5,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
             message: "Error level issue".to_string(),
             severity: Severity::Error,
             fix: None,

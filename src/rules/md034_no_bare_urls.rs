@@ -300,7 +300,7 @@ impl MD034NoBareUrls {
                     calculate_url_range(line_number, line, start, trimmed_len);
 
                 warnings.push(LintWarning {
-                    rule_name: Some("MD034"),
+                    rule_name: Some("MD034".to_string()),
                     line: start_line,
                     column: start_col,
                     end_line,
@@ -351,7 +351,7 @@ impl MD034NoBareUrls {
                             calculate_url_range(line_number, line, start, email_len);
 
                         warnings.push(LintWarning {
-                            rule_name: Some("MD034"),
+                            rule_name: Some("MD034".to_string()),
                             line: start_line,
                             column: start_col,
                             end_line,

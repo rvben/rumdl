@@ -87,7 +87,7 @@ impl Rule for MD009TrailingSpaces {
                     let (start_line, start_col, end_line, end_col) = calculate_trailing_range(line_num + 1, line, 0);
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
                         end_line,
@@ -136,7 +136,7 @@ impl Rule for MD009TrailingSpaces {
                 calculate_trailing_range(line_num + 1, line, trimmed.len());
 
             warnings.push(LintWarning {
-                rule_name: Some(self.name()),
+                rule_name: Some(self.name().to_string()),
                 line: start_line,
                 column: start_col,
                 end_line,

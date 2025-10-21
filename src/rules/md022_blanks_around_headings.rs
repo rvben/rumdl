@@ -480,7 +480,7 @@ impl Rule for MD022BlanksAroundHeadings {
             };
 
             result.push(LintWarning {
-                rule_name: Some(self.name()),
+                rule_name: Some(self.name().to_string()),
                 message,
                 line: start_line,
                 column: start_col,

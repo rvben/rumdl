@@ -235,7 +235,7 @@ impl Rule for MD026NoTrailingPunctuation {
 
                         let last_char = text_to_check.chars().last().unwrap_or(' ');
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             line: start_line,
                             column: start_col,
                             end_line,

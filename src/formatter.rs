@@ -285,7 +285,7 @@ pub fn print_statistics(warnings: &[rumdl_lib::rule::LintWarning]) {
     let mut fixable_counts: HashMap<&str, usize> = HashMap::new();
 
     for warning in warnings {
-        let rule_name = warning.rule_name.unwrap_or("unknown");
+        let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
         *rule_counts.entry(rule_name).or_insert(0) += 1;
 
         if warning.fix.is_some() {

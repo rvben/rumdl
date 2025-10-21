@@ -186,7 +186,7 @@ pub fn lint(
                     .into_iter()
                     .filter(|warning| {
                         // Use the warning's rule_name if available, otherwise use the rule's name
-                        let rule_name_to_check = warning.rule_name.unwrap_or(rule.name());
+                        let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
 
                         // Extract the base rule name for sub-rules like "MD029-style" -> "MD029"
                         let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
@@ -449,7 +449,7 @@ mod tests {
         let warnings = result.unwrap();
         assert!(!warnings.is_empty());
         // Check the rule field of LintWarning struct
-        assert_eq!(warnings[0].rule_name, Some("MD001"));
+        assert_eq!(warnings[0].rule_name.as_deref(), Some("MD001"));
     }
 
     #[test]

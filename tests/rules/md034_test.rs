@@ -20,7 +20,7 @@ fn test_bare_urls() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Bare URLs should be flagged");
     assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].rule_name, Some("MD034"));
+    assert_eq!(result[0].rule_name.as_deref(), Some("MD034"));
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "This is a bare URL: <https://example.com/foobar>");
 }

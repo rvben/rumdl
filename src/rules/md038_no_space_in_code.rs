@@ -236,7 +236,7 @@ impl Rule for MD038NoSpaceInCode {
                 }
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     line: code_span.line,
                     column: code_span.start_col + 1, // Convert to 1-indexed
                     end_line: code_span.line,

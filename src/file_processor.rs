@@ -543,7 +543,7 @@ pub fn process_file_with_formatter(
             // Create a custom formatter that shows [fixed] instead of [*]
             let mut output = String::new();
             for warning in &all_warnings {
-                let rule_name = warning.rule_name.unwrap_or("unknown");
+                let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
 
                 // Check if the rule is actually fixable based on configuration
                 let is_fixable = is_rule_actually_fixable(config, rule_name);
@@ -636,13 +636,14 @@ pub fn process_file_inner(
         return (Vec::new(), String::new(), 0, 0, original_line_ending);
     }
 
-    // Compute config hash for cache
+    // Compute hashes for cache (Ruff-style: file content + config + enabled rules)
     let config_hash = LintCache::hash_config(config);
+    let rules_hash = LintCache::hash_rules(rules);
 
     // Try to get from cache first (lock briefly for cache read)
     if let Some(ref cache_arc) = cache {
         let mut cache_guard = cache_arc.lock().unwrap();
-        if let Some(cached_warnings) = cache_guard.get(&content, &config_hash) {
+        if let Some(cached_warnings) = cache_guard.get(&content, &config_hash, &rules_hash) {
             drop(cache_guard); // Release lock immediately
 
             if verbose && !quiet {
@@ -651,7 +652,12 @@ pub fn process_file_inner(
             // Count fixable warnings from cache
             let fixable_warnings = cached_warnings
                 .iter()
-                .filter(|w| w.fix.is_some() && w.rule_name.is_some_and(|name| is_rule_actually_fixable(config, name)))
+                .filter(|w| {
+                    w.fix.is_some()
+                        && w.rule_name
+                            .as_ref()
+                            .is_some_and(|name| is_rule_actually_fixable(config, name))
+                })
                 .count();
 
             return (
@@ -709,7 +715,12 @@ pub fn process_file_inner(
     // Count fixable issues (excluding unfixable rules)
     let fixable_warnings = all_warnings
         .iter()
-        .filter(|w| w.fix.is_some() && w.rule_name.is_some_and(|name| is_rule_actually_fixable(config, name)))
+        .filter(|w| {
+            w.fix.is_some()
+                && w.rule_name
+                    .as_ref()
+                    .is_some_and(|name| is_rule_actually_fixable(config, name))
+        })
         .count();
 
     let lint_end_time = Instant::now();
@@ -727,7 +738,7 @@ pub fn process_file_inner(
     // Store in cache before returning (lock briefly for cache write)
     if let Some(ref cache_arc) = cache {
         let mut cache_guard = cache_arc.lock().unwrap();
-        cache_guard.set(&content, &config_hash, all_warnings.clone());
+        cache_guard.set(&content, &config_hash, &rules_hash, all_warnings.clone());
         // Unlock happens automatically when cache_guard goes out of scope
     }
 
@@ -780,7 +791,12 @@ pub fn apply_fixes_coordinated(
             // Count warnings for the rules that were successfully applied
             all_warnings
                 .iter()
-                .filter(|w| w.rule_name.map(|name| fixed_rule_names.contains(name)).unwrap_or(false))
+                .filter(|w| {
+                    w.rule_name
+                        .as_ref()
+                        .map(|name| fixed_rule_names.contains(name.as_str()))
+                        .unwrap_or(false)
+                })
                 .count()
         }
         Err(e) => {

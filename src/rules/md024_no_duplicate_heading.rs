@@ -114,7 +114,7 @@ impl Rule for MD024NoDuplicateHeading {
                     let siblings = seen_siblings.entry(parent_path.clone()).or_default();
                     if siblings.contains(&heading_key) {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message: format!("Duplicate heading: '{}'.", heading.text),
                             line: start_line,
                             column: start_col,
@@ -134,7 +134,7 @@ impl Rule for MD024NoDuplicateHeading {
                     let seen = seen_headings_per_level.entry(level).or_default();
                     if seen.contains(&heading_key) {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message: format!("Duplicate heading: '{}'.", heading.text),
                             line: start_line,
                             column: start_col,
@@ -150,7 +150,7 @@ impl Rule for MD024NoDuplicateHeading {
                     // Flag all duplicates, regardless of level
                     if seen_headings.contains(&heading_key) {
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message: format!("Duplicate heading: '{}'.", heading.text),
                             line: start_line,
                             column: start_col,

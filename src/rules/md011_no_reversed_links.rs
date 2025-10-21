@@ -127,7 +127,7 @@ impl Rule for MD011NoReversedLinks {
                     calculate_match_range(line_num + 1, line, match_start, actual_length);
 
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     message: format!("Reversed link syntax: use [{text}]({url}) instead"),
                     line: start_line,
                     column: start_col,

@@ -253,7 +253,7 @@ impl Rule for MD055TablePipeStyle {
 
                         let fixed_line = self.fix_table_row(line, target_style);
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             severity: Severity::Warning,
                             message,
                             line: start_line,

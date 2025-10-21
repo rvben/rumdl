@@ -146,7 +146,7 @@ impl Rule for MD004UnorderedListStyle {
                                             "List marker '{marker}' does not match expected style '{first}'"
                                         ),
                                         severity: Severity::Warning,
-                                        rule_name: Some(self.name()),
+                                        rule_name: Some(self.name().to_string()),
                                         fix: Some(Fix {
                                             range: offset..offset + 1,
                                             replacement: first.to_string(),
@@ -183,7 +183,7 @@ impl Rule for MD004UnorderedListStyle {
                                             "List marker '{marker}' does not match expected style '{expected_marker}' for nesting level {nesting_level}"
                                         ),
                                         severity: Severity::Warning,
-                                        rule_name: Some(self.name()),
+                                        rule_name: Some(self.name().to_string()),
                                         fix: Some(Fix {
                                             range: offset..offset + 1,
                                             replacement: expected_marker.to_string(),
@@ -214,7 +214,7 @@ impl Rule for MD004UnorderedListStyle {
                                         "List marker '{marker}' does not match expected style '{target_marker}'"
                                     ),
                                     severity: Severity::Warning,
-                                    rule_name: Some(self.name()),
+                                    rule_name: Some(self.name().to_string()),
                                     fix: Some(Fix {
                                         range: offset..offset + 1,
                                         replacement: target_marker.to_string(),

@@ -96,7 +96,7 @@ impl Rule for MD048CodeFenceStyle {
                             calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message: "Code fence style: use ~~~ instead of ```".to_string(),
                             line: start_line,
                             column: start_col,
@@ -118,7 +118,7 @@ impl Rule for MD048CodeFenceStyle {
                             calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message: "Code fence style: use ``` instead of ~~~".to_string(),
                             line: start_line,
                             column: start_col,
@@ -144,7 +144,7 @@ impl Rule for MD048CodeFenceStyle {
                             calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message: "Code fence style: use ~~~ instead of ```".to_string(),
                             line: start_line,
                             column: start_col,
@@ -166,7 +166,7 @@ impl Rule for MD048CodeFenceStyle {
                             calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message: "Code fence style: use ``` instead of ~~~".to_string(),
                             line: start_line,
                             column: start_col,

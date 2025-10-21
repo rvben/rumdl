@@ -253,7 +253,7 @@ impl MD033NoInlineHtml {
                                     incomplete_match.len(),
                                 );
                                 warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
+                                    rule_name: Some(self.name().to_string()),
                                     line: start_line,
                                     column: start_col,
                                     end_line,
@@ -400,7 +400,7 @@ impl Rule for MD033NoInlineHtml {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_html_tag_range(line_num, line, tag_match.start(), tag_match.len());
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     line: start_line,
                     column: start_col,
                     end_line,

@@ -133,7 +133,7 @@ impl Rule for MD058BlanksAroundTables {
                     };
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         message,
                         line: table_block.start_line + 1,
                         column: 1,
@@ -169,7 +169,7 @@ impl Rule for MD058BlanksAroundTables {
                         };
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message,
                             line: table_block.end_line + 1,
                             column: lines[table_block.end_line].len() + 1,

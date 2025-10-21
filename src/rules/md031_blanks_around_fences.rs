@@ -142,7 +142,7 @@ impl Rule for MD031BlanksAroundFences {
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
                         end_line,
@@ -173,7 +173,7 @@ impl Rule for MD031BlanksAroundFences {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             line: start_line,
                             column: start_col,
                             end_line,
@@ -244,7 +244,7 @@ impl Rule for MD031BlanksAroundFences {
                                 let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
                                 warnings.push(LintWarning {
-                                    rule_name: Some(self.name()),
+                                    rule_name: Some(self.name().to_string()),
                                     line: start_line,
                                     column: start_col,
                                     end_line,
@@ -274,7 +274,7 @@ impl Rule for MD031BlanksAroundFences {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             line: start_line,
                             column: start_col,
                             end_line,

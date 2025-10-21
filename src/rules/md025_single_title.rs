@@ -263,7 +263,7 @@ impl Rule for MD025SingleTitle {
                     );
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         message: format!(
                             "Multiple top-level headings (level {}) in the same document",
                             self.config.level

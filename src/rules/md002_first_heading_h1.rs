@@ -187,7 +187,7 @@ impl Rule for MD002FirstHeadingH1 {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix,
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                 }]);
             }
         }

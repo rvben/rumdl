@@ -259,7 +259,7 @@ impl Rule for MD054LinkImageStyle {
                         calculate_match_range(line_num + 1, line, match_start_char, match_len);
 
                     warnings.push(LintWarning {
-                        rule_name: Some(self.name()),
+                        rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
                         end_line,

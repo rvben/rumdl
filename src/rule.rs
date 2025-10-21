@@ -48,8 +48,7 @@ pub struct LintWarning {
     pub end_column: usize, // 1-indexed end column
     pub severity: Severity,
     pub fix: Option<Fix>,
-    #[serde(skip)]
-    pub rule_name: Option<&'static str>,
+    pub rule_name: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -739,7 +738,7 @@ Content here"#;
             end_column: 10,
             severity: Severity::Warning,
             fix: None,
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
         };
 
         let serialized = serde_json::to_string(&warning).unwrap();
@@ -769,7 +768,7 @@ Content here"#;
             end_column: 10,
             severity: Severity::Warning,
             fix: Some(fix),
-            rule_name: Some("MD001"),
+            rule_name: Some("MD001".to_string()),
         };
 
         let serialized = serde_json::to_string(&warning).unwrap();

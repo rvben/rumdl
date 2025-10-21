@@ -131,7 +131,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                         let replacement = self.fix_closed_atx_heading(line);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message,
                             line: start_line,
                             column: start_col,

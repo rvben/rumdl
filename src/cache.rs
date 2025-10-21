@@ -41,6 +41,8 @@ struct CacheEntry {
     file_hash: String,
     /// Blake3 hash of config
     config_hash: String,
+    /// Blake3 hash of enabled rules (sorted rule names)
+    rules_hash: String,
     /// rumdl version
     version: String,
     /// Cached lint warnings
@@ -94,21 +96,38 @@ impl LintCache {
         blake3::hash(config_json.as_bytes()).to_hex().to_string()
     }
 
+    /// Compute hash of enabled rules (Ruff-style)
+    /// This ensures different rule configurations get different cache entries
+    pub fn hash_rules(rules: &[Box<dyn rumdl_lib::rule::Rule>]) -> String {
+        // Sort rule names for deterministic hashing
+        let mut rule_names: Vec<&str> = rules.iter().map(|r| r.name()).collect();
+        rule_names.sort_unstable();
+
+        // Hash the sorted rule names
+        let rules_str = rule_names.join(",");
+        blake3::hash(rules_str.as_bytes()).to_hex().to_string()
+    }
+
     /// Get the cache file path for a given content and config hash
-    fn cache_file_path(&self, file_hash: &str) -> PathBuf {
-        self.cache_dir.join(VERSION).join(format!("{file_hash}.json"))
+    /// Includes rules_hash in filename to separate different rule configurations
+    fn cache_file_path(&self, file_hash: &str, rules_hash: &str) -> PathBuf {
+        // Include first 8 chars of rules_hash to keep filenames reasonable
+        let short_rules_hash = &rules_hash[..8];
+        self.cache_dir
+            .join(VERSION)
+            .join(format!("{file_hash}_{short_rules_hash}.json"))
     }
 
     /// Try to get cached results for a file
     ///
     /// Returns Some(warnings) if cache hit, None if cache miss
-    pub fn get(&mut self, content: &str, config_hash: &str) -> Option<Vec<LintWarning>> {
+    pub fn get(&mut self, content: &str, config_hash: &str, rules_hash: &str) -> Option<Vec<LintWarning>> {
         if !self.enabled {
             return None;
         }
 
         let file_hash = Self::hash_content(content);
-        let cache_path = self.cache_file_path(&file_hash);
+        let cache_path = self.cache_file_path(&file_hash, rules_hash);
 
         // Try to read cache file
         let cache_data = match fs::read_to_string(&cache_path) {
@@ -128,8 +147,12 @@ impl LintCache {
             }
         };
 
-        // Validate cache entry
-        if entry.file_hash != file_hash || entry.config_hash != config_hash || entry.version != VERSION {
+        // Validate cache entry (Ruff-style: file content + config + enabled rules)
+        if entry.file_hash != file_hash
+            || entry.config_hash != config_hash
+            || entry.rules_hash != rules_hash
+            || entry.version != VERSION
+        {
             self.stats.misses += 1;
             return None;
         }
@@ -140,13 +163,13 @@ impl LintCache {
     }
 
     /// Store lint results in cache
-    pub fn set(&mut self, content: &str, config_hash: &str, warnings: Vec<LintWarning>) {
+    pub fn set(&mut self, content: &str, config_hash: &str, rules_hash: &str, warnings: Vec<LintWarning>) {
         if !self.enabled {
             return;
         }
 
         let file_hash = Self::hash_content(content);
-        let cache_path = self.cache_file_path(&file_hash);
+        let cache_path = self.cache_file_path(&file_hash, rules_hash);
 
         // Create cache directory if it doesn't exist
         if let Some(parent) = cache_path.parent() {
@@ -157,6 +180,7 @@ impl LintCache {
         let entry = CacheEntry {
             file_hash,
             config_hash: config_hash.to_string(),
+            rules_hash: rules_hash.to_string(),
             version: VERSION.to_string(),
             warnings,
             timestamp: chrono::Utc::now().timestamp(),
@@ -234,10 +258,10 @@ mod tests {
         let config_hash = "abc123";
 
         // Should return None when disabled
-        assert!(cache.get(content, config_hash).is_none());
+        assert!(cache.get(content, config_hash, "test_rules_hash").is_none());
 
         // Set should be no-op when disabled
-        cache.set(content, config_hash, vec![]);
+        cache.set(content, config_hash, "test_rules_hash", vec![]);
         assert_eq!(cache.stats().writes, 0);
     }
 
@@ -250,7 +274,7 @@ mod tests {
         let config_hash = "abc123";
 
         // First access should be a miss
-        assert!(cache.get(content, config_hash).is_none());
+        assert!(cache.get(content, config_hash, "test_rules_hash").is_none());
         assert_eq!(cache.stats().misses, 1);
         assert_eq!(cache.stats().hits, 0);
     }
@@ -266,10 +290,10 @@ mod tests {
         let warnings = vec![];
 
         // Store in cache
-        cache.set(content, config_hash, warnings.clone());
+        cache.set(content, config_hash, "test_rules_hash", warnings.clone());
 
         // Should hit cache
-        let cached = cache.get(content, config_hash);
+        let cached = cache.get(content, config_hash, "test_rules_hash");
         assert!(cached.is_some());
         assert_eq!(cached.unwrap(), warnings);
         assert_eq!(cache.stats().hits, 1);
@@ -286,10 +310,10 @@ mod tests {
         let config_hash = "abc123";
 
         // Cache content1
-        cache.set(content1, config_hash, vec![]);
+        cache.set(content1, config_hash, "test_rules_hash", vec![]);
 
         // content2 should miss (different content)
-        assert!(cache.get(content2, config_hash).is_none());
+        assert!(cache.get(content2, config_hash, "test_rules_hash").is_none());
     }
 
     #[test]
@@ -303,10 +327,10 @@ mod tests {
         let config_hash2 = "def456";
 
         // Cache with config1
-        cache.set(content, config_hash1, vec![]);
+        cache.set(content, config_hash1, "test_rules_hash", vec![]);
 
         // Should miss with config2 (different config)
-        assert!(cache.get(content, config_hash2).is_none());
+        assert!(cache.get(content, config_hash2, "test_rules_hash").is_none());
     }
 
     #[test]
@@ -336,16 +360,16 @@ mod tests {
         let config_hash = "abc123";
 
         // Miss
-        cache.get(content, config_hash);
+        cache.get(content, config_hash, "test_rules_hash");
         assert_eq!(cache.stats().misses, 1);
         assert_eq!(cache.stats().hits, 0);
 
         // Write
-        cache.set(content, config_hash, vec![]);
+        cache.set(content, config_hash, "test_rules_hash", vec![]);
         assert_eq!(cache.stats().writes, 1);
 
         // Hit
-        cache.get(content, config_hash);
+        cache.get(content, config_hash, "test_rules_hash");
         assert_eq!(cache.stats().hits, 1);
 
         // Hit rate
@@ -359,7 +383,7 @@ mod tests {
         cache.init().unwrap();
 
         // Add something to cache
-        cache.set("# Test", "abc", vec![]);
+        cache.set("# Test", "abc", "test_rules_hash", vec![]);
 
         // Clear cache
         cache.clear().unwrap();

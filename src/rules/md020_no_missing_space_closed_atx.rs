@@ -156,7 +156,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                             calculate_single_line_range(line_num + 1, start_col, length);
 
                         warnings.push(LintWarning {
-                            rule_name: Some(self.name()),
+                            rule_name: Some(self.name().to_string()),
                             message,
                             line: start_line,
                             column: start_col_calc,

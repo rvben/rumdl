@@ -183,7 +183,7 @@ impl MD057ExistingRelativeLinks {
             // Check if the file exists (with caching to avoid filesystem calls)
             if !file_exists_with_cache(&resolved_path) {
                 warnings.push(LintWarning {
-                    rule_name: Some(self.name()),
+                    rule_name: Some(self.name().to_string()),
                     line: line_num,
                     column,
                     end_line: line_num,

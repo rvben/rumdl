@@ -464,11 +464,17 @@ second line of second item"#;
     );
 
     // Check for lazy continuation warnings
-    let lazy_warnings = result.iter().filter(|w| w.rule_name == Some("MD029-style")).count();
+    let lazy_warnings = result
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD029-style"))
+        .count();
     assert_eq!(lazy_warnings, 2, "Should have 2 lazy continuation warnings");
 
     // Check for numbering warning
-    let numbering_warnings = result.iter().filter(|w| w.rule_name == Some("MD029")).count();
+    let numbering_warnings = result
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD029"))
+        .count();
     assert_eq!(numbering_warnings, 1, "Should have 1 numbering warning");
 }
 
@@ -724,7 +730,10 @@ lazy line
     let result = rule.check(&ctx).unwrap();
 
     // Should detect lazy continuations (0 and 2 space lines)
-    let lazy_warnings = result.iter().filter(|w| w.rule_name == Some("MD029-style")).count();
+    let lazy_warnings = result
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD029-style"))
+        .count();
     // Note: Only line 2 is detected as lazy continuation because it's within the list block.
     // Line 5 has 2 spaces but it's after line 4 which starts a new list, so it's not
     // considered part of the list block and thus not checked for lazy continuation.
