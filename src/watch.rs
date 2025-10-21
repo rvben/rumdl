@@ -74,7 +74,12 @@ pub fn clear_screen() {
 }
 
 /// Perform a single check run (extracted from run_check for reuse in watch mode)
-pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config, quiet: bool) -> bool {
+pub fn perform_check_run(
+    args: &crate::CheckArgs,
+    config: &rumdl_config::Config,
+    quiet: bool,
+    mut cache: Option<&mut crate::cache::LintCache>,
+) -> bool {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
 
     // Create output writer for linting results
@@ -146,7 +151,7 @@ pub fn perform_check_run(args: &crate::CheckArgs, config: &rumdl_config::Config,
                 args.verbose && !args.silent,
                 quiet,
                 config,
-                None, // TODO: Add caching support to watch mode
+                cache.as_deref_mut(),
             );
 
             if !warnings.is_empty() {
@@ -388,7 +393,7 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
     println!("{}", "Press Ctrl-C to exit".cyan());
     println!();
 
-    let _has_issues = perform_check_run(args, &config, quiet);
+    let _has_issues = perform_check_run(args, &config, quiet, None);
     if !quiet {
         println!("\n{}", "Watching for file changes...".cyan());
     }
@@ -461,7 +466,7 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
                         let _ = io::stdout().flush();
 
                         // Re-run the check
-                        let _has_issues = perform_check_run(args, &config, quiet);
+                        let _has_issues = perform_check_run(args, &config, quiet, None);
                         if !quiet {
                             println!("\n{}", "Watching for file changes...".cyan());
                         }

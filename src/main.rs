@@ -1345,8 +1345,27 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     // 4. Convert to Config for the rest of the linter
     let config: rumdl_config::Config = sourced.into();
 
+    // 5. Initialize cache if enabled
+    let cache_enabled = !args.no_cache;
+    let cache_dir = args
+        .cache_dir
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(".rumdl-cache"));
+
+    let mut cache = cache::LintCache::new(cache_dir.clone(), cache_enabled);
+
+    // Initialize cache directory structure
+    if cache_enabled
+        && let Err(e) = cache.init()
+        && !quiet
+    {
+        eprintln!("Warning: Failed to initialize cache: {e}");
+        // Continue without cache
+    }
+
     // Perform the check and exit if issues were found
-    let has_issues = watch::perform_check_run(args, &config, quiet);
+    let has_issues = watch::perform_check_run(args, &config, quiet, Some(&mut cache));
     if has_issues {
         exit::violations_found();
     }
