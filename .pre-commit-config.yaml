@@ -1,12 +1,22 @@
 # Pre-commit hooks for rumdl
 # Install with:
-#   pre-commit install                    # Install commit hooks
-#   pre-commit install --hook-type pre-push  # Install push hooks
+#   pre-commit install                          # Install commit hooks
+#   pre-commit install --hook-type commit-msg   # Install commit-msg hooks
+#   pre-commit install --hook-type pre-push     # Install push hooks
 # Run manually:
-#   pre-commit run --all-files           # Run commit hooks
-#   pre-commit run --hook-stage push --all-files  # Run push hooks
+#   pre-commit run --all-files                         # Run commit hooks
+#   pre-commit run --hook-stage push --all-files       # Run push hooks
+#   pre-commit run --hook-stage commit-msg --commit-msg-filename .git/COMMIT_EDITMSG
 
 repos:
+  # Conventional Commits validation
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: []  # Optional: add --strict for stricter validation
+
   # Rust formatting and linting
   - repo: local
     hooks:

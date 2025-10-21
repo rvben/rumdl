@@ -39,13 +39,21 @@ Thank you for your interest in contributing to rumdl! This document provides gui
    cargo install cargo-nextest cargo-watch maturin
    ```
 
-3. **Verify installation**:
+3. **Install pre-commit hooks**:
+
+   ```bash
+   pre-commit install                        # Code quality hooks
+   pre-commit install --hook-type commit-msg # Conventional commits validation
+   pre-commit install --hook-type pre-push   # Comprehensive validation
+   ```
+
+4. **Verify installation**:
 
    ```bash
    make dev-verify
    ```
 
-4. **Run tests**:
+5. **Run tests**:
 
    ```bash
    make test-dev    # Recommended: ~20s, skips slowest tests
