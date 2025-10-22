@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.166] - 2025-10-22
+
+### Added
+
+- **MD013: `paragraphs` field to control paragraph line length checks** (resolves #121)
+  - New boolean config field `paragraphs` (defaults to `true`) allows disabling line length warnings for paragraph text
+  - Enables sentence-per-line formatting workflows without line length validation noise
+  - Still checks headings, tables, code blocks, blockquotes, and HTML when `paragraphs: false`
+  - Useful for semantic line breaks where sentence length is determined by content, not arbitrary limits
+  - Example configuration:
+    ```yaml
+    MD013:
+      paragraphs: false  # Don't warn about long paragraphs
+      code-blocks: true  # Still check code blocks
+      tables: true       # Still check tables
+      reflow: true
+      reflow-mode: "sentence-per-line"
+    ```
+
 ## [0.0.165] - 2025-10-21
 
 ### Fixed
