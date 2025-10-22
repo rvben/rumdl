@@ -35,6 +35,12 @@ pub struct MD013Config {
     #[serde(default = "default_headings")]
     pub headings: bool,
 
+    /// Check paragraph/text line length (default: true)
+    /// When false, line length violations in regular text are not reported,
+    /// but reflow can still be used to format paragraphs.
+    #[serde(default = "default_paragraphs")]
+    pub paragraphs: bool,
+
     /// Strict mode - disables exceptions for URLs, etc. (default: false)
     #[serde(default)]
     pub strict: bool,
@@ -64,6 +70,10 @@ fn default_headings() -> bool {
     true
 }
 
+fn default_paragraphs() -> bool {
+    true
+}
+
 impl Default for MD013Config {
     fn default() -> Self {
         Self {
@@ -71,6 +81,7 @@ impl Default for MD013Config {
             code_blocks: default_code_blocks(),
             tables: default_tables(),
             headings: default_headings(),
+            paragraphs: default_paragraphs(),
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
@@ -154,6 +165,7 @@ mod tests {
             code_blocks: true,
             tables: true,
             headings: true,
+            paragraphs: true,
             strict: false,
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
@@ -192,6 +204,45 @@ mod tests {
         assert!(config.headings);
         assert!(config.strict);
         assert!(config.reflow);
+        assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
+    }
+
+    #[test]
+    fn test_paragraphs_default_true() {
+        // Test that paragraphs defaults to true
+        let config = MD013Config::default();
+        assert!(config.paragraphs, "paragraphs should default to true");
+    }
+
+    #[test]
+    fn test_paragraphs_deserialization_kebab_case() {
+        // Test kebab-case (canonical format)
+        let toml_str = r#"
+            paragraphs = false
+        "#;
+        let config: MD013Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.paragraphs);
+    }
+
+    #[test]
+    fn test_paragraphs_full_config() {
+        // Test paragraphs in a full configuration with issue #121 use case
+        let toml_str = r#"
+            line-length = 80
+            code-blocks = true
+            tables = true
+            headings = false
+            paragraphs = false
+            reflow = true
+            reflow-mode = "sentence-per-line"
+        "#;
+        let config: MD013Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.line_length, 80);
+        assert!(config.code_blocks, "code-blocks should be true");
+        assert!(config.tables, "tables should be true");
+        assert!(!config.headings, "headings should be false");
+        assert!(!config.paragraphs, "paragraphs should be false");
+        assert!(config.reflow, "reflow should be true");
         assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
     }
 }

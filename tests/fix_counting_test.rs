@@ -31,6 +31,7 @@ Another very very very very very very very very very very very very very very ve
         code_blocks: true,
         tables: true, // Check tables for line length
         headings: true,
+        paragraphs: true,
         strict: false,
         reflow: true, // Enable reflow
         ..Default::default()
@@ -95,6 +96,7 @@ fn test_mixed_rules_fix_counting() {
         code_blocks: true,
         tables: true, // Check tables for line length
         headings: true,
+        paragraphs: true,
         strict: false,
         reflow: true,
         ..Default::default()

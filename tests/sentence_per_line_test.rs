@@ -9,6 +9,7 @@ fn create_sentence_per_line_rule() -> MD013LineLength {
         code_blocks: false,
         tables: false,
         headings: false,
+        paragraphs: true, // Default: check paragraphs
         strict: false,
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,

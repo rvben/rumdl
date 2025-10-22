@@ -449,6 +449,7 @@ fn test_heading_line_length_config() {
         code_blocks: false, // false = skip code blocks
         tables: false,      // false = skip tables
         headings: false,    // false = skip headings (don't check them)
+        paragraphs: true,
         strict: false,
         reflow: false,
         ..Default::default()
@@ -474,6 +475,7 @@ fn test_code_block_line_length_config() {
         code_blocks: false, // false = skip code blocks (don't check them)
         tables: true,       // true = check tables
         headings: true,     // true = check headings
+        paragraphs: true,
         strict: false,
         reflow: false,
         ..Default::default()
@@ -499,7 +501,8 @@ fn test_stern_mode() {
         code_blocks: false, // Don't skip code blocks
         tables: false,      // Don't skip tables
         headings: false,    // Don't skip headings
-        strict: true,       // Strict mode: no URL exceptions
+        paragraphs: true,
+        strict: true, // Strict mode: no URL exceptions
         reflow: false,
         ..Default::default()
     };
@@ -523,6 +526,7 @@ fn test_combined_heading_and_code_block_limits() {
         code_blocks: false, // false = skip code blocks
         tables: true,       // true = check tables
         headings: false,    // false = skip headings
+        paragraphs: true,
         strict: false,
         reflow: false,
         ..Default::default()

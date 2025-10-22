@@ -28,6 +28,7 @@ impl MD013LineLength {
                 code_blocks,
                 tables,
                 headings,
+                paragraphs: true, // Default to true for backwards compatibility
                 strict,
                 reflow: false,
                 reflow_mode: ReflowMode::default(),
@@ -173,33 +174,27 @@ impl Rule for MD013LineLength {
             content.lines().collect()
         };
 
-        // Create a quick lookup set for heading lines (only if needed)
-        let heading_lines_set: std::collections::HashSet<usize> = if !effective_config.headings {
-            ctx.lines
-                .iter()
-                .enumerate()
-                .filter(|(_, line)| line.heading.is_some())
-                .map(|(idx, _)| idx + 1)
-                .collect()
-        } else {
-            std::collections::HashSet::new()
-        };
+        // Create a quick lookup set for heading lines
+        // We need this for both the heading skip check AND the paragraphs check
+        let heading_lines_set: std::collections::HashSet<usize> = ctx
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| line.heading.is_some())
+            .map(|(idx, _)| idx + 1)
+            .collect();
 
-        // Use TableUtils to find all table blocks (only if needed)
-        let table_lines_set: std::collections::HashSet<usize> = if !effective_config.tables {
-            let table_blocks = TableUtils::find_table_blocks(content, ctx);
-            let mut table_lines = std::collections::HashSet::new();
-            for table in &table_blocks {
-                table_lines.insert(table.header_line + 1);
-                table_lines.insert(table.delimiter_line + 1);
-                for &line in &table.content_lines {
-                    table_lines.insert(line + 1);
-                }
+        // Use TableUtils to find all table blocks
+        // We need this for both the table skip check AND the paragraphs check
+        let table_blocks = TableUtils::find_table_blocks(content, ctx);
+        let mut table_lines_set = std::collections::HashSet::new();
+        for table in &table_blocks {
+            table_lines_set.insert(table.header_line + 1);
+            table_lines_set.insert(table.delimiter_line + 1);
+            for &line in &table.content_lines {
+                table_lines_set.insert(line + 1);
             }
-            table_lines
-        } else {
-            std::collections::HashSet::new()
-        };
+        }
 
         // Process candidate lines for line length checks
         for &line_idx in &candidate_lines {
@@ -241,6 +236,22 @@ impl Rule for MD013LineLength {
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
                 {
                     continue;
+                }
+
+                // Check if this is a paragraph/regular text line
+                // If paragraphs = false, skip lines that are NOT in special blocks
+                if !effective_config.paragraphs {
+                    let is_special_block = heading_lines_set.contains(&line_number)
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_code_block)
+                        || table_lines_set.contains(&line_number)
+                        || ctx.lines[line_number - 1].blockquote.is_some()
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment);
+
+                    // Skip regular paragraph text when paragraphs = false
+                    if !is_special_block {
+                        continue;
+                    }
                 }
 
                 // Skip lines that are only a URL, image ref, or link ref
@@ -3369,5 +3380,143 @@ with multiple lines."#;
                 fix.replacement
             );
         }
+    }
+
+    #[test]
+    fn test_paragraphs_false_skips_regular_text() {
+        // Test that paragraphs=false skips checking regular text
+        let config = MD013Config {
+            line_length: 50,
+            paragraphs: false, // Don't check paragraphs
+            code_blocks: true,
+            tables: true,
+            headings: true,
+            strict: false,
+            reflow: false,
+            reflow_mode: ReflowMode::default(),
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content =
+            "This is a very long line of regular text that exceeds fifty characters and should not trigger a warning.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not report any warnings when paragraphs=false
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not warn about long paragraph text when paragraphs=false"
+        );
+    }
+
+    #[test]
+    fn test_paragraphs_false_still_checks_code_blocks() {
+        // Test that paragraphs=false still checks code blocks
+        let config = MD013Config {
+            line_length: 50,
+            paragraphs: false, // Don't check paragraphs
+            code_blocks: true, // But DO check code blocks
+            tables: true,
+            headings: true,
+            strict: false,
+            reflow: false,
+            reflow_mode: ReflowMode::default(),
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = r#"```
+This is a very long line in a code block that exceeds fifty characters.
+```"#;
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // SHOULD report warnings for code blocks even when paragraphs=false
+        assert_eq!(
+            result.len(),
+            1,
+            "Should warn about long lines in code blocks even when paragraphs=false"
+        );
+    }
+
+    #[test]
+    fn test_paragraphs_false_still_checks_headings() {
+        // Test that paragraphs=false still checks headings
+        let config = MD013Config {
+            line_length: 50,
+            paragraphs: false, // Don't check paragraphs
+            code_blocks: true,
+            tables: true,
+            headings: true, // But DO check headings
+            strict: false,
+            reflow: false,
+            reflow_mode: ReflowMode::default(),
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "# This is a very long heading that exceeds fifty characters and should trigger a warning";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // SHOULD report warnings for headings even when paragraphs=false
+        assert_eq!(
+            result.len(),
+            1,
+            "Should warn about long headings even when paragraphs=false"
+        );
+    }
+
+    #[test]
+    fn test_paragraphs_false_with_reflow_sentence_per_line() {
+        // Test issue #121 use case: paragraphs=false with sentence-per-line reflow
+        let config = MD013Config {
+            line_length: 80,
+            paragraphs: false,
+            code_blocks: true,
+            tables: true,
+            headings: false,
+            strict: false,
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "This is a very long sentence that exceeds eighty characters and contains important information that should not be flagged.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should NOT warn when paragraphs=false
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not warn about long sentences when paragraphs=false"
+        );
+    }
+
+    #[test]
+    fn test_paragraphs_true_checks_regular_text() {
+        // Test that paragraphs=true (default) checks regular text
+        let config = MD013Config {
+            line_length: 50,
+            paragraphs: true, // Default: DO check paragraphs
+            code_blocks: true,
+            tables: true,
+            headings: true,
+            strict: false,
+            reflow: false,
+            reflow_mode: ReflowMode::default(),
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "This is a very long line of regular text that exceeds fifty characters.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // SHOULD report warnings when paragraphs=true
+        assert_eq!(
+            result.len(),
+            1,
+            "Should warn about long paragraph text when paragraphs=true"
+        );
     }
 }
