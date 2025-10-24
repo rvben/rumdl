@@ -385,16 +385,25 @@ unknown_global = true"#;
     fs::write(&config_path, config_content).unwrap();
     let sourced =
         rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
-            .expect("config should load successfully"); // Use load
-    let rules = rumdl_lib::all_rules(&rumdl_lib::config::Config::default()); // Use all_rules instead of get_rules
+            .expect("config should load successfully");
+    let rules = rumdl_lib::all_rules(&rumdl_lib::config::Config::default());
     let registry = RuleRegistry::from_rules(&rules);
-    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
-    // It seems unknown global keys are not yet tracked properly. Adjust test or implementation.
-    // For now, let's expect 0 warnings related to global keys until tracking is implemented/fixed.
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry);
+
+    // Should detect the unknown global key "unknown_global"
     let global_warnings = warnings.iter().filter(|w| w.rule.is_none()).count();
     assert_eq!(
-        global_warnings, 0,
-        "Expected 0 unknown global option warnings (check implementation)"
+        global_warnings, 1,
+        "Expected 1 unknown global option warning for 'unknown_global'"
+    );
+
+    // Verify the warning message contains "unknown_global" or "unknown-global"
+    let has_unknown_key_warning = warnings
+        .iter()
+        .any(|w| w.message.contains("unknown_global") || w.message.contains("unknown-global"));
+    assert!(
+        has_unknown_key_warning,
+        "Expected warning about unknown_global, got: {warnings:?}"
     );
 }
 

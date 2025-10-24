@@ -1468,7 +1468,8 @@ pub struct SourcedConfigFragment {
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
-    // Note: Does not include loaded_files or unknown_keys, as those are tracked globally.
+    pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
+                                                             // Note: loaded_files is tracked globally in SourcedConfig.
 }
 
 impl Default for SourcedConfigFragment {
@@ -1477,6 +1478,7 @@ impl Default for SourcedConfigFragment {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
             rules: BTreeMap::new(),
+            unknown_keys: Vec::new(),
         }
     }
 }
@@ -1487,7 +1489,7 @@ pub struct SourcedConfig {
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     pub loaded_files: Vec<String>,
-    pub unknown_keys: Vec<(String, String)>, // (section, key)
+    pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
 }
 
 impl Default for SourcedConfig {
@@ -1626,6 +1628,14 @@ impl SourcedConfig {
                     file_from_fragment,            // Pass the file path from the fragment override
                     line_from_fragment,            // Pass the line number from the fragment override
                 );
+            }
+        }
+
+        // Merge unknown_keys from fragment
+        for (section, key, file_path) in fragment.unknown_keys {
+            // Deduplicate: only add if not already present
+            if !self.unknown_keys.iter().any(|(s, k, _)| s == &section && k == &key) {
+                self.unknown_keys.push((section, key, file_path));
             }
         }
     }
@@ -1956,7 +1966,7 @@ impl SourcedConfig {
             // No rule-specific CLI overrides implemented yet
         }
 
-        // TODO: Handle unknown keys collected during parsing/merging
+        // Unknown keys are now collected during parsing and validated via validate_config_sourced()
 
         Ok(sourced_config)
     }
@@ -2145,8 +2155,14 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
         if let Some(valid_keys) = registry.config_keys_for(rule) {
             for key in rule_cfg.values.keys() {
                 if !valid_keys.contains(key) {
+                    let valid_keys_vec: Vec<String> = valid_keys.iter().cloned().collect();
+                    let message = if let Some(suggestion) = suggest_similar_key(key, &valid_keys_vec) {
+                        format!("Unknown option for rule {rule}: {key} (did you mean: {suggestion}?)")
+                    } else {
+                        format!("Unknown option for rule {rule}: {key}")
+                    };
                     warnings.push(ConfigValidationWarning {
-                        message: format!("Unknown option for rule {rule}: {key}"),
+                        message,
                         rule: Some(rule.clone()),
                         key: Some(key.clone()),
                     });
@@ -2173,12 +2189,59 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
         }
     }
     // 3. Unknown global options (from unknown_keys)
-    for (section, key) in &sourced.unknown_keys {
-        if section.contains("[global]") {
+    let known_global_keys = vec![
+        "enable".to_string(),
+        "disable".to_string(),
+        "include".to_string(),
+        "exclude".to_string(),
+        "respect-gitignore".to_string(),
+        "line-length".to_string(),
+        "fixable".to_string(),
+        "unfixable".to_string(),
+        "flavor".to_string(),
+        "force-exclude".to_string(),
+        "output-format".to_string(),
+    ];
+
+    for (section, key, file_path) in &sourced.unknown_keys {
+        if section.contains("[global]") || section.contains("[tool.rumdl]") {
+            let message = if let Some(suggestion) = suggest_similar_key(key, &known_global_keys) {
+                if let Some(path) = file_path {
+                    format!("Unknown global option in {path}: {key} (did you mean: {suggestion}?)")
+                } else {
+                    format!("Unknown global option: {key} (did you mean: {suggestion}?)")
+                }
+            } else if let Some(path) = file_path {
+                format!("Unknown global option in {path}: {key}")
+            } else {
+                format!("Unknown global option: {key}")
+            };
             warnings.push(ConfigValidationWarning {
-                message: format!("Unknown global option: {key}"),
+                message,
                 rule: None,
                 key: Some(key.clone()),
+            });
+        } else if !key.is_empty() {
+            // This is an unknown rule section (key is empty means it's a section header)
+            // No suggestions for rule names - just warn
+            continue;
+        } else {
+            // Unknown rule section
+            let message = if let Some(path) = file_path {
+                format!(
+                    "Unknown rule in {path}: {}",
+                    section.trim_matches(|c| c == '[' || c == ']')
+                )
+            } else {
+                format!(
+                    "Unknown rule in config: {}",
+                    section.trim_matches(|c| c == '[' || c == ']')
+                )
+            };
+            warnings.push(ConfigValidationWarning {
+                message,
+                rule: None,
+                key: None,
             });
         }
     }
@@ -2195,6 +2258,63 @@ fn toml_type_name(val: &toml::Value) -> &'static str {
         toml::Value::Table(_) => "table",
         toml::Value::Datetime(_) => "datetime",
     }
+}
+
+/// Calculate Levenshtein distance between two strings (simple implementation)
+fn levenshtein_distance(s1: &str, s2: &str) -> usize {
+    let len1 = s1.len();
+    let len2 = s2.len();
+
+    if len1 == 0 {
+        return len2;
+    }
+    if len2 == 0 {
+        return len1;
+    }
+
+    let s1_chars: Vec<char> = s1.chars().collect();
+    let s2_chars: Vec<char> = s2.chars().collect();
+
+    let mut prev_row: Vec<usize> = (0..=len2).collect();
+    let mut curr_row = vec![0; len2 + 1];
+
+    for i in 1..=len1 {
+        curr_row[0] = i;
+        for j in 1..=len2 {
+            let cost = if s1_chars[i - 1] == s2_chars[j - 1] { 0 } else { 1 };
+            curr_row[j] = (prev_row[j] + 1)          // deletion
+                .min(curr_row[j - 1] + 1)            // insertion
+                .min(prev_row[j - 1] + cost); // substitution
+        }
+        std::mem::swap(&mut prev_row, &mut curr_row);
+    }
+
+    prev_row[len2]
+}
+
+/// Suggest a similar key from a list of valid keys using fuzzy matching
+fn suggest_similar_key(unknown: &str, valid_keys: &[String]) -> Option<String> {
+    let unknown_lower = unknown.to_lowercase();
+    let max_distance = 2.max(unknown.len() / 3); // Allow up to 2 edits or 30% of string length
+
+    let mut best_match: Option<(String, usize)> = None;
+
+    for valid in valid_keys {
+        let valid_lower = valid.to_lowercase();
+        let distance = levenshtein_distance(&unknown_lower, &valid_lower);
+
+        if distance <= max_distance {
+            if let Some((_, best_dist)) = &best_match {
+                if distance < *best_dist {
+                    best_match = Some((valid.clone(), distance));
+                }
+            } else {
+                best_match = Some((valid.clone(), distance));
+            }
+        }
+    }
+
+    best_match.map(|(key, _)| key)
 }
 
 fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool {
@@ -2438,8 +2558,10 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 }
             } else {
                 // Key is not a global/special key, doesn't start with 'md', or isn't a table.
-                // TODO: Track unknown keys/sections if necessary for validation later.
-                // eprintln!("[DEBUG parse_pyproject] Skipping key '{}' as it's not a recognized rule table.", key);
+                // Track unknown keys under [tool.rumdl] for validation
+                fragment
+                    .unknown_keys
+                    .push(("[tool.rumdl]".to_string(), key.to_string(), Some(path.to_string())));
             }
         }
     }
@@ -2464,6 +2586,13 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                             .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
                         sv.push_override(toml_val, source, file.clone(), None);
                     }
+                } else if rule_name.to_ascii_uppercase().starts_with("MD") {
+                    // Track unknown rule sections like [tool.rumdl.MD999]
+                    fragment.unknown_keys.push((
+                        format!("[tool.rumdl.{rule_name}]"),
+                        String::new(),
+                        Some(path.to_string()),
+                    ));
                 }
             }
         }
@@ -2489,6 +2618,13 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                             .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
                         sv.push_override(toml_val, source, file.clone(), None);
                     }
+                } else if rule_name.to_ascii_uppercase().starts_with("MD") {
+                    // Track unknown rule sections like [tool.rumdl.MD999]
+                    fragment.unknown_keys.push((
+                        format!("[tool.rumdl.{rule_name}]"),
+                        String::new(),
+                        Some(path.to_string()),
+                    ));
                 }
             }
         }
@@ -2715,8 +2851,10 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                     }
                 }
                 _ => {
-                    // Add to unknown_keys for potential validation later
-                    // fragment.unknown_keys.push(("[global]".to_string(), key.to_string()));
+                    // Track unknown global keys for validation
+                    fragment
+                        .unknown_keys
+                        .push(("[global]".to_string(), key.to_string(), Some(path.to_string())));
                     log::warn!("[WARN] Unknown key in [global] section of {path}: {key}");
                 }
             }
@@ -2751,9 +2889,23 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
     // Rule-specific: all other top-level tables
     for (key, item) in doc.iter() {
         let norm_rule_name = key.to_ascii_uppercase();
-        if !known_rule_names.contains(&norm_rule_name) {
+
+        // Skip known special sections
+        if key == "global" || key == "per-file-ignores" {
             continue;
         }
+
+        // Track unknown rule sections (like [MD999])
+        if !known_rule_names.contains(&norm_rule_name) {
+            // Only track if it looks like a rule section (starts with MD or is uppercase)
+            if norm_rule_name.starts_with("MD") || key.chars().all(|c| c.is_uppercase() || c.is_numeric()) {
+                fragment
+                    .unknown_keys
+                    .push((format!("[{key}]"), String::new(), Some(path.to_string())));
+            }
+            continue;
+        }
+
         if let Some(tbl) = item.as_table() {
             let rule_entry = fragment.rules.entry(norm_rule_name.clone()).or_default();
             for (rk, rv_item) in tbl.iter() {

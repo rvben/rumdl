@@ -484,22 +484,10 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Reports one warning per HTML tag (true markdownlint compatibility)
         assert_eq!(result.len(), 4); // <DiV>, <B>, </B>, </dIv>
-        assert_eq!(
-            result[0].message,
-            "Inline HTML found: <DiV>"
-        );
-        assert_eq!(
-            result[1].message,
-            "Inline HTML found: <B>"
-        );
-        assert_eq!(
-            result[2].message,
-            "Inline HTML found: </B>"
-        );
-        assert_eq!(
-            result[3].message,
-            "Inline HTML found: </dIv>"
-        );
+        assert_eq!(result[0].message, "Inline HTML found: <DiV>");
+        assert_eq!(result[1].message, "Inline HTML found: <B>");
+        assert_eq!(result[2].message, "Inline HTML found: </B>");
+        assert_eq!(result[3].message, "Inline HTML found: </dIv>");
     }
 
     #[test]
@@ -510,28 +498,16 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Only warnings for non-allowed tags (<p> and </p>, div and br are allowed)
         assert_eq!(result.len(), 2);
-        assert_eq!(
-            result[0].message,
-            "Inline HTML found: <p>"
-        );
-        assert_eq!(
-            result[1].message,
-            "Inline HTML found: </p>"
-        );
+        assert_eq!(result[0].message, "Inline HTML found: <p>");
+        assert_eq!(result[1].message, "Inline HTML found: </p>");
 
         // Test case-insensitivity of allowed tags
         let content2 = "<DIV>Allowed</DIV><P>Not allowed</P><BR/>";
         let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
         assert_eq!(result2.len(), 2); // <P> and </P> flagged
-        assert_eq!(
-            result2[0].message,
-            "Inline HTML found: <P>"
-        );
-        assert_eq!(
-            result2[1].message,
-            "Inline HTML found: </P>"
-        );
+        assert_eq!(result2[0].message, "Inline HTML found: <P>");
+        assert_eq!(result2[1].message, "Inline HTML found: </P>");
     }
 
     #[test]
@@ -542,14 +518,8 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Should detect warnings for HTML tags (comments are skipped)
         assert_eq!(result.len(), 2); // <p> and </p>
-        assert_eq!(
-            result[0].message,
-            "Inline HTML found: <p>"
-        );
-        assert_eq!(
-            result[1].message,
-            "Inline HTML found: </p>"
-        );
+        assert_eq!(result[0].message, "Inline HTML found: <p>");
+        assert_eq!(result[1].message, "Inline HTML found: </p>");
     }
 
     #[test]
@@ -560,24 +530,15 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // The <div> in the URL should be detected as HTML (not skipped)
         assert_eq!(result.len(), 1);
-        assert_eq!(
-            result[0].message,
-            "Inline HTML found: <div>"
-        );
+        assert_eq!(result[0].message, "Inline HTML found: <div>");
 
         let content2 = "[Link <a>text</a>](url)";
         let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
         // Reports one warning per HTML tag (true markdownlint compatibility)
         assert_eq!(result2.len(), 2); // <a> and </a>
-        assert_eq!(
-            result2[0].message,
-            "Inline HTML found: <a>"
-        );
-        assert_eq!(
-            result2[1].message,
-            "Inline HTML found: </a>"
-        );
+        assert_eq!(result2[0].message, "Inline HTML found: <a>");
+        assert_eq!(result2[1].message, "Inline HTML found: </a>");
     }
 
     #[test]
@@ -598,14 +559,8 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Reports one warning per HTML tag (true markdownlint compatibility)
         assert_eq!(result.len(), 2); // <div> and </div> outside code block
-        assert_eq!(
-            result[0].message,
-            "Inline HTML found: <div>"
-        );
-        assert_eq!(
-            result[1].message,
-            "Inline HTML found: </div>"
-        );
+        assert_eq!(result[0].message, "Inline HTML found: <div>");
+        assert_eq!(result[1].message, "Inline HTML found: </div>");
     }
 
     #[test]
@@ -616,10 +571,7 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // Should detect <br/> outside code span, but not tags inside code span
         assert_eq!(result.len(), 1);
-        assert_eq!(
-            result[0].message,
-            "Inline HTML found: <br/>"
-        );
+        assert_eq!(result[0].message, "Inline HTML found: <br/>");
     }
 
     #[test]
