@@ -149,12 +149,18 @@ impl Rule for MD013LineLength {
             self.config.clone()
         };
 
+        // Special handling: line_length = 0 means "no line length limit"
+        // Skip all line length checks, but still allow reflow if enabled
+        let skip_length_checks = effective_config.line_length == 0;
+
         // Pre-filter lines that could be problematic to avoid processing all lines
         let mut candidate_lines = Vec::new();
-        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
-            // Quick length check first
-            if line_info.content.len() > effective_config.line_length {
-                candidate_lines.push(line_idx);
+        if !skip_length_checks {
+            for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+                // Quick length check first
+                if line_info.content.len() > effective_config.line_length {
+                    candidate_lines.push(line_idx);
+                }
             }
         }
 
@@ -805,8 +811,14 @@ impl MD013LineLength {
                     let byte_range = start_range.start..end_range.end;
 
                     // Reflow each block (paragraphs only, preserve code blocks)
+                    // When line_length = 0 (no limit), use a very large value for reflow
+                    let reflow_line_length = if config.line_length == 0 {
+                        usize::MAX
+                    } else {
+                        config.line_length.saturating_sub(indent_size).max(1)
+                    };
                     let reflow_options = crate::utils::text_reflow::ReflowOptions {
-                        line_length: config.line_length - indent_size,
+                        line_length: reflow_line_length,
                         break_on_sentences: true,
                         preserve_breaks: false,
                         sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
@@ -1135,8 +1147,14 @@ impl MD013LineLength {
                 });
 
                 // Reflow the paragraph
+                // When line_length = 0 (no limit), use a very large value for reflow
+                let reflow_line_length = if config.line_length == 0 {
+                    usize::MAX
+                } else {
+                    config.line_length
+                };
                 let reflow_options = crate::utils::text_reflow::ReflowOptions {
-                    line_length: config.line_length,
+                    line_length: reflow_line_length,
                     break_on_sentences: true,
                     preserve_breaks: false,
                     sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
@@ -3518,5 +3536,126 @@ This is a very long line in a code block that exceeds fifty characters.
             1,
             "Should warn about long paragraph text when paragraphs=true"
         );
+    }
+
+    #[test]
+    fn test_line_length_zero_disables_all_checks() {
+        // Test that line_length = 0 disables all line length checks
+        let config = MD013Config {
+            line_length: 0, // 0 = no limit
+            paragraphs: true,
+            code_blocks: true,
+            tables: true,
+            headings: true,
+            strict: false,
+            reflow: false,
+            reflow_mode: ReflowMode::default(),
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "This is a very very very very very very very very very very very very very very very very very very very very very very very very long line that would normally trigger MD013.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should NOT warn when line_length = 0
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not warn about any line length when line_length = 0"
+        );
+    }
+
+    #[test]
+    fn test_line_length_zero_with_headings() {
+        // Test that line_length = 0 disables checks even for headings
+        let config = MD013Config {
+            line_length: 0, // 0 = no limit
+            paragraphs: true,
+            code_blocks: true,
+            tables: true,
+            headings: true, // Even with headings enabled
+            strict: false,
+            reflow: false,
+            reflow_mode: ReflowMode::default(),
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "# This is a very very very very very very very very very very very very very very very very very very very very very long heading";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should NOT warn when line_length = 0
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not warn about heading line length when line_length = 0"
+        );
+    }
+
+    #[test]
+    fn test_line_length_zero_with_code_blocks() {
+        // Test that line_length = 0 disables checks even for code blocks
+        let config = MD013Config {
+            line_length: 0, // 0 = no limit
+            paragraphs: true,
+            code_blocks: true, // Even with code_blocks enabled
+            tables: true,
+            headings: true,
+            strict: false,
+            reflow: false,
+            reflow_mode: ReflowMode::default(),
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "```\nThis is a very very very very very very very very very very very very very very very very very very very very very long code line\n```";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should NOT warn when line_length = 0
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not warn about code block line length when line_length = 0"
+        );
+    }
+
+    #[test]
+    fn test_line_length_zero_with_sentence_per_line_reflow() {
+        // Test issue #121 use case: line_length = 0 with sentence-per-line reflow
+        let config = MD013Config {
+            line_length: 0, // 0 = no limit
+            paragraphs: true,
+            code_blocks: true,
+            tables: true,
+            headings: true,
+            strict: false,
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+
+        let content = "This is sentence one. This is sentence two. This is sentence three.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have warnings with fixes (reflow enabled)
+        assert_eq!(result.len(), 1, "Should provide reflow fix for multiple sentences");
+        assert!(result[0].fix.is_some(), "Should have a fix available");
+    }
+
+    #[test]
+    fn test_line_length_zero_config_parsing() {
+        // Test that line_length = 0 can be parsed from TOML config
+        let toml_str = r#"
+            line-length = 0
+            paragraphs = true
+            reflow = true
+            reflow-mode = "sentence-per-line"
+        "#;
+        let config: MD013Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.line_length, 0, "Should parse line_length = 0");
+        assert!(config.paragraphs);
+        assert!(config.reflow);
+        assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
     }
 }
