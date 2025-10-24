@@ -1294,8 +1294,13 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
     for line in paragraph_lines.iter() {
         end_byte += line.len() + 1; // +1 for newline
     }
-    // Adjust end_byte: the last line doesn't necessarily have a newline
-    if para_end == lines.len() - 1 && !content.ends_with('\n') {
+
+    // Track whether the byte range includes a trailing newline
+    // (it doesn't if this is the last line and the file doesn't end with newline)
+    let includes_trailing_newline = !(para_end == lines.len() - 1 && !content.ends_with('\n'));
+
+    // Adjust end_byte if the last line doesn't have a newline
+    if !includes_trailing_newline {
         end_byte -= 1;
     }
 
@@ -1313,11 +1318,23 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
     // Reflow the paragraph using reflow_markdown to handle it properly
     let reflowed = reflow_markdown(&paragraph_text, &options);
 
-    // Remove trailing newline if original paragraph didn't have one
-    let reflowed_text = if !paragraph_text.ends_with('\n') && reflowed.ends_with('\n') {
-        reflowed.trim_end_matches('\n').to_string()
+    // Ensure reflowed text matches whether the byte range includes a trailing newline
+    // This is critical: if the range includes a newline, the replacement must too,
+    // otherwise the next line will get appended to the reflowed paragraph
+    let reflowed_text = if includes_trailing_newline {
+        // Range includes newline - ensure reflowed text has one
+        if reflowed.ends_with('\n') {
+            reflowed
+        } else {
+            format!("{}\n", reflowed)
+        }
     } else {
-        reflowed
+        // Range doesn't include newline - ensure reflowed text doesn't have one
+        if reflowed.ends_with('\n') {
+            reflowed.trim_end_matches('\n').to_string()
+        } else {
+            reflowed
+        }
     };
 
     Some(ParagraphReflow {
