@@ -55,6 +55,10 @@ lazy_static! {
     // Ampersand and copyright with whitespace patterns
     static ref AMPERSAND_WITH_SPACES: Regex = Regex::new(r"\s+&\s+").unwrap();
     static ref COPYRIGHT_WITH_SPACES: Regex = Regex::new(r"\s+©\s+").unwrap();
+
+    // Angle bracket content removal (e.g., Generic<T> → Generic)
+    // GitHub removes the entire content between angle brackets, including the brackets themselves
+    static ref ANGLE_BRACKET_CONTENT: Regex = Regex::new(r"<[^>]*>").unwrap();
 }
 
 /// Generate GitHub.com style anchor fragment from heading text with security hardening
@@ -215,6 +219,11 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     // Remove ampersand and copyright without spaces
     text = text.replace("&", "");
     text = text.replace("©", "");
+
+    // Step 9.5: Remove angle bracket content (e.g., Generic<T> → Generic)
+    // GitHub.com removes the entire content between angle brackets
+    // This handles type parameters in headings like "Bound<T>" → "bound"
+    text = ANGLE_BRACKET_CONTENT.replace_all(&text, "").to_string();
 
     // Step 10: Character-by-character processing
     let mut result = String::with_capacity(text.len()); // Pre-allocate for efficiency
