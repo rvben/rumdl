@@ -618,6 +618,12 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Skip mdbook template placeholders ({{#VARIABLE}})
+            // mdbook uses {{#VARIABLE}} syntax where # is part of the template, not a fragment
+            if url.contains("{{#") && url.contains("}}") {
+                continue;
+            }
+
             // Cross-file links are valid if the file exists (not checked here)
             if Self::is_cross_file_link(url) {
                 continue;
