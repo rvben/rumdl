@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.167] - 2025-10-24
+
 ### Added
+
+- **Configuration validation with fuzzy-match suggestions**
+  - Comprehensive unknown key detection for `.rumdl.toml` and `pyproject.toml`
+  - Intelligent "did you mean?" suggestions using Levenshtein distance algorithm
+  - File path context in validation warnings for easy debugging
+  - Catches typos in global options, rule names, and rule options
+  - Example: `line-lenght` → suggests `line-length`, `reflw` → suggests `reflow`
+  - Zero-dependency implementation with configurable similarity threshold
+  - Helps users catch configuration mistakes before they cause confusion
+
+- **MD053: Support for community comment-style references**
+  - Recognizes and ignores reference-style link syntax used as comments
+  - Supports widely-used patterns: `[//]: # (comment)`, `[comment]: #`, `[note]: #`, `[todo]: #`, `[fixme]: #`, `[hack]: #`
+  - Any reference with just `#` as URL is treated as a comment
+  - While not in CommonMark/GFM specs, used across 23+ markdown implementations
+  - Complements HTML comments with a less HTML-like syntax option
+  - Improves compatibility with existing markdown practices
+
+- **MD013: `line-length = 0` to disable all line length checks**
+  - Setting `line-length = 0` now completely disables MD013 rule
+  - Provides explicit way to turn off line length validation entirely
+  - More intuitive than previous workarounds
+  - Useful when line length management is handled by other tools or not desired
+
+- **MD051: mdbook template support**
+  - Added detection and slug generation for mdbook templates
+  - Recognizes `{{#template path/to/file.md}}` syntax
+  - Properly generates GitHub-compatible slugs for template-included headings
+  - Improves compatibility with mdbook documentation projects
 
 - **LSP: Manual "Reflow paragraph" code action for MD013 warnings**
   - New code action available for MD013 line length warnings when auto-reflow is disabled
@@ -17,6 +48,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Respects line length limit from warning message or defaults to 80 characters
   - Provides a way to try paragraph reflow before committing to enabling it globally
   - Gives users fine-grained control over which paragraphs to reflow
+
+### Fixed
+
+- **LSP: Preserve trailing newline in reflow action**
+  - Manual reflow code action now correctly preserves trailing newlines
+  - Prevents unwanted file modifications from reflow operations
+  - Maintains document structure integrity
+
+- **LSP: Improve logging and resolve auto-fix issues**
+  - Enhanced LSP server logging for better debugging
+  - Resolved various auto-fix edge cases and reliability issues
+
+- **MD051: Correct GitHub slug generation for angle brackets**
+  - Fixed incorrect slug generation for headings containing angle brackets
+  - Now properly handles special characters in anchor generation
+  - Improves accuracy of link validation for complex headings
+
+### Changed
+
+- **MD033: Remove unhelpful message suffix**
+  - Simplified warning messages for inline HTML detection
+  - Removed redundant information to reduce noise
+  - Cleaner, more focused error messages
+
+- **Code cleanup: Remove dead code**
+  - Removed unused `LinkImageStyle` enum from MD054
+  - General refactoring to improve maintainability
+  - Fixed clippy warnings
+
+### Documentation
+
+- **MD033: Document mdbook use case for semantic HTML**
+  - Added documentation about using semantic HTML in mdbook projects
+  - Clarifies when and why inline HTML might be intentionally used
+  - Helps users understand legitimate use cases for HTML in markdown
 
 ## [0.0.166] - 2025-10-22
 
