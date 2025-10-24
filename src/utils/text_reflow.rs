@@ -1286,8 +1286,8 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
 
     // Calculate byte offsets
     let mut start_byte = 0;
-    for i in 0..para_start {
-        start_byte += lines[i].len() + 1; // +1 for newline
+    for line in lines.iter().take(para_start) {
+        start_byte += line.len() + 1; // +1 for newline
     }
 
     let mut end_byte = start_byte;
@@ -1297,7 +1297,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
 
     // Track whether the byte range includes a trailing newline
     // (it doesn't if this is the last line and the file doesn't end with newline)
-    let includes_trailing_newline = !(para_end == lines.len() - 1 && !content.ends_with('\n'));
+    let includes_trailing_newline = para_end != lines.len() - 1 || content.ends_with('\n');
 
     // Adjust end_byte if the last line doesn't have a newline
     if !includes_trailing_newline {
@@ -1326,7 +1326,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
         if reflowed.ends_with('\n') {
             reflowed
         } else {
-            format!("{}\n", reflowed)
+            format!("{reflowed}\n")
         }
     } else {
         // Range doesn't include newline - ensure reflowed text doesn't have one

@@ -7,7 +7,6 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
 use lazy_static::lazy_static;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 
 mod md054_config;
 use md054_config::MD054Config;

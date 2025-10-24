@@ -134,10 +134,11 @@ pub fn warning_to_code_actions(warning: &crate::rule::LintWarning, uri: &Url, do
 
     // Add manual reflow action for MD013 when no fix is available
     // This allows users to manually reflow paragraphs without enabling reflow globally
-    if warning.rule_name.as_deref() == Some("MD013") && warning.fix.is_none() {
-        if let Some(reflow_action) = create_reflow_action(warning, uri, document_text) {
-            actions.push(reflow_action);
-        }
+    if warning.rule_name.as_deref() == Some("MD013")
+        && warning.fix.is_none()
+        && let Some(reflow_action) = create_reflow_action(warning, uri, document_text)
+    {
+        actions.push(reflow_action);
     }
 
     // Add ignore-line action
@@ -229,7 +230,7 @@ fn extract_line_length_from_message(message: &str) -> Option<usize> {
     let after_exceeds = &message[exceeds_idx + 7..]; // Skip "exceeds"
 
     // Find the number after "exceeds"
-    let num_str = after_exceeds.trim_start().split_whitespace().next()?;
+    let num_str = after_exceeds.split_whitespace().next()?;
 
     num_str.parse::<usize>().ok()
 }
