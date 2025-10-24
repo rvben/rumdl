@@ -10,7 +10,7 @@ pub mod server;
 pub mod types;
 
 pub use server::RumdlLanguageServer;
-pub use types::{RumdlLspConfig, warning_to_code_action, warning_to_diagnostic};
+pub use types::{RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
 
 use anyhow::Result;
 use tokio::net::TcpListener;
@@ -64,7 +64,7 @@ mod tests {
                 &crate::rule::LintWarning,
                 &tower_lsp::lsp_types::Url,
                 &str,
-            ) -> Option<tower_lsp::lsp_types::CodeAction> = warning_to_code_action;
+            ) -> Vec<tower_lsp::lsp_types::CodeAction> = warning_to_code_actions;
         }
     }
 

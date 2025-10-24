@@ -13,7 +13,8 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::config::Config;
-use crate::lsp::types::{RumdlLspConfig, warning_to_code_action, warning_to_diagnostic};
+use crate::lint;
+use crate::lsp::types::{RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
 use crate::rule::Rule;
 use crate::rules;
 
@@ -218,9 +219,15 @@ impl RumdlLanguageServer {
 
     /// Update diagnostics for a document
     async fn update_diagnostics(&self, uri: Url, text: String) {
+        // Get the document version if available
+        let version = {
+            let docs = self.documents.read().await;
+            docs.get(&uri).and_then(|entry| entry.version)
+        };
+
         match self.lint_document(&uri, &text).await {
             Ok(diagnostics) => {
-                self.client.publish_diagnostics(uri, diagnostics, None).await;
+                self.client.publish_diagnostics(uri, diagnostics, version).await;
             }
             Err(e) => {
                 log::error!("Failed to update diagnostics: {e}");
@@ -250,11 +257,34 @@ impl RumdlLanguageServer {
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
-        // Apply fixes sequentially for each rule
+        // First, run lint to get active warnings (respecting ignore comments)
+        // This tells us which rules actually have unfixed issues
+        let mut rules_with_warnings = std::collections::HashSet::new();
         let mut fixed_text = text.to_string();
+
+        match lint(&fixed_text, &filtered_rules, false, flavor) {
+            Ok(warnings) => {
+                for warning in warnings {
+                    if let Some(rule_name) = &warning.rule_name {
+                        rules_with_warnings.insert(rule_name.clone());
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to lint document for auto-fix: {e}");
+                return Ok(None);
+            }
+        }
+
+        // Only apply fixes for rules that have active warnings
         let mut any_changes = false;
 
         for rule in &filtered_rules {
+            // Skip rules that don't have any active warnings
+            if !rules_with_warnings.contains(rule.name()) {
+                continue;
+            }
+
             let ctx = crate::lint_context::LintContext::new(&fixed_text, flavor);
             match rule.fix(&ctx) {
                 Ok(new_text) => {
@@ -264,7 +294,11 @@ impl RumdlLanguageServer {
                     }
                 }
                 Err(e) => {
-                    log::warn!("Failed to apply fix for rule {}: {}", rule.name(), e);
+                    // Only log if it's an actual error, not just "rule doesn't support auto-fix"
+                    let msg = e.to_string();
+                    if !msg.contains("does not support automatic fixing") {
+                        log::warn!("Failed to apply fix for rule {}: {}", rule.name(), e);
+                    }
                 }
             }
         }
@@ -314,11 +348,11 @@ impl RumdlLanguageServer {
                 for warning in &warnings {
                     // Check if warning is within the requested range
                     let warning_line = (warning.line.saturating_sub(1)) as u32;
-                    if warning_line >= range.start.line
-                        && warning_line <= range.end.line
-                        && let Some(action) = warning_to_code_action(warning, uri, text)
-                    {
-                        actions.push(action);
+                    if warning_line >= range.start.line && warning_line <= range.end.line {
+                        // Get all code actions for this warning (fix + ignore actions)
+                        let mut warning_actions = warning_to_code_actions(warning, uri, text);
+                        actions.append(&mut warning_actions);
+
                         if warning.fix.is_some() {
                             fixable_count += 1;
                         }
@@ -478,10 +512,37 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        log::info!("rumdl Language Server initialized");
+        let version = env!("CARGO_PKG_VERSION");
+
+        // Get binary path and build time
+        let (binary_path, build_time) = std::env::current_exe()
+            .ok()
+            .map(|path| {
+                let path_str = path.to_str().unwrap_or("unknown").to_string();
+                let build_time = std::fs::metadata(&path)
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                    .and_then(|duration| {
+                        let secs = duration.as_secs();
+                        chrono::DateTime::from_timestamp(secs as i64, 0)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                    })
+                    .unwrap_or_else(|| "unknown".to_string());
+                (path_str, build_time)
+            })
+            .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+
+        let working_dir = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        log::info!("rumdl Language Server v{version} initialized (built: {build_time}, binary: {binary_path})");
+        log::info!("Working directory: {working_dir}");
 
         self.client
-            .log_message(MessageType::INFO, "rumdl Language Server started")
+            .log_message(MessageType::INFO, format!("rumdl v{version} Language Server started"))
             .await;
     }
 
@@ -500,7 +561,6 @@ impl LanguageServer for RumdlLanguageServer {
         let text = params.text_document.text;
         let version = params.text_document.version;
 
-        // Store document with version information
         let entry = DocumentEntry {
             content: text.clone(),
             version: Some(version),
@@ -508,7 +568,6 @@ impl LanguageServer for RumdlLanguageServer {
         };
         self.documents.write().await.insert(uri.clone(), entry);
 
-        // Update diagnostics
         self.update_diagnostics(uri, text).await;
     }
 
@@ -516,11 +575,9 @@ impl LanguageServer for RumdlLanguageServer {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
 
-        // Apply changes (we're using FULL sync, so just take the full text)
         if let Some(change) = params.content_changes.into_iter().next() {
             let text = change.text;
 
-            // Update stored document with new version
             let entry = DocumentEntry {
                 content: text.clone(),
                 version: Some(version),
@@ -528,7 +585,6 @@ impl LanguageServer for RumdlLanguageServer {
             };
             self.documents.write().await.insert(uri.clone(), entry);
 
-            // Update diagnostics
             self.update_diagnostics(uri, text).await;
         }
     }
@@ -539,15 +595,23 @@ impl LanguageServer for RumdlLanguageServer {
         drop(config_guard);
 
         // Auto-fix on save if enabled
-        if enable_auto_fix && let Some(entry) = self.documents.read().await.get(&params.text_document.uri) {
-            let text = &entry.content;
-            match self.apply_all_fixes(&params.text_document.uri, text).await {
+        // IMPORTANT: Clone the content and release the lock BEFORE applying edits
+        // to avoid deadlock when apply_edit triggers did_change
+        let text = if enable_auto_fix {
+            let docs = self.documents.read().await;
+            docs.get(&params.text_document.uri).map(|entry| entry.content.clone())
+        } else {
+            None
+        };
+
+        if let Some(text) = text {
+            match self.apply_all_fixes(&params.text_document.uri, &text).await {
                 Ok(Some(fixed_text)) => {
                     // Create a workspace edit to apply the fixes
                     let edit = TextEdit {
                         range: Range {
                             start: Position { line: 0, character: 0 },
-                            end: self.get_end_position(text),
+                            end: self.get_end_position(&text),
                         },
                         new_text: fixed_text.clone(),
                     };
@@ -922,10 +986,12 @@ mod tests {
         assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
         assert_eq!(diagnostic.code, Some(NumberOrString::String("MD001".to_string())));
 
-        // Test code action conversion (no fix)
+        // Test code action conversion (no fix, but should have ignore action)
         let uri = Url::parse("file:///test.md").unwrap();
-        let action = warning_to_code_action(&warning, &uri, "Test content");
-        assert!(action.is_none());
+        let actions = warning_to_code_actions(&warning, &uri, "Test content");
+        // Should have 1 action: ignore-line (no fix available)
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].title, "Ignore MD001 for this line");
     }
 
     #[tokio::test]
@@ -985,7 +1051,8 @@ mod tests {
         // Test apply_all_fixes
         let fixed = server.apply_all_fixes(&uri, text).await.unwrap();
         assert!(fixed.is_some());
-        assert_eq!(fixed.unwrap(), "# Heading without space");
+        // MD018 adds space, MD047 adds trailing newline
+        assert_eq!(fixed.unwrap(), "# Heading without space\n");
     }
 
     #[tokio::test]

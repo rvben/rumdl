@@ -337,7 +337,12 @@ impl Rule for MD055TablePipeStyle {
             }
         }
 
-        Ok(result_lines.join("\n"))
+        let mut fixed = result_lines.join("\n");
+        // Preserve trailing newline if original content had one
+        if content.ends_with('\n') && !fixed.ends_with('\n') {
+            fixed.push('\n');
+        }
+        Ok(fixed)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

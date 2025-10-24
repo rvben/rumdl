@@ -108,7 +108,10 @@ fn byte_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Op
         byte_pos += ch.len_utf8();
     }
 
-    // Handle end position at EOF
+    // Handle positions at EOF
+    if byte_pos == byte_range.start && start_pos.is_none() {
+        start_pos = Some(Position { line, character });
+    }
     if byte_pos == byte_range.end && end_pos.is_none() {
         end_pos = Some(Position { line, character });
     }
@@ -119,12 +122,26 @@ fn byte_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Op
     }
 }
 
-/// Create a code action from a rumdl warning with fix
-pub fn warning_to_code_action(
-    warning: &crate::rule::LintWarning,
-    uri: &Url,
-    document_text: &str,
-) -> Option<CodeAction> {
+/// Create code actions from a rumdl warning
+/// Returns a vector of available actions: fix action (if available) and ignore actions
+pub fn warning_to_code_actions(warning: &crate::rule::LintWarning, uri: &Url, document_text: &str) -> Vec<CodeAction> {
+    let mut actions = Vec::new();
+
+    // Add fix action if available (marked as preferred)
+    if let Some(fix_action) = create_fix_action(warning, uri, document_text) {
+        actions.push(fix_action);
+    }
+
+    // Add ignore-line action
+    if let Some(ignore_line_action) = create_ignore_line_action(warning, uri, document_text) {
+        actions.push(ignore_line_action);
+    }
+
+    actions
+}
+
+/// Create a fix code action from a rumdl warning with fix
+fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_text: &str) -> Option<CodeAction> {
     if let Some(fix) = &warning.fix {
         // Convert fix range (byte offsets) to LSP positions
         let range = byte_range_to_lsp_range(document_text, fix.range.clone())?;
@@ -156,6 +173,70 @@ pub fn warning_to_code_action(
     } else {
         None
     }
+}
+
+/// Create an ignore-line code action that adds a rumdl-disable-line comment
+fn create_ignore_line_action(warning: &crate::rule::LintWarning, uri: &Url, document_text: &str) -> Option<CodeAction> {
+    let rule_id = warning.rule_name.as_ref()?;
+    let warning_line = warning.line.saturating_sub(1);
+
+    // Find the end of the line where the warning occurs
+    let lines: Vec<&str> = document_text.lines().collect();
+    let line_content = lines.get(warning_line)?;
+
+    // Check if this line already has a rumdl-disable-line comment
+    if line_content.contains("rumdl-disable-line") || line_content.contains("markdownlint-disable-line") {
+        // Don't offer the action if the line already has a disable comment
+        return None;
+    }
+
+    // Calculate position at end of line
+    let line_end = Position {
+        line: warning_line as u32,
+        character: line_content.len() as u32,
+    };
+
+    // Use rumdl-disable-line syntax
+    let comment = format!(" <!-- rumdl-disable-line {rule_id} -->");
+
+    let edit = TextEdit {
+        range: Range {
+            start: line_end,
+            end: line_end,
+        },
+        new_text: comment,
+    };
+
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(uri.clone(), vec![edit]);
+
+    Some(CodeAction {
+        title: format!("Ignore {rule_id} for this line"),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![warning_to_diagnostic(warning)]),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        }),
+        command: None,
+        is_preferred: Some(false), // Fix action is preferred
+        disabled: None,
+        data: None,
+    })
+}
+
+/// Legacy function for backwards compatibility
+/// Use `warning_to_code_actions` instead
+#[deprecated(since = "0.0.167", note = "Use warning_to_code_actions instead")]
+pub fn warning_to_code_action(
+    warning: &crate::rule::LintWarning,
+    uri: &Url,
+    document_text: &str,
+) -> Option<CodeAction> {
+    warning_to_code_actions(warning, uri, document_text)
+        .into_iter()
+        .find(|action| action.is_preferred == Some(true))
 }
 
 #[cfg(test)]
@@ -327,6 +408,34 @@ mod tests {
     }
 
     #[test]
+    fn test_byte_range_to_lsp_range_insertion_at_eof() {
+        // Test insertion point at EOF (like MD047 adds trailing newline)
+        let text = "Hello\nWorld";
+        let text_len = text.len(); // 11 bytes
+        let range = byte_range_to_lsp_range(text, text_len..text_len).unwrap();
+
+        // Should create a zero-width range at EOF position
+        assert_eq!(range.start.line, 1);
+        assert_eq!(range.start.character, 5); // After "World"
+        assert_eq!(range.end.line, 1);
+        assert_eq!(range.end.character, 5);
+    }
+
+    #[test]
+    fn test_byte_range_to_lsp_range_insertion_at_eof_with_trailing_newline() {
+        // Test when file already ends with newline
+        let text = "Hello\nWorld\n";
+        let text_len = text.len(); // 12 bytes
+        let range = byte_range_to_lsp_range(text, text_len..text_len).unwrap();
+
+        // Should create a zero-width range at EOF (after the newline)
+        assert_eq!(range.start.line, 2);
+        assert_eq!(range.start.character, 0); // Beginning of line after newline
+        assert_eq!(range.end.line, 2);
+        assert_eq!(range.end.character, 0);
+    }
+
+    #[test]
     fn test_warning_to_code_action_with_fix() {
         let warning = LintWarning {
             line: 1,
@@ -345,13 +454,15 @@ mod tests {
         let uri = Url::parse("file:///test.md").unwrap();
         let document_text = "Hello World";
 
-        let action = warning_to_code_action(&warning, &uri, document_text).unwrap();
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+        assert!(!actions.is_empty());
+        let action = &actions[0]; // First action is the fix
 
         assert_eq!(action.title, "Fix: Missing space");
         assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
         assert_eq!(action.is_preferred, Some(true));
 
-        let changes = action.edit.unwrap().changes.unwrap();
+        let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
         let edits = &changes[&uri];
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].new_text, "Fixed");
@@ -373,8 +484,9 @@ mod tests {
         let uri = Url::parse("file:///test.md").unwrap();
         let document_text = "Hello World";
 
-        let action = warning_to_code_action(&warning, &uri, document_text);
-        assert!(action.is_none());
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+        // Should have ignore actions but no fix action (fix actions have is_preferred = true)
+        assert!(actions.iter().all(|a| a.is_preferred != Some(true)));
     }
 
     #[test]
@@ -396,9 +508,11 @@ mod tests {
         let uri = Url::parse("file:///test.md").unwrap();
         let document_text = "Hello\nWorld\nTest Line";
 
-        let action = warning_to_code_action(&warning, &uri, document_text).unwrap();
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+        assert!(!actions.is_empty());
+        let action = &actions[0]; // First action is the fix
 
-        let changes = action.edit.unwrap().changes.unwrap();
+        let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
         let edits = &changes[&uri];
         assert_eq!(edits[0].new_text, "Fixed\nContent");
         assert_eq!(edits[0].range.start.line, 1);
@@ -434,5 +548,195 @@ mod tests {
         assert!(!config.enable_linting);
         assert_eq!(config.config_path, None); // Should use default
         assert!(!config.enable_auto_fix); // Should use default
+    }
+
+    #[test]
+    fn test_create_ignore_line_action_uses_rumdl_syntax() {
+        let warning = LintWarning {
+            line: 5,
+            column: 1,
+            end_line: 5,
+            end_column: 50,
+            rule_name: Some("MD013".to_string()),
+            message: "Line too long".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+
+        let document = "Line 1\nLine 2\nLine 3\nLine 4\nThis is a very long line that exceeds the limit\nLine 6";
+        let uri = Url::parse("file:///test.md").unwrap();
+
+        let action = create_ignore_line_action(&warning, &uri, document).unwrap();
+
+        assert_eq!(action.title, "Ignore MD013 for this line");
+        assert_eq!(action.is_preferred, Some(false));
+        assert!(action.edit.is_some());
+
+        // Verify the edit adds the rumdl-disable-line comment
+        let edit = action.edit.unwrap();
+        let changes = edit.changes.unwrap();
+        let file_edits = changes.get(&uri).unwrap();
+
+        assert_eq!(file_edits.len(), 1);
+        assert!(file_edits[0].new_text.contains("rumdl-disable-line MD013"));
+        assert!(!file_edits[0].new_text.contains("markdownlint"));
+
+        // Verify position is at end of line
+        assert_eq!(file_edits[0].range.start.line, 4); // 0-indexed line 5
+        assert_eq!(file_edits[0].range.start.character, 47); // End of "This is a very long line that exceeds the limit"
+    }
+
+    #[test]
+    fn test_create_ignore_line_action_no_duplicate() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 50,
+            rule_name: Some("MD013".to_string()),
+            message: "Line too long".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+
+        // Line already has a disable comment
+        let document = "This is a line <!-- rumdl-disable-line MD013 -->";
+        let uri = Url::parse("file:///test.md").unwrap();
+
+        let action = create_ignore_line_action(&warning, &uri, document);
+
+        // Should not offer the action if comment already exists
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn test_create_ignore_line_action_detects_markdownlint_syntax() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 50,
+            rule_name: Some("MD013".to_string()),
+            message: "Line too long".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+
+        // Line has markdownlint-disable-line comment
+        let document = "This is a line <!-- markdownlint-disable-line MD013 -->";
+        let uri = Url::parse("file:///test.md").unwrap();
+
+        let action = create_ignore_line_action(&warning, &uri, document);
+
+        // Should not offer the action if markdownlint comment exists
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn test_warning_to_code_actions_with_fix() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            rule_name: Some("MD009".to_string()),
+            message: "Trailing spaces".to_string(),
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: 0..5,
+                replacement: "Fixed".to_string(),
+            }),
+        };
+
+        let uri = Url::parse("file:///test.md").unwrap();
+        let document_text = "Hello   \nWorld";
+
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+
+        // Should have 2 actions: fix and ignore-line
+        assert_eq!(actions.len(), 2);
+
+        // First action should be fix (preferred)
+        assert_eq!(actions[0].title, "Fix: Trailing spaces");
+        assert_eq!(actions[0].is_preferred, Some(true));
+
+        // Second action should be ignore-line
+        assert_eq!(actions[1].title, "Ignore MD009 for this line");
+        assert_eq!(actions[1].is_preferred, Some(false));
+    }
+
+    #[test]
+    fn test_warning_to_code_actions_no_fix() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 10,
+            rule_name: Some("MD033".to_string()),
+            message: "Inline HTML".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+
+        let uri = Url::parse("file:///test.md").unwrap();
+        let document_text = "<div>HTML</div>";
+
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+
+        // Should have 1 action: ignore-line only (no fix available)
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].title, "Ignore MD033 for this line");
+        assert_eq!(actions[0].is_preferred, Some(false));
+    }
+
+    #[test]
+    fn test_warning_to_code_actions_no_rule_name() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            rule_name: None,
+            message: "Generic warning".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+
+        let uri = Url::parse("file:///test.md").unwrap();
+        let document_text = "Hello World";
+
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+
+        // Should have no actions (no rule name means can't create ignore comment)
+        assert_eq!(actions.len(), 0);
+    }
+
+    #[test]
+    fn test_legacy_warning_to_code_action_compatibility() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            rule_name: Some("MD001".to_string()),
+            message: "Test".to_string(),
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: 0..5,
+                replacement: "Fixed".to_string(),
+            }),
+        };
+
+        let uri = Url::parse("file:///test.md").unwrap();
+        let document_text = "Hello World";
+
+        #[allow(deprecated)]
+        let action = warning_to_code_action(&warning, &uri, document_text);
+
+        // Should return the preferred (fix) action
+        assert!(action.is_some());
+        let action = action.unwrap();
+        assert_eq!(action.title, "Fix: Test");
+        assert_eq!(action.is_preferred, Some(true));
     }
 }
