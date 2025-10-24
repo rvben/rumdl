@@ -8,11 +8,11 @@ include = [
 ]
 # Globally disable specific rules
 disable = ["MD033"]
-respect_gitignore = true
+respect-gitignore = true
 
 [MD013]
-line_length = 200
-code_blocks = true
+line-length = 200
+code-blocks = true
 tables = false
 headings = true
 reflow = true

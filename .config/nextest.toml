@@ -29,10 +29,10 @@ default-filter = 'not (package(rumdl) and binary(deeply_nested_lists_performance
 # More conservative in CI
 test-threads = "num-cpus"
 
-# Always show all output in CI
+# Show failures immediately, but minimize successful test output for speed
 failure-output = "immediate"
-success-output = "immediate"
-status-level = "all"
+success-output = "final"
+status-level = "pass"
 
 # No retries in CI to catch flaky tests
 retries = 0

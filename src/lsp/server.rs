@@ -4,6 +4,7 @@
 //! It provides real-time markdown linting, diagnostics, and code actions.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -29,6 +30,15 @@ struct DocumentEntry {
     from_disk: bool,
 }
 
+/// Cache entry for resolved configuration
+#[derive(Clone, Debug)]
+pub(crate) struct ConfigCacheEntry {
+    /// The resolved configuration
+    pub(crate) config: Config,
+    /// Config file path that was loaded (for invalidation)
+    pub(crate) config_file: Option<PathBuf>,
+}
+
 /// Main LSP server for rumdl
 ///
 /// Following Ruff's pattern, this server provides:
@@ -36,16 +46,24 @@ struct DocumentEntry {
 /// - Code actions for automatic fixes
 /// - Configuration management
 /// - Multi-file support
+/// - Multi-root workspace support with per-file config resolution
 #[derive(Clone)]
 pub struct RumdlLanguageServer {
     client: Client,
     /// Configuration for the LSP server
     config: Arc<RwLock<RumdlLspConfig>>,
-    /// Rumdl core configuration
+    /// Rumdl core configuration (fallback/default)
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) rumdl_config: Arc<RwLock<Config>>,
     /// Document store for open files and cached disk files
     documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
+    /// Workspace root folders from the client
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
+    /// Configuration cache: maps directory path to resolved config
+    /// Key is the directory where config search started (file's parent dir)
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) config_cache: Arc<RwLock<HashMap<PathBuf, ConfigCacheEntry>>>,
 }
 
 impl RumdlLanguageServer {
@@ -55,6 +73,8 @@ impl RumdlLanguageServer {
             config: Arc::new(RwLock::new(RumdlLspConfig::default())),
             rumdl_config: Arc::new(RwLock::new(Config::default())),
             documents: Arc::new(RwLock::new(HashMap::new())),
+            workspace_roots: Arc::new(RwLock::new(Vec::new())),
+            config_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -128,7 +148,8 @@ impl RumdlLanguageServer {
             Err(_) => return false, // If we can't get a path, don't exclude
         };
 
-        let rumdl_config = self.rumdl_config.read().await;
+        // Resolve configuration for this specific file to get its exclude patterns
+        let rumdl_config = self.resolve_config_for_file(&file_path).await;
         let exclude_patterns = &rumdl_config.global.exclude;
 
         // If no exclude patterns, don't exclude
@@ -192,14 +213,19 @@ impl RumdlLanguageServer {
             return Ok(Vec::new());
         }
 
-        // Get rumdl configuration
-        let rumdl_config = self.rumdl_config.read().await;
+        // Resolve configuration for this specific file
+        let rumdl_config = if let Ok(file_path) = uri.to_file_path() {
+            self.resolve_config_for_file(&file_path).await
+        } else {
+            // Fallback to global config for non-file URIs
+            (*self.rumdl_config.read().await).clone()
+        };
+
         let all_rules = rules::all_rules(&rumdl_config);
         let flavor = rumdl_config.markdown_flavor();
 
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
-        drop(rumdl_config); // Release config lock early
 
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
@@ -246,13 +272,19 @@ impl RumdlLanguageServer {
         let lsp_config = config_guard.clone();
         drop(config_guard);
 
-        let rumdl_config = self.rumdl_config.read().await;
+        // Resolve configuration for this specific file
+        let rumdl_config = if let Ok(file_path) = uri.to_file_path() {
+            self.resolve_config_for_file(&file_path).await
+        } else {
+            // Fallback to global config for non-file URIs
+            (*self.rumdl_config.read().await).clone()
+        };
+
         let all_rules = rules::all_rules(&rumdl_config);
         let flavor = rumdl_config.markdown_flavor();
 
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
-        drop(rumdl_config);
 
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
@@ -329,13 +361,19 @@ impl RumdlLanguageServer {
         let lsp_config = config_guard.clone();
         drop(config_guard);
 
-        let rumdl_config = self.rumdl_config.read().await;
+        // Resolve configuration for this specific file
+        let rumdl_config = if let Ok(file_path) = uri.to_file_path() {
+            self.resolve_config_for_file(&file_path).await
+        } else {
+            // Fallback to global config for non-file URIs
+            (*self.rumdl_config.read().await).clone()
+        };
+
         let all_rules = rules::all_rules(&rumdl_config);
         let flavor = rumdl_config.markdown_flavor();
 
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
-        drop(rumdl_config);
 
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
@@ -466,6 +504,103 @@ impl RumdlLanguageServer {
         // Use the same configuration loading as the CLI
         crate::config::SourcedConfig::load_with_discovery(config_path, None, false)
     }
+
+    /// Resolve configuration for a specific file
+    ///
+    /// This method searches for a configuration file starting from the file's directory
+    /// and walking up the directory tree until a workspace root is hit or a config is found.
+    ///
+    /// Results are cached to avoid repeated filesystem access.
+    pub(crate) async fn resolve_config_for_file(&self, file_path: &std::path::Path) -> Config {
+        // Get the directory to start searching from
+        let search_dir = file_path.parent().unwrap_or(file_path).to_path_buf();
+
+        // Check cache first
+        {
+            let cache = self.config_cache.read().await;
+            if let Some(entry) = cache.get(&search_dir) {
+                log::debug!(
+                    "Config cache hit for directory: {} (loaded from: {:?})",
+                    search_dir.display(),
+                    entry.config_file
+                );
+                return entry.config.clone();
+            }
+        }
+
+        // Cache miss - need to search for config
+        log::debug!(
+            "Config cache miss for directory: {}, searching for config...",
+            search_dir.display()
+        );
+
+        // Try to find workspace root for this file
+        let workspace_root = {
+            let workspace_roots = self.workspace_roots.read().await;
+            workspace_roots
+                .iter()
+                .find(|root| search_dir.starts_with(root))
+                .map(|p| p.to_path_buf())
+        };
+
+        // Search upward from the file's directory
+        let mut current_dir = search_dir.clone();
+        let mut found_config: Option<(Config, Option<PathBuf>)> = None;
+
+        loop {
+            // Try to find a config file in the current directory
+            const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml", ".markdownlint.json"];
+
+            for config_file_name in CONFIG_FILES {
+                let config_path = current_dir.join(config_file_name);
+                if config_path.exists() {
+                    log::debug!("Found config file: {}", config_path.display());
+
+                    // Load the config
+                    if let Ok(sourced) = Self::load_config_for_lsp(Some(config_path.to_str().unwrap())) {
+                        found_config = Some((sourced.into(), Some(config_path)));
+                        break;
+                    }
+                }
+            }
+
+            if found_config.is_some() {
+                break;
+            }
+
+            // Check if we've hit a workspace root
+            if let Some(ref root) = workspace_root
+                && &current_dir == root
+            {
+                log::debug!("Hit workspace root without finding config: {}", root.display());
+                break;
+            }
+
+            // Move up to parent directory
+            if let Some(parent) = current_dir.parent() {
+                current_dir = parent.to_path_buf();
+            } else {
+                // Hit filesystem root
+                break;
+            }
+        }
+
+        // Use found config or fall back to default
+        let (config, config_file) = found_config.unwrap_or_else(|| {
+            log::debug!("No config found, using default config");
+            (Config::default(), None)
+        });
+
+        // Cache the result
+        let entry = ConfigCacheEntry {
+            config: config.clone(),
+            config_file,
+        };
+
+        self.config_cache.write().await.insert(search_dir, entry);
+
+        config
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -480,7 +615,24 @@ impl LanguageServer for RumdlLanguageServer {
             *self.config.write().await = config;
         }
 
-        // Load rumdl configuration with auto-discovery
+        // Extract and store workspace roots
+        let mut roots = Vec::new();
+        if let Some(workspace_folders) = params.workspace_folders {
+            for folder in workspace_folders {
+                if let Ok(path) = folder.uri.to_file_path() {
+                    log::info!("Workspace root: {}", path.display());
+                    roots.push(path);
+                }
+            }
+        } else if let Some(root_uri) = params.root_uri
+            && let Ok(path) = root_uri.to_file_path()
+        {
+            log::info!("Workspace root: {}", path.display());
+            roots.push(path);
+        }
+        *self.workspace_roots.write().await = roots;
+
+        // Load rumdl configuration with auto-discovery (fallback/default)
         self.load_configuration(false).await;
 
         Ok(InitializeResult {
@@ -546,8 +698,33 @@ impl LanguageServer for RumdlLanguageServer {
             .await;
     }
 
-    async fn did_change_workspace_folders(&self, _params: DidChangeWorkspaceFoldersParams) {
-        // Reload configuration when workspace folders change
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        // Update workspace roots
+        let mut roots = self.workspace_roots.write().await;
+
+        // Remove deleted workspace folders
+        for removed in &params.event.removed {
+            if let Ok(path) = removed.uri.to_file_path() {
+                roots.retain(|r| r != &path);
+                log::info!("Removed workspace root: {}", path.display());
+            }
+        }
+
+        // Add new workspace folders
+        for added in &params.event.added {
+            if let Ok(path) = added.uri.to_file_path()
+                && !roots.contains(&path)
+            {
+                log::info!("Added workspace root: {}", path.display());
+                roots.push(path);
+            }
+        }
+        drop(roots);
+
+        // Clear config cache as workspace structure changed
+        self.config_cache.write().await.clear();
+
+        // Reload fallback configuration
         self.reload_configuration().await;
     }
 
@@ -675,6 +852,51 @@ impl LanguageServer for RumdlLanguageServer {
             .await;
     }
 
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        // Check if any of the changed files are config files
+        const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml", ".markdownlint.json"];
+
+        for change in &params.changes {
+            if let Ok(path) = change.uri.to_file_path()
+                && let Some(file_name) = path.file_name().and_then(|f| f.to_str())
+                && CONFIG_FILES.contains(&file_name)
+            {
+                log::info!("Config file changed: {}, invalidating config cache", path.display());
+
+                // Invalidate all cache entries that were loaded from this config file
+                let mut cache = self.config_cache.write().await;
+                cache.retain(|_, entry| {
+                    if let Some(config_file) = &entry.config_file {
+                        config_file != &path
+                    } else {
+                        true
+                    }
+                });
+
+                // Also reload the global fallback configuration
+                drop(cache);
+                self.reload_configuration().await;
+
+                // Re-lint all open documents
+                // First collect URIs and content to avoid holding lock during async operations
+                let docs_to_update: Vec<(Url, String)> = {
+                    let docs = self.documents.read().await;
+                    docs.iter()
+                        .filter(|(_, entry)| !entry.from_disk)
+                        .map(|(uri, entry)| (uri.clone(), entry.content.clone()))
+                        .collect()
+                };
+
+                // Now update diagnostics without holding the lock
+                for (uri, text) in docs_to_update {
+                    self.update_diagnostics(uri, text).await;
+                }
+
+                break;
+            }
+        }
+    }
+
     async fn code_action(&self, params: CodeActionParams) -> JsonRpcResult<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
         let range = params.range;
@@ -726,15 +948,19 @@ impl LanguageServer for RumdlLanguageServer {
             let lsp_config = config_guard.clone();
             drop(config_guard);
 
-            // Get all rules from config
-            let rumdl_config = self.rumdl_config.read().await;
+            // Resolve configuration for this specific file
+            let rumdl_config = if let Ok(file_path) = uri.to_file_path() {
+                self.resolve_config_for_file(&file_path).await
+            } else {
+                // Fallback to global config for non-file URIs
+                self.rumdl_config.read().await.clone()
+            };
+
             let all_rules = rules::all_rules(&rumdl_config);
             let flavor = rumdl_config.markdown_flavor();
 
             // Use the standard filter_rules function which respects config's disabled rules
             let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
-
-            drop(rumdl_config);
 
             // Apply LSP config overrides
             filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
@@ -1159,5 +1385,331 @@ mod tests {
         // and a final newline added
         let expected = "# Test\n\nThis is a test  \nWith trailing spaces\n";
         assert_eq!(edit.new_text, expected);
+    }
+
+    /// Test that resolve_config_for_file() finds the correct config in multi-root workspace
+    #[tokio::test]
+    async fn test_resolve_config_for_file_multi_root() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Setup project A with line_length=60
+        let project_a = temp_path.join("project_a");
+        let project_a_docs = project_a.join("docs");
+        fs::create_dir_all(&project_a_docs).unwrap();
+
+        let config_a = project_a.join(".rumdl.toml");
+        fs::write(
+            &config_a,
+            r#"
+[global]
+
+[MD013]
+line_length = 60
+"#,
+        )
+        .unwrap();
+
+        // Setup project B with line_length=120
+        let project_b = temp_path.join("project_b");
+        fs::create_dir(&project_b).unwrap();
+
+        let config_b = project_b.join(".rumdl.toml");
+        fs::write(
+            &config_b,
+            r#"
+[global]
+
+[MD013]
+line_length = 120
+"#,
+        )
+        .unwrap();
+
+        // Create LSP server and initialize with workspace roots
+        let server = create_test_server();
+
+        // Set workspace roots
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(project_a.clone());
+            roots.push(project_b.clone());
+        }
+
+        // Test file in project A
+        let file_a = project_a_docs.join("test.md");
+        fs::write(&file_a, "# Test A\n").unwrap();
+
+        let config_for_a = server.resolve_config_for_file(&file_a).await;
+        let line_length_a = crate::config::get_rule_config_value::<usize>(&config_for_a, "MD013", "line_length");
+        assert_eq!(line_length_a, Some(60), "File in project_a should get line_length=60");
+
+        // Test file in project B
+        let file_b = project_b.join("test.md");
+        fs::write(&file_b, "# Test B\n").unwrap();
+
+        let config_for_b = server.resolve_config_for_file(&file_b).await;
+        let line_length_b = crate::config::get_rule_config_value::<usize>(&config_for_b, "MD013", "line_length");
+        assert_eq!(line_length_b, Some(120), "File in project_b should get line_length=120");
+    }
+
+    /// Test that config resolution respects workspace root boundaries
+    #[tokio::test]
+    async fn test_config_resolution_respects_workspace_boundaries() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Create parent config that should NOT be used
+        let parent_config = temp_path.join(".rumdl.toml");
+        fs::write(
+            &parent_config,
+            r#"
+[global]
+
+[MD013]
+line_length = 80
+"#,
+        )
+        .unwrap();
+
+        // Create workspace root with its own config
+        let workspace_root = temp_path.join("workspace");
+        let workspace_subdir = workspace_root.join("subdir");
+        fs::create_dir_all(&workspace_subdir).unwrap();
+
+        let workspace_config = workspace_root.join(".rumdl.toml");
+        fs::write(
+            &workspace_config,
+            r#"
+[global]
+
+[MD013]
+line_length = 100
+"#,
+        )
+        .unwrap();
+
+        let server = create_test_server();
+
+        // Register workspace_root as a workspace root
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(workspace_root.clone());
+        }
+
+        // Test file deep in subdirectory
+        let test_file = workspace_subdir.join("deep").join("test.md");
+        fs::create_dir_all(test_file.parent().unwrap()).unwrap();
+        fs::write(&test_file, "# Test\n").unwrap();
+
+        let config = server.resolve_config_for_file(&test_file).await;
+        let line_length = crate::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
+
+        // Should find workspace_root/.rumdl.toml (100), NOT parent config (80)
+        assert_eq!(
+            line_length,
+            Some(100),
+            "Should find workspace config, not parent config outside workspace"
+        );
+    }
+
+    /// Test that config cache works (cache hit scenario)
+    #[tokio::test]
+    async fn test_config_cache_hit() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        let project = temp_path.join("project");
+        fs::create_dir(&project).unwrap();
+
+        let config_file = project.join(".rumdl.toml");
+        fs::write(
+            &config_file,
+            r#"
+[global]
+
+[MD013]
+line_length = 75
+"#,
+        )
+        .unwrap();
+
+        let server = create_test_server();
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(project.clone());
+        }
+
+        let test_file = project.join("test.md");
+        fs::write(&test_file, "# Test\n").unwrap();
+
+        // First call - cache miss
+        let config1 = server.resolve_config_for_file(&test_file).await;
+        let line_length1 = crate::config::get_rule_config_value::<usize>(&config1, "MD013", "line_length");
+        assert_eq!(line_length1, Some(75));
+
+        // Verify cache was populated
+        {
+            let cache = server.config_cache.read().await;
+            let search_dir = test_file.parent().unwrap();
+            assert!(
+                cache.contains_key(search_dir),
+                "Cache should be populated after first call"
+            );
+        }
+
+        // Second call - cache hit (should return same config without filesystem access)
+        let config2 = server.resolve_config_for_file(&test_file).await;
+        let line_length2 = crate::config::get_rule_config_value::<usize>(&config2, "MD013", "line_length");
+        assert_eq!(line_length2, Some(75));
+    }
+
+    /// Test nested directory config search (file searches upward)
+    #[tokio::test]
+    async fn test_nested_directory_config_search() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        let project = temp_path.join("project");
+        fs::create_dir(&project).unwrap();
+
+        // Config at project root
+        let config = project.join(".rumdl.toml");
+        fs::write(
+            &config,
+            r#"
+[global]
+
+[MD013]
+line_length = 110
+"#,
+        )
+        .unwrap();
+
+        // File deep in nested structure
+        let deep_dir = project.join("src").join("docs").join("guides");
+        fs::create_dir_all(&deep_dir).unwrap();
+        let deep_file = deep_dir.join("test.md");
+        fs::write(&deep_file, "# Test\n").unwrap();
+
+        let server = create_test_server();
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(project.clone());
+        }
+
+        let resolved_config = server.resolve_config_for_file(&deep_file).await;
+        let line_length = crate::config::get_rule_config_value::<usize>(&resolved_config, "MD013", "line_length");
+
+        assert_eq!(
+            line_length,
+            Some(110),
+            "Should find config by searching upward from deep directory"
+        );
+    }
+
+    /// Test fallback to default config when no config file found
+    #[tokio::test]
+    async fn test_fallback_to_default_config() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        let project = temp_path.join("project");
+        fs::create_dir(&project).unwrap();
+
+        // No config file created!
+
+        let test_file = project.join("test.md");
+        fs::write(&test_file, "# Test\n").unwrap();
+
+        let server = create_test_server();
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(project.clone());
+        }
+
+        let config = server.resolve_config_for_file(&test_file).await;
+
+        // Default global line_length is 80
+        assert_eq!(
+            config.global.line_length, 80,
+            "Should fall back to default config when no config file found"
+        );
+    }
+
+    /// Test config priority: closer config wins over parent config
+    #[tokio::test]
+    async fn test_config_priority_closer_wins() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        let project = temp_path.join("project");
+        fs::create_dir(&project).unwrap();
+
+        // Parent config
+        let parent_config = project.join(".rumdl.toml");
+        fs::write(
+            &parent_config,
+            r#"
+[global]
+
+[MD013]
+line_length = 100
+"#,
+        )
+        .unwrap();
+
+        // Subdirectory with its own config (should override parent)
+        let subdir = project.join("subdir");
+        fs::create_dir(&subdir).unwrap();
+
+        let subdir_config = subdir.join(".rumdl.toml");
+        fs::write(
+            &subdir_config,
+            r#"
+[global]
+
+[MD013]
+line_length = 50
+"#,
+        )
+        .unwrap();
+
+        let server = create_test_server();
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(project.clone());
+        }
+
+        // File in subdirectory
+        let test_file = subdir.join("test.md");
+        fs::write(&test_file, "# Test\n").unwrap();
+
+        let config = server.resolve_config_for_file(&test_file).await;
+        let line_length = crate::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
+
+        assert_eq!(
+            line_length,
+            Some(50),
+            "Closer config (subdir) should override parent config"
+        );
     }
 }

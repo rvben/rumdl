@@ -20,7 +20,7 @@ fn test_create_default_config_new_file() {
     assert!(content.contains("[global]"));
     assert!(content.contains("# rumdl configuration file"));
     assert!(content.contains("exclude ="));
-    assert!(content.contains("respect_gitignore = true"));
+    assert!(content.contains("respect-gitignore = true"));
     assert!(content.contains("# [MD007]"));
 
     // Cleanup is handled automatically by tempdir
@@ -98,7 +98,7 @@ fn test_create_default_config_content_validation() {
     assert!(content.contains("[global]"));
     assert!(content.contains("# rumdl configuration file"));
     assert!(content.contains("exclude ="));
-    assert!(content.contains("respect_gitignore = true"));
+    assert!(content.contains("respect-gitignore = true"));
 
     // Verify some example rule configurations are present (commented out)
     assert!(content.contains("# [MD003]"));

@@ -88,7 +88,7 @@ pub fn normalize_key(key: &str) -> String {
 }
 
 /// Represents a rule-specific configuration
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
 pub struct RuleConfig {
     /// Configuration values for the rule
     #[serde(flatten)]
@@ -110,7 +110,7 @@ fn arbitrary_value_schema(_gen: &mut schemars::r#gen::SchemaGenerator) -> schema
 }
 
 /// Represents the complete configuration loaded from rumdl.toml
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
 #[schemars(
     description = "rumdl configuration for linting Markdown files. Rules can be configured individually using [MD###] sections with rule-specific options."
 )]
@@ -205,7 +205,7 @@ impl Config {
 }
 
 /// Global configuration options
-#[derive(Debug, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct GlobalConfig {
     /// Enabled rules
@@ -340,7 +340,7 @@ exclude = [
 ]
 
 # Respect .gitignore files when scanning directories (default: true)
-respect_gitignore = true
+respect-gitignore = true
 
 # Markdown flavor/dialect (uncomment to enable)
 # Options: mkdocs, gfm, commonmark
@@ -358,8 +358,8 @@ respect_gitignore = true
 # indent = 4  # Unordered list indentation
 
 # [MD013]
-# line_length = 100  # Line length
-# code_blocks = false  # Exclude code blocks from line length check
+# line-length = 100  # Line length
+# code-blocks = false  # Exclude code blocks from line length check
 # tables = false  # Exclude tables from line length check
 # headings = true  # Include headings in line length check
 
@@ -452,8 +452,8 @@ respect-gitignore = true
 # indent = 4  # Unordered list indentation
 
 # [tool.rumdl.MD013]
-# line_length = 100  # Line length
-# code_blocks = false  # Exclude code blocks from line length check
+# line-length = 100  # Line length
+# code-blocks = false  # Exclude code blocks from line length check
 # tables = false  # Exclude tables from line length check
 # headings = true  # Include headings in line length check
 

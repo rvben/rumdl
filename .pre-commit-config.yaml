@@ -8,6 +8,8 @@
 #   pre-commit run --hook-stage push --all-files       # Run push hooks
 #   pre-commit run --hook-stage commit-msg --commit-msg-filename .git/COMMIT_EDITMSG
 
+fail_fast: true
+
 repos:
   # Conventional Commits validation
   - repo: https://github.com/compilerla/conventional-pre-commit

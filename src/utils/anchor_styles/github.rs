@@ -56,9 +56,9 @@ lazy_static! {
     static ref AMPERSAND_WITH_SPACES: Regex = Regex::new(r"\s+&\s+").unwrap();
     static ref COPYRIGHT_WITH_SPACES: Regex = Regex::new(r"\s+©\s+").unwrap();
 
-    // Angle bracket content removal (e.g., Generic<T> → Generic)
-    // GitHub removes the entire content between angle brackets, including the brackets themselves
-    static ref ANGLE_BRACKET_CONTENT: Regex = Regex::new(r"<[^>]*>").unwrap();
+    // Angle bracket removal (e.g., Generic<T> → GenericT, import <FILE> → import FILE)
+    // GitHub removes only the angle brackets themselves, preserving the content
+    static ref ANGLE_BRACKETS: Regex = Regex::new(r"<([^>]*)>").unwrap();
 }
 
 /// Generate GitHub.com style anchor fragment from heading text with security hardening
@@ -220,10 +220,10 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     text = text.replace("&", "");
     text = text.replace("©", "");
 
-    // Step 9.5: Remove angle bracket content (e.g., Generic<T> → Generic)
-    // GitHub.com removes the entire content between angle brackets
-    // This handles type parameters in headings like "Bound<T>" → "bound"
-    text = ANGLE_BRACKET_CONTENT.replace_all(&text, "").to_string();
+    // Step 9.5: Remove angle brackets but preserve content (e.g., Generic<T> → GenericT, import <FILE> → import FILE)
+    // GitHub.com removes only the angle brackets themselves, not the content
+    // This handles both type parameters like "Bound<T>" → "boundt" and placeholders like "import <FILE>" → "import file"
+    text = ANGLE_BRACKETS.replace_all(&text, "$1").to_string();
 
     // Step 10: Character-by-character processing
     let mut result = String::with_capacity(text.len()); // Pre-allocate for efficiency
