@@ -191,6 +191,53 @@ impl MD053LinkImageReferenceDefinitions {
         reference.replace("\\", "")
     }
 
+    /// Check if a reference definition is likely a comment-style reference.
+    ///
+    /// This recognizes common community patterns for comments in markdown:
+    /// - `[//]: # (comment)` - Most popular pattern
+    /// - `[comment]: # (text)` - Semantic pattern
+    /// - `[note]: # (text)` - Documentation pattern
+    /// - `[todo]: # (text)` - Task tracking pattern
+    /// - Any reference with just `#` as the URL (fragment-only, often unused)
+    ///
+    /// While not part of any official markdown spec (CommonMark, GFM), these patterns
+    /// are widely used across 23+ markdown implementations as documented in the community.
+    ///
+    /// # Arguments
+    /// * `ref_id` - The reference ID (already normalized to lowercase)
+    /// * `url` - The URL from the reference definition
+    ///
+    /// # Returns
+    /// `true` if this looks like a comment-style reference that should be ignored
+    fn is_likely_comment_reference(ref_id: &str, url: &str) -> bool {
+        // Common comment reference labels used in the community
+        const COMMENT_LABELS: &[&str] = &[
+            "//",      // [//]: # (comment) - most popular
+            "comment", // [comment]: # (text)
+            "note",    // [note]: # (text)
+            "todo",    // [todo]: # (text)
+            "fixme",   // [fixme]: # (text)
+            "hack",    // [hack]: # (text)
+        ];
+
+        let normalized_id = ref_id.trim().to_lowercase();
+        let normalized_url = url.trim();
+
+        // Pattern 1: Known comment labels with fragment URLs
+        // e.g., [//]: # (comment), [comment]: #section
+        if COMMENT_LABELS.contains(&normalized_id.as_str()) && normalized_url.starts_with('#') {
+            return true;
+        }
+
+        // Pattern 2: Any reference with just "#" as the URL
+        // This is often used as a comment placeholder or unused anchor
+        if normalized_url == "#" {
+            return true;
+        }
+
+        false
+    }
+
     /// Find all link and image reference definitions in the content.
     ///
     /// This method returns a HashMap where the key is the normalized reference ID and the value is a vector of (start_line, end_line) tuples.
@@ -199,6 +246,11 @@ impl MD053LinkImageReferenceDefinitions {
 
         // First, add all reference definitions from context
         for ref_def in &ctx.reference_defs {
+            // Skip comment-style references (e.g., [//]: # (comment))
+            if Self::is_likely_comment_reference(&ref_def.id, &ref_def.url) {
+                continue;
+            }
+
             // Apply unescape to handle escaped characters in definitions
             let normalized_id = Self::unescape_reference(&ref_def.id); // Already lowercase from context
             definitions
@@ -886,5 +938,111 @@ mod tests {
         // Should have no duplicate warnings, only unused warnings
         let duplicate_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("Duplicate")).collect();
         assert_eq!(duplicate_warnings.len(), 0);
+    }
+
+    #[test]
+    fn test_comment_style_reference_double_slash() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        // Most popular comment pattern: [//]: # (comment)
+        let content = "[//]: # (This is a comment)\n\nSome regular text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not report as unused - it's recognized as a comment
+        assert_eq!(result.len(), 0, "Comment-style reference [//]: # should not be flagged");
+    }
+
+    #[test]
+    fn test_comment_style_reference_comment_label() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        // Semantic comment pattern: [comment]: # (text)
+        let content = "[comment]: # (This is a semantic comment)\n\n[note]: # (This is a note)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not report either as unused
+        assert_eq!(result.len(), 0, "Comment-style references should not be flagged");
+    }
+
+    #[test]
+    fn test_comment_style_reference_todo_fixme() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        // Task tracking patterns: [todo]: # and [fixme]: #
+        let content = "[todo]: # (Add more examples)\n[fixme]: # (Fix this later)\n[hack]: # (Temporary workaround)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not report any as unused
+        assert_eq!(result.len(), 0, "TODO/FIXME comment patterns should not be flagged");
+    }
+
+    #[test]
+    fn test_comment_style_reference_fragment_only() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        // Any reference with just "#" as URL should be treated as a comment
+        let content = "[anything]: #\n[ref]: #\n\nSome text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not report as unused - fragment-only URLs are often comments
+        assert_eq!(result.len(), 0, "References with just '#' URL should not be flagged");
+    }
+
+    #[test]
+    fn test_comment_vs_real_reference() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        // Mix of comment and real reference - only real one should be flagged if unused
+        let content = "[//]: # (This is a comment)\n[real-ref]: https://example.com\n\nSome text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only report the real reference as unused
+        assert_eq!(result.len(), 1, "Only real unused references should be flagged");
+        assert!(result[0].message.contains("real-ref"), "Should flag the real reference");
+    }
+
+    #[test]
+    fn test_comment_with_fragment_section() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        // Comment pattern with a fragment section (still a comment)
+        let content = "[//]: #section (Comment about section)\n\nSome text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not report as unused - it's still a comment pattern
+        assert_eq!(result.len(), 0, "Comment with fragment section should not be flagged");
+    }
+
+    #[test]
+    fn test_is_likely_comment_reference_helper() {
+        // Test the helper function directly
+        assert!(
+            MD053LinkImageReferenceDefinitions::is_likely_comment_reference("//", "#"),
+            "[//]: # should be recognized as comment"
+        );
+        assert!(
+            MD053LinkImageReferenceDefinitions::is_likely_comment_reference("comment", "#section"),
+            "[comment]: #section should be recognized as comment"
+        );
+        assert!(
+            MD053LinkImageReferenceDefinitions::is_likely_comment_reference("note", "#"),
+            "[note]: # should be recognized as comment"
+        );
+        assert!(
+            MD053LinkImageReferenceDefinitions::is_likely_comment_reference("todo", "#"),
+            "[todo]: # should be recognized as comment"
+        );
+        assert!(
+            MD053LinkImageReferenceDefinitions::is_likely_comment_reference("anything", "#"),
+            "Any label with just '#' should be recognized as comment"
+        );
+        assert!(
+            !MD053LinkImageReferenceDefinitions::is_likely_comment_reference("ref", "https://example.com"),
+            "Real URL should not be recognized as comment"
+        );
+        assert!(
+            !MD053LinkImageReferenceDefinitions::is_likely_comment_reference("link", "http://test.com"),
+            "Real URL should not be recognized as comment"
+        );
     }
 }
