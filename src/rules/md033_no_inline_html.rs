@@ -258,7 +258,7 @@ impl MD033NoInlineHtml {
                                     column: start_col,
                                     end_line,
                                     end_column: end_col,
-                                    message: format!("HTML tag found: {final_tag} (use Markdown syntax instead)"),
+                                    message: format!("HTML tag found: {final_tag}"),
                                     severity: Severity::Warning,
                                     fix: None,
                                 });
@@ -405,7 +405,7 @@ impl Rule for MD033NoInlineHtml {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: format!("Inline HTML found: {tag} (use Markdown syntax instead)"),
+                    message: format!("Inline HTML found: {tag}"),
                     severity: Severity::Warning,
                     fix: None,
                 });
@@ -486,19 +486,19 @@ mod tests {
         assert_eq!(result.len(), 4); // <DiV>, <B>, </B>, </dIv>
         assert_eq!(
             result[0].message,
-            "Inline HTML found: <DiV> (use Markdown syntax instead)"
+            "Inline HTML found: <DiV>"
         );
         assert_eq!(
             result[1].message,
-            "Inline HTML found: <B> (use Markdown syntax instead)"
+            "Inline HTML found: <B>"
         );
         assert_eq!(
             result[2].message,
-            "Inline HTML found: </B> (use Markdown syntax instead)"
+            "Inline HTML found: </B>"
         );
         assert_eq!(
             result[3].message,
-            "Inline HTML found: </dIv> (use Markdown syntax instead)"
+            "Inline HTML found: </dIv>"
         );
     }
 
@@ -512,11 +512,11 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(
             result[0].message,
-            "Inline HTML found: <p> (use Markdown syntax instead)"
+            "Inline HTML found: <p>"
         );
         assert_eq!(
             result[1].message,
-            "Inline HTML found: </p> (use Markdown syntax instead)"
+            "Inline HTML found: </p>"
         );
 
         // Test case-insensitivity of allowed tags
@@ -526,11 +526,11 @@ mod tests {
         assert_eq!(result2.len(), 2); // <P> and </P> flagged
         assert_eq!(
             result2[0].message,
-            "Inline HTML found: <P> (use Markdown syntax instead)"
+            "Inline HTML found: <P>"
         );
         assert_eq!(
             result2[1].message,
-            "Inline HTML found: </P> (use Markdown syntax instead)"
+            "Inline HTML found: </P>"
         );
     }
 
@@ -544,11 +544,11 @@ mod tests {
         assert_eq!(result.len(), 2); // <p> and </p>
         assert_eq!(
             result[0].message,
-            "Inline HTML found: <p> (use Markdown syntax instead)"
+            "Inline HTML found: <p>"
         );
         assert_eq!(
             result[1].message,
-            "Inline HTML found: </p> (use Markdown syntax instead)"
+            "Inline HTML found: </p>"
         );
     }
 
@@ -562,7 +562,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0].message,
-            "Inline HTML found: <div> (use Markdown syntax instead)"
+            "Inline HTML found: <div>"
         );
 
         let content2 = "[Link <a>text</a>](url)";
@@ -572,11 +572,11 @@ mod tests {
         assert_eq!(result2.len(), 2); // <a> and </a>
         assert_eq!(
             result2[0].message,
-            "Inline HTML found: <a> (use Markdown syntax instead)"
+            "Inline HTML found: <a>"
         );
         assert_eq!(
             result2[1].message,
-            "Inline HTML found: </a> (use Markdown syntax instead)"
+            "Inline HTML found: </a>"
         );
     }
 
@@ -600,11 +600,11 @@ mod tests {
         assert_eq!(result.len(), 2); // <div> and </div> outside code block
         assert_eq!(
             result[0].message,
-            "Inline HTML found: <div> (use Markdown syntax instead)"
+            "Inline HTML found: <div>"
         );
         assert_eq!(
             result[1].message,
-            "Inline HTML found: </div> (use Markdown syntax instead)"
+            "Inline HTML found: </div>"
         );
     }
 
@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0].message,
-            "Inline HTML found: <br/> (use Markdown syntax instead)"
+            "Inline HTML found: <br/>"
         );
     }
 
