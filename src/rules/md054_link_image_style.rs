@@ -68,16 +68,6 @@ lazy_static! {
 /// styles have different advantages (e.g., inline links are self-contained, reference links
 /// keep the content cleaner), but mixing styles can create confusion.
 ///
-#[derive(Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Clone)]
-pub enum LinkImageStyle {
-    Autolink,
-    Inline,
-    UrlInline,
-    Shortcut,
-    Collapsed,
-    Full,
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct MD054LinkImageStyle {
     config: MD054Config,
