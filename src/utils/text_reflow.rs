@@ -1160,6 +1160,173 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
     }
 }
 
+/// Information about a reflowed paragraph
+#[derive(Debug, Clone)]
+pub struct ParagraphReflow {
+    /// Starting byte offset of the paragraph in the original content
+    pub start_byte: usize,
+    /// Ending byte offset of the paragraph in the original content
+    pub end_byte: usize,
+    /// The reflowed text for this paragraph
+    pub reflowed_text: String,
+}
+
+/// Reflow a single paragraph at the specified line number
+///
+/// This function finds the paragraph containing the given line number,
+/// reflows it according to the specified line length, and returns
+/// information about the paragraph location and its reflowed text.
+///
+/// # Arguments
+///
+/// * `content` - The full document content
+/// * `line_number` - The 1-based line number within the paragraph to reflow
+/// * `line_length` - The target line length for reflowing
+///
+/// # Returns
+///
+/// Returns `Some(ParagraphReflow)` if a paragraph was found and reflowed,
+/// or `None` if the line number is out of bounds or the content at that
+/// line shouldn't be reflowed (e.g., code blocks, headings, etc.)
+pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: usize) -> Option<ParagraphReflow> {
+    if line_number == 0 {
+        return None;
+    }
+
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Check if line number is valid (1-based)
+    if line_number > lines.len() {
+        return None;
+    }
+
+    let target_idx = line_number - 1; // Convert to 0-based
+    let target_line = lines[target_idx];
+    let trimmed = target_line.trim();
+
+    // Don't reflow special blocks
+    if trimmed.is_empty()
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("~~~")
+        || target_line.starts_with("    ")
+        || target_line.starts_with('\t')
+        || trimmed.starts_with('>')
+        || trimmed.contains('|') // Tables
+        || (trimmed.starts_with('[') && target_line.contains("]:")) // Reference definitions
+        || is_horizontal_rule(trimmed)
+        || ((trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+'))
+            && !is_horizontal_rule(trimmed)
+            && (trimmed.len() == 1 || trimmed.chars().nth(1) == Some(' ')))
+        || is_numbered_list_item(trimmed)
+    {
+        return None;
+    }
+
+    // Find paragraph start - scan backward until blank line or special block
+    let mut para_start = target_idx;
+    while para_start > 0 {
+        let prev_idx = para_start - 1;
+        let prev_line = lines[prev_idx];
+        let prev_trimmed = prev_line.trim();
+
+        // Stop at blank line or special blocks
+        if prev_trimmed.is_empty()
+            || prev_trimmed.starts_with('#')
+            || prev_trimmed.starts_with("```")
+            || prev_trimmed.starts_with("~~~")
+            || prev_line.starts_with("    ")
+            || prev_line.starts_with('\t')
+            || prev_trimmed.starts_with('>')
+            || prev_trimmed.contains('|')
+            || (prev_trimmed.starts_with('[') && prev_line.contains("]:"))
+            || is_horizontal_rule(prev_trimmed)
+            || ((prev_trimmed.starts_with('-') || prev_trimmed.starts_with('*') || prev_trimmed.starts_with('+'))
+                && !is_horizontal_rule(prev_trimmed)
+                && (prev_trimmed.len() == 1 || prev_trimmed.chars().nth(1) == Some(' ')))
+            || is_numbered_list_item(prev_trimmed)
+        {
+            break;
+        }
+
+        para_start = prev_idx;
+    }
+
+    // Find paragraph end - scan forward until blank line or special block
+    let mut para_end = target_idx;
+    while para_end + 1 < lines.len() {
+        let next_idx = para_end + 1;
+        let next_line = lines[next_idx];
+        let next_trimmed = next_line.trim();
+
+        // Stop at blank line or special blocks
+        if next_trimmed.is_empty()
+            || next_trimmed.starts_with('#')
+            || next_trimmed.starts_with("```")
+            || next_trimmed.starts_with("~~~")
+            || next_line.starts_with("    ")
+            || next_line.starts_with('\t')
+            || next_trimmed.starts_with('>')
+            || next_trimmed.contains('|')
+            || (next_trimmed.starts_with('[') && next_line.contains("]:"))
+            || is_horizontal_rule(next_trimmed)
+            || ((next_trimmed.starts_with('-') || next_trimmed.starts_with('*') || next_trimmed.starts_with('+'))
+                && !is_horizontal_rule(next_trimmed)
+                && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
+            || is_numbered_list_item(next_trimmed)
+        {
+            break;
+        }
+
+        para_end = next_idx;
+    }
+
+    // Extract paragraph lines
+    let paragraph_lines = &lines[para_start..=para_end];
+
+    // Calculate byte offsets
+    let mut start_byte = 0;
+    for i in 0..para_start {
+        start_byte += lines[i].len() + 1; // +1 for newline
+    }
+
+    let mut end_byte = start_byte;
+    for line in paragraph_lines.iter() {
+        end_byte += line.len() + 1; // +1 for newline
+    }
+    // Adjust end_byte: the last line doesn't necessarily have a newline
+    if para_end == lines.len() - 1 && !content.ends_with('\n') {
+        end_byte -= 1;
+    }
+
+    // Join paragraph lines and reflow
+    let paragraph_text = paragraph_lines.join("\n");
+
+    // Create reflow options
+    let options = ReflowOptions {
+        line_length,
+        break_on_sentences: true,
+        preserve_breaks: false,
+        sentence_per_line: false,
+    };
+
+    // Reflow the paragraph using reflow_markdown to handle it properly
+    let reflowed = reflow_markdown(&paragraph_text, &options);
+
+    // Remove trailing newline if original paragraph didn't have one
+    let reflowed_text = if !paragraph_text.ends_with('\n') && reflowed.ends_with('\n') {
+        reflowed.trim_end_matches('\n').to_string()
+    } else {
+        reflowed
+    };
+
+    Some(ParagraphReflow {
+        start_byte,
+        end_byte,
+        reflowed_text,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

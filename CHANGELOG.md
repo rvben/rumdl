@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **LSP: Manual "Reflow paragraph" code action for MD013 warnings**
+  - New code action available for MD013 line length warnings when auto-reflow is disabled
+  - Allows users to manually reflow specific paragraphs without enabling global reflow in config
+  - Appears as "Reflow paragraph" in Quick Fix menu (not marked as preferred, so won't trigger on save)
+  - Intelligently detects paragraph boundaries and reflows entire paragraph, not just the flagged line
+  - Respects line length limit from warning message or defaults to 80 characters
+  - Provides a way to try paragraph reflow before committing to enabling it globally
+  - Gives users fine-grained control over which paragraphs to reflow
+
 ## [0.0.166] - 2025-10-22
 
 ### Added

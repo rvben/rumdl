@@ -132,6 +132,14 @@ pub fn warning_to_code_actions(warning: &crate::rule::LintWarning, uri: &Url, do
         actions.push(fix_action);
     }
 
+    // Add manual reflow action for MD013 when no fix is available
+    // This allows users to manually reflow paragraphs without enabling reflow globally
+    if warning.rule_name.as_deref() == Some("MD013") && warning.fix.is_none() {
+        if let Some(reflow_action) = create_reflow_action(warning, uri, document_text) {
+            actions.push(reflow_action);
+        }
+    }
+
     // Add ignore-line action
     if let Some(ignore_line_action) = create_ignore_line_action(warning, uri, document_text) {
         actions.push(ignore_line_action);
@@ -173,6 +181,57 @@ fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_tex
     } else {
         None
     }
+}
+
+/// Create a manual reflow code action for MD013 line length warnings
+/// This allows users to manually reflow paragraphs even when reflow is disabled in config
+fn create_reflow_action(warning: &crate::rule::LintWarning, uri: &Url, document_text: &str) -> Option<CodeAction> {
+    // Extract line length limit from message (format: "Line length X exceeds Y characters")
+    let line_length = extract_line_length_from_message(&warning.message).unwrap_or(80);
+
+    // Use the reflow helper to find and reflow the paragraph
+    let reflow_result = crate::utils::text_reflow::reflow_paragraph_at_line(document_text, warning.line, line_length)?;
+
+    // Convert byte offsets to LSP range
+    let range = byte_range_to_lsp_range(document_text, reflow_result.start_byte..reflow_result.end_byte)?;
+
+    let edit = TextEdit {
+        range,
+        new_text: reflow_result.reflowed_text,
+    };
+
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(uri.clone(), vec![edit]);
+
+    let workspace_edit = WorkspaceEdit {
+        changes: Some(changes),
+        document_changes: None,
+        change_annotations: None,
+    };
+
+    Some(CodeAction {
+        title: "Reflow paragraph".to_string(),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![warning_to_diagnostic(warning)]),
+        edit: Some(workspace_edit),
+        command: None,
+        is_preferred: Some(false), // Not preferred - manual action only
+        disabled: None,
+        data: None,
+    })
+}
+
+/// Extract line length limit from MD013 warning message
+/// Message format: "Line length X exceeds Y characters"
+fn extract_line_length_from_message(message: &str) -> Option<usize> {
+    // Find "exceeds" in the message
+    let exceeds_idx = message.find("exceeds")?;
+    let after_exceeds = &message[exceeds_idx + 7..]; // Skip "exceeds"
+
+    // Find the number after "exceeds"
+    let num_str = after_exceeds.trim_start().split_whitespace().next()?;
+
+    num_str.parse::<usize>().ok()
 }
 
 /// Create an ignore-line code action that adds a rumdl-disable-line comment
