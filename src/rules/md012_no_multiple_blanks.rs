@@ -259,19 +259,22 @@ impl Rule for MD012NoMultipleBlanks {
             }
         }
 
-        // Markdownlint treats ANY blank lines at EOF as a violation
-        // A file ending with \n\n has 1 blank line but markdownlint reports it
-        // as "multiple consecutive blank lines" with "Actual: 2"
-        // This suggests it counts blank lines at EOF specially
+        // To have N blank lines at EOF, you need N+1 trailing newlines
+        // For example: "content\n\n" has 1 blank line (2 newlines)
         let blank_lines_at_eof = consecutive_newlines_at_end.saturating_sub(1);
 
-        // At EOF, ANY blank lines violate the rule (markdownlint behavior)
-        // This is different from the middle of the file where 1 blank is allowed
+        // At EOF, blank lines are always enforced to be 0 (POSIX/Prettier standard)
+        // The `maximum` config only applies to in-document blank lines
         if blank_lines_at_eof > 0 {
             let location = "at end of file";
 
             // Report on the last line (which is blank)
             let report_line = lines.len();
+
+            // Calculate how many newlines to remove
+            // Always keep exactly 1 newline at EOF (0 blank lines)
+            let target_newlines = 1;
+            let excess_newlines = consecutive_newlines_at_end - target_newlines;
 
             // Report one warning for the excess blank lines at EOF
             warnings.push(LintWarning {
@@ -285,9 +288,18 @@ impl Rule for MD012NoMultipleBlanks {
                 fix: Some(Fix {
                     range: {
                         // Remove excess trailing newlines
-                        // Keep content up to where excess newlines start
-                        let excess_newlines = blank_lines_at_eof - self.config.maximum;
                         let keep_chars = content.len() - excess_newlines;
+                        log::debug!(
+                            "MD012 EOF: consecutive_newlines_at_end={}, blank_lines_at_eof={}, target_newlines={}, excess_newlines={}, content_len={}, keep_chars={}, range={}..{}",
+                            consecutive_newlines_at_end,
+                            blank_lines_at_eof,
+                            target_newlines,
+                            excess_newlines,
+                            content.len(),
+                            keep_chars,
+                            keep_chars,
+                            content.len()
+                        );
                         keep_chars..content.len()
                     },
                     replacement: String::new(),
@@ -349,13 +361,9 @@ impl Rule for MD012NoMultipleBlanks {
             }
         }
 
-        // Handle trailing blank lines
-        if !in_code_block {
-            let allowed_blanks = blank_count.min(self.config.maximum);
-            if allowed_blanks > 0 {
-                result.extend(vec![""; allowed_blanks]);
-            }
-        }
+        // Trailing blank lines are not added to the result
+        // Files should end with exactly 1 newline (added below), with 0 blank lines at EOF
+        // This follows POSIX/Prettier standards. The maximum config only applies to in-document blank lines.
 
         // Join lines and handle final newline
         let mut output = result.join("\n");

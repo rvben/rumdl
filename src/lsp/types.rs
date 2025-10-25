@@ -108,17 +108,27 @@ fn byte_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Op
         byte_pos += ch.len_utf8();
     }
 
-    // Handle positions at EOF
-    if byte_pos == byte_range.start && start_pos.is_none() {
+    // Handle positions at or beyond EOF
+    // This is crucial for fixes that delete trailing content (like MD012 EOF blanks)
+    if start_pos.is_none() && byte_pos >= byte_range.start {
         start_pos = Some(Position { line, character });
     }
-    if byte_pos == byte_range.end && end_pos.is_none() {
+    if end_pos.is_none() && byte_pos >= byte_range.end {
         end_pos = Some(Position { line, character });
     }
 
     match (start_pos, end_pos) {
         (Some(start), Some(end)) => Some(Range { start, end }),
-        _ => None,
+        _ => {
+            // If we still don't have valid positions, log for debugging
+            // This shouldn't happen with proper fix ranges
+            log::warn!(
+                "Failed to convert byte range {:?} to LSP range for text of length {}",
+                byte_range,
+                text.len()
+            );
+            None
+        }
     }
 }
 
@@ -139,6 +149,14 @@ pub fn warning_to_code_actions(warning: &crate::rule::LintWarning, uri: &Url, do
         && let Some(reflow_action) = create_reflow_action(warning, uri, document_text)
     {
         actions.push(reflow_action);
+    }
+
+    // Add convert-to-markdown-link action for MD034 (bare URLs)
+    // This provides an alternative to the default angle bracket fix
+    if warning.rule_name.as_deref() == Some("MD034")
+        && let Some(convert_action) = create_convert_to_link_action(warning, uri, document_text)
+    {
+        actions.push(convert_action);
     }
 
     // Add ignore-line action
@@ -233,6 +251,79 @@ fn extract_line_length_from_message(message: &str) -> Option<usize> {
     let num_str = after_exceeds.split_whitespace().next()?;
 
     num_str.parse::<usize>().ok()
+}
+
+/// Create a "convert to markdown link" action for MD034 bare URL warnings
+/// This provides an alternative to the default angle bracket fix, allowing users
+/// to create proper markdown links with descriptive text
+fn create_convert_to_link_action(
+    warning: &crate::rule::LintWarning,
+    uri: &Url,
+    document_text: &str,
+) -> Option<CodeAction> {
+    // Get the fix from the warning
+    let fix = warning.fix.as_ref()?;
+
+    // Extract the URL from the fix replacement (format: "<https://example.com>" or "<user@example.com>")
+    // The MD034 fix wraps URLs in angle brackets
+    let url = extract_url_from_fix_replacement(&fix.replacement)?;
+
+    // Convert byte offsets to LSP range
+    let range = byte_range_to_lsp_range(document_text, fix.range.clone())?;
+
+    // Create markdown link with the domain as link text
+    // The user can then edit the link text manually
+    // Note: LSP WorkspaceEdit doesn't support snippet placeholders like ${1:text}
+    // so we just use the domain as default text that user can select and replace
+    let link_text = extract_domain_for_placeholder(url);
+    let new_text = format!("[{link_text}]({url})");
+
+    let edit = TextEdit { range, new_text };
+
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(uri.clone(), vec![edit]);
+
+    let workspace_edit = WorkspaceEdit {
+        changes: Some(changes),
+        document_changes: None,
+        change_annotations: None,
+    };
+
+    Some(CodeAction {
+        title: "Convert to markdown link".to_string(),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![warning_to_diagnostic(warning)]),
+        edit: Some(workspace_edit),
+        command: None,
+        is_preferred: Some(false), // Not preferred - user explicitly chooses this
+        disabled: None,
+        data: None,
+    })
+}
+
+/// Extract URL/email from MD034 fix replacement
+/// MD034 fix format: "<https://example.com>" or "<user@example.com>"
+fn extract_url_from_fix_replacement(replacement: &str) -> Option<&str> {
+    // Remove angle brackets that MD034's fix adds
+    let trimmed = replacement.trim();
+    if trimmed.starts_with('<') && trimmed.ends_with('>') {
+        Some(&trimmed[1..trimmed.len() - 1])
+    } else {
+        None
+    }
+}
+
+/// Extract a smart placeholder from a URL for the link text
+/// For "https://example.com/path" returns "example.com"
+/// For "user@example.com" returns "user@example.com"
+fn extract_domain_for_placeholder(url: &str) -> &str {
+    // For email addresses, use the whole email
+    if url.contains('@') && !url.contains("://") {
+        return url;
+    }
+
+    // For URLs, extract the domain
+    url.split("://").nth(1).and_then(|s| s.split('/').next()).unwrap_or(url)
 }
 
 /// Create an ignore-line code action that adds a rumdl-disable-line comment
@@ -798,5 +889,155 @@ mod tests {
         let action = action.unwrap();
         assert_eq!(action.title, "Fix: Test");
         assert_eq!(action.is_preferred, Some(true));
+    }
+
+    #[test]
+    fn test_md034_convert_to_link_action() {
+        // Test the "convert to markdown link" action for MD034 bare URLs
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 25,
+            rule_name: Some("MD034".to_string()),
+            message: "URL without angle brackets or link formatting: 'https://example.com'".to_string(),
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: 0..20, // "https://example.com"
+                replacement: "<https://example.com>".to_string(),
+            }),
+        };
+
+        let uri = Url::parse("file:///test.md").unwrap();
+        let document_text = "https://example.com is a test URL";
+
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+
+        // Should have 3 actions: fix (angle brackets), convert to link, and ignore
+        assert_eq!(actions.len(), 3);
+
+        // First action should be the fix (angle brackets) - preferred
+        assert_eq!(
+            actions[0].title,
+            "Fix: URL without angle brackets or link formatting: 'https://example.com'"
+        );
+        assert_eq!(actions[0].is_preferred, Some(true));
+
+        // Second action should be convert to link - not preferred
+        assert_eq!(actions[1].title, "Convert to markdown link");
+        assert_eq!(actions[1].is_preferred, Some(false));
+
+        // Check that the convert action creates a proper markdown link
+        let edit = actions[1].edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let file_edits = changes.get(&uri).unwrap();
+        assert_eq!(file_edits.len(), 1);
+
+        // The replacement should be: [example.com](https://example.com)
+        assert_eq!(file_edits[0].new_text, "[example.com](https://example.com)");
+
+        // Third action should be ignore
+        assert_eq!(actions[2].title, "Ignore MD034 for this line");
+    }
+
+    #[test]
+    fn test_md034_convert_to_link_action_email() {
+        // Test the "convert to markdown link" action for MD034 bare emails
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 20,
+            rule_name: Some("MD034".to_string()),
+            message: "Email address without angle brackets or link formatting: 'user@example.com'".to_string(),
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: 0..16, // "user@example.com"
+                replacement: "<user@example.com>".to_string(),
+            }),
+        };
+
+        let uri = Url::parse("file:///test.md").unwrap();
+        let document_text = "user@example.com is my email";
+
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+
+        // Should have 3 actions
+        assert_eq!(actions.len(), 3);
+
+        // Check convert to link action
+        assert_eq!(actions[1].title, "Convert to markdown link");
+
+        let edit = actions[1].edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let file_edits = changes.get(&uri).unwrap();
+
+        // For emails, use the whole email as link text
+        assert_eq!(file_edits[0].new_text, "[user@example.com](user@example.com)");
+    }
+
+    #[test]
+    fn test_extract_url_from_fix_replacement() {
+        assert_eq!(
+            extract_url_from_fix_replacement("<https://example.com>"),
+            Some("https://example.com")
+        );
+        assert_eq!(
+            extract_url_from_fix_replacement("<user@example.com>"),
+            Some("user@example.com")
+        );
+        assert_eq!(extract_url_from_fix_replacement("https://example.com"), None);
+        assert_eq!(extract_url_from_fix_replacement("<>"), Some(""));
+    }
+
+    #[test]
+    fn test_extract_domain_for_placeholder() {
+        assert_eq!(extract_domain_for_placeholder("https://example.com"), "example.com");
+        assert_eq!(
+            extract_domain_for_placeholder("https://example.com/path/to/page"),
+            "example.com"
+        );
+        assert_eq!(
+            extract_domain_for_placeholder("http://sub.example.com:8080/"),
+            "sub.example.com:8080"
+        );
+        assert_eq!(extract_domain_for_placeholder("user@example.com"), "user@example.com");
+        assert_eq!(
+            extract_domain_for_placeholder("ftp://files.example.com"),
+            "files.example.com"
+        );
+    }
+
+    #[test]
+    fn test_byte_range_to_lsp_range_trailing_newlines() {
+        // Test converting byte ranges for MD012 trailing blank line fixes
+        let text = "line1\nline2\n\n"; // 13 bytes: "line1\n" (6) + "line2\n" (6) + "\n" (1)
+
+        // Remove the last blank line (byte 12..13)
+        let range = byte_range_to_lsp_range(text, 12..13);
+        assert!(range.is_some());
+        let range = range.unwrap();
+
+        // Should be on line 2 (0-indexed), at position 0 for start
+        // End should be on line 3 (after the newline at byte 12)
+        assert_eq!(range.start.line, 2);
+        assert_eq!(range.start.character, 0);
+        assert_eq!(range.end.line, 3);
+        assert_eq!(range.end.character, 0);
+    }
+
+    #[test]
+    fn test_byte_range_to_lsp_range_at_eof() {
+        // Test a range that starts at EOF (empty range)
+        let text = "test\n"; // 5 bytes
+
+        // Try to convert a range starting at EOF (should handle gracefully)
+        let range = byte_range_to_lsp_range(text, 5..5);
+        assert!(range.is_some());
+        let range = range.unwrap();
+
+        // Should be at line 1 (after newline), position 0
+        assert_eq!(range.start.line, 1);
+        assert_eq!(range.start.character, 0);
     }
 }

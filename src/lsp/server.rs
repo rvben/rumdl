@@ -308,6 +308,11 @@ impl RumdlLanguageServer {
             }
         }
 
+        // Early return if no warnings to fix
+        if rules_with_warnings.is_empty() {
+            return Ok(None);
+        }
+
         // Only apply fixes for rules that have active warnings
         let mut any_changes = false;
 
@@ -806,7 +811,6 @@ impl LanguageServer for RumdlLanguageServer {
                     match self.client.apply_edit(workspace_edit).await {
                         Ok(response) => {
                             if response.applied {
-                                log::info!("Auto-fix applied successfully");
                                 // Update our stored version
                                 let entry = DocumentEntry {
                                     content: fixed_text,

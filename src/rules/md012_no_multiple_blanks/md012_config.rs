@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD012Config {
-    /// Maximum number of consecutive blank lines allowed (default: 1)
+    /// Maximum number of consecutive blank lines allowed within the document (default: 1)
+    ///
+    /// This setting controls blank lines within the document content.
+    /// Blank lines at EOF are always enforced to be 0 (following POSIX/Prettier standards).
     #[serde(default = "default_maximum")]
     pub maximum: usize,
 }
