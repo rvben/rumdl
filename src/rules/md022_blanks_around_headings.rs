@@ -117,16 +117,19 @@ impl MD022BlanksAroundHeadings {
         let mut result = Vec::new();
         let mut skip_next = false;
 
-        // Performance optimization: Find front matter end and first heading ONCE
-        let front_matter_end =
-            crate::rules::front_matter_utils::FrontMatterUtils::get_front_matter_end_line(ctx.content);
-        let first_non_blank_heading_idx = ctx
-            .lines
-            .iter()
-            .enumerate()
-            .skip(front_matter_end)
-            .find(|(_, line)| line.heading.is_some() && !line.is_blank)
-            .map(|(i, _)| i);
+        let heading_at_start_idx = {
+            let mut found_non_blank = false;
+            ctx.lines.iter().enumerate().find_map(|(i, line)| {
+                if line.heading.is_some() && !found_non_blank {
+                    Some(i)
+                } else {
+                    if !line.is_blank {
+                        found_non_blank = true;
+                    }
+                    None
+                }
+            })
+        };
 
         for (i, line_info) in ctx.lines.iter().enumerate() {
             if skip_next {
@@ -135,8 +138,7 @@ impl MD022BlanksAroundHeadings {
             }
             let line = &line_info.content;
 
-            // Inside code block or front matter, preserve content exactly
-            if line_info.in_code_block || i < front_matter_end {
+            if line_info.in_code_block {
                 result.push(line.to_string());
                 continue;
             }
@@ -144,8 +146,7 @@ impl MD022BlanksAroundHeadings {
             // Check if it's a heading
             if let Some(heading) = &line_info.heading {
                 // This is a heading line (ATX or Setext content)
-                // O(1) check instead of O(n)
-                let is_first_heading = Some(i) == first_non_blank_heading_idx;
+                let is_first_heading = Some(i) == heading_at_start_idx;
 
                 // Count existing blank lines above in the result
                 let mut blank_lines_above = 0;
@@ -297,18 +298,19 @@ impl Rule for MD022BlanksAroundHeadings {
         // Content is normalized to LF at I/O boundary
         let line_ending = "\n";
 
-        // Performance optimization: Find the first non-blank heading ONCE (O(n) instead of O(n²))
-        // This is used to determine if a heading is the "first" heading in the document
-        let front_matter_end =
-            crate::rules::front_matter_utils::FrontMatterUtils::get_front_matter_end_line(ctx.content);
-
-        let first_non_blank_heading_idx = ctx.lines.iter()
-            .enumerate()
-            .skip(front_matter_end)  // Skip past front matter
-            .find(|(_, line)| {
-                line.heading.is_some() && !line.is_blank
+        let heading_at_start_idx = {
+            let mut found_non_blank = false;
+            ctx.lines.iter().enumerate().find_map(|(i, line)| {
+                if line.heading.is_some() && !found_non_blank {
+                    Some(i)
+                } else {
+                    if !line.is_blank {
+                        found_non_blank = true;
+                    }
+                    None
+                }
             })
-            .map(|(i, _)| i);
+        };
 
         // Collect all headings first to batch process
         let mut heading_violations = Vec::new();
@@ -335,8 +337,8 @@ impl Rule for MD022BlanksAroundHeadings {
 
             processed_headings.insert(line_num);
 
-            // Check if this is the first heading (O(1) check instead of O(n))
-            let is_first_heading = Some(line_num) == first_non_blank_heading_idx;
+            // Check if this heading is at document start
+            let is_first_heading = Some(line_num) == heading_at_start_idx;
 
             // Count blank lines above
             let blank_lines_above = if line_num > 0 && (!is_first_heading || !self.config.allowed_at_start) {
