@@ -422,12 +422,27 @@ fn test_memory_usage_with_large_content() {
         Box::new(MD022BlanksAroundHeadings::default()),
     ];
 
-    for rule in &rules {
-        let ctx = LintContext::new(&large_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    // Create LintContext ONCE and share it across all rules
+    // This is more realistic to actual usage where the context is created once per file
+    let ctx_start = Instant::now();
+    let ctx = LintContext::new(&large_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_duration = ctx_start.elapsed();
+    println!(
+        "LintContext creation for 50k lines took: {:.2}s",
+        ctx_duration.as_secs_f64()
+    );
 
+    for rule in &rules {
         let start_time = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
         let check_duration = start_time.elapsed();
+
+        println!(
+            "Rule {} check took: {:.2}s, found {} warnings",
+            rule.name(),
+            check_duration.as_secs_f64(),
+            warnings.len()
+        );
 
         // Should handle large content efficiently (under 5 seconds)
         assert!(
@@ -442,6 +457,8 @@ fn test_memory_usage_with_large_content() {
             let start_time = Instant::now();
             let _fixed = rule.fix(&ctx).expect("Fix should succeed");
             let fix_duration = start_time.elapsed();
+
+            println!("Rule {} fix took: {:.2}s", rule.name(), fix_duration.as_secs_f64());
 
             assert!(
                 fix_duration.as_secs() < 10,
