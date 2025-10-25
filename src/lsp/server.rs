@@ -642,7 +642,15 @@ impl LanguageServer for RumdlLanguageServer {
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+                text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
+                    open_close: Some(true),
+                    change: Some(TextDocumentSyncKind::FULL),
+                    will_save: Some(false),
+                    will_save_wait_until: Some(true),
+                    save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                        include_text: Some(false),
+                    })),
+                })),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
@@ -771,75 +779,44 @@ impl LanguageServer for RumdlLanguageServer {
         }
     }
 
-    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+    async fn will_save_wait_until(&self, params: WillSaveTextDocumentParams) -> JsonRpcResult<Option<Vec<TextEdit>>> {
         let config_guard = self.config.read().await;
         let enable_auto_fix = config_guard.enable_auto_fix;
         drop(config_guard);
 
-        // Auto-fix on save if enabled
-        // IMPORTANT: Clone the content and release the lock BEFORE applying edits
-        // to avoid deadlock when apply_edit triggers did_change
-        let text = if enable_auto_fix {
-            let docs = self.documents.read().await;
-            docs.get(&params.text_document.uri).map(|entry| entry.content.clone())
-        } else {
-            None
-        };
-
-        if let Some(text) = text {
-            match self.apply_all_fixes(&params.text_document.uri, &text).await {
-                Ok(Some(fixed_text)) => {
-                    // Create a workspace edit to apply the fixes
-                    let edit = TextEdit {
-                        range: Range {
-                            start: Position { line: 0, character: 0 },
-                            end: self.get_end_position(&text),
-                        },
-                        new_text: fixed_text.clone(),
-                    };
-
-                    let mut changes = std::collections::HashMap::new();
-                    changes.insert(params.text_document.uri.clone(), vec![edit]);
-
-                    let workspace_edit = WorkspaceEdit {
-                        changes: Some(changes),
-                        document_changes: None,
-                        change_annotations: None,
-                    };
-
-                    // Apply the edit
-                    match self.client.apply_edit(workspace_edit).await {
-                        Ok(response) => {
-                            if response.applied {
-                                // Update our stored version
-                                let entry = DocumentEntry {
-                                    content: fixed_text,
-                                    version: None, // Will be updated by the next didChange from client
-                                    from_disk: false,
-                                };
-                                self.documents
-                                    .write()
-                                    .await
-                                    .insert(params.text_document.uri.clone(), entry);
-                            } else {
-                                log::warn!("Auto-fix was not applied: {:?}", response.failure_reason);
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Failed to apply auto-fix: {e}");
-                        }
-                    }
-                }
-                Ok(None) => {
-                    log::debug!("No fixes to apply");
-                }
-                Err(e) => {
-                    log::error!("Failed to generate fixes: {e}");
-                }
-            }
+        if !enable_auto_fix {
+            return Ok(None);
         }
 
-        // Re-lint the document
+        // Get the current document content
+        let text = match self.get_document_content(&params.text_document.uri).await {
+            Some(content) => content,
+            None => return Ok(None),
+        };
+
+        // Apply all fixes
+        match self.apply_all_fixes(&params.text_document.uri, &text).await {
+            Ok(Some(fixed_text)) => {
+                // Return a single edit that replaces the entire document
+                Ok(Some(vec![TextEdit {
+                    range: Range {
+                        start: Position { line: 0, character: 0 },
+                        end: self.get_end_position(&text),
+                    },
+                    new_text: fixed_text,
+                }]))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => {
+                log::error!("Failed to generate fixes in will_save_wait_until: {e}");
+                Ok(None)
+            }
+        }
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        // Re-lint the document after save
+        // Note: Auto-fixing is now handled by will_save_wait_until which runs before the save
         if let Some(entry) = self.documents.read().await.get(&params.text_document.uri) {
             self.update_diagnostics(params.text_document.uri, entry.content.clone())
                 .await;
