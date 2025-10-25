@@ -152,7 +152,7 @@ fn test_init_load_apply_config() {
     let config_content = fs::read_to_string(&_config_path).unwrap();
 
     // Check that it contains a few key elements (more flexible assertions)
-    assert!(config_content.contains("line_length"));
+    assert!(config_content.contains("line-length"));
     assert!(config_content.contains("rules"));
 
     // Create a markdown file with a long line
