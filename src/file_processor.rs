@@ -198,6 +198,8 @@ pub fn find_markdown_files(
     types_builder.add("markdown", "*.mkdn").unwrap();
     types_builder.add("markdown", "*.mdown").unwrap();
     types_builder.add("markdown", "*.mdwn").unwrap();
+    types_builder.add("markdown", "*.qmd").unwrap();
+    types_builder.add("markdown", "*.rmd").unwrap();
     types_builder.select("markdown"); // Select ONLY markdown for processing
     let types = types_builder.build().unwrap();
     walk_builder.types(types);
@@ -230,6 +232,8 @@ pub fn find_markdown_files(
             "*.mkdn".to_string(),
             "*.mdown".to_string(),
             "*.mdwn".to_string(),
+            "*.qmd".to_string(),
+            "*.rmd".to_string(),
         ]
     } else {
         // 4. Explicit path mode: No includes applied by default. Walk starts from explicit paths.
@@ -326,7 +330,7 @@ pub fn find_markdown_files(
                 && let Some(ext) = path.extension()
                 && matches!(
                     ext.to_str(),
-                    Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn")
+                    Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn" | "qmd" | "rmd")
                 )
             {
                 processed_explicit_files = true;
@@ -437,7 +441,7 @@ pub fn find_markdown_files(
         path.extension().is_some_and(|ext| {
             matches!(
                 ext.to_str(),
-                Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn")
+                Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn" | "qmd" | "rmd")
             )
         })
     });
