@@ -202,13 +202,13 @@ Inline R code: `r mean(1:10)`
     );
 }
 
-/// Test explicit path handling for .qmd and .rmd files
+/// Test explicit path handling for .qmd, .rmd, and .Rmd files
 #[test]
 fn test_qmd_rmd_explicit_paths() {
     let temp_dir = TempDir::new().unwrap();
     let temp_path = temp_dir.path();
 
-    for ext in &["qmd", "rmd"] {
+    for ext in &["qmd", "rmd", "Rmd"] {
         let file_path = temp_path.join(format!("test.{}", ext));
         fs::write(&file_path, format!("# Test {}\n", ext.to_uppercase())).unwrap();
 
