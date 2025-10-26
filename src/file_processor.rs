@@ -193,6 +193,11 @@ pub fn find_markdown_files(
     types_builder.add_defaults(); // Add standard types
     types_builder.add("markdown", "*.md").unwrap();
     types_builder.add("markdown", "*.markdown").unwrap();
+    types_builder.add("markdown", "*.mdx").unwrap();
+    types_builder.add("markdown", "*.mkd").unwrap();
+    types_builder.add("markdown", "*.mkdn").unwrap();
+    types_builder.add("markdown", "*.mdown").unwrap();
+    types_builder.add("markdown", "*.mdwn").unwrap();
     types_builder.select("markdown"); // Select ONLY markdown for processing
     let types = types_builder.build().unwrap();
     walk_builder.types(types);
@@ -216,8 +221,16 @@ pub fn find_markdown_files(
         // 2. Config include is used ONLY in discovery mode if specified
         config.global.include.clone()
     } else if is_discovery_mode {
-        // 3. Default include (*.md, *.markdown) ONLY in discovery mode if no CLI/Config include
-        vec!["*.md".to_string(), "*.markdown".to_string()]
+        // 3. Default include (all markdown variants) ONLY in discovery mode if no CLI/Config include
+        vec![
+            "*.md".to_string(),
+            "*.markdown".to_string(),
+            "*.mdx".to_string(),
+            "*.mkd".to_string(),
+            "*.mkdn".to_string(),
+            "*.mdown".to_string(),
+            "*.mdwn".to_string(),
+        ]
     } else {
         // 4. Explicit path mode: No includes applied by default. Walk starts from explicit paths.
         Vec::new()
@@ -311,7 +324,10 @@ pub fn find_markdown_files(
             // If it's a file, check if it's a markdown file
             if path.is_file()
                 && let Some(ext) = path.extension()
-                && (ext == "md" || ext == "markdown")
+                && matches!(
+                    ext.to_str(),
+                    Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn")
+                )
             {
                 processed_explicit_files = true;
                 // Convert to relative path for pattern matching
@@ -414,11 +430,16 @@ pub fn find_markdown_files(
     file_paths.dedup();
 
     // --- Final Explicit Markdown Filter ---
-    // Ensure only files with .md or .markdown extensions are returned,
+    // Ensure only files with markdown extensions are returned,
     // regardless of how ignore crate overrides interacted with type filters.
     file_paths.retain(|path_str| {
         let path = Path::new(path_str);
-        path.extension().is_some_and(|ext| ext == "md" || ext == "markdown")
+        path.extension().is_some_and(|ext| {
+            matches!(
+                ext.to_str(),
+                Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn")
+            )
+        })
     });
     // -------------------------------------
 
