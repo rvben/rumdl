@@ -661,10 +661,10 @@ impl MD052ReferenceLinkImages {
                         // Check if there's a ^ immediately before the opening bracket
                         if bracket_start > 0 {
                             // bracket_start is a byte offset, so we need to check the byte before
-                            if let Some(byte) = line.as_bytes().get(bracket_start.saturating_sub(1)) {
-                                if *byte == b'^' {
-                                    continue; // This is an inline footnote, skip it
-                                }
+                            if let Some(byte) = line.as_bytes().get(bracket_start.saturating_sub(1))
+                                && *byte == b'^'
+                            {
+                                continue; // This is an inline footnote, skip it
                             }
                         }
 

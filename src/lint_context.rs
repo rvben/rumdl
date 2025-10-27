@@ -417,6 +417,13 @@ impl<'a> LintContext<'a> {
         // Detect HTML blocks
         Self::detect_html_blocks(&mut lines);
 
+        // Clear heading info for lines inside HTML blocks (they're not real markdown headings)
+        for line in &mut lines {
+            if line.in_html_block && line.heading.is_some() {
+                line.heading = None;
+            }
+        }
+
         // Compute character frequency for fast content analysis
         let char_frequency = Self::compute_char_frequency(content);
 
@@ -1472,7 +1479,9 @@ impl<'a> LintContext<'a> {
             "ol",
             "p",
             "pre",
+            "script",
             "section",
+            "style",
             "table",
             "tbody",
             "td",
@@ -1516,11 +1525,13 @@ impl<'a> LintContext<'a> {
                     // This avoids complex nesting logic that might cause infinite loops
                     if !is_closing {
                         let closing_tag = format!("</{tag_name}>");
+                        // style and script tags can contain blank lines (CSS/JS formatting)
+                        let allow_blank_lines = tag_name == "style" || tag_name == "script";
                         let mut j = i + 1;
                         while j < lines.len() && j < i + 100 {
                             // Limit search to 100 lines
-                            // Stop at blank lines
-                            if lines[j].is_blank {
+                            // Stop at blank lines (except for style/script tags)
+                            if !allow_blank_lines && lines[j].is_blank {
                                 break;
                             }
 

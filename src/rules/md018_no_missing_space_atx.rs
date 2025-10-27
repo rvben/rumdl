@@ -143,6 +143,11 @@ impl Rule for MD018NoMissingSpaceAtx {
 
         // Check all lines that have ATX headings from cached info
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            // Skip lines inside HTML blocks (e.g., CSS selectors like #id)
+            if line_info.in_html_block {
+                continue;
+            }
+
             if let Some(heading) = &line_info.heading {
                 // Only check ATX headings
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
@@ -432,5 +437,63 @@ More content."#;
         let detected_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
         assert!(detected_lines.contains(&3)); // ##Malformed Heading
         assert!(detected_lines.contains(&7)); // ###Another Malformed
+    }
+
+    #[test]
+    fn test_css_selectors_in_html_blocks() {
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Test CSS selectors inside <style> tags should not trigger MD018
+        // This is a common pattern in Quarto/RMarkdown files
+        let content = r#"# Proper Heading
+
+<style>
+#slide-1 ol li {
+    margin-top: 0;
+}
+
+#special-slide ol li {
+    margin-top: 2em;
+}
+</style>
+
+## Another Heading
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not detect CSS selectors as malformed headings
+        assert_eq!(
+            result.len(),
+            0,
+            "CSS selectors in <style> blocks should not be flagged as malformed headings"
+        );
+    }
+
+    #[test]
+    fn test_js_code_in_script_blocks() {
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Test that patterns like #element in <script> tags don't trigger MD018
+        let content = r#"# Heading
+
+<script>
+const element = document.querySelector('#main-content');
+#another-comment
+</script>
+
+## Another Heading
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not detect JS code as malformed headings
+        assert_eq!(
+            result.len(),
+            0,
+            "JavaScript code in <script> blocks should not be flagged as malformed headings"
+        );
     }
 }
