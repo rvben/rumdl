@@ -3,7 +3,7 @@
 //!
 //! See [docs/md033.md](../../docs/md033.md) for full documentation, configuration, and examples.
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::kramdown_utils::{is_kramdown_block_attribute, is_kramdown_extension};
 use crate::utils::range_utils::calculate_html_tag_range;
 use crate::utils::regex_cache::*;
@@ -155,6 +155,50 @@ impl MD033NoInlineHtml {
             || content.starts_with("ftp://")
             || content.starts_with("ftps://")
             || content.starts_with("mailto:")
+    }
+
+    /// Calculate fix to remove HTML tags while keeping content
+    ///
+    /// For self-closing tags like `<br/>`, returns a single fix to remove the tag.
+    /// For paired tags like `<span>text</span>`, returns the replacement text (just the content).
+    ///
+    /// Returns (range, replacement_text) where range is the bytes to replace
+    /// and replacement_text is what to put there (content without tags, or empty for self-closing).
+    fn calculate_fix(
+        &self,
+        content: &str,
+        opening_tag: &str,
+        tag_byte_start: usize,
+    ) -> Option<(std::ops::Range<usize>, String)> {
+        // Check if it's a self-closing tag (ends with />)
+        if opening_tag.ends_with("/>") {
+            return Some((tag_byte_start..tag_byte_start + opening_tag.len(), String::new()));
+        }
+
+        // Extract tag name from opening tag (e.g., "<div>" -> "div", "<span class='x'>" -> "span")
+        let tag_name = opening_tag
+            .trim_start_matches('<')
+            .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+            .next()?
+            .to_lowercase();
+
+        // Build the closing tag pattern
+        let closing_tag = format!("</{tag_name}>");
+
+        // Search for the closing tag after the opening tag
+        let search_start = tag_byte_start + opening_tag.len();
+        if let Some(closing_pos) = content[search_start..].find(&closing_tag) {
+            let closing_byte_start = search_start + closing_pos;
+            let closing_byte_end = closing_byte_start + closing_tag.len();
+
+            // Extract the content between tags
+            let inner_content = &content[search_start..closing_byte_start];
+
+            return Some((tag_byte_start..closing_byte_end, inner_content.to_string()));
+        }
+
+        // If no closing tag found, just remove the opening tag
+        Some((tag_byte_start..tag_byte_start + opening_tag.len(), String::new()))
     }
 
     /// Find HTML tags that span multiple lines
@@ -399,6 +443,20 @@ impl Rule for MD033NoInlineHtml {
                 // Report each HTML tag individually (true markdownlint compatibility)
                 let (start_line, start_col, end_line, end_col) =
                     calculate_html_tag_range(line_num, line, tag_match.start(), tag_match.len());
+
+                // Calculate byte offset for the tag in the entire content
+                let line_byte_offset: usize = content
+                    .lines()
+                    .take(line_num - 1)
+                    .map(|l| l.len() + 1) // +1 for newline
+                    .sum();
+                let tag_byte_start = line_byte_offset + tag_match.start();
+
+                // Calculate fix to remove HTML tags but keep content
+                let fix = self
+                    .calculate_fix(content, tag, tag_byte_start)
+                    .map(|(range, replacement)| Fix { range, replacement });
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: start_line,
@@ -407,7 +465,7 @@ impl Rule for MD033NoInlineHtml {
                     end_column: end_col,
                     message: format!("Inline HTML found: {tag}"),
                     severity: Severity::Warning,
-                    fix: None,
+                    fix,
                 });
             }
         }
@@ -612,5 +670,74 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should handle code span before code block");
+    }
+
+    #[test]
+    fn test_md033_quick_fix_inline_tag() {
+        // Test Quick Fix for inline HTML tags - keeps content, removes tags
+        let rule = MD033NoInlineHtml::default();
+        let content = "This has <span>inline text</span> that should keep content.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should find one HTML tag");
+        assert!(result[0].fix.is_some(), "Should have a fix");
+
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(&content[fix.range.clone()], "<span>inline text</span>");
+        assert_eq!(fix.replacement, "inline text");
+    }
+
+    #[test]
+    fn test_md033_quick_fix_multiline_tag() {
+        // Test Quick Fix for multiline HTML tags - keeps content
+        let rule = MD033NoInlineHtml::default();
+        let content = "<div>\nBlock content\n</div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should find one HTML tag");
+        assert!(result[0].fix.is_some(), "Should have a fix");
+
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(&content[fix.range.clone()], "<div>\nBlock content\n</div>");
+        assert_eq!(fix.replacement, "\nBlock content\n");
+    }
+
+    #[test]
+    fn test_md033_quick_fix_self_closing_tag() {
+        // Test Quick Fix for self-closing tags - removes tag (no content)
+        let rule = MD033NoInlineHtml::default();
+        let content = "Self-closing: <br/>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should find one HTML tag");
+        assert!(result[0].fix.is_some(), "Should have a fix");
+
+        let fix = result[0].fix.as_ref().unwrap();
+        assert_eq!(&content[fix.range.clone()], "<br/>");
+        assert_eq!(fix.replacement, "");
+    }
+
+    #[test]
+    fn test_md033_quick_fix_multiple_tags() {
+        // Test Quick Fix with multiple HTML tags - keeps content for both
+        let rule = MD033NoInlineHtml::default();
+        let content = "<span>first</span> and <strong>second</strong>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 2, "Should find two HTML tags");
+        assert!(result[0].fix.is_some(), "First tag should have a fix");
+        assert!(result[1].fix.is_some(), "Second tag should have a fix");
+
+        let fix1 = result[0].fix.as_ref().unwrap();
+        assert_eq!(&content[fix1.range.clone()], "<span>first</span>");
+        assert_eq!(fix1.replacement, "first");
+
+        let fix2 = result[1].fix.as_ref().unwrap();
+        assert_eq!(&content[fix2.range.clone()], "<strong>second</strong>");
+        assert_eq!(fix2.replacement, "second");
     }
 }
