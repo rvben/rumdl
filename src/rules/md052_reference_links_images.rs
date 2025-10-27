@@ -71,9 +71,14 @@ impl MD052ReferenceLinkImages {
         s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     }
 
-    /// Check if a pattern is likely NOT a markdown reference
-    /// Returns true if this pattern should be skipped
-    fn is_likely_not_reference(text: &str) -> bool {
+    /// Check if text matches a known non-reference pattern that should be skipped.
+    ///
+    /// These are deterministic patterns from markdown extensions or code examples,
+    /// not heuristics. Returns true for:
+    /// - Markdown extensions: [^footnote], [@citation], [!alert], [TOC]
+    /// - Programming syntax: [T], [null], [i32], ["string"]
+    /// - Descriptive text: [default: value], [0-9]
+    fn is_known_non_reference_pattern(text: &str) -> bool {
         // Skip numeric patterns (array indices, ranges)
         if text.chars().all(|c| c.is_ascii_digit()) {
             return true;
@@ -161,6 +166,12 @@ impl MD052ReferenceLinkImages {
         // Skip footnote syntax like [^1], [^note], etc.
         // Footnotes start with ^ and are a common markdown extension
         if text.starts_with('^') {
+            return true;
+        }
+
+        // Skip Pandoc/RMarkdown/Quarto citation syntax like [@citation-key]
+        // Citations in these formats start with @ inside brackets
+        if text.starts_with('@') {
             return true;
         }
 
@@ -370,6 +381,11 @@ impl MD052ReferenceLinkImages {
             if let Some(ref_id) = &link.reference_id {
                 let reference_lower = ref_id.to_lowercase();
 
+                // Skip known non-reference patterns (markdown extensions, code examples)
+                if Self::is_known_non_reference_pattern(ref_id) {
+                    continue;
+                }
+
                 // Skip MkDocs auto-references if in MkDocs mode
                 // Check both the reference_id and the link text for shorthand references
                 // Strip backticks since MkDocs resolves `module.Class` as module.Class
@@ -454,6 +470,11 @@ impl MD052ReferenceLinkImages {
 
             if let Some(ref_id) = &image.reference_id {
                 let reference_lower = ref_id.to_lowercase();
+
+                // Skip known non-reference patterns (markdown extensions, code examples)
+                if Self::is_known_non_reference_pattern(ref_id) {
+                    continue;
+                }
 
                 // Skip MkDocs auto-references if in MkDocs mode
                 // Check both the reference_id and the alt text for shorthand references
@@ -636,11 +657,22 @@ impl MD052ReferenceLinkImages {
                             continue;
                         }
 
+                        // Skip Pandoc/RMarkdown inline footnotes: ^[text]
+                        // Check if there's a ^ immediately before the opening bracket
+                        if bracket_start > 0 {
+                            // bracket_start is a byte offset, so we need to check the byte before
+                            if let Some(byte) = line.as_bytes().get(bracket_start.saturating_sub(1)) {
+                                if *byte == b'^' {
+                                    continue; // This is an inline footnote, skip it
+                                }
+                            }
+                        }
+
                         let reference = ref_match.as_str();
                         let reference_lower = reference.to_lowercase();
 
-                        // Skip patterns that are likely not markdown references
-                        if Self::is_likely_not_reference(reference) {
+                        // Skip known non-reference patterns (markdown extensions, code examples)
+                        if Self::is_known_non_reference_pattern(reference) {
                             continue;
                         }
 
@@ -825,31 +857,9 @@ impl Rule for MD052ReferenceLinkImages {
         let content = ctx.content;
         let mut warnings = Vec::new();
 
-        // OPTIMIZATION: Early exit if no reference-style links/images exist
-        // Check if there are any reference-style links or images in the document
-        let has_reference_links = ctx.links.iter().any(|l| l.is_reference);
-        let has_reference_images = ctx.images.iter().any(|i| i.is_reference);
-
-        // Quick check: If document contains no brackets at all, nothing to check
+        // OPTIMIZATION: Early exit if no brackets at all
         if !content.contains('[') {
             return Ok(warnings);
-        }
-
-        // Quick check for reference definitions
-        let has_reference_definitions = content.contains("]:");
-
-        // If we have no reference links/images AND no reference definitions,
-        // then check if we might have shortcut references [text]
-        if !has_reference_links && !has_reference_images && !has_reference_definitions {
-            // Only do expensive shortcut checking if we have brackets but no links/images/refs
-            // This handles the case where all brackets are inline links [text](url)
-            let all_brackets_are_inline = ctx.links.iter().all(|l| !l.is_reference)
-                && ctx.images.iter().all(|i| !i.is_reference)
-                && ctx.links.len() + ctx.images.len() > 0;
-
-            if all_brackets_are_inline {
-                return Ok(warnings); // All brackets accounted for as inline links/images
-            }
         }
 
         // Check if we're in MkDocs mode from the context
@@ -1428,6 +1438,57 @@ Regular [undefined] reference outside snippet markers."#;
             2,
             "In standard mode, snippet markers should be flagged as undefined references"
         );
+    }
+
+    #[test]
+    fn test_pandoc_citations_not_flagged() {
+        // Test that Pandoc/RMarkdown/Quarto citation syntax is not flagged
+        let rule = MD052ReferenceLinkImages::new();
+
+        let content = r#"# Research Paper
+
+We are using the **bookdown** package [@R-bookdown] in this sample book.
+This was built on top of R Markdown and **knitr** [@xie2015].
+
+Multiple citations [@citation1; @citation2; @citation3] are also supported.
+
+Regular [undefined] reference should still be flagged.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag the undefined reference, not the citations
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only flag the undefined reference, not Pandoc citations"
+        );
+        assert!(result[0].message.contains("undefined"));
+    }
+
+    #[test]
+    fn test_pandoc_inline_footnotes_not_flagged() {
+        // Test that Pandoc inline footnote syntax is not flagged
+        let rule = MD052ReferenceLinkImages::new();
+
+        let content = r#"# Math Document
+
+You can use math in footnotes like this^[where we mention $p = \frac{a}{b}$].
+
+Another footnote^[with some text and a [link](https://example.com)].
+
+But this [reference] without ^ should be flagged.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag the reference without ^
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only flag the regular reference, not inline footnotes"
+        );
+        assert!(result[0].message.contains("reference"));
     }
 
     #[test]
