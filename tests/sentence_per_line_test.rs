@@ -107,3 +107,38 @@ fn test_multiple_paragraphs() {
     // Should detect violations in both paragraphs
     assert_eq!(result.len(), 2, "Should detect violations in both paragraphs");
 }
+
+#[test]
+fn test_issue_124_paragraph_with_backticks() {
+    // Test case from issue #124: paragraph with backticks not being detected
+    let rule = create_sentence_per_line_rule();
+    let content = "If you are sure that all data structures exposed in a `PyModule` are\n\
+                   thread-safe, then pass `gil_used = false` as a parameter to the\n\
+                   `pymodule` procedural macro declaring the module or call\n\
+                   `PyModule::gil_used` on a `PyModule` instance.  For example:";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // This paragraph has at least two sentences - should be detected
+    assert!(
+        !result.is_empty(),
+        "Should detect multiple sentences in paragraph with backticks"
+    );
+}
+
+#[test]
+fn test_issue_124_second_paragraph() {
+    // Test case from issue #124: second example paragraph
+    let rule = create_sentence_per_line_rule();
+    let content = "This document provides advice for porting Rust code using PyO3 to run under\n\
+                   free-threaded Python.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // This is a single sentence on multiple lines - should NOT be detected
+    // (single long sentences don't violate sentence-per-line, only multiple sentences do)
+    assert!(
+        result.is_empty(),
+        "Single sentence on multiple lines should not trigger sentence-per-line warning"
+    );
+}

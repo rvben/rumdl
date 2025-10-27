@@ -37,7 +37,7 @@ impl Default for ReflowOptions {
 fn is_sentence_boundary(text: &str, pos: usize) -> bool {
     let chars: Vec<char> = text.chars().collect();
 
-    if pos + 2 >= chars.len() {
+    if pos + 1 >= chars.len() {
         return false;
     }
 
@@ -47,13 +47,24 @@ fn is_sentence_boundary(text: &str, pos: usize) -> bool {
         return false;
     }
 
-    // Must be followed by a space
+    // Must be followed by at least one space
     if chars[pos + 1] != ' ' {
         return false;
     }
 
-    // Next character after space must be uppercase (new sentence indicator)
-    if !chars[pos + 2].is_uppercase() {
+    // Skip all whitespace after the punctuation to find the start of the next sentence
+    let mut next_char_pos = pos + 2;
+    while next_char_pos < chars.len() && chars[next_char_pos].is_whitespace() {
+        next_char_pos += 1;
+    }
+
+    // Check if we reached the end of the string
+    if next_char_pos >= chars.len() {
+        return false;
+    }
+
+    // Next character after space(s) must be uppercase (new sentence indicator)
+    if !chars[next_char_pos].is_uppercase() {
         return false;
     }
 
@@ -71,7 +82,8 @@ fn is_sentence_boundary(text: &str, pos: usize) -> bool {
         }
 
         // Check for decimal numbers (e.g., "3.14")
-        if pos > 0 && chars[pos - 1].is_numeric() && pos + 2 < chars.len() && chars[pos + 2].is_numeric() {
+        // Make sure to check if next_char_pos is within bounds
+        if pos > 0 && chars[pos - 1].is_numeric() && next_char_pos < chars.len() && chars[next_char_pos].is_numeric() {
             return false;
         }
     }
@@ -1600,6 +1612,26 @@ mod tests {
         assert_eq!(result[0], "Is this a question?");
         assert_eq!(result[1], "Yes it is!");
         assert_eq!(result[2], "And a statement.");
+    }
+
+    #[test]
+    fn test_split_sentences_issue_124() {
+        // Test the actual text from issue #124
+        let text = "If you are sure that all data structures exposed in a `PyModule` are thread-safe, then pass `gil_used = false` as a parameter to the `pymodule` procedural macro declaring the module or call `PyModule::gil_used` on a `PyModule` instance.  For example:";
+
+        let sentences = split_into_sentences(text);
+
+        // Debug output
+        eprintln!("Text: {text}");
+        eprintln!("Number of sentences: {}", sentences.len());
+        for (i, s) in sentences.iter().enumerate() {
+            eprintln!("Sentence {}: '{s}'", i + 1);
+        }
+
+        // This should detect 2 sentences:
+        // 1. "If you are sure ... on a `PyModule` instance."
+        // 2. "For example:"
+        assert_eq!(sentences.len(), 2, "Should detect 2 sentences in the text");
     }
 
     #[test]

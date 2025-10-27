@@ -1092,6 +1092,10 @@ impl MD013LineLength {
                 i += 1;
             }
 
+            // Combine paragraph lines into a single string for processing
+            // This must be done BEFORE the needs_reflow check for sentence-per-line mode
+            let paragraph_text = paragraph_lines.join(" ");
+
             // Check if this paragraph needs reflowing
             let needs_reflow = match config.reflow_mode {
                 ReflowMode::Normalize => {
@@ -1099,12 +1103,10 @@ impl MD013LineLength {
                     paragraph_lines.len() > 1
                 }
                 ReflowMode::SentencePerLine => {
-                    // In sentence-per-line mode, check if any line has multiple sentences
-                    paragraph_lines.iter().any(|line| {
-                        // Count sentences in this line
-                        let sentences = split_into_sentences(line);
-                        sentences.len() > 1
-                    })
+                    // In sentence-per-line mode, check if the JOINED paragraph has multiple sentences
+                    // Note: we check the joined text because sentences can span multiple lines
+                    let sentences = split_into_sentences(&paragraph_text);
+                    sentences.len() > 1
                 }
                 ReflowMode::Default => {
                     // In default mode, only reflow if lines exceed limit
@@ -1130,9 +1132,6 @@ impl MD013LineLength {
                 };
 
                 let byte_range = start_range.start..end_range.end;
-
-                // Combine paragraph lines into a single string for reflowing
-                let paragraph_text = paragraph_lines.join(" ");
 
                 // Check if the paragraph ends with a hard break and what type
                 let hard_break_type = paragraph_lines.last().and_then(|line| {
