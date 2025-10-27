@@ -239,7 +239,7 @@ impl MD033NoInlineHtml {
                             && !self.is_url_in_angle_brackets(final_tag)
                             && !self.is_tag_allowed(final_tag)
                             && !skip_mkdocs_markdown
-                            && HTML_TAG_FINDER.is_match(final_tag)
+                            && HTML_OPENING_TAG_FINDER.is_match(final_tag)
                         {
                             // Check for duplicates (avoid flagging the same position twice)
                             let already_warned =
@@ -356,8 +356,8 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
-            // Find all HTML tags in the line using regex
-            for tag_match in HTML_TAG_FINDER.find_iter(line) {
+            // Find all HTML opening tags in the line using regex
+            for tag_match in HTML_OPENING_TAG_FINDER.find_iter(line) {
                 let tag = tag_match.as_str();
 
                 // Skip HTML comments
@@ -470,10 +470,9 @@ mod tests {
         let content = "<div>Some content</div>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Reports one warning per HTML tag (true markdownlint compatibility)
-        assert_eq!(result.len(), 2); // <div> and </div>
+        // Only reports opening tags, not closing tags
+        assert_eq!(result.len(), 1); // Only <div>, not </div>
         assert!(result[0].message.starts_with("Inline HTML found: <div>"));
-        assert!(result[1].message.starts_with("Inline HTML found: </div>"));
     }
 
     #[test]
@@ -482,12 +481,10 @@ mod tests {
         let content = "<DiV>Some <B>content</B></dIv>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Reports one warning per HTML tag (true markdownlint compatibility)
-        assert_eq!(result.len(), 4); // <DiV>, <B>, </B>, </dIv>
+        // Only reports opening tags, not closing tags
+        assert_eq!(result.len(), 2); // <DiV>, <B> (not </B>, </dIv>)
         assert_eq!(result[0].message, "Inline HTML found: <DiV>");
         assert_eq!(result[1].message, "Inline HTML found: <B>");
-        assert_eq!(result[2].message, "Inline HTML found: </B>");
-        assert_eq!(result[3].message, "Inline HTML found: </dIv>");
     }
 
     #[test]
@@ -496,18 +493,16 @@ mod tests {
         let content = "<div>Allowed</div><p>Not allowed</p><br/>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Only warnings for non-allowed tags (<p> and </p>, div and br are allowed)
-        assert_eq!(result.len(), 2);
+        // Only warnings for non-allowed opening tags (<p> only, div and br are allowed)
+        assert_eq!(result.len(), 1);
         assert_eq!(result[0].message, "Inline HTML found: <p>");
-        assert_eq!(result[1].message, "Inline HTML found: </p>");
 
         // Test case-insensitivity of allowed tags
         let content2 = "<DIV>Allowed</DIV><P>Not allowed</P><BR/>";
         let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
-        assert_eq!(result2.len(), 2); // <P> and </P> flagged
+        assert_eq!(result2.len(), 1); // Only <P> flagged
         assert_eq!(result2[0].message, "Inline HTML found: <P>");
-        assert_eq!(result2[1].message, "Inline HTML found: </P>");
     }
 
     #[test]
@@ -516,10 +511,9 @@ mod tests {
         let content = "<!-- This is a comment --> <p>Not a comment</p>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Should detect warnings for HTML tags (comments are skipped)
-        assert_eq!(result.len(), 2); // <p> and </p>
+        // Should detect warnings for HTML opening tags (comments are skipped, closing tags not reported)
+        assert_eq!(result.len(), 1); // Only <p>
         assert_eq!(result[0].message, "Inline HTML found: <p>");
-        assert_eq!(result[1].message, "Inline HTML found: </p>");
     }
 
     #[test]
@@ -535,10 +529,9 @@ mod tests {
         let content2 = "[Link <a>text</a>](url)";
         let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
-        // Reports one warning per HTML tag (true markdownlint compatibility)
-        assert_eq!(result2.len(), 2); // <a> and </a>
+        // Only reports opening tags
+        assert_eq!(result2.len(), 1); // Only <a>
         assert_eq!(result2[0].message, "Inline HTML found: <a>");
-        assert_eq!(result2[1].message, "Inline HTML found: </a>");
     }
 
     #[test]
@@ -557,10 +550,9 @@ mod tests {
         let content = "```html\n<div>Code</div>\n```\n<div>Not code</div>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Reports one warning per HTML tag (true markdownlint compatibility)
-        assert_eq!(result.len(), 2); // <div> and </div> outside code block
+        // Only reports opening tags outside code block
+        assert_eq!(result.len(), 1); // Only <div> outside code block
         assert_eq!(result[0].message, "Inline HTML found: <div>");
-        assert_eq!(result[1].message, "Inline HTML found: </div>");
     }
 
     #[test]

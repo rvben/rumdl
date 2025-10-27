@@ -200,6 +200,7 @@ lazy_static! {
     pub static ref HTML_TAG_REGEX: Regex = Regex::new(r"<([a-zA-Z][^>]*)>").unwrap();
     pub static ref HTML_SELF_CLOSING_TAG_REGEX: Regex = Regex::new(r"<([a-zA-Z][^>]*/)>").unwrap();
     pub static ref HTML_TAG_FINDER: Regex = Regex::new("(?i)</?[a-zA-Z][^>]*>").unwrap();
+    pub static ref HTML_OPENING_TAG_FINDER: Regex = Regex::new("(?i)<[a-zA-Z][^>]*>").unwrap();
     pub static ref HTML_TAG_QUICK_CHECK: Regex = Regex::new("(?i)</?[a-zA-Z]").unwrap();
 
     // Link patterns for MD051 and other rules
