@@ -90,8 +90,14 @@ impl MD052ReferenceLinkImages {
         }
 
         // Skip patterns that look like config sections [tool.something], [section.subsection]
-        // But not if they contain other non-alphanumeric chars like hyphens or underscores
-        if text.contains('.') && !text.contains(' ') && !text.contains('-') && !text.contains('_') {
+        // But not if they contain other non-alphanumeric chars like hyphens, underscores, or backticks
+        // Backticks indicate intentional code formatting in a reference name (e.g., [`module.Class`])
+        if text.contains('.')
+            && !text.contains(' ')
+            && !text.contains('-')
+            && !text.contains('_')
+            && !text.contains('`')
+        {
             // Config sections typically have dots, no spaces, and only alphanumeric + dots
             return true;
         }
