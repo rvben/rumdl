@@ -399,8 +399,15 @@ impl<'a> LintContext<'a> {
         // Detect code blocks once and cache them
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
-        // Pre-compute line information
-        let mut lines = Self::compute_line_info(content, &line_offsets, &code_blocks, flavor);
+        // Pre-compute line information (without headings/blockquotes yet)
+        let mut lines = Self::compute_basic_line_info(content, &line_offsets, &code_blocks, flavor);
+
+        // Detect HTML blocks BEFORE heading detection
+        // This ensures HTML content is never considered as markdown
+        Self::detect_html_blocks(&mut lines);
+
+        // Now detect headings and blockquotes, which will skip HTML blocks
+        Self::detect_headings_and_blockquotes(content, &mut lines, flavor);
 
         // Parse code spans early so we can exclude them from link/image parsing
         let ast = get_cached_ast(content);
@@ -413,16 +420,6 @@ impl<'a> LintContext<'a> {
         // Use line-by-line list parsing for MD032 compatibility
         // TODO: Consider using AST-based parsing in the future when MD032 is updated
         let list_blocks = Self::parse_list_blocks(&lines);
-
-        // Detect HTML blocks
-        Self::detect_html_blocks(&mut lines);
-
-        // Clear heading info for lines inside HTML blocks (they're not real markdown headings)
-        for line in &mut lines {
-            if line.in_html_block && line.heading.is_some() {
-                line.heading = None;
-            }
-        }
 
         // Compute character frequency for fast content analysis
         let char_frequency = Self::compute_char_frequency(content);
@@ -1036,8 +1033,8 @@ impl<'a> LintContext<'a> {
         refs
     }
 
-    /// Pre-compute line information
-    fn compute_line_info(
+    /// Pre-compute basic line information (without headings/blockquotes)
+    fn compute_basic_line_info(
         content: &str,
         line_offsets: &[usize],
         code_blocks: &[(usize, usize)],
@@ -1048,15 +1045,8 @@ impl<'a> LintContext<'a> {
             static ref UNORDERED_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)([-*+])([ \t]*)(.*)").unwrap();
             static ref ORDERED_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(\d+)([.)])([ \t]*)(.*)").unwrap();
 
-            // Regex for blockquote prefix
+            // Regex for blockquote prefix (used for blank line detection in blockquotes)
             static ref BLOCKQUOTE_REGEX: regex::Regex = regex::Regex::new(r"^(\s*>\s*)(.*)").unwrap();
-
-            // Regex for heading detection
-            static ref ATX_HEADING_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
-            static ref SETEXT_UNDERLINE_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
-
-            // Regex for blockquote detection
-            static ref BLOCKQUOTE_REGEX_FULL: regex::Regex = regex::Regex::new(r"^(\s*)(>+)(\s*)(.*)$").unwrap();
         }
 
         let content_lines: Vec<&str> = content.lines().collect();
@@ -1207,14 +1197,38 @@ impl<'a> LintContext<'a> {
             });
         }
 
-        // Second pass: detect headings (including Setext which needs look-ahead) and blockquotes
-        for i in 0..content_lines.len() {
+        lines
+    }
+
+    /// Detect headings and blockquotes (called after HTML block detection)
+    fn detect_headings_and_blockquotes(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) {
+        lazy_static! {
+            // Regex for blockquote prefix
+            static ref BLOCKQUOTE_REGEX_FULL: regex::Regex = regex::Regex::new(r"^(\s*)(>+)(\s*)(.*)$").unwrap();
+
+            // Regex for heading detection
+            static ref ATX_HEADING_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
+            static ref SETEXT_UNDERLINE_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
+        }
+
+        let content_lines: Vec<&str> = content.lines().collect();
+
+        // Detect front matter boundaries to skip those lines
+        let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
+
+        // Detect headings (including Setext which needs look-ahead) and blockquotes
+        for i in 0..lines.len() {
             if lines[i].in_code_block {
                 continue;
             }
 
             // Skip lines in front matter
             if front_matter_end > 0 && i < front_matter_end {
+                continue;
+            }
+
+            // Skip lines in HTML blocks - HTML content should not be parsed as markdown
+            if lines[i].in_html_block {
                 continue;
             }
 
@@ -1372,7 +1386,7 @@ impl<'a> LintContext<'a> {
                 });
             }
             // Check for Setext headings (need to look at next line)
-            else if i + 1 < content_lines.len() {
+            else if i + 1 < content_lines.len() && i + 1 < lines.len() {
                 let next_line = content_lines[i + 1];
                 if !lines[i + 1].in_code_block && SETEXT_UNDERLINE_REGEX.is_match(next_line) {
                     // Skip if next line is front matter delimiter
@@ -1442,8 +1456,6 @@ impl<'a> LintContext<'a> {
                 }
             }
         }
-
-        lines
     }
 
     /// Detect HTML blocks in the content
