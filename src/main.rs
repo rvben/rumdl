@@ -41,7 +41,24 @@ fn handle_schema_command(action: SchemaAction) {
 
     // Generate the schema
     let schema = schema_for!(rumdl_config::Config);
-    let schema_json = serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
+
+    // Post-process the schema to add additionalProperties for flattened rules
+    // This allows [MD###] sections at the root level alongside [global] and [per-file-ignores]
+    let mut schema_value: serde_json::Value = serde_json::to_value(&schema).expect("Failed to convert schema to Value");
+
+    if let Some(schema_obj) = schema_value.as_object_mut() {
+        // Add additionalProperties that reference the RuleConfig definition
+        // This allows any additional properties (rule names like MD013, MD007, etc.)
+        // to be validated as RuleConfig objects
+        schema_obj.insert(
+            "additionalProperties".to_string(),
+            serde_json::json!({
+                "$ref": "#/definitions/RuleConfig"
+            }),
+        );
+    }
+
+    let schema_json = serde_json::to_string_pretty(&schema_value).expect("Failed to serialize schema");
 
     match action {
         SchemaAction::Print => {
