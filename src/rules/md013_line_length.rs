@@ -438,6 +438,7 @@ impl MD013LineLength {
                 || TableUtils::is_potential_table_row(lines[i])
                 || lines[i].trim().is_empty()
                 || is_horizontal_rule(lines[i].trim())
+                || is_template_directive_only(lines[i])
             {
                 i += 1;
                 continue;
