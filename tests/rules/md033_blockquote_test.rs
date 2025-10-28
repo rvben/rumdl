@@ -58,7 +58,7 @@ fn test_md033_html_outside_fenced_code_inside_blockquote() {
     let result = rule.check(&ctx).unwrap();
 
     // Should flag HTML tags outside code blocks
-    assert_eq!(result.len(), 2, "Should flag HTML tags outside code blocks"); // <div> and </div>
+    assert_eq!(result.len(), 1, "Should flag HTML tags outside code blocks"); // Only <div>
 }
 
 #[test]
@@ -78,13 +78,11 @@ fn test_md033_mixed_blockquote_with_code_and_html() {
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should only flag HTML outside code blocks: <span>, </span>, <div>, </div>
-    // Should NOT flag <a> and </a> inside code block
-    assert_eq!(result.len(), 4, "Should flag only HTML outside code blocks");
+    // Should only flag HTML outside code blocks: <span>, <div> (opening tags only)
+    // Should NOT flag <a> inside code block
+    assert_eq!(result.len(), 2, "Should flag only HTML outside code blocks");
     assert!(result.iter().any(|w| w.message.contains("<span>")));
-    assert!(result.iter().any(|w| w.message.contains("</span>")));
     assert!(result.iter().any(|w| w.message.contains("<div>")));
-    assert!(result.iter().any(|w| w.message.contains("</div>")));
     assert!(
         !result.iter().any(|w| w.message.contains("<a")),
         "Should not flag <a> inside code block"
@@ -178,9 +176,8 @@ fn test_md033_blockquote_multiple_code_blocks() {
     let result = rule.check(&ctx).unwrap();
 
     // Should flag HTML between code blocks but not inside them
-    assert_eq!(result.len(), 2, "Should flag HTML between code blocks");
+    assert_eq!(result.len(), 1, "Should flag HTML between code blocks");
     assert!(result.iter().any(|w| w.message.contains("<span>")));
-    assert!(result.iter().any(|w| w.message.contains("</span>")));
     assert!(
         !result.iter().any(|w| w.message.contains("<div>")),
         "Should not flag HTML in code blocks"

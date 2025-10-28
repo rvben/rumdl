@@ -42,10 +42,9 @@ fn test_fence_boundary_alignment() {
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag only the <span> outside the code block
-    assert_eq!(result.len(), 2, "Should flag HTML outside code block");
+    // Should flag only the <span> outside the code block (opening tag only)
+    assert_eq!(result.len(), 1, "Should flag HTML outside code block");
     assert!(result.iter().any(|w| w.message.contains("<span>")));
-    assert!(result.iter().any(|w| w.message.contains("</span>")));
     assert!(
         !result.iter().any(|w| w.message.contains("<div>")),
         "Should not flag HTML inside code block"
@@ -86,8 +85,8 @@ fn test_list_vs_code_in_blockquotes() {
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag HTML in list item, not in code continuation
-    assert!(result.len() >= 2, "Should flag HTML in list item");
+    // Should flag HTML in list item (opening tag only), not in code continuation
+    assert!(!result.is_empty(), "Should flag HTML in list item");
     assert!(result.iter().any(|w| w.message.contains("<span>")));
 }
 
@@ -222,8 +221,8 @@ fn test_multiple_fences_same_blockquote() {
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should only flag the <b> tag between code blocks
-    assert_eq!(result.len(), 2, "Should flag HTML between code blocks");
+    // Should only flag the <b> tag between code blocks (opening tag only)
+    assert_eq!(result.len(), 1, "Should flag HTML between code blocks");
     assert!(result.iter().any(|w| w.message.contains("<b>")));
     assert!(!result.iter().any(|w| w.message.contains("<div>")));
 }

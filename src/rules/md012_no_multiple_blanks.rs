@@ -318,10 +318,29 @@ impl Rule for MD012NoMultipleBlanks {
 
         let mut in_code_block = false;
         let mut code_block_blanks = Vec::new();
+        let mut in_front_matter = false;
 
-        // Use filtered_lines to automatically skip front-matter lines
-        for filtered_line in ctx.filtered_lines().skip_front_matter() {
+        // Process ALL lines (don't skip front-matter in fix mode)
+        for filtered_line in ctx.filtered_lines() {
             let line = filtered_line.content;
+
+            // Pass through front-matter lines unchanged
+            if filtered_line.line_info.in_front_matter {
+                if !in_front_matter {
+                    // Entering front-matter: flush any accumulated blanks
+                    let allowed_blanks = blank_count.min(self.config.maximum);
+                    if allowed_blanks > 0 {
+                        result.extend(vec![""; allowed_blanks]);
+                    }
+                    blank_count = 0;
+                    in_front_matter = true;
+                }
+                result.push(line);
+                continue;
+            } else if in_front_matter {
+                // Exiting front-matter
+                in_front_matter = false;
+            }
 
             // Track code blocks
             if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
@@ -361,9 +380,13 @@ impl Rule for MD012NoMultipleBlanks {
             }
         }
 
-        // Trailing blank lines are not added to the result
-        // Files should end with exactly 1 newline (added below), with 0 blank lines at EOF
-        // This follows POSIX/Prettier standards. The maximum config only applies to in-document blank lines.
+        // Handle trailing blank lines
+        // After the loop, blank_count contains the number of trailing blank lines
+        // Add up to maximum allowed trailing blank lines
+        let allowed_trailing_blanks = blank_count.min(self.config.maximum);
+        if allowed_trailing_blanks > 0 {
+            result.extend(vec![""; allowed_trailing_blanks]);
+        }
 
         // Join lines and handle final newline
         let mut output = result.join("\n");

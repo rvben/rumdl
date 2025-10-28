@@ -138,16 +138,13 @@ fn test_md032_blanks_around_lists() {
     test_character_ranges(test);
 }
 
-// MD033 - Inline HTML
+// MD033 - Inline HTML (only opening tags are reported)
 #[test]
 fn test_md033_no_inline_html() {
-    let test = multi_warning_test(
+    let test = simple_test(
         "MD033",
         "Some <b>bold</b> text",
-        vec![
-            ExpectedWarning::new(1, 6, 1, 9, "<b>"),
-            ExpectedWarning::new(1, 13, 1, 17, "</b>"),
-        ],
+        ExpectedWarning::new(1, 6, 1, 9, "<b>"),
     );
     test_character_ranges(test);
 }

@@ -1106,7 +1106,24 @@ impl MD013LineLength {
                     // In sentence-per-line mode, check if the JOINED paragraph has multiple sentences
                     // Note: we check the joined text because sentences can span multiple lines
                     let sentences = split_into_sentences(&paragraph_text);
-                    sentences.len() > 1
+
+                    // Always reflow if multiple sentences on one line
+                    if sentences.len() > 1 {
+                        true
+                    } else if paragraph_lines.len() > 1 {
+                        // For single-sentence paragraphs spanning multiple lines:
+                        // Reflow if they COULD fit on one line (respecting line-length constraint)
+                        if config.line_length == 0 {
+                            // No line-length constraint - always join single sentences
+                            true
+                        } else {
+                            // Only join if it fits within line-length
+                            let effective_length = self.calculate_effective_length(&paragraph_text);
+                            effective_length <= config.line_length
+                        }
+                    } else {
+                        false
+                    }
                 }
                 ReflowMode::Default => {
                     // In default mode, only reflow if lines exceed limit

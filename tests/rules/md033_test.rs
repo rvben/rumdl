@@ -17,12 +17,10 @@ fn test_simple_html_tag() {
     let content = "Some <b>bold</b> text";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Reports one warning per HTML tag (true markdownlint compatibility)
-    assert_eq!(result.len(), 2); // <b> and </b>
+    // Only reports opening tags (only opening tags)
+    assert_eq!(result.len(), 1); // Only <b>
     assert_eq!(result[0].line, 1);
     assert_eq!(result[0].column, 6); // <b> tag
-    assert_eq!(result[1].line, 1);
-    assert_eq!(result[1].column, 13); // </b> tag
 }
 
 #[test]
@@ -79,12 +77,10 @@ fn test_multiple_tags() {
     let content = "<div><p>Nested</p></div>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Reports one warning per HTML tag (true markdownlint compatibility)
-    assert_eq!(result.len(), 4); // <div>, <p>, </p>, </div>
+    // Only reports opening tags (only opening tags)
+    assert_eq!(result.len(), 2); // Only <div> and <p>
     assert_eq!(result[0].column, 1); // <div> tag
     assert_eq!(result[1].column, 6); // <p> tag
-    assert_eq!(result[2].column, 15); // </p> tag
-    assert_eq!(result[3].column, 19); // </div> tag
 }
 
 #[test]
@@ -93,10 +89,9 @@ fn test_attributes() {
     let content = "<div class=\"test\" id=\"main\">Content</div>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Reports one warning per HTML tag (true markdownlint compatibility)
-    assert_eq!(result.len(), 2); // <div> and </div>
+    // Only reports opening tags (only opening tags)
+    assert_eq!(result.len(), 1); // Only <div>
     assert_eq!(result[0].column, 1); // <div> tag
-    assert_eq!(result[1].column, 36); // </div> tag
 }
 
 #[test]
@@ -105,13 +100,11 @@ fn test_mixed_content() {
     let content = "# Heading\n\n<div>HTML content</div>\n\n* List item\n\n<span>More HTML</span>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Reports one warning per HTML tag (true markdownlint compatibility)
-    // Two lines with HTML: line 3 and line 7, each with 2 tags
-    assert_eq!(result.len(), 4); // <div>, </div>, <span>, </span>
+    // Only reports opening tags (only opening tags)
+    // Two lines with HTML: line 3 and line 7
+    assert_eq!(result.len(), 2); // Only <div> and <span>
     assert_eq!(result[0].line, 3); // <div> line
-    assert_eq!(result[1].line, 3); // </div> line
-    assert_eq!(result[2].line, 7); // <span> line
-    assert_eq!(result[3].line, 7); // </span> line
+    assert_eq!(result[1].line, 7); // <span> line
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content);
 }
@@ -131,8 +124,8 @@ fn test_multiline_html() {
     let content = "<div>\nMultiline\ncontent\n</div>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Now detects both opening and closing tags (improved behavior)
-    assert_eq!(result.len(), 2);
+    // Only detects opening tags (only opening tags)
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
@@ -158,13 +151,13 @@ fn test_complex_code_block_patterns() {
     let content = "```\n<div>Starts with code</div>\n```\nText with <b>bold</b>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // <b> and </b> outside code block
+    assert_eq!(result.len(), 1); // Only <b> outside code block
 
     // Test with code block at end of document
     let content = "Text with <i>italic</i>\n```\n<div>Ends with code</div>\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // <i> and </i> outside code block
+    assert_eq!(result.len(), 1); // Only <i> outside code block
 
     // Test adjacent code blocks
     let content = "```\n<div>Block 1</div>\n```\n```\n<span>Block 2</span>\n```";
@@ -181,13 +174,13 @@ fn test_code_span_binary_search() {
     let content = "<span>`code`</span>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // <span> and </span> outside code span
+    assert_eq!(result.len(), 1); // Only <span> outside code span
 
     // Test HTML tag immediately after a code span
     let content = "`code`<div>text</div>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // <div> and </div> outside code span
+    assert_eq!(result.len(), 1); // Only <div> outside code span
 
     // Test HTML tag exactly at position boundaries
     let content = "Text `<div>` more text";
@@ -199,7 +192,7 @@ fn test_code_span_binary_search() {
     let content = "`1` `2` `3` `4` `5` `6` `7` `8` `9` `10` `11` `12` <span>text</span>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // <span> and </span> outside code spans
+    assert_eq!(result.len(), 1); // Only <span> outside code spans
 }
 
 #[test]
@@ -276,8 +269,8 @@ fn test_mixed_urls_and_html() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should only flag the real HTML tags, not the URLs
-    assert_eq!(result.len(), 4); // <strong>, </strong>, <em>, </em>
+    // Should only flag the real HTML tags (opening tags only), not the URLs
+    assert_eq!(result.len(), 2); // Only <strong> and <em> opening tags
 
     // Verify the flagged tags are the HTML ones
     let flagged_content: Vec<String> = result
@@ -291,9 +284,7 @@ fn test_mixed_urls_and_html() {
         .collect();
 
     assert!(flagged_content.contains(&"<strong>".to_string()));
-    assert!(flagged_content.contains(&"</strong>".to_string()));
     assert!(flagged_content.contains(&"<em>".to_string()));
-    assert!(flagged_content.contains(&"</em>".to_string()));
 
     // Verify URLs are not in the flagged content
     assert!(!flagged_content.iter().any(|tag| tag.contains("https://")));
@@ -312,14 +303,14 @@ fn test_edge_case_urls() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag <notaurl>, <https>, and <div> but not the real URL
-    assert_eq!(result.len(), 3);
+    // Should flag <notaurl>, <https>, and <div> but not the real URL <https://example.com>
+    assert_eq!(result.len(), 3); // Only opening tags
 
     let flagged_positions: Vec<(usize, usize)> = result.iter().map(|w| (w.line, w.column)).collect();
 
     // <notaurl> should be flagged (line 1)
     assert!(flagged_positions.contains(&(1, 12)));
-    // <https> should be flagged (line 3) - not a valid URL
+    // <https> should be flagged (line 3) - not a valid URL, looks like HTML tag
     assert!(flagged_positions.contains(&(3, 11)));
     // <div> should be flagged (line 4)
     assert!(flagged_positions.contains(&(4, 11)));
@@ -344,8 +335,8 @@ More regular HTML: <span>should be flagged</span>"#;
     let rule = MD033NoInlineHtml::default();
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should only flag the regular HTML, not the indented HTML
-    assert_eq!(warnings.len(), 4); // <div>, </div>, <span>, </span>
+    // Should only flag the regular HTML (opening tags only), not the indented HTML
+    assert_eq!(warnings.len(), 2); // <div>, <span> (opening tags only)
 
     // Verify the flagged lines are only the regular HTML
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
@@ -524,11 +515,11 @@ Regular: <em>flagged</em>"#;
 
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
-    // Should flag only regular HTML, not indented HTML
-    assert_eq!(warnings.len(), 5); // 2 tags on line 3, 1 on line 14, 2 on line 24
-    assert!(flagged_lines.contains(&3)); // Regular div (opening and closing)
+    // Should flag only regular HTML (opening tags only), not indented HTML
+    assert_eq!(warnings.len(), 3); // 1 tag on line 3, 1 on line 14, 1 on line 24 (opening tags only)
+    assert!(flagged_lines.contains(&3)); // Regular div (opening tag)
     assert!(flagged_lines.contains(&14)); // Self-closing br
-    assert!(flagged_lines.contains(&24)); // Regular em (opening and closing)
+    assert!(flagged_lines.contains(&24)); // Regular em (opening tag)
 }
 
 #[test]
@@ -643,5 +634,5 @@ Back to regular: <em>flagged</em>"#;
     assert!(!flagged_lines.contains(&17)); // fenced <p>
 
     // Verify we have the expected number of warnings
-    assert_eq!(warnings.len(), 8); // 4 opening + 4 closing tags
+    assert_eq!(warnings.len(), 4); // 4 opening tags
 }

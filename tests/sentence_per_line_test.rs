@@ -109,8 +109,9 @@ fn test_multiple_paragraphs() {
 }
 
 #[test]
-fn test_issue_124_paragraph_with_backticks() {
-    // Test case from issue #124: paragraph with backticks not being detected
+fn test_multi_sentence_paragraph_with_backticks() {
+    // Paragraph with multiple sentences spanning multiple lines, containing inline code
+    // Reported in issue #124
     let rule = create_sentence_per_line_rule();
     let content = "If you are sure that all data structures exposed in a `PyModule` are\n\
                    thread-safe, then pass `gil_used = false` as a parameter to the\n\
@@ -127,18 +128,75 @@ fn test_issue_124_paragraph_with_backticks() {
 }
 
 #[test]
-fn test_issue_124_second_paragraph() {
-    // Test case from issue #124: second example paragraph
-    let rule = create_sentence_per_line_rule();
+fn test_single_sentence_exceeds_line_length() {
+    // Single sentence spanning multiple lines that exceeds line-length constraint
+    // This sentence is 85 chars when joined, so with line-length=80 it should NOT be reflowed
+    // Reported in issue #124
+    let rule = create_sentence_per_line_rule(); // Uses line_length: 80
     let content = "This document provides advice for porting Rust code using PyO3 to run under\n\
                    free-threaded Python.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // This is a single sentence on multiple lines - should NOT be detected
-    // (single long sentences don't violate sentence-per-line, only multiple sentences do)
+    // Single sentence spanning multiple lines: should NOT be reflowed if it exceeds line-length
     assert!(
         result.is_empty(),
-        "Single sentence on multiple lines should not trigger sentence-per-line warning"
+        "Single sentence exceeding line-length should not be reflowed"
     );
+}
+
+#[test]
+fn test_single_sentence_with_no_line_length_constraint() {
+    // Single sentence spanning multiple lines with line-length=0 (no constraint)
+    // Should be joined into one line since there's no line-length limitation
+    // Reported in issue #124
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: 0, // No line-length constraint
+        code_blocks: false,
+        tables: false,
+        headings: false,
+        paragraphs: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+    });
+    let content = "This document provides advice for porting Rust code using PyO3 to run under\n\
+                   free-threaded Python.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // With line-length=0, single sentences spanning multiple lines should be joined
+    assert!(
+        !result.is_empty(),
+        "Single sentence should be joined when line-length=0"
+    );
+    assert_eq!(result[0].message, "Line contains multiple sentences");
+
+    // Verify the fix joins the sentence
+    assert!(result[0].fix.is_some());
+    let fix = result[0].fix.as_ref().unwrap();
+    assert_eq!(
+        fix.replacement.trim(),
+        "This document provides advice for porting Rust code using PyO3 to run under free-threaded Python."
+    );
+}
+
+#[test]
+fn test_single_sentence_fits_within_line_length() {
+    // Single sentence spanning multiple lines that DOES fit within line-length should be joined
+    let rule = create_sentence_per_line_rule(); // Uses line_length: 80
+    let content = "This is a short sentence that\nspans two lines.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // This sentence is 46 chars, fits in 80, so should be joined
+    assert!(
+        !result.is_empty(),
+        "Single sentence spanning multiple lines should be joined if it fits within line-length"
+    );
+
+    // Verify the fix joins the sentence
+    assert!(result[0].fix.is_some());
+    let fix = result[0].fix.as_ref().unwrap();
+    assert_eq!(fix.replacement.trim(), "This is a short sentence that spans two lines.");
 }

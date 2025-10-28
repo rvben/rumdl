@@ -55,9 +55,12 @@ fn test_md033_code_span_with_real_html_nearby() {
     let content = "`<code>` but <div>real html</div>";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2, "Should only flag real HTML, not code spans");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should only flag real HTML (opening tag), not code spans"
+    );
     assert_eq!(result[0].column, 14); // <div>
-    assert_eq!(result[1].column, 28); // </div>
 }
 
 #[test]
@@ -87,7 +90,11 @@ fn test_md033_mixed_backticks_and_html() {
     let content = "Use `<div>` for blocks, but avoid <span>raw html</span> outside code";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2, "Should flag only HTML outside code spans");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag only HTML outside code spans (opening tag)"
+    );
     assert!(
         result.iter().all(|w| w.column >= 35),
         "All warnings should be at or after position 35"
@@ -100,8 +107,12 @@ fn test_md033_unclosed_backticks() {
     let content = "Start `<tag> but no closing backtick <div>test</div>";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Unclosed backticks don't create code spans, so both should be flagged
-    assert_eq!(result.len(), 3, "Unclosed backticks don't protect angle brackets");
+    // Unclosed backticks don't create code spans, so both opening tags should be flagged
+    assert_eq!(
+        result.len(),
+        2,
+        "Unclosed backticks don't protect angle brackets (opening tags only)"
+    );
 }
 
 #[test]
@@ -130,10 +141,14 @@ fn test_md033_multiline_with_code_spans() {
     let result = rule.check(&ctx).unwrap();
     // HTML block on line 2 breaks paragraph parsing, so line 3 code span isn't detected
     // This is correct CommonMark behavior - <div> starts an HTML block
-    assert_eq!(result.len(), 3, "Should flag HTML on line 2 and line 3");
+    // Only opening tags are reported
+    assert_eq!(
+        result.len(),
+        2,
+        "Should flag HTML on line 2 and line 3 (opening tags only)"
+    );
     assert_eq!(result[0].line, 2); // <div>
-    assert_eq!(result[1].line, 2); // </div>
-    assert_eq!(result[2].line, 3); // <more> (not in code span due to HTML block)
+    assert_eq!(result[1].line, 3); // <more> (not in code span due to HTML block)
 }
 
 #[test]
