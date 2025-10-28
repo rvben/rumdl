@@ -87,7 +87,6 @@ fn is_sentence_boundary(text: &str, pos: usize) -> bool {
             return false;
         }
     }
-
     true
 }
 
@@ -107,7 +106,6 @@ pub fn split_into_sentences(text: &str) -> Vec<String> {
                 chars.next();
                 pos += 1;
             }
-
             sentences.push(current_sentence.trim().to_string());
             current_sentence.clear();
         }
@@ -119,7 +117,6 @@ pub fn split_into_sentences(text: &str) -> Vec<String> {
     if !current_sentence.trim().is_empty() {
         sentences.push(current_sentence.trim().to_string());
     }
-
     sentences
 }
 
@@ -714,7 +711,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current_line = String::new();
 
-    for element in elements {
+    for element in elements.iter() {
         let element_str = format!("{element}");
 
         // For text elements, split into sentences
@@ -728,11 +725,60 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
                 for (i, sentence) in sentences.iter().enumerate() {
                     if i == 0 {
                         // First sentence might continue from previous elements
-                        lines.push(sentence.to_string());
+                        // But check if it ends with an abbreviation
+                        let trimmed = sentence.trim();
+                        let ends_with_sentence_punct =
+                            trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+                        let ends_with_abbreviation = if ends_with_sentence_punct {
+                            // Strip the final punctuation before checking abbreviations
+                            let without_punct = trimmed
+                                .trim_end_matches('.')
+                                .trim_end_matches('!')
+                                .trim_end_matches('?');
+                            let ignored_words = [
+                                "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr",
+                                "Jr",
+                            ];
+                            ignored_words
+                                .iter()
+                                .any(|word| without_punct.to_lowercase().ends_with(&word.to_lowercase()))
+                        } else {
+                            false
+                        };
+
+                        if ends_with_abbreviation {
+                            // Don't emit yet - this sentence ends with abbreviation, continue accumulating
+                            current_line = sentence.to_string();
+                        } else {
+                            // Normal case - emit the first sentence
+                            lines.push(sentence.to_string());
+                            current_line.clear();
+                        }
                     } else if i == sentences.len() - 1 {
                         // Last sentence: check if it's complete or incomplete
                         let trimmed = sentence.trim();
-                        if trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?') {
+                        let ends_with_sentence_punct =
+                            trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+
+                        // Check if it ends with an abbreviation
+                        let ends_with_abbreviation = if ends_with_sentence_punct {
+                            // Strip the final punctuation before checking abbreviations
+                            let without_punct = trimmed
+                                .trim_end_matches('.')
+                                .trim_end_matches('!')
+                                .trim_end_matches('?');
+                            let ignored_words = [
+                                "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr",
+                                "Jr",
+                            ];
+                            ignored_words
+                                .iter()
+                                .any(|word| without_punct.to_lowercase().ends_with(&word.to_lowercase()))
+                        } else {
+                            false
+                        };
+
+                        if ends_with_sentence_punct && !ends_with_abbreviation {
                             // Complete sentence - emit it immediately
                             lines.push(sentence.to_string());
                             current_line.clear();
@@ -767,7 +813,6 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
     if !current_line.is_empty() {
         lines.push(current_line.trim().to_string());
     }
-
     lines
 }
 
@@ -1394,9 +1439,6 @@ mod tests {
 
         let result = reflow_markdown(input, &options);
 
-        eprintln!("Input: {input:?}");
-        eprintln!("Result: {result:?}");
-
         // Should not contain 3+ consecutive spaces (which would indicate
         // trailing whitespace became mid-line whitespace)
         assert!(
@@ -1639,13 +1681,6 @@ mod tests {
         let text = "If you are sure that all data structures exposed in a `PyModule` are thread-safe, then pass `gil_used = false` as a parameter to the `pymodule` procedural macro declaring the module or call `PyModule::gil_used` on a `PyModule` instance.  For example:";
 
         let sentences = split_into_sentences(text);
-
-        // Debug output
-        eprintln!("Text: {text}");
-        eprintln!("Number of sentences: {}", sentences.len());
-        for (i, s) in sentences.iter().enumerate() {
-            eprintln!("Sentence {}: '{s}'", i + 1);
-        }
 
         // This should detect 2 sentences:
         // 1. "If you are sure ... on a `PyModule` instance."
@@ -1905,6 +1940,55 @@ mod tests {
         assert_eq!(
             result, expected,
             "Bullet lists should preserve markers and indent continuations with 2 spaces.\nExpected:\n{expected}\nGot:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_ie_abbreviation_split_debug() {
+        let input = "This results in extracting directly from the input object, i.e. `obj.extract()`, rather than trying to access an item or attribute.";
+
+        let options = ReflowOptions {
+            line_length: 80,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        let result = reflow_line(input, &options);
+
+        // Should be 1 sentence, not split after "i.e."
+        assert_eq!(result.len(), 1, "Should not split after i.e. abbreviation");
+    }
+
+    #[test]
+    fn test_ie_abbreviation_paragraph() {
+        // Test the full paragraph from the file that's causing the issue
+        let input = "The `pyo3(transparent)` attribute can be used on structs with exactly one field.\nThis results in extracting directly from the input object, i.e. `obj.extract()`, rather than trying to access an item or attribute.\nThis behaviour is enabled per default for newtype structs and tuple-variants with a single field.";
+
+        let options = ReflowOptions {
+            line_length: 80,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        let result = reflow_markdown(input, &options);
+
+        // Should be 3 sentences, not 4 (shouldn't split after "i.e.")
+        let line_count = result.lines().count();
+        assert_eq!(line_count, 3, "Should have 3 sentences, not {line_count}");
+
+        // Verify the second line contains the full sentence
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() >= 2, "Should have at least 2 lines");
+        assert!(lines[1].contains("i.e."), "Second line should contain 'i.e.'");
+        assert!(
+            lines[1].contains("`obj.extract()`"),
+            "Second line should contain the code span"
+        );
+        assert!(
+            lines[1].contains("attribute."),
+            "Second line should end with 'attribute.'"
         );
     }
 }
