@@ -600,7 +600,7 @@ impl MD013LineLength {
                 let indent_size = actual_indent.unwrap_or(marker_len);
                 let expected_indent = " ".repeat(indent_size);
 
-                // Split list_item_lines into blocks (paragraphs, code blocks, nested lists, and semantic lines)
+                // Split list_item_lines into blocks (paragraphs, code blocks, nested lists, semantic lines, and HTML blocks)
                 #[derive(Clone)]
                 enum Block {
                     Paragraph(Vec<String>),
@@ -610,16 +610,113 @@ impl MD013LineLength {
                     },
                     NestedList(Vec<(String, usize)>), // (content, indent) pairs for nested list items
                     SemanticLine(String), // Semantic markers like NOTE:, WARNING: that stay on their own line
+                    Html {
+                        lines: Vec<String>,        // HTML content preserved exactly as-is
+                        has_preceding_blank: bool, // Whether there was a blank line before this block
+                    },
+                }
+
+                // HTML tag detection helpers
+                // Block-level HTML tags that should trigger HTML block detection
+                const BLOCK_LEVEL_TAGS: &[&str] = &[
+                    "div",
+                    "details",
+                    "summary",
+                    "section",
+                    "article",
+                    "header",
+                    "footer",
+                    "nav",
+                    "aside",
+                    "main",
+                    "table",
+                    "thead",
+                    "tbody",
+                    "tfoot",
+                    "tr",
+                    "td",
+                    "th",
+                    "ul",
+                    "ol",
+                    "li",
+                    "dl",
+                    "dt",
+                    "dd",
+                    "pre",
+                    "blockquote",
+                    "figure",
+                    "figcaption",
+                    "form",
+                    "fieldset",
+                    "legend",
+                    "hr",
+                    "p",
+                    "h1",
+                    "h2",
+                    "h3",
+                    "h4",
+                    "h5",
+                    "h6",
+                    "style",
+                    "script",
+                    "noscript",
+                ];
+
+                fn is_block_html_opening_tag(line: &str) -> Option<String> {
+                    let trimmed = line.trim();
+
+                    // Check for HTML comments
+                    if trimmed.starts_with("<!--") {
+                        return Some("!--".to_string());
+                    }
+
+                    // Check for opening tags
+                    if trimmed.starts_with('<') && !trimmed.starts_with("</") && !trimmed.starts_with("<!") {
+                        // Extract tag name from <tagname ...> or <tagname>
+                        let after_bracket = &trimmed[1..];
+                        if let Some(end) = after_bracket.find(|c: char| c.is_whitespace() || c == '>' || c == '/') {
+                            let tag_name = after_bracket[..end].to_lowercase();
+
+                            // Only treat as block if it's a known block-level tag
+                            if BLOCK_LEVEL_TAGS.contains(&tag_name.as_str()) {
+                                return Some(tag_name);
+                            }
+                        }
+                    }
+                    None
+                }
+
+                fn is_html_closing_tag(line: &str, tag_name: &str) -> bool {
+                    let trimmed = line.trim();
+
+                    // Special handling for HTML comments
+                    if tag_name == "!--" {
+                        return trimmed.ends_with("-->");
+                    }
+
+                    // Check for closing tags: </tagname> or </tagname ...>
+                    trimmed.starts_with(&format!("</{tag_name}>"))
+                        || trimmed.starts_with(&format!("</{tag_name}  "))
+                        || (trimmed.starts_with("</") && trimmed[2..].trim_start().starts_with(tag_name))
+                }
+
+                fn is_self_closing_tag(line: &str) -> bool {
+                    let trimmed = line.trim();
+                    trimmed.ends_with("/>")
                 }
 
                 let mut blocks: Vec<Block> = Vec::new();
                 let mut current_paragraph: Vec<String> = Vec::new();
                 let mut current_code_block: Vec<(String, usize)> = Vec::new();
                 let mut current_nested_list: Vec<(String, usize)> = Vec::new();
+                let mut current_html_block: Vec<String> = Vec::new();
+                let mut html_tag_stack: Vec<String> = Vec::new();
                 let mut in_code = false;
                 let mut in_nested_list = false;
+                let mut in_html_block = false;
                 let mut had_preceding_blank = false; // Track if we just saw an empty line
                 let mut code_block_has_preceding_blank = false; // Track blank before current code block
+                let mut html_block_has_preceding_blank = false; // Track blank before current HTML block
 
                 for line in &list_item_lines {
                     match line {
@@ -628,6 +725,9 @@ impl MD013LineLength {
                                 current_code_block.push((String::new(), 0));
                             } else if in_nested_list {
                                 current_nested_list.push((String::new(), 0));
+                            } else if in_html_block {
+                                // Allow blank lines inside HTML blocks
+                                current_html_block.push(String::new());
                             } else if !current_paragraph.is_empty() {
                                 blocks.push(Block::Paragraph(current_paragraph.clone()));
                                 current_paragraph.clear();
@@ -636,22 +736,90 @@ impl MD013LineLength {
                             had_preceding_blank = true;
                         }
                         LineType::Content(content) => {
-                            if in_code {
-                                // Switching from code to content
-                                blocks.push(Block::Code {
-                                    lines: current_code_block.clone(),
-                                    has_preceding_blank: code_block_has_preceding_blank,
-                                });
-                                current_code_block.clear();
-                                in_code = false;
-                            } else if in_nested_list {
-                                // Switching from nested list to content
-                                blocks.push(Block::NestedList(current_nested_list.clone()));
-                                current_nested_list.clear();
-                                in_nested_list = false;
+                            // Check if we're currently in an HTML block
+                            if in_html_block {
+                                current_html_block.push(content.clone());
+
+                                // Check if this line closes any open HTML tags
+                                if let Some(last_tag) = html_tag_stack.last() {
+                                    if is_html_closing_tag(content, last_tag) {
+                                        html_tag_stack.pop();
+
+                                        // If stack is empty, HTML block is complete
+                                        if html_tag_stack.is_empty() {
+                                            blocks.push(Block::Html {
+                                                lines: current_html_block.clone(),
+                                                has_preceding_blank: html_block_has_preceding_blank,
+                                            });
+                                            current_html_block.clear();
+                                            in_html_block = false;
+                                        }
+                                    } else if let Some(new_tag) = is_block_html_opening_tag(content) {
+                                        // Nested opening tag within HTML block
+                                        if !is_self_closing_tag(content) {
+                                            html_tag_stack.push(new_tag);
+                                        }
+                                    }
+                                }
+                                had_preceding_blank = false;
+                            } else {
+                                // Not in HTML block - check if this line starts one
+                                if let Some(tag_name) = is_block_html_opening_tag(content) {
+                                    // Flush current paragraph before starting HTML block
+                                    if in_code {
+                                        blocks.push(Block::Code {
+                                            lines: current_code_block.clone(),
+                                            has_preceding_blank: code_block_has_preceding_blank,
+                                        });
+                                        current_code_block.clear();
+                                        in_code = false;
+                                    } else if in_nested_list {
+                                        blocks.push(Block::NestedList(current_nested_list.clone()));
+                                        current_nested_list.clear();
+                                        in_nested_list = false;
+                                    } else if !current_paragraph.is_empty() {
+                                        blocks.push(Block::Paragraph(current_paragraph.clone()));
+                                        current_paragraph.clear();
+                                    }
+
+                                    // Start new HTML block
+                                    in_html_block = true;
+                                    html_block_has_preceding_blank = had_preceding_blank;
+                                    current_html_block.push(content.clone());
+
+                                    // Check if it's self-closing or needs a closing tag
+                                    if is_self_closing_tag(content) {
+                                        // Self-closing tag - complete the HTML block immediately
+                                        blocks.push(Block::Html {
+                                            lines: current_html_block.clone(),
+                                            has_preceding_blank: html_block_has_preceding_blank,
+                                        });
+                                        current_html_block.clear();
+                                        in_html_block = false;
+                                    } else {
+                                        // Regular opening tag - push to stack
+                                        html_tag_stack.push(tag_name);
+                                    }
+                                } else {
+                                    // Regular content line - add to paragraph
+                                    if in_code {
+                                        // Switching from code to content
+                                        blocks.push(Block::Code {
+                                            lines: current_code_block.clone(),
+                                            has_preceding_blank: code_block_has_preceding_blank,
+                                        });
+                                        current_code_block.clear();
+                                        in_code = false;
+                                    } else if in_nested_list {
+                                        // Switching from nested list to content
+                                        blocks.push(Block::NestedList(current_nested_list.clone()));
+                                        current_nested_list.clear();
+                                        in_nested_list = false;
+                                    }
+                                    current_paragraph.push(content.clone());
+                                }
+                                had_preceding_blank = false; // Reset after content
                             }
-                            current_paragraph.push(content.clone());
-                            had_preceding_blank = false; // Reset after content
                         }
                         LineType::CodeBlock(content, indent) => {
                             if in_nested_list {
@@ -659,6 +827,15 @@ impl MD013LineLength {
                                 blocks.push(Block::NestedList(current_nested_list.clone()));
                                 current_nested_list.clear();
                                 in_nested_list = false;
+                            } else if in_html_block {
+                                // Switching from HTML block to code (shouldn't happen normally, but handle it)
+                                blocks.push(Block::Html {
+                                    lines: current_html_block.clone(),
+                                    has_preceding_blank: html_block_has_preceding_blank,
+                                });
+                                current_html_block.clear();
+                                html_tag_stack.clear();
+                                in_html_block = false;
                             }
                             if !in_code {
                                 // Switching from content to code
@@ -682,6 +859,15 @@ impl MD013LineLength {
                                 });
                                 current_code_block.clear();
                                 in_code = false;
+                            } else if in_html_block {
+                                // Switching from HTML block to nested list (shouldn't happen normally, but handle it)
+                                blocks.push(Block::Html {
+                                    lines: current_html_block.clone(),
+                                    has_preceding_blank: html_block_has_preceding_blank,
+                                });
+                                current_html_block.clear();
+                                html_tag_stack.clear();
+                                in_html_block = false;
                             }
                             if !in_nested_list {
                                 // Switching from content to nested list
@@ -707,6 +893,14 @@ impl MD013LineLength {
                                 blocks.push(Block::NestedList(current_nested_list.clone()));
                                 current_nested_list.clear();
                                 in_nested_list = false;
+                            } else if in_html_block {
+                                blocks.push(Block::Html {
+                                    lines: current_html_block.clone(),
+                                    has_preceding_blank: html_block_has_preceding_blank,
+                                });
+                                current_html_block.clear();
+                                html_tag_stack.clear();
+                                in_html_block = false;
                             } else if !current_paragraph.is_empty() {
                                 blocks.push(Block::Paragraph(current_paragraph.clone()));
                                 current_paragraph.clear();
@@ -726,6 +920,13 @@ impl MD013LineLength {
                     });
                 } else if in_nested_list && !current_nested_list.is_empty() {
                     blocks.push(Block::NestedList(current_nested_list));
+                } else if in_html_block && !current_html_block.is_empty() {
+                    // If we still have an unclosed HTML block, push it anyway
+                    // (malformed HTML - missing closing tag)
+                    blocks.push(Block::Html {
+                        lines: current_html_block,
+                        has_preceding_blank: html_block_has_preceding_blank,
+                    });
                 } else if !current_paragraph.is_empty() {
                     blocks.push(Block::Paragraph(current_paragraph));
                 }
@@ -802,15 +1003,6 @@ impl MD013LineLength {
                 };
 
                 if needs_reflow {
-                    // Check if list item contains HTML tags
-                    let has_html_tags =
-                        (list_start..i).any(|line_idx| lines[line_idx].contains('<') && lines[line_idx].contains('>'));
-
-                    // Skip auto-fix for list items with HTML - joining with spaces breaks structure
-                    if has_html_tags {
-                        continue;
-                    }
-
                     let start_range = line_index.whole_line_range(list_start + 1);
                     let end_line = i - 1;
                     let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
@@ -997,6 +1189,44 @@ impl MD013LineLength {
                                     let next_block = &blocks[block_idx + 1];
                                     let should_add_blank = match next_block {
                                         Block::Code {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
+                                        _ => true, // For all other blocks, add blank line
+                                    };
+                                    if should_add_blank {
+                                        result.push(String::new());
+                                    }
+                                }
+                            }
+                            Block::Html {
+                                lines: html_lines,
+                                has_preceding_blank: _,
+                            } => {
+                                // Preserve HTML blocks exactly as-is with original indentation
+                                // NOTE: Blank line before HTML block is handled by the previous block
+
+                                for (idx, line) in html_lines.iter().enumerate() {
+                                    if is_first_block && idx == 0 {
+                                        // First line of first block gets marker
+                                        result.push(format!("{marker}{line}"));
+                                        is_first_block = false;
+                                    } else if line.is_empty() {
+                                        // Preserve blank lines inside HTML blocks
+                                        result.push(String::new());
+                                    } else {
+                                        // Preserve lines with their original content (already includes indentation)
+                                        result.push(format!("{expected_indent}{line}"));
+                                    }
+                                }
+
+                                // Add blank line after HTML block if there's a next block
+                                if block_idx < blocks.len() - 1 {
+                                    let next_block = &blocks[block_idx + 1];
+                                    let should_add_blank = match next_block {
+                                        Block::Code {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
+                                        Block::Html {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
                                         _ => true, // For all other blocks, add blank line
