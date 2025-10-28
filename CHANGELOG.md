@@ -7,6 +7,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.168] - 2025-10-28
+
+### Added
+
+- **CLI: Support for Quarto (.qmd) and RMarkdown (.rmd/.Rmd) files**
+  - Added support for `.qmd` (Quarto), `.rmd` and `.Rmd` (RMarkdown) file extensions
+  - Enables markdown linting for data science and scientific documentation workflows
+  - Particularly useful for Jupyter-based publishing and reproducible research documents
+
+- **LSP: will_save_wait_until for proper auto-fix on save**
+  - Implemented LSP `textDocument/willSaveWaitUntil` capability
+  - Provides proper auto-fix on save support in compatible editors
+  - More reliable than `textDocument/didSave` approach
+  - Ensures fixes are applied before file is actually saved to disk
+
+- **MD033: LSP Quick Fix to remove HTML tags while keeping content**
+  - New code action removes HTML opening and closing tags while preserving inner content
+  - Helps convert inline HTML to plain text when needed
+  - Available through editor Quick Fix menu (Ctrl+. or Cmd+.)
+
+### Fixed
+
+- **MD013: Skip auto-fix for list items containing HTML tags**
+  - Prevents broken auto-fix when HTML tags are present in list items
+  - HTML structure (indentation, tag hierarchy) is now preserved
+  - Errors are still reported but no destructive fix is applied
+  - Pragmatic solution until full HTML-aware reflow is implemented
+  - Fixes issues where tags like `</details>` were split or indentation was lost
+
+- **MD013: Fix incorrect sentence splitting after abbreviations in sentence-per-line mode**
+  - No longer incorrectly splits sentences after common abbreviations (e.g., etc., i.e., Dr., Mr.)
+  - Improved sentence detection algorithm for better accuracy
+  - Prevents unwanted line breaks in the middle of sentences
+
+- **MD013: Prevent autolinks from being parsed as HTML tags**
+  - Autolinks like `<https://example.com>` are no longer treated as HTML
+  - Fixes false positives in HTML detection that could skip auto-fix unnecessarily
+  - Properly distinguishes between markdown autolinks and actual HTML tags
+
+- **MD013: Prevent content duplication in sentence-per-line reflow**
+  - Fixed bug where content could be duplicated during paragraph reflow
+  - Ensures each sentence appears exactly once in reflowed output
+  - Improves reliability of auto-fix in sentence-per-line mode
+
+- **MD013: Improve sentence-per-line error messages and highlighting**
+  - Better error messages that clearly indicate sentence-per-line violations
+  - More accurate highlighting of problematic text
+  - Helps users understand what needs to be fixed
+
+- **MD013: Skip template directives at paragraph start in sentence-per-line mode**
+  - Template directives (like `{{ variable }}`) at start of paragraphs no longer cause issues
+  - Prevents false positives in templated markdown files
+  - Improves compatibility with static site generators and template engines
+
+- **MD013: Treat template directives as paragraph boundaries**
+  - Template directives now properly separate paragraphs during reflow
+  - Prevents template syntax from being joined with regular content
+  - Better handling of mixed template and markdown content
+
+- **MD013: Join single-sentence paragraphs in sentence-per-line mode**
+  - Single-sentence paragraphs that span multiple lines are now properly joined
+  - Fixes issues where short paragraphs were incorrectly flagged
+  - Improves consistency of sentence-per-line formatting
+
+- **MD013: Handle multiple spaces and multi-line paragraphs in sentence-per-line mode**
+  - Better handling of paragraphs with inconsistent spacing
+  - Multi-line paragraphs are now correctly reflowed
+  - Fixes edge cases in whitespace handling
+
+- **MD052: Preserve backtick-wrapped patterns with dots in MkDocs mode**
+  - Backtick-wrapped references like `` `[foo.bar]` `` now preserve dots in slugs
+  - Matches MkDocs behavior of treating code-wrapped text literally
+  - Prevents false positives for code examples in documentation
+
+- **MD052: Support Pandoc citations and inline footnotes in RMarkdown/Quarto**
+  - Recognizes Pandoc citation syntax: `[@citation]`, `@citation`, `[-@citation]`
+  - Recognizes inline footnote syntax: `^[footnote text]`
+  - No longer treats these as reference-style links
+  - Essential for academic and scientific writing in RMarkdown and Quarto
+
+- **MD033: Only report opening HTML tags, not closing tags**
+  - MD033 violations now only report the opening tag of an HTML element
+  - Reduces noise in linting output (one violation per element vs two)
+  - Closing tags like `</div>` are no longer separately reported
+  - Makes HTML-related warnings clearer and less redundant
+
+- **MD018: Skip CSS selectors and JS code inside HTML blocks**
+  - CSS selectors like `#slide-1` inside `<style>` tags no longer trigger MD018
+  - JavaScript code inside `<script>` tags is properly ignored
+  - Prevents false positives for Quarto and RMarkdown files with embedded HTML/CSS/JS
+  - Particularly important for interactive documents and custom styling
+
+- **MD012: Enforce exactly 1 newline at EOF and clean LSP logging**
+  - Files now must end with exactly one newline character (not zero, not two)
+  - Aligns with POSIX standard and common editor behavior
+  - Improved LSP logging with less noise
+
+- **CI: Use cargo run instead of release binary in rumdl pre-commit hook**
+  - Pre-commit hooks now use `cargo run` for more reliable execution
+  - Prevents issues with stale release binaries during development
+  - Better integration with cargo workflow
+
+- **Schema: Allow root-level rule sections like [MD013] in config validation**
+  - Configuration schema now correctly allows `[MD013]` style sections
+  - Fixes false validation errors for valid TOML config
+  - Better compatibility with common configuration patterns
+
+### Changed
+
+- **Refactor: Detect HTML blocks before parsing headings**
+  - Reordered LintContext initialization to detect HTML blocks first
+  - Headings are no longer detected inside HTML blocks (like `<style>` or `<script>`)
+  - Architectural improvement that prevents multiple false positives
+  - Benefits MD018 and other heading-related rules
+  - More correct parsing aligned with markdown specifications
+
+- **Refactor: Use filtered_lines() for front-matter handling in MD011 and MD012**
+  - Improved front-matter handling using consistent filtered_lines API
+  - Better code reuse and maintainability
+  - More reliable front-matter detection across rules
+
 ## [0.0.167] - 2025-10-24
 
 ### Added

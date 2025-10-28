@@ -44,6 +44,14 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      - id: cargo-lock-check
+        name: check Cargo.lock is up-to-date
+        entry: cargo check --locked
+        language: system
+        files: ^(Cargo\.(toml|lock)|.*\.rs)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # General file quality checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -98,6 +106,15 @@ repos:
         entry: cargo doc --no-deps --all-features
         language: system
         types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+        verbose: true
+
+      - id: cargo-lock-check-push
+        name: verify Cargo.lock is committed and up-to-date
+        entry: cargo check --locked
+        language: system
+        files: ^(Cargo\.(toml|lock)|.*\.rs)$
         pass_filenames: false
         stages: [pre-push]
         verbose: true
