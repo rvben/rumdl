@@ -1016,7 +1016,19 @@ impl MD013LineLength {
                     if original_text != replacement {
                         // Generate an appropriate message based on why reflow is needed
                         let message = match config.reflow_mode {
-                            ReflowMode::SentencePerLine => "Line contains multiple sentences".to_string(),
+                            ReflowMode::SentencePerLine => {
+                                let num_sentences = split_into_sentences(&combined_content).len();
+                                let num_lines = content_lines.len();
+                                if num_lines == 1 {
+                                    // Single line with multiple sentences
+                                    format!("Line contains {num_sentences} sentences (one sentence per line required)")
+                                } else {
+                                    // Multiple lines - could be split sentences or mixed
+                                    format!(
+                                        "Paragraph should have one sentence per line (found {num_sentences} sentences across {num_lines} lines)"
+                                    )
+                                }
+                            }
                             ReflowMode::Normalize => {
                                 let combined_length = self.calculate_effective_length(&full_line);
                                 if combined_length > config.line_length {
@@ -1207,20 +1219,12 @@ impl MD013LineLength {
                     // Create warning with actual fix
                     // In default mode, report the specific line that violates
                     // In normalize mode, report the whole paragraph
-                    // In sentence-per-line mode, report lines with multiple sentences
+                    // In sentence-per-line mode, report the entire paragraph
                     let (warning_line, warning_end_line) = match config.reflow_mode {
                         ReflowMode::Normalize => (paragraph_start + 1, end_line + 1),
                         ReflowMode::SentencePerLine => {
-                            // Find the first line with multiple sentences
-                            let mut violating_line = paragraph_start;
-                            for (idx, line) in paragraph_lines.iter().enumerate() {
-                                let sentences = split_into_sentences(line);
-                                if sentences.len() > 1 {
-                                    violating_line = paragraph_start + idx;
-                                    break;
-                                }
-                            }
-                            (violating_line + 1, violating_line + 1)
+                            // Highlight the entire paragraph that needs reformatting
+                            (paragraph_start + 1, paragraph_start + paragraph_lines.len())
                         }
                         ReflowMode::Default => {
                             // Find the first line that exceeds the limit
@@ -1242,7 +1246,17 @@ impl MD013LineLength {
                                 "Paragraph could be normalized to use line length of {} characters",
                                 config.line_length
                             ),
-                            ReflowMode::SentencePerLine => "Line contains multiple sentences".to_string(),
+                            ReflowMode::SentencePerLine => {
+                                let num_sentences = split_into_sentences(&paragraph_text).len();
+                                if paragraph_lines.len() == 1 {
+                                    // Single line with multiple sentences
+                                    format!("Line contains {num_sentences} sentences (one sentence per line required)")
+                                } else {
+                                    let num_lines = paragraph_lines.len();
+                                    // Multiple lines - could be split sentences or mixed
+                                    format!("Paragraph should have one sentence per line (found {num_sentences} sentences across {num_lines} lines)")
+                                }
+                            },
                             ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length),
                         },
                         line: warning_line,
@@ -3002,7 +3016,10 @@ with multiple lines."#;
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "Should detect multiple sentences on one line");
-        assert_eq!(result[0].message, "Line contains multiple sentences");
+        assert_eq!(
+            result[0].message,
+            "Line contains 3 sentences (one sentence per line required)"
+        );
     }
 
     #[test]
