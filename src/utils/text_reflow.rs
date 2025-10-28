@@ -719,8 +719,16 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
                         // First sentence might continue from previous elements
                         lines.push(sentence.to_string());
                     } else if i == sentences.len() - 1 {
-                        // Last sentence might continue to next elements
-                        current_line = sentence.to_string();
+                        // Last sentence: check if it's complete or incomplete
+                        let trimmed = sentence.trim();
+                        if trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?') {
+                            // Complete sentence - emit it immediately
+                            lines.push(sentence.to_string());
+                            current_line.clear();
+                        } else {
+                            // Incomplete sentence - save for next iteration
+                            current_line = sentence.to_string();
+                        }
                     } else {
                         // Complete sentences in the middle
                         lines.push(sentence.to_string());

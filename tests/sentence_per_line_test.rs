@@ -25,7 +25,10 @@ fn test_sentence_per_line_detection() {
 
     // Should detect violations on lines with multiple sentences
     assert!(!result.is_empty(), "Should detect multiple sentences on one line");
-    assert_eq!(result[0].message, "Line contains multiple sentences");
+    assert_eq!(
+        result[0].message,
+        "Line contains 3 sentences (one sentence per line required)"
+    );
 }
 
 #[test]
@@ -170,7 +173,10 @@ fn test_single_sentence_with_no_line_length_constraint() {
         !result.is_empty(),
         "Single sentence should be joined when line-length=0"
     );
-    assert_eq!(result[0].message, "Line contains multiple sentences");
+    assert_eq!(
+        result[0].message,
+        "Paragraph should have one sentence per line (found 1 sentences across 2 lines)"
+    );
 
     // Verify the fix joins the sentence
     assert!(result[0].fix.is_some());
