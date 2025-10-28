@@ -802,6 +802,15 @@ impl MD013LineLength {
                 };
 
                 if needs_reflow {
+                    // Check if list item contains HTML tags
+                    let has_html_tags =
+                        (list_start..i).any(|line_idx| lines[line_idx].contains('<') && lines[line_idx].contains('>'));
+
+                    // Skip auto-fix for list items with HTML - joining with spaces breaks structure
+                    if has_html_tags {
+                        continue;
+                    }
+
                     let start_range = line_index.whole_line_range(list_start + 1);
                     let end_line = i - 1;
                     let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
