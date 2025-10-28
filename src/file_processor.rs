@@ -717,8 +717,17 @@ pub fn process_file_inner(
         rules.to_vec()
     };
 
-    // Use the standard lint function with the configured flavor
-    let warnings_result = rumdl_lib::lint(&content, &filtered_rules, verbose, config.markdown_flavor());
+    // Determine flavor: use file extension if config uses Standard, otherwise use config flavor
+    let flavor = if config.markdown_flavor() == rumdl_lib::config::MarkdownFlavor::Standard {
+        // Auto-detect from file extension for .mdx, .qmd, .Rmd files
+        rumdl_lib::config::MarkdownFlavor::from_path(Path::new(file_path))
+    } else {
+        // Use explicitly configured flavor
+        config.markdown_flavor()
+    };
+
+    // Use the standard lint function with the determined flavor
+    let warnings_result = rumdl_lib::lint(&content, &filtered_rules, verbose, flavor);
 
     // Clear the environment variable after processing
     unsafe {

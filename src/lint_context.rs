@@ -88,6 +88,8 @@ pub struct LineInfo {
     pub blockquote: Option<BlockquoteInfo>,
     /// Whether this line is inside a mkdocstrings autodoc block
     pub in_mkdocstrings: bool,
+    /// Whether this line is part of an ESM import/export block (MDX only)
+    pub in_esm_block: bool,
 }
 
 /// Information about a list item
@@ -406,7 +408,11 @@ impl<'a> LintContext<'a> {
         // This ensures HTML content is never considered as markdown
         Self::detect_html_blocks(&mut lines);
 
-        // Now detect headings and blockquotes, which will skip HTML blocks
+        // Detect ESM import/export blocks in MDX files BEFORE heading detection
+        // This ensures ESM blocks are never considered as markdown
+        Self::detect_esm_blocks(&mut lines, flavor);
+
+        // Now detect headings and blockquotes, which will skip HTML blocks and ESM blocks
         Self::detect_headings_and_blockquotes(content, &mut lines, flavor);
 
         // Parse code spans early so we can exclude them from link/image parsing
@@ -477,7 +483,7 @@ impl<'a> LintContext<'a> {
         let mut cache = self.html_tags_cache.lock().unwrap();
 
         if cache.is_none() {
-            let html_tags = Self::parse_html_tags(self.content, &self.lines, &self.code_blocks);
+            let html_tags = Self::parse_html_tags(self.content, &self.lines, &self.code_blocks, self.flavor);
             *cache = Some(Arc::new(html_tags));
         }
 
@@ -1194,6 +1200,7 @@ impl<'a> LintContext<'a> {
                 heading: None,    // Will be populated in second pass for Setext headings
                 blockquote: None, // Will be populated after line creation
                 in_mkdocstrings,
+                in_esm_block: false, // Will be populated after line creation for MDX files
             });
         }
 
@@ -1560,6 +1567,31 @@ impl<'a> LintContext<'a> {
             }
 
             i += 1;
+        }
+    }
+
+    /// Detect ESM import/export blocks in MDX files
+    /// ESM blocks consist of contiguous import/export statements at the top of the file
+    fn detect_esm_blocks(lines: &mut [LineInfo], flavor: MarkdownFlavor) {
+        // Only process MDX files
+        if !flavor.supports_esm_blocks() {
+            return;
+        }
+
+        for line in lines.iter_mut() {
+            // Skip blank lines and comments at the start
+            if line.is_blank || line.in_html_comment {
+                continue;
+            }
+
+            // Check if line starts with import or export
+            let trimmed = line.content.trim_start();
+            if trimmed.starts_with("import ") || trimmed.starts_with("export ") {
+                line.in_esm_block = true;
+            } else {
+                // Once we hit a non-ESM line, we're done with the ESM block
+                break;
+            }
         }
     }
 
@@ -2286,7 +2318,12 @@ impl<'a> LintContext<'a> {
     }
 
     /// Parse HTML tags in the content
-    fn parse_html_tags(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<HtmlTag> {
+    fn parse_html_tags(
+        content: &str,
+        lines: &[LineInfo],
+        code_blocks: &[(usize, usize)],
+        flavor: MarkdownFlavor,
+    ) -> Vec<HtmlTag> {
         lazy_static! {
             static ref HTML_TAG_REGEX: regex::Regex =
                 regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap();
@@ -2305,8 +2342,15 @@ impl<'a> LintContext<'a> {
             }
 
             let is_closing = !cap.get(1).unwrap().as_str().is_empty();
-            let tag_name = cap.get(2).unwrap().as_str().to_lowercase();
+            let tag_name_original = cap.get(2).unwrap().as_str();
+            let tag_name = tag_name_original.to_lowercase();
             let is_self_closing = !cap.get(3).unwrap().as_str().is_empty();
+
+            // Skip JSX components in MDX files (tags starting with uppercase letter)
+            // JSX components like <Chart />, <MyComponent> should not be treated as HTML
+            if flavor.supports_jsx() && tag_name_original.chars().next().is_some_and(|c| c.is_uppercase()) {
+                continue;
+            }
 
             // Find which line this tag is on
             let mut line_num = 1;
@@ -2948,5 +2992,55 @@ mod tests {
         assert_eq!(ctx.offset_to_line_col(3), (2, 2)); // after 'b'
         assert_eq!(ctx.offset_to_line_col(4), (3, 1)); // 'c'
         assert_eq!(ctx.offset_to_line_col(5), (3, 2)); // after 'c'
+    }
+
+    #[test]
+    fn test_mdx_esm_blocks() {
+        let content = r##"import {Chart} from './snowfall.js'
+export const year = 2023
+
+# Last year's snowfall
+
+In {year}, the snowfall was above average.
+It was followed by a warm spring which caused
+flood conditions in many of the nearby rivers.
+
+<Chart color="#fcb32c" year={year} />
+"##;
+
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX);
+
+        // Check that lines 1 and 2 are marked as ESM blocks
+        assert_eq!(ctx.lines.len(), 10);
+        assert!(ctx.lines[0].in_esm_block, "Line 1 (import) should be in_esm_block");
+        assert!(ctx.lines[1].in_esm_block, "Line 2 (export) should be in_esm_block");
+        assert!(!ctx.lines[2].in_esm_block, "Line 3 (blank) should NOT be in_esm_block");
+        assert!(
+            !ctx.lines[3].in_esm_block,
+            "Line 4 (heading) should NOT be in_esm_block"
+        );
+        assert!(!ctx.lines[4].in_esm_block, "Line 5 (blank) should NOT be in_esm_block");
+        assert!(!ctx.lines[5].in_esm_block, "Line 6 (text) should NOT be in_esm_block");
+    }
+
+    #[test]
+    fn test_mdx_esm_blocks_not_detected_in_standard_flavor() {
+        let content = r#"import {Chart} from './snowfall.js'
+export const year = 2023
+
+# Last year's snowfall
+"#;
+
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+        // ESM blocks should NOT be detected in Standard flavor
+        assert!(
+            !ctx.lines[0].in_esm_block,
+            "Line 1 should NOT be in_esm_block in Standard flavor"
+        );
+        assert!(
+            !ctx.lines[1].in_esm_block,
+            "Line 2 should NOT be in_esm_block in Standard flavor"
+        );
     }
 }

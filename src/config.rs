@@ -27,6 +27,12 @@ pub enum MarkdownFlavor {
     /// MkDocs flavor with auto-reference support
     #[serde(rename = "mkdocs")]
     MkDocs,
+    /// MDX flavor with JSX and ESM support (.mdx files)
+    #[serde(rename = "mdx")]
+    MDX,
+    /// Quarto/RMarkdown flavor for scientific publishing (.qmd, .Rmd files)
+    #[serde(rename = "quarto")]
+    Quarto,
     // Future flavors can be added here when they have actual implementation differences
     // Planned: GFM (GitHub Flavored Markdown) - for GitHub-specific features like tables, strikethrough
     // Planned: CommonMark - for strict CommonMark compliance
@@ -37,6 +43,8 @@ impl fmt::Display for MarkdownFlavor {
         match self {
             MarkdownFlavor::Standard => write!(f, "standard"),
             MarkdownFlavor::MkDocs => write!(f, "mkdocs"),
+            MarkdownFlavor::MDX => write!(f, "mdx"),
+            MarkdownFlavor::Quarto => write!(f, "quarto"),
         }
     }
 }
@@ -48,6 +56,8 @@ impl FromStr for MarkdownFlavor {
         match s.to_lowercase().as_str() {
             "standard" | "" | "none" => Ok(MarkdownFlavor::Standard),
             "mkdocs" => Ok(MarkdownFlavor::MkDocs),
+            "mdx" => Ok(MarkdownFlavor::MDX),
+            "quarto" | "qmd" | "rmd" | "rmarkdown" => Ok(MarkdownFlavor::Quarto),
             // Accept but warn about unimplemented flavors
             "gfm" | "github" => {
                 eprintln!("Warning: GFM flavor not yet implemented, using standard");
@@ -58,6 +68,51 @@ impl FromStr for MarkdownFlavor {
                 Ok(MarkdownFlavor::Standard)
             }
             _ => Err(format!("Unknown markdown flavor: {s}")),
+        }
+    }
+}
+
+impl MarkdownFlavor {
+    /// Detect flavor from file extension
+    pub fn from_extension(ext: &str) -> Self {
+        match ext.to_lowercase().as_str() {
+            "mdx" => Self::MDX,
+            "qmd" => Self::Quarto,
+            "rmd" => Self::Quarto,
+            _ => Self::Standard,
+        }
+    }
+
+    /// Detect flavor from file path
+    pub fn from_path(path: &std::path::Path) -> Self {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(Self::from_extension)
+            .unwrap_or(Self::Standard)
+    }
+
+    /// Check if this flavor supports ESM imports/exports (MDX-specific)
+    pub fn supports_esm_blocks(self) -> bool {
+        matches!(self, Self::MDX)
+    }
+
+    /// Check if this flavor supports JSX components (MDX-specific)
+    pub fn supports_jsx(self) -> bool {
+        matches!(self, Self::MDX)
+    }
+
+    /// Check if this flavor supports auto-references (MkDocs-specific)
+    pub fn supports_auto_references(self) -> bool {
+        matches!(self, Self::MkDocs)
+    }
+
+    /// Get a human-readable name for this flavor
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Standard => "Standard",
+            Self::MkDocs => "MkDocs",
+            Self::MDX => "MDX",
+            Self::Quarto => "Quarto",
         }
     }
 }

@@ -409,6 +409,21 @@ impl Rule for MD033NoInlineHtml {
                     continue;
                 }
 
+                // Skip JSX components in MDX files (e.g., <Chart />, <MyComponent>)
+                // JSX components start with uppercase letter
+                if ctx.flavor.supports_jsx() {
+                    // Extract tag name (remove angle brackets, slashes, and attributes)
+                    let tag_clean = tag.trim_start_matches('<').trim_start_matches('/');
+                    let tag_name = tag_clean
+                        .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                        .next()
+                        .unwrap_or("");
+
+                    if tag_name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                        continue;
+                    }
+                }
+
                 // Skip likely programming type annotations
                 if self.is_likely_type_annotation(tag) {
                     continue;

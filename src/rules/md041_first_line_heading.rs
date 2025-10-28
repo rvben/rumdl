@@ -134,6 +134,10 @@ impl Rule for MD041FirstLineHeading {
 
         for (line_num, line_info) in ctx.lines.iter().enumerate().skip(skip_lines) {
             let line_content = line_info.content.trim();
+            // Skip ESM blocks in MDX files (import/export statements)
+            if line_info.in_esm_block {
+                continue;
+            }
             if !line_content.is_empty() && !Self::is_non_content_line(&line_info.content) {
                 first_content_line_num = Some(line_num);
                 break;

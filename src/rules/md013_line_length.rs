@@ -240,6 +240,7 @@ impl Rule for MD013LineLength {
                     || ctx.lines[line_number - 1].blockquote.is_some()
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
+                    || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
                 {
                     continue;
                 }
@@ -252,7 +253,8 @@ impl Rule for MD013LineLength {
                         || table_lines_set.contains(&line_number)
                         || ctx.lines[line_number - 1].blockquote.is_some()
                         || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
-                        || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment);
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block);
 
                     // Skip regular paragraph text when paragraphs = false
                     if !is_special_block {
@@ -429,7 +431,11 @@ impl MD013LineLength {
 
             // Skip special structures
             let should_skip_due_to_line_info = ctx.line_info(line_num).is_some_and(|info| {
-                info.in_code_block || info.in_front_matter || info.in_html_block || info.in_html_comment
+                info.in_code_block
+                    || info.in_front_matter
+                    || info.in_html_block
+                    || info.in_html_comment
+                    || info.in_esm_block
             });
 
             if should_skip_due_to_line_info
@@ -1322,6 +1328,7 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_front_matter)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_html_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_html_comment)
+                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_esm_block)
                     || (next_line_num > 0
                         && next_line_num <= ctx.lines.len()
                         && ctx.lines[next_line_num - 1].blockquote.is_some())
