@@ -433,10 +433,21 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
         }
 
         // Check for HTML tags - <tag> </tag> <tag/>
+        // But exclude autolinks like <https://...> or <mailto:...>
         if let Ok(Some(m)) = HTML_TAG_PATTERN.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "html_tag", m));
+            // Check if this is an autolink (starts with protocol or mailto:)
+            let matched_text = &remaining[m.start()..m.end()];
+            let is_autolink = matched_text.starts_with("<http://")
+                || matched_text.starts_with("<https://")
+                || matched_text.starts_with("<mailto:")
+                || matched_text.starts_with("<ftp://")
+                || matched_text.starts_with("<ftps://");
+
+            if !is_autolink {
+                earliest_match = Some((m.start(), "html_tag", m));
+            }
         }
 
         // Find earliest non-link special characters
