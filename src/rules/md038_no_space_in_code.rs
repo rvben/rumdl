@@ -224,6 +224,16 @@ impl Rule for MD038NoSpaceInCode {
                     continue;
                 }
 
+                // Skip inline R code in Quarto/RMarkdown: `r expression`
+                // This is a legitimate pattern where space is required after 'r'
+                if ctx.flavor == crate::config::MarkdownFlavor::Quarto
+                    && trimmed.starts_with('r')
+                    && trimmed.len() > 1
+                    && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace())
+                {
+                    continue;
+                }
+
                 // Check if this might be part of a nested backtick structure
                 // by looking for other code spans nearby that might indicate nesting
                 if self.is_likely_nested_backticks(ctx, i) {
@@ -499,5 +509,34 @@ mod tests {
         let lenient_rule = MD038NoSpaceInCode::new();
         assert!(lenient_rule.should_allow_spaces(" y ", "y")); // Single char
         assert!(!lenient_rule.should_allow_spaces(" plain text ", "plain text"));
+    }
+
+    #[test]
+    fn test_quarto_inline_r_code() {
+        // Test with strict mode to verify the Quarto-specific R code exception works
+        let rule_strict = MD038NoSpaceInCode::strict();
+
+        // Test inline R code - should NOT trigger warning in Quarto flavor
+        // The key pattern is "r " followed by code
+        let content = r#"The result is `r nchar("test")` which equals 4."#;
+
+        // In strict mode, Quarto flavor should still allow R code
+        let ctx_quarto_strict = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Quarto);
+        let result_quarto_strict = rule_strict.check(&ctx_quarto_strict).unwrap();
+        assert!(
+            result_quarto_strict.is_empty(),
+            "Quarto inline R code should not trigger warnings even in strict mode. Got {} warnings",
+            result_quarto_strict.len()
+        );
+
+        // Test that other code with spaces still gets flagged in Quarto strict mode
+        let content_other = "This has ` plain text ` with spaces.";
+        let ctx_other = crate::lint_context::LintContext::new(content_other, crate::config::MarkdownFlavor::Quarto);
+        let result_other = rule_strict.check(&ctx_other).unwrap();
+        assert_eq!(
+            result_other.len(),
+            1,
+            "Quarto strict mode should still flag non-R code spans with improper spaces"
+        );
     }
 }

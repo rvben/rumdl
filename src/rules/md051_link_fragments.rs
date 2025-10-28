@@ -624,6 +624,13 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Skip Quarto/RMarkdown cross-references (@fig-, @tbl-, @sec-, @eq-, etc.)
+            // These are special cross-reference syntax, not HTML anchors
+            // Format: @prefix-identifier or just @identifier
+            if url.starts_with('@') {
+                continue;
+            }
+
             // Cross-file links are valid if the file exists (not checked here)
             if Self::is_cross_file_link(url) {
                 continue;
@@ -718,4 +725,48 @@ anchor-style = "github"
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_quarto_cross_references() {
+        let rule = MD051LinkFragments::new();
+
+        // Test that Quarto cross-references are skipped
+        let content = r#"# Test Document
+
+## Figures
+
+See [@fig-plot] for the visualization.
+
+More details in [@tbl-results] and [@sec-methods].
+
+The equation [@eq-regression] shows the relationship.
+
+Reference to [@lst-code] for implementation."#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Quarto cross-references (@fig-, @tbl-, @sec-, @eq-) should not trigger MD051 warnings. Got {} warnings",
+            result.len()
+        );
+
+        // Test that normal anchors still work
+        let content_with_anchor = r#"# Test
+
+See [link](#test) for details."#;
+        let ctx_anchor = LintContext::new(content_with_anchor, crate::config::MarkdownFlavor::Quarto);
+        let result_anchor = rule.check(&ctx_anchor).unwrap();
+        assert!(result_anchor.is_empty(), "Valid anchor should not trigger warning");
+
+        // Test that invalid anchors are still flagged
+        let content_invalid = r#"# Test
+
+See [link](#nonexistent) for details."#;
+        let ctx_invalid = LintContext::new(content_invalid, crate::config::MarkdownFlavor::Quarto);
+        let result_invalid = rule.check(&ctx_invalid).unwrap();
+        assert_eq!(result_invalid.len(), 1, "Invalid anchor should still trigger warning");
+    }
+}

@@ -98,7 +98,13 @@ impl Rule for MD040FencedCodeLanguage {
                     let has_title_only =
                         ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
 
-                    if after_fence.is_empty() || has_title_only {
+                    // Check for Quarto/RMarkdown code chunk syntax: {language} or {language, options}
+                    // Examples: ```{python}, ```{r}, ```{r, echo=FALSE}
+                    let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
+                        && after_fence.starts_with('{')
+                        && after_fence.contains('}');
+
+                    if (after_fence.is_empty() || has_title_only) && !has_quarto_syntax {
                         // Calculate precise character range for the entire fence line that needs a language
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
 
@@ -238,7 +244,12 @@ impl Rule for MD040FencedCodeLanguage {
                     let has_title_only =
                         ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
 
-                    if after_fence.is_empty() || has_title_only {
+                    // Check for Quarto/RMarkdown code chunk syntax: {language} or {language, options}
+                    let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
+                        && after_fence.starts_with('{')
+                        && after_fence.contains('}');
+
+                    if (after_fence.is_empty() || has_title_only) && !has_quarto_syntax {
                         // Always preserve the original indentation - adding a language tag should not change indentation
                         original_indent = line_indent;
                         if has_title_only {
@@ -805,5 +816,59 @@ console.log(`template string with backticks`);
         // Empty document should skip
         let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
         assert!(rule.should_skip(&ctx));
+    }
+
+    #[test]
+    fn test_quarto_code_chunk_syntax() {
+        let rule = MD040FencedCodeLanguage;
+
+        // Test Quarto {r} syntax - should NOT trigger warning
+        let content = r#"# Test
+
+```{r}
+x <- 1
+```
+
+```{python}
+x = 1
+```
+
+```{r, echo=FALSE}
+plot(x)
+```
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Quarto code chunks with {{language}} syntax should not trigger warnings"
+        );
+
+        // Test that missing language DOES trigger warning for Quarto
+        let content_no_lang = r#"# Test
+
+```
+code without language
+```
+"#;
+        let ctx = LintContext::new(content_no_lang, crate::config::MarkdownFlavor::Quarto);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Quarto files without language should trigger warning");
+
+        // Test that standard flavor still requires standard language syntax
+        let content_standard = r#"# Test
+
+```{python}
+code
+```
+"#;
+        let ctx = LintContext::new(content_standard, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        // In standard flavor, {python} is considered "after_fence" content, so it's valid
+        // The fence marker is "```" and after_fence is "{python}", which is non-empty
+        assert!(
+            result.is_empty(),
+            "Standard flavor should accept any non-empty after_fence content"
+        );
     }
 }
