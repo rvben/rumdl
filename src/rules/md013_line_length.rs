@@ -1078,6 +1078,7 @@ impl MD013LineLength {
                     || is_list_item(next_trimmed)
                     || is_horizontal_rule(next_trimmed)
                     || (next_trimmed.starts_with('[') && next_line.contains("]:"))
+                    || is_template_directive_only(next_line)
                 {
                     break;
                 }
@@ -1483,9 +1484,41 @@ fn is_list_item(line: &str) -> bool {
     is_numbered_list_item(line)
 }
 
+/// Check if a line contains only template directives (no other content)
+///
+/// Detects common template syntax used in static site generators:
+/// - Handlebars/mdBook/Mustache: `{{...}}`
+/// - Jinja2/Liquid/Jekyll: `{%...%}`
+/// - Hugo shortcodes: `{{<...>}}` or `{{%...%}}`
+///
+/// Template directives are preprocessor directives, not Markdown content,
+/// so they should be treated as paragraph boundaries like HTML comments.
+fn is_template_directive_only(line: &str) -> bool {
+    let trimmed = line.trim();
+
+    // Empty lines are not template directives
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Check for various template syntaxes
+    // Handlebars/mdBook/Mustache: {{...}}
+    if trimmed.starts_with("{{") && trimmed.ends_with("}}") {
+        return true;
+    }
+
+    // Jinja2/Liquid/Jekyll: {%...%}
+    if trimmed.starts_with("{%") && trimmed.ends_with("%}") {
+        return true;
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MarkdownFlavor;
     use crate::lint_context::LintContext;
 
     #[test]
@@ -3673,5 +3706,78 @@ This is a very long line in a code block that exceeds fifty characters.
         assert!(config.paragraphs);
         assert!(config.reflow);
         assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
+    }
+
+    #[test]
+    fn test_template_directives_as_paragraph_boundaries() {
+        // mdBook template tags should act as paragraph boundaries
+        let content = r#"Some regular text here.
+
+{{#tabs }}
+{{#tab name="Tab 1" }}
+
+More text in the tab.
+
+{{#endtab }}
+{{#tabs }}
+
+Final paragraph.
+"#;
+
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let config = MD013Config {
+            line_length: 80,
+            code_blocks: true,
+            tables: true,
+            headings: true,
+            paragraphs: true,
+            strict: false,
+            reflow: true,
+            reflow_mode: ReflowMode::SentencePerLine,
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        let result = rule.check(&ctx).unwrap();
+
+        // Template directives should not be flagged as "multiple sentences"
+        // because they act as paragraph boundaries
+        for warning in &result {
+            assert!(
+                !warning.message.contains("multiple sentences"),
+                "Template directives should not trigger 'multiple sentences' warning. Got: {}",
+                warning.message
+            );
+        }
+    }
+
+    #[test]
+    fn test_template_directive_detection() {
+        // Handlebars/mdBook/Mustache syntax
+        assert!(is_template_directive_only("{{#tabs }}"));
+        assert!(is_template_directive_only("{{#endtab }}"));
+        assert!(is_template_directive_only("{{variable}}"));
+        assert!(is_template_directive_only("  {{#tabs }}  "));
+
+        // Jinja2/Liquid syntax
+        assert!(is_template_directive_only("{% for item in items %}"));
+        assert!(is_template_directive_only("{%endfor%}"));
+        assert!(is_template_directive_only("  {% if condition %}  "));
+
+        // Not template directives
+        assert!(!is_template_directive_only("This is {{variable}} in text"));
+        assert!(!is_template_directive_only("{{incomplete"));
+        assert!(!is_template_directive_only("incomplete}}"));
+        assert!(!is_template_directive_only(""));
+        assert!(!is_template_directive_only("   "));
+        assert!(!is_template_directive_only("Regular text"));
+    }
+
+    #[test]
+    fn test_mixed_content_with_templates() {
+        // Lines with mixed content should NOT be treated as template directives
+        let content = "This has {{variable}} in the middle.";
+        assert!(!is_template_directive_only(content));
+
+        let content2 = "Start {{#something}} end";
+        assert!(!is_template_directive_only(content2));
     }
 }
