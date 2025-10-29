@@ -412,16 +412,17 @@ impl<'a> LintContext<'a> {
         // This ensures ESM blocks are never considered as markdown
         Self::detect_esm_blocks(&mut lines, flavor);
 
+        // Pre-compute HTML comment ranges ONCE for all operations
+        // Used by heading detection, link parsing, and image parsing
+        // This avoids O((H+L+I) × file_size) where H=headings, L=links, I=images
+        let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
+
         // Now detect headings and blockquotes, which will skip HTML blocks and ESM blocks
-        Self::detect_headings_and_blockquotes(content, &mut lines, flavor);
+        Self::detect_headings_and_blockquotes(content, &mut lines, flavor, &html_comment_ranges);
 
         // Parse code spans early so we can exclude them from link/image parsing
         let ast = get_cached_ast(content);
         let code_spans = Self::parse_code_spans(content, &lines, &ast);
-
-        // Pre-compute HTML comment ranges once for link/image parsing
-        // This avoids O(L × file_size) where L = links+images
-        let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
 
         // Parse links, images, references, and list blocks
         let links = Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges);
@@ -1182,7 +1183,12 @@ impl<'a> LintContext<'a> {
     }
 
     /// Detect headings and blockquotes (called after HTML block detection)
-    fn detect_headings_and_blockquotes(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) {
+    fn detect_headings_and_blockquotes(
+        content: &str,
+        lines: &mut [LineInfo],
+        flavor: MarkdownFlavor,
+        html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+    ) {
         lazy_static! {
             // Regex for blockquote prefix
             static ref BLOCKQUOTE_REGEX_FULL: regex::Regex = regex::Regex::new(r"^(\s*)(>+)(\s*)(.*)$").unwrap();
@@ -1193,10 +1199,6 @@ impl<'a> LintContext<'a> {
         }
 
         let content_lines: Vec<&str> = content.lines().collect();
-
-        // Pre-compute HTML comment ranges once for efficient lookup
-        // This changes complexity from O(H × file_size) to O(H × log C) where H = headings, C = comments
-        let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
 
         // Detect front matter boundaries to skip those lines
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
@@ -1270,7 +1272,7 @@ impl<'a> LintContext<'a> {
 
             if !is_snippet_line && let Some(caps) = ATX_HEADING_REGEX.captures(line) {
                 // Skip headings inside HTML comments (using pre-computed ranges for efficiency)
-                if crate::utils::skip_context::is_in_html_comment_ranges(&html_comment_ranges, lines[i].byte_offset) {
+                if crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, lines[i].byte_offset) {
                     continue;
                 }
                 let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
@@ -1380,7 +1382,7 @@ impl<'a> LintContext<'a> {
                     }
 
                     // Skip Setext headings inside HTML comments (using pre-computed ranges for efficiency)
-                    if crate::utils::skip_context::is_in_html_comment_ranges(&html_comment_ranges, lines[i].byte_offset)
+                    if crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, lines[i].byte_offset)
                     {
                         continue;
                     }
