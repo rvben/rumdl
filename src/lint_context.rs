@@ -174,6 +174,10 @@ pub struct ReferenceDef {
     pub url: String,
     /// Optional title
     pub title: Option<String>,
+    /// Byte offset where the reference definition starts
+    pub byte_offset: usize,
+    /// Byte offset where the reference definition ends
+    pub byte_end: usize,
 }
 
 /// Parsed code span information
@@ -384,6 +388,7 @@ pub struct LintContext<'a> {
     emphasis_spans_cache: Mutex<Option<Arc<Vec<EmphasisSpan>>>>, // Lazy-loaded emphasis spans
     table_rows_cache: Mutex<Option<Arc<Vec<TableRow>>>>, // Lazy-loaded table rows
     bare_urls_cache: Mutex<Option<Arc<Vec<BareUrl>>>>, // Lazy-loaded bare URLs
+    html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
 }
 
@@ -562,6 +567,7 @@ impl<'a> LintContext<'a> {
             emphasis_spans_cache: Mutex::new(None),
             table_rows_cache: Mutex::new(None),
             bare_urls_cache: Mutex::new(None),
+            html_comment_ranges,
             flavor,
         }
     }
@@ -739,6 +745,25 @@ impl<'a> LintContext<'a> {
         code_spans
             .iter()
             .any(|span| span.line == line_num && col_0indexed >= span.start_col && col_0indexed < span.end_col)
+    }
+
+    /// Check if a byte position is within a reference definition
+    /// This is much faster than scanning the content with regex for each check (O(1) vs O(n))
+    #[inline]
+    pub fn is_in_reference_def(&self, byte_pos: usize) -> bool {
+        self.reference_defs
+            .iter()
+            .any(|ref_def| byte_pos >= ref_def.byte_offset && byte_pos < ref_def.byte_end)
+    }
+
+    /// Check if a byte position is within an HTML comment
+    /// This is much faster than scanning the content with regex for each check (O(k) vs O(n))
+    /// where k is the number of HTML comments (typically very small)
+    #[inline]
+    pub fn is_in_html_comment(&self, byte_pos: usize) -> bool {
+        self.html_comment_ranges
+            .iter()
+            .any(|range| byte_pos >= range.start && byte_pos < range.end)
     }
 
     /// Check if content has any instances of a specific character (fast)
@@ -1110,11 +1135,19 @@ impl<'a> LintContext<'a> {
                 let url = cap.get(2).unwrap().as_str().to_string();
                 let title = cap.get(3).or_else(|| cap.get(4)).map(|m| m.as_str().to_string());
 
+                // Calculate byte positions
+                // The match starts at the beginning of the line (0) and extends to the end
+                let match_obj = cap.get(0).unwrap();
+                let byte_offset = line_info.byte_offset + match_obj.start();
+                let byte_end = line_info.byte_offset + match_obj.end();
+
                 refs.push(ReferenceDef {
                     line: line_num,
                     id,
                     url,
                     title,
+                    byte_offset,
+                    byte_end,
                 });
             }
         }

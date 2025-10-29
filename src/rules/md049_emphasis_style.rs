@@ -3,15 +3,6 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
 use crate::utils::range_utils::LineIndex;
-use lazy_static::lazy_static;
-use regex::Regex;
-
-lazy_static! {
-    // Reference definition pattern - matches [ref]: url "title"
-    static ref REF_DEF_REGEX: Regex = Regex::new(
-        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
-    ).unwrap();
-}
 
 mod md049_config;
 use md049_config::MD049Config;
@@ -58,14 +49,8 @@ impl MD049EmphasisStyle {
             }
         }
 
-        // Check reference definitions [ref]: url "title" using regex pattern
-        for m in REF_DEF_REGEX.find_iter(ctx.content) {
-            if m.start() <= byte_pos && byte_pos < m.end() {
-                return true;
-            }
-        }
-
-        false
+        // Check reference definitions [ref]: url "title" using pre-computed data (O(1) vs O(n))
+        ctx.is_in_reference_def(byte_pos)
     }
 
     // Collect emphasis from a single line

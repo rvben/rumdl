@@ -10,15 +10,6 @@ use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::range_utils::LineIndex;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use crate::utils::skip_context::{is_in_html_comment, is_in_math_context, is_in_table_cell};
-use lazy_static::lazy_static;
-use regex::Regex;
-
-lazy_static! {
-    // Reference definition pattern - matches [ref]: url "title"
-    static ref REF_DEF_REGEX: Regex = Regex::new(
-        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
-    ).unwrap();
-}
 
 /// Check if an emphasis span has spacing issues that should be flagged
 #[inline]
@@ -53,14 +44,8 @@ impl MD037NoSpaceInEmphasis {
             }
         }
 
-        // Check reference definitions [ref]: url "title" using regex pattern
-        for m in REF_DEF_REGEX.find_iter(ctx.content) {
-            if m.start() <= byte_pos && byte_pos < m.end() {
-                return true;
-            }
-        }
-
-        false
+        // Check reference definitions [ref]: url "title" using pre-computed data (O(1) vs O(n))
+        ctx.is_in_reference_def(byte_pos)
     }
 }
 

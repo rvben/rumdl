@@ -21,7 +21,6 @@ const MARKDOWN_IMAGE_PATTERN_STR: &str = r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+
 const SIMPLE_URL_REGEX_STR: &str = r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`\]]+)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
 const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
 const REFERENCE_DEF_RE_STR: &str = r"^\s*\[[^\]]+\]:\s*(?:https?|ftps?)://\S+$";
-const HTML_COMMENT_PATTERN_STR: &str = r#"<!--[\s\S]*?-->"#;
 const HTML_TAG_PATTERN_STR: &str = r#"<[^>]*>"#;
 const MULTILINE_LINK_CONTINUATION_STR: &str = r#"^[^\[]*\]\(.*\)"#;
 
@@ -99,19 +98,6 @@ impl MD034NoBareUrls {
             .unwrap_or(false)
     }
 
-    /// Check if we're inside an HTML comment
-    fn is_in_html_comment(&self, content: &str, pos: usize) -> bool {
-        // Find all HTML comments in the content
-        if let Ok(re) = get_cached_regex(HTML_COMMENT_PATTERN_STR) {
-            for mat in re.find_iter(content) {
-                if pos >= mat.start() && pos < mat.end() {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     /// Check if a position in a line is inside an HTML tag
     fn is_in_html_tag(&self, line: &str, pos: usize) -> bool {
         // Find all HTML tags in the line
@@ -128,7 +114,7 @@ impl MD034NoBareUrls {
     fn check_line(
         &self,
         line: &str,
-        content: &str,
+        ctx: &LintContext,
         line_number: usize,
         code_spans: &[crate::lint_context::CodeSpan],
         buffers: &mut LineCheckBuffers,
@@ -286,7 +272,7 @@ impl MD034NoBareUrls {
             // Check if we're inside an HTML comment
             let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
             let absolute_pos = line_start_byte + start;
-            if self.is_in_html_comment(content, absolute_pos) {
+            if ctx.is_in_html_comment(absolute_pos) {
                 continue;
             }
 
@@ -427,14 +413,8 @@ impl Rule for MD034NoBareUrls {
         // Iterate over content lines, automatically skipping front matter and code blocks
         // This uses the filtered iterator API which centralizes the skip logic
         for line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
-            let mut line_warnings = self.check_line(
-                line.content,
-                content,
-                line.line_num,
-                &code_spans,
-                &mut buffers,
-                &line_index,
-            );
+            let mut line_warnings =
+                self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers, &line_index);
 
             // Filter out warnings that are inside code spans
             line_warnings.retain(|warning| {

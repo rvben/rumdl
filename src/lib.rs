@@ -152,6 +152,8 @@ pub fn lint(
     // Parse LintContext once with the provided flavor
     let lint_ctx = crate::lint_context::LintContext::new(content, flavor);
 
+    let profile_rules = std::env::var("RUMDL_PROFILE_RULES").is_ok();
+
     for rule in applicable_rules {
         let _rule_start = Instant::now();
 
@@ -187,12 +189,14 @@ pub fn lint(
             }
         }
 
+        let rule_duration = _rule_start.elapsed();
+        if profile_rules {
+            eprintln!("[RULE] {:6} {:?}", rule.name(), rule_duration);
+        }
+
         #[cfg(not(test))]
-        if _verbose {
-            let rule_duration = _rule_start.elapsed();
-            if rule_duration.as_millis() > 500 {
-                log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
-            }
+        if _verbose && rule_duration.as_millis() > 500 {
+            log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
         }
     }
 

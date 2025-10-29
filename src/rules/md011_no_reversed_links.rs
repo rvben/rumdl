@@ -6,7 +6,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::jinja_utils::is_in_jinja_template;
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use crate::utils::regex_cache::get_cached_regex;
-use crate::utils::skip_context::{is_in_html_comment, is_in_math_context};
+use crate::utils::skip_context::is_in_math_context;
 
 // Reversed link detection pattern
 const REVERSED_LINK_REGEX_STR: &str = r"(^|[^\\])\(([^()]+)\)\[([^\]]+)\]";
@@ -208,7 +208,7 @@ impl Rule for MD011NoReversedLinks {
 
                 // Skip if in code block, inline code, HTML comments, math contexts, or Jinja templates
                 if ctx.is_in_code_block_or_span(match_byte_pos)
-                    || is_in_html_comment(content, match_byte_pos)
+                    || ctx.is_in_html_comment(match_byte_pos)
                     || is_in_math_context(ctx, match_byte_pos)
                     || is_in_jinja_template(content, match_byte_pos)
                 {
@@ -281,7 +281,7 @@ impl Rule for MD011NoReversedLinks {
 
             // Skip if in any skip context
             if !ctx.is_in_code_block_or_span(pos)
-                && !is_in_html_comment(content, pos)
+                && !ctx.is_in_html_comment(pos)
                 && !is_in_math_context(ctx, pos)
                 && !is_in_jinja_template(content, pos)
             {
