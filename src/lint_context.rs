@@ -1299,11 +1299,15 @@ impl<'a> LintContext<'a> {
             };
 
             if should_mark {
-                // Mark all lines whose byte_offset falls within [start, end)
-                for (i, &byte_offset) in line_offsets.iter().enumerate() {
-                    if byte_offset >= start && byte_offset < end {
-                        in_code_block[i] = true;
-                    }
+                // Use binary search to find the first and last line indices
+                // line_offsets is sorted, so we can use partition_point for O(log n) lookup
+                // Use safe_start/safe_end (UTF-8 boundaries) for consistent line mapping
+                let first_line = line_offsets.partition_point(|&offset| offset < safe_start);
+                let last_line = line_offsets.partition_point(|&offset| offset < safe_end);
+
+                // Mark all lines in the range at once
+                for flag in in_code_block.iter_mut().take(last_line).skip(first_line) {
+                    *flag = true;
                 }
             }
         }
