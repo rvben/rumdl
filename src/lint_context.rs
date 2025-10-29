@@ -462,10 +462,27 @@ impl<'a> LintContext<'a> {
             eprintln!("[PROFILE] HTML comment ranges: {:?}", start.elapsed());
         }
 
+        // Pre-compute autodoc block ranges for MkDocs flavor (avoids O(n²) scaling)
+        let start = Instant::now();
+        let autodoc_ranges = if flavor == MarkdownFlavor::MkDocs {
+            crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content)
+        } else {
+            Vec::new()
+        };
+        if profile {
+            eprintln!("[PROFILE] Autodoc block ranges: {:?}", start.elapsed());
+        }
+
         // Pre-compute line information (without headings/blockquotes yet)
         let start = Instant::now();
-        let mut lines =
-            Self::compute_basic_line_info(content, &line_offsets, &code_blocks, flavor, &html_comment_ranges);
+        let mut lines = Self::compute_basic_line_info(
+            content,
+            &line_offsets,
+            &code_blocks,
+            flavor,
+            &html_comment_ranges,
+            &autodoc_ranges,
+        );
         if profile {
             eprintln!("[PROFILE] Basic line info: {:?}", start.elapsed());
         }
@@ -1264,6 +1281,7 @@ impl<'a> LintContext<'a> {
         code_blocks: &[(usize, usize)],
         flavor: MarkdownFlavor,
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+        autodoc_ranges: &[crate::utils::skip_context::ByteRange],
     ) -> Vec<LineInfo> {
         let content_lines: Vec<&str> = content.lines().collect();
         let mut lines = Vec::with_capacity(content_lines.len());
@@ -1295,7 +1313,7 @@ impl<'a> LintContext<'a> {
 
             // Detect list items (skip if in frontmatter, in mkdocstrings block, or in HTML comment)
             let in_mkdocstrings = flavor == MarkdownFlavor::MkDocs
-                && crate::utils::mkdocstrings_refs::is_within_autodoc_block(content, byte_offset);
+                && crate::utils::mkdocstrings_refs::is_within_autodoc_block_ranges(autodoc_ranges, byte_offset);
             // Use pre-computed ranges for efficiency (O(log n) vs O(file_size))
             let in_html_comment =
                 crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, byte_offset);

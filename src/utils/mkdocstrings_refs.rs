@@ -114,7 +114,67 @@ pub fn is_autodoc_options(line: &str, base_indent: usize) -> bool {
     false
 }
 
-/// Check if content at a byte position is within an autodoc block
+/// Pre-compute all autodoc block ranges in the content
+/// Returns a sorted vector of byte ranges for efficient lookup
+pub fn detect_autodoc_block_ranges(content: &str) -> Vec<crate::utils::skip_context::ByteRange> {
+    let mut ranges = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut byte_pos = 0;
+    let mut in_autodoc = false;
+    let mut autodoc_indent = 0;
+    let mut block_start = 0;
+
+    for line in lines {
+        let line_end = byte_pos + line.len();
+
+        // Check if we're starting an autodoc block
+        if is_autodoc_marker(line) {
+            in_autodoc = true;
+            autodoc_indent = get_autodoc_indent(line).unwrap_or(0);
+            block_start = byte_pos;
+        } else if in_autodoc {
+            // Check if we're still in autodoc options
+            if is_autodoc_options(line, autodoc_indent) {
+                // Continue in autodoc block
+            } else {
+                // Not part of options - check if this ends the block
+                // Completely empty lines (no indentation) don't end the block
+                if line.is_empty() {
+                    // Continue in autodoc
+                } else {
+                    // Non-option, non-empty line ends the autodoc block
+                    // Save the range up to the previous line
+                    ranges.push(crate::utils::skip_context::ByteRange {
+                        start: block_start,
+                        end: byte_pos.saturating_sub(1), // Don't include the newline before this line
+                    });
+                    in_autodoc = false;
+                    autodoc_indent = 0;
+                }
+            }
+        }
+
+        // Account for newline character
+        byte_pos = line_end + 1;
+    }
+
+    // If we ended while still in an autodoc block, save it
+    if in_autodoc {
+        ranges.push(crate::utils::skip_context::ByteRange {
+            start: block_start,
+            end: byte_pos.saturating_sub(1),
+        });
+    }
+
+    ranges
+}
+
+/// Check if a position is within any of the pre-computed autodoc block ranges
+pub fn is_within_autodoc_block_ranges(ranges: &[crate::utils::skip_context::ByteRange], position: usize) -> bool {
+    crate::utils::skip_context::is_in_html_comment_ranges(ranges, position)
+}
+
+/// Check if content at a byte position is within an autodoc block (DEPRECATED: use detect_autodoc_block_ranges + is_within_autodoc_block_ranges)
 pub fn is_within_autodoc_block(content: &str, position: usize) -> bool {
     let lines: Vec<&str> = content.lines().collect();
     let mut byte_pos = 0;
