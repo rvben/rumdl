@@ -823,6 +823,23 @@ impl<'a> LintContext<'a> {
         (idx, line_num, col)
     }
 
+    /// Check if a byte offset is within a code span using binary search
+    #[inline]
+    fn is_offset_in_code_span(code_spans: &[CodeSpan], offset: usize) -> bool {
+        // Since spans are sorted by byte_offset, use partition_point for binary search
+        let idx = code_spans.partition_point(|span| span.byte_offset <= offset);
+
+        // Check the span that starts at or before our offset
+        if idx > 0 {
+            let span = &code_spans[idx - 1];
+            if offset >= span.byte_offset && offset < span.byte_end {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Parse all links in the content
     fn parse_links(
         content: &str,
@@ -859,10 +876,7 @@ impl<'a> LintContext<'a> {
             }
 
             // Skip if in code span
-            if code_spans
-                .iter()
-                .any(|span| match_start >= span.byte_offset && match_start < span.byte_end)
-            {
+            if Self::is_offset_in_code_span(code_spans, match_start) {
                 continue;
             }
 
@@ -956,10 +970,7 @@ impl<'a> LintContext<'a> {
             }
 
             // Skip if in code span
-            if code_spans
-                .iter()
-                .any(|span| match_start >= span.byte_offset && match_start < span.byte_end)
-            {
+            if Self::is_offset_in_code_span(code_spans, match_start) {
                 continue;
             }
 
