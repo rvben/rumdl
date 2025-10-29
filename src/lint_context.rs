@@ -389,50 +389,101 @@ pub struct LintContext<'a> {
 
 impl<'a> LintContext<'a> {
     pub fn new(content: &'a str, flavor: MarkdownFlavor) -> Self {
+        use std::time::Instant;
+        let profile = std::env::var("RUMDL_PROFILE_QUADRATIC").is_ok();
+
+        let start = Instant::now();
         let mut line_offsets = vec![0];
         for (i, c) in content.char_indices() {
             if c == '\n' {
                 line_offsets.push(i + 1);
             }
         }
+        if profile {
+            eprintln!("[PROFILE] Line offsets: {:?}", start.elapsed());
+        }
 
         // Detect code blocks once and cache them
+        let start = Instant::now();
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+        if profile {
+            eprintln!("[PROFILE] Code blocks: {:?}", start.elapsed());
+        }
 
         // Pre-compute HTML comment ranges ONCE for all operations
-        // MUST be done BEFORE compute_basic_line_info() which checks HTML comments for every line
-        // Also used by heading detection, link parsing, and image parsing
-        // This avoids O((N+H+L+I) × file_size) where N=lines, H=headings, L=links, I=images
+        let start = Instant::now();
         let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
+        if profile {
+            eprintln!("[PROFILE] HTML comment ranges: {:?}", start.elapsed());
+        }
 
         // Pre-compute line information (without headings/blockquotes yet)
+        let start = Instant::now();
         let mut lines =
             Self::compute_basic_line_info(content, &line_offsets, &code_blocks, flavor, &html_comment_ranges);
+        if profile {
+            eprintln!("[PROFILE] Basic line info: {:?}", start.elapsed());
+        }
 
         // Detect HTML blocks BEFORE heading detection
-        // This ensures HTML content is never considered as markdown
+        let start = Instant::now();
         Self::detect_html_blocks(&mut lines);
+        if profile {
+            eprintln!("[PROFILE] HTML blocks: {:?}", start.elapsed());
+        }
 
         // Detect ESM import/export blocks in MDX files BEFORE heading detection
-        // This ensures ESM blocks are never considered as markdown
+        let start = Instant::now();
         Self::detect_esm_blocks(&mut lines, flavor);
+        if profile {
+            eprintln!("[PROFILE] ESM blocks: {:?}", start.elapsed());
+        }
 
-        // Now detect headings and blockquotes, which will skip HTML blocks and ESM blocks
+        // Now detect headings and blockquotes
+        let start = Instant::now();
         Self::detect_headings_and_blockquotes(content, &mut lines, flavor, &html_comment_ranges);
+        if profile {
+            eprintln!("[PROFILE] Headings & blockquotes: {:?}", start.elapsed());
+        }
 
         // Parse code spans early so we can exclude them from link/image parsing
+        let start = Instant::now();
         let code_spans = Self::parse_code_spans(content, &lines);
+        if profile {
+            eprintln!("[PROFILE] Code spans: {:?}", start.elapsed());
+        }
 
         // Parse links, images, references, and list blocks
+        let start = Instant::now();
         let links = Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges);
+        if profile {
+            eprintln!("[PROFILE] Links: {:?}", start.elapsed());
+        }
+
+        let start = Instant::now();
         let images = Self::parse_images(content, &lines, &code_blocks, &code_spans, &html_comment_ranges);
+        if profile {
+            eprintln!("[PROFILE] Images: {:?}", start.elapsed());
+        }
+
+        let start = Instant::now();
         let reference_defs = Self::parse_reference_defs(content, &lines);
-        // Use line-by-line list parsing for MD032 compatibility
-        // TODO: Consider using AST-based parsing in the future when MD032 is updated
+        if profile {
+            eprintln!("[PROFILE] Reference defs: {:?}", start.elapsed());
+        }
+
+        let start = Instant::now();
         let list_blocks = Self::parse_list_blocks(&lines);
+        if profile {
+            eprintln!("[PROFILE] List blocks: {:?}", start.elapsed());
+        }
 
         // Compute character frequency for fast content analysis
+        let start = Instant::now();
         let char_frequency = Self::compute_char_frequency(content);
+        if profile {
+            eprintln!("[PROFILE] Char frequency: {:?}", start.elapsed());
+        }
 
         Self {
             content,
@@ -1098,6 +1149,58 @@ impl<'a> LintContext<'a> {
         ))
     }
 
+    /// Pre-compute which lines are in code blocks - O(m*n) where m=code_blocks, n=lines
+    /// Returns a Vec<bool> where index i indicates if line i is in a code block
+    fn compute_code_block_line_map(content: &str, line_offsets: &[usize], code_blocks: &[(usize, usize)]) -> Vec<bool> {
+        let num_lines = line_offsets.len();
+        let mut in_code_block = vec![false; num_lines];
+
+        // For each code block, mark all lines within it
+        for &(start, end) in code_blocks {
+            // Ensure we're at valid UTF-8 boundaries
+            let safe_start = if start > 0 && !content.is_char_boundary(start) {
+                let mut boundary = start;
+                while boundary > 0 && !content.is_char_boundary(boundary) {
+                    boundary -= 1;
+                }
+                boundary
+            } else {
+                start
+            };
+
+            let safe_end = if end < content.len() && !content.is_char_boundary(end) {
+                let mut boundary = end;
+                while boundary < content.len() && !content.is_char_boundary(boundary) {
+                    boundary += 1;
+                }
+                boundary
+            } else {
+                end.min(content.len())
+            };
+
+            let block_content = &content[safe_start..safe_end];
+
+            // Only consider multiline or fenced/indented code blocks
+            let is_multiline = block_content.contains('\n');
+            let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
+            let is_indented = !is_fenced
+                && block_content
+                    .lines()
+                    .all(|l| l.starts_with("    ") || l.starts_with("\t") || l.trim().is_empty());
+
+            if is_multiline || is_fenced || is_indented {
+                // Mark all lines whose byte_offset falls within [start, end)
+                for (i, &byte_offset) in line_offsets.iter().enumerate() {
+                    if byte_offset >= start && byte_offset < end {
+                        in_code_block[i] = true;
+                    }
+                }
+            }
+        }
+
+        in_code_block
+    }
+
     /// Pre-compute basic line information (without headings/blockquotes)
     fn compute_basic_line_info(
         content: &str,
@@ -1108,6 +1211,9 @@ impl<'a> LintContext<'a> {
     ) -> Vec<LineInfo> {
         let content_lines: Vec<&str> = content.lines().collect();
         let mut lines = Vec::with_capacity(content_lines.len());
+
+        // Pre-compute which lines are in code blocks - O(m*n) done ONCE instead of O(n²)
+        let code_block_map = Self::compute_code_block_line_map(content, line_offsets, code_blocks);
 
         // Detect front matter boundaries FIRST, before any other parsing
         // Use FrontMatterUtils to detect all types of front matter (YAML, TOML, JSON, malformed)
@@ -1123,45 +1229,9 @@ impl<'a> LintContext<'a> {
             } else {
                 line.trim().is_empty()
             };
-            // Check if this line is inside a code block (not inline code span)
-            // We only want to check for fenced/indented code blocks, not inline code
-            let in_code_block = code_blocks.iter().any(|&(start, end)| {
-                // Only consider ranges that span multiple lines (code blocks)
-                // Inline code spans are typically on a single line
 
-                // Ensure we're at valid UTF-8 boundaries
-                let safe_start = if start > 0 && !content.is_char_boundary(start) {
-                    // Find the nearest valid boundary before start
-                    let mut boundary = start;
-                    while boundary > 0 && !content.is_char_boundary(boundary) {
-                        boundary -= 1;
-                    }
-                    boundary
-                } else {
-                    start
-                };
-
-                let safe_end = if end < content.len() && !content.is_char_boundary(end) {
-                    // Find the nearest valid boundary after end
-                    let mut boundary = end;
-                    while boundary < content.len() && !content.is_char_boundary(boundary) {
-                        boundary += 1;
-                    }
-                    boundary
-                } else {
-                    end.min(content.len())
-                };
-
-                let block_content = &content[safe_start..safe_end];
-                let is_multiline = block_content.contains('\n');
-                let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
-                let is_indented = !is_fenced
-                    && block_content
-                        .lines()
-                        .all(|l| l.starts_with("    ") || l.starts_with("\t") || l.trim().is_empty());
-
-                byte_offset >= start && byte_offset < end && (is_multiline || is_fenced || is_indented)
-            });
+            // Use pre-computed map for O(1) lookup instead of O(m) iteration
+            let in_code_block = code_block_map.get(i).copied().unwrap_or(false);
 
             // Detect list items (skip if in frontmatter, in mkdocstrings block, or in HTML comment)
             let in_mkdocstrings = flavor == MarkdownFlavor::MkDocs
@@ -1677,27 +1747,19 @@ impl<'a> LintContext<'a> {
                     String::new()
                 };
 
-                // Find which line this code span starts on
-                let mut line_num = 1;
-                let mut col_start = start_pos;
-                for (idx, line_info) in lines.iter().enumerate() {
-                    if start_pos >= line_info.byte_offset {
-                        line_num = idx + 1;
-                        col_start = start_pos - line_info.byte_offset;
-                    } else {
-                        break;
-                    }
-                }
+                // Use binary search to find line number - O(log n) instead of O(n)
+                // Find the rightmost line whose byte_offset <= start_pos
+                let line_idx = lines
+                    .partition_point(|line| line.byte_offset <= start_pos)
+                    .saturating_sub(1);
+                let line_num = line_idx + 1;
+                let col_start = start_pos - lines[line_idx].byte_offset;
 
-                // Find end column
-                let mut col_end = end_pos;
-                for line_info in lines.iter() {
-                    if end_pos > line_info.byte_offset {
-                        col_end = end_pos - line_info.byte_offset;
-                    } else {
-                        break;
-                    }
-                }
+                // Find end column using binary search
+                let end_line_idx = lines
+                    .partition_point(|line| line.byte_offset <= end_pos)
+                    .saturating_sub(1);
+                let col_end = end_pos - lines[end_line_idx].byte_offset;
 
                 code_spans.push(CodeSpan {
                     line: line_num,
