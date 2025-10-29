@@ -114,11 +114,6 @@ pub trait Rule: DynClone + Send + Sync {
         RuleCategory::Other // Default implementation returns Other
     }
 
-    /// Check if this rule can benefit from AST parsing
-    fn uses_ast(&self) -> bool {
-        false
-    }
-
     fn as_any(&self) -> &dyn std::any::Any;
 
     // DocumentStructure has been merged into LintContext - this method is no longer used

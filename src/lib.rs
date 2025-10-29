@@ -149,35 +149,13 @@ pub fn lint(
     let _total_rules = rules.len();
     let _applicable_count = applicable_rules.len();
 
-    // Parse AST once for rules that can benefit from it
-    let ast_rules_count = applicable_rules.iter().filter(|rule| rule.uses_ast()).count();
-    let ast = if ast_rules_count > 0 {
-        Some(crate::utils::ast_utils::get_cached_ast(content))
-    } else {
-        None
-    };
-
-    // Parse LintContext once (migration step) with the provided flavor
+    // Parse LintContext once with the provided flavor
     let lint_ctx = crate::lint_context::LintContext::new(content, flavor);
 
     for rule in applicable_rules {
         let _rule_start = Instant::now();
 
-        // Try optimized paths in order of preference
-        let result = if rule.uses_ast() {
-            if let Some(ref ast_ref) = ast {
-                // 1. AST-based path
-                rule.as_maybe_ast()
-                    .and_then(|ext| ext.check_with_ast_opt(&lint_ctx, ast_ref))
-                    .unwrap_or_else(|| rule.check_with_ast(&lint_ctx, ast_ref))
-            } else {
-                // Fallback to regular check if no AST
-                rule.check(&lint_ctx)
-            }
-        } else {
-            // 2. Regular check path
-            rule.check(&lint_ctx)
-        };
+        let result = rule.check(&lint_ctx);
 
         match result {
             Ok(rule_warnings) => {
@@ -223,9 +201,6 @@ pub fn lint(
         let skipped_rules = _total_rules - _applicable_count;
         if skipped_rules > 0 {
             log::debug!("Skipped {skipped_rules} of {_total_rules} rules based on content analysis");
-        }
-        if ast.is_some() {
-            log::debug!("Used shared AST for {ast_rules_count} rules");
         }
     }
 

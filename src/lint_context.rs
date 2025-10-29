@@ -1,9 +1,8 @@
 use crate::config::MarkdownFlavor;
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::utils::ast_utils::get_cached_ast;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use lazy_static::lazy_static;
-use markdown::mdast::Node;
+use pulldown_cmark::{Event, Parser};
 use regex::Regex;
 
 lazy_static! {
@@ -385,7 +384,6 @@ pub struct LintContext<'a> {
     emphasis_spans_cache: Mutex<Option<Arc<Vec<EmphasisSpan>>>>, // Lazy-loaded emphasis spans
     table_rows_cache: Mutex<Option<Arc<Vec<TableRow>>>>, // Lazy-loaded table rows
     bare_urls_cache: Mutex<Option<Arc<Vec<BareUrl>>>>, // Lazy-loaded bare URLs
-    ast_cache: Mutex<Option<Arc<Node>>>,  // Lazy-loaded AST
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
 }
 
@@ -423,8 +421,7 @@ impl<'a> LintContext<'a> {
         Self::detect_headings_and_blockquotes(content, &mut lines, flavor, &html_comment_ranges);
 
         // Parse code spans early so we can exclude them from link/image parsing
-        let ast = get_cached_ast(content);
-        let code_spans = Self::parse_code_spans(content, &lines, &ast);
+        let code_spans = Self::parse_code_spans(content, &lines);
 
         // Parse links, images, references, and list blocks
         let links = Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges);
@@ -452,22 +449,8 @@ impl<'a> LintContext<'a> {
             emphasis_spans_cache: Mutex::new(None),
             table_rows_cache: Mutex::new(None),
             bare_urls_cache: Mutex::new(None),
-            ast_cache: Mutex::new(None),
             flavor,
         }
-    }
-
-    /// Get AST - uses global cache for deduplication
-    pub fn get_ast(&self) -> Arc<Node> {
-        let mut cache = self.ast_cache.lock().unwrap();
-
-        if cache.is_none() {
-            // Use global AST cache to avoid duplicate parsing
-            // MarkdownAst is just a type alias for Node, so no conversion needed
-            *cache = Some(get_cached_ast(self.content));
-        }
-
-        cache.as_ref().unwrap().clone()
     }
 
     /// Get code spans - computed lazily on first access
@@ -476,8 +459,7 @@ impl<'a> LintContext<'a> {
 
         // Check if we need to compute code spans
         if cache.is_none() {
-            let ast = self.get_ast();
-            let code_spans = Self::parse_code_spans(self.content, &self.lines, &ast);
+            let code_spans = Self::parse_code_spans(self.content, &self.lines);
             *cache = Some(Arc::new(code_spans));
         }
 
@@ -1581,8 +1563,8 @@ impl<'a> LintContext<'a> {
         }
     }
 
-    /// Parse all inline code spans in the content using AST
-    fn parse_code_spans(content: &str, lines: &[LineInfo], ast: &Node) -> Vec<CodeSpan> {
+    /// Parse all inline code spans in the content using pulldown-cmark streaming parser
+    fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
         let mut code_spans = Vec::new();
 
         // Quick check - if no backticks, no code spans
@@ -1590,162 +1572,60 @@ impl<'a> LintContext<'a> {
             return code_spans;
         }
 
-        // Helper function to recursively extract inline code spans from AST nodes
-        fn extract_code_spans(node: &Node, content: &str, lines: &[LineInfo], spans: &mut Vec<CodeSpan>) {
-            match node {
-                Node::InlineCode(inline_code) => {
-                    if let Some(pos) = &inline_code.position {
-                        let start_pos = pos.start.offset;
-                        let end_pos = pos.end.offset;
+        // Use pulldown-cmark's streaming parser with byte offsets
+        let parser = Parser::new(content).into_offset_iter();
 
-                        // The position includes the backticks, extract the actual content
-                        let full_span = &content[start_pos..end_pos];
-                        let backtick_count = full_span.chars().take_while(|&c| c == '`').count();
+        for (event, range) in parser {
+            if let Event::Code(_) = event {
+                let start_pos = range.start;
+                let end_pos = range.end;
 
-                        // Extract content between backticks, preserving spaces
-                        let content_start = start_pos + backtick_count;
-                        let content_end = end_pos - backtick_count;
-                        let span_content = if content_start < content_end {
-                            content[content_start..content_end].to_string()
-                        } else {
-                            String::new()
-                        };
+                // The range includes the backticks, extract the actual content
+                let full_span = &content[start_pos..end_pos];
+                let backtick_count = full_span.chars().take_while(|&c| c == '`').count();
 
-                        // Find which line this code span starts on
-                        let mut line_num = 1;
-                        let mut col_start = start_pos;
-                        for (idx, line_info) in lines.iter().enumerate() {
-                            if start_pos >= line_info.byte_offset {
-                                line_num = idx + 1;
-                                col_start = start_pos - line_info.byte_offset;
-                            } else {
-                                break;
-                            }
-                        }
+                // Extract content between backticks, preserving spaces
+                let content_start = start_pos + backtick_count;
+                let content_end = end_pos - backtick_count;
+                let span_content = if content_start < content_end {
+                    content[content_start..content_end].to_string()
+                } else {
+                    String::new()
+                };
 
-                        // Find end column
-                        let mut col_end = end_pos;
-                        for line_info in lines.iter() {
-                            if end_pos > line_info.byte_offset {
-                                col_end = end_pos - line_info.byte_offset;
-                            } else {
-                                break;
-                            }
-                        }
+                // Find which line this code span starts on
+                let mut line_num = 1;
+                let mut col_start = start_pos;
+                for (idx, line_info) in lines.iter().enumerate() {
+                    if start_pos >= line_info.byte_offset {
+                        line_num = idx + 1;
+                        col_start = start_pos - line_info.byte_offset;
+                    } else {
+                        break;
+                    }
+                }
 
-                        spans.push(CodeSpan {
-                            line: line_num,
-                            start_col: col_start,
-                            end_col: col_end,
-                            byte_offset: start_pos,
-                            byte_end: end_pos,
-                            backtick_count,
-                            content: span_content,
-                        });
+                // Find end column
+                let mut col_end = end_pos;
+                for line_info in lines.iter() {
+                    if end_pos > line_info.byte_offset {
+                        col_end = end_pos - line_info.byte_offset;
+                    } else {
+                        break;
                     }
                 }
-                // Recursively process children
-                Node::Root(root) => {
-                    for child in &root.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::Paragraph(para) => {
-                    for child in &para.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::Heading(heading) => {
-                    for child in &heading.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::List(list) => {
-                    for child in &list.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::ListItem(item) => {
-                    for child in &item.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::Blockquote(blockquote) => {
-                    for child in &blockquote.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::Table(table) => {
-                    for child in &table.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::TableRow(row) => {
-                    for child in &row.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::TableCell(cell) => {
-                    for child in &cell.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::Emphasis(emphasis) => {
-                    for child in &emphasis.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::Strong(strong) => {
-                    for child in &strong.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::Link(link) => {
-                    for child in &link.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::LinkReference(link_ref) => {
-                    for child in &link_ref.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::FootnoteDefinition(footnote) => {
-                    for child in &footnote.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                Node::Delete(delete) => {
-                    for child in &delete.children {
-                        extract_code_spans(child, content, lines, spans);
-                    }
-                }
-                // Terminal nodes or nodes without relevant children
-                Node::Code(_)
-                | Node::Text(_)
-                | Node::Html(_)
-                | Node::Image(_)
-                | Node::ImageReference(_)
-                | Node::FootnoteReference(_)
-                | Node::Break(_)
-                | Node::ThematicBreak(_)
-                | Node::Definition(_)
-                | Node::Yaml(_)
-                | Node::Toml(_)
-                | Node::Math(_)
-                | Node::InlineMath(_)
-                | Node::MdxJsxFlowElement(_)
-                | Node::MdxFlowExpression(_)
-                | Node::MdxJsxTextElement(_)
-                | Node::MdxTextExpression(_)
-                | Node::MdxjsEsm(_) => {
-                    // No children to process or not relevant for code spans
-                }
+
+                code_spans.push(CodeSpan {
+                    line: line_num,
+                    start_col: col_start,
+                    end_col: col_end,
+                    byte_offset: start_pos,
+                    byte_end: end_pos,
+                    backtick_count,
+                    content: span_content,
+                });
             }
         }
-
-        // Extract all code spans from the AST
-        extract_code_spans(ast, content, lines, &mut code_spans);
 
         // Sort by position to ensure consistent ordering
         code_spans.sort_by_key(|span| span.byte_offset);
