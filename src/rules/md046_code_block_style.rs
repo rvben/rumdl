@@ -41,7 +41,70 @@ impl MD046CodeBlockStyle {
                 && (trimmed.contains(". ") || trimmed.contains(") ")))
     }
 
-    fn is_indented_code_block(&self, lines: &[&str], i: usize, is_mkdocs: bool) -> bool {
+    /// Pre-compute which lines are in list context with a single forward pass
+    /// This replaces the O(n²) backward scanning in is_part_of_list_structure
+    fn precompute_list_context(&self, lines: &[&str]) -> Vec<bool> {
+        let mut in_list_context = vec![false; lines.len()];
+        let mut last_list_item_line: Option<usize> = None;
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+
+            // Check if this is a list item
+            if self.is_list_item(line) {
+                last_list_item_line = Some(i);
+                in_list_context[i] = true;
+                continue;
+            }
+
+            // Skip empty lines - they don't break list context
+            if line.trim().is_empty() {
+                if last_list_item_line.is_some() {
+                    in_list_context[i] = true;
+                }
+                continue;
+            }
+
+            // Check for structural breaks at column 0
+            let indent_len = line.len() - trimmed.len();
+            if indent_len == 0 && !trimmed.is_empty() {
+                // Headings definitely end list context
+                if trimmed.starts_with('#') {
+                    last_list_item_line = None;
+                    continue;
+                }
+                // Horizontal rules end list context
+                if trimmed.starts_with("---") || trimmed.starts_with("***") {
+                    last_list_item_line = None;
+                    continue;
+                }
+                // Paragraph at column 0 - be conservative like original logic
+                if let Some(list_line) = last_list_item_line
+                    && i - list_line > 5
+                {
+                    last_list_item_line = None;
+                    continue;
+                }
+            }
+
+            // If we have a recent list item and haven't hit a break, we're in list context
+            if last_list_item_line.is_some() {
+                in_list_context[i] = true;
+            }
+        }
+
+        in_list_context
+    }
+
+    /// Check if a line is an indented code block using pre-computed context arrays
+    fn is_indented_code_block_with_context(
+        &self,
+        lines: &[&str],
+        i: usize,
+        is_mkdocs: bool,
+        in_list_context: &[bool],
+        in_tab_context: &[bool],
+    ) -> bool {
         if i >= lines.len() {
             return false;
         }
@@ -53,13 +116,13 @@ impl MD046CodeBlockStyle {
             return false;
         }
 
-        // Check if this is part of a list structure
-        if self.is_part_of_list_structure(lines, i) {
+        // Check if this is part of a list structure (pre-computed)
+        if in_list_context[i] {
             return false;
         }
 
-        // Skip if this is MkDocs tab content
-        if is_mkdocs && self.is_in_mkdocs_tab(lines, i) {
+        // Skip if this is MkDocs tab content (pre-computed)
+        if is_mkdocs && in_tab_context[i] {
             return false;
         }
 
@@ -68,8 +131,8 @@ impl MD046CodeBlockStyle {
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
         let prev_is_indented_code = i > 0
             && (lines[i - 1].starts_with("    ") || lines[i - 1].starts_with("\t"))
-            && !self.is_part_of_list_structure(lines, i - 1)
-            && !(is_mkdocs && self.is_in_mkdocs_tab(lines, i - 1));
+            && !in_list_context[i - 1]
+            && !(is_mkdocs && in_tab_context[i - 1]);
 
         // If no blank line before and previous line is not indented code,
         // it's likely list continuation, not a code block
@@ -80,78 +143,35 @@ impl MD046CodeBlockStyle {
         true
     }
 
-    /// Check if an indented line is part of a list structure
-    fn is_part_of_list_structure(&self, lines: &[&str], i: usize) -> bool {
-        // Look backwards to find if we're in a list context
-        // We need to be more aggressive about detecting list contexts
+    /// Pre-compute which lines are in MkDocs tab context with a single forward pass
+    fn precompute_mkdocs_tab_context(&self, lines: &[&str]) -> Vec<bool> {
+        let mut in_tab_context = vec![false; lines.len()];
+        let mut current_tab_indent: Option<usize> = None;
 
-        for j in (0..i).rev() {
-            let line = lines[j];
-
-            // Skip empty lines - they don't break list context
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            // If we find a list item, we're definitely in a list context
-            if self.is_list_item(line) {
-                return true;
-            }
-
-            // Check if this line looks like it's part of a list item
-            // (indented content that's not a code block)
-            let trimmed = line.trim_start();
-            let indent_len = line.len() - trimmed.len();
-
-            // If we find a line that starts at column 0 and is not a list item,
-            // check if it's a structural element that would end list context
-            if indent_len == 0 && !trimmed.is_empty() {
-                // Headings definitely end list context
-                if trimmed.starts_with('#') {
-                    break;
-                }
-                // Horizontal rules end list context
-                if trimmed.starts_with("---") || trimmed.starts_with("***") {
-                    break;
-                }
-                // If it's a paragraph that doesn't look like it's part of a list,
-                // we might not be in a list anymore, but let's be conservative
-                // and keep looking a bit more
-                if j > 0 && i >= 5 && j < i - 5 {
-                    // Only break if we've looked back a reasonable distance
-                    break;
-                }
-            }
-
-            // Continue looking backwards through indented content
-        }
-
-        false
-    }
-
-    /// Helper function to check if a line is part of MkDocs tab content
-    fn is_in_mkdocs_tab(&self, lines: &[&str], i: usize) -> bool {
-        // Look backwards for tab markers
-        for j in (0..i).rev() {
-            let line = lines[j];
-
+        for (i, line) in lines.iter().enumerate() {
             // Check if this is a tab marker
             if mkdocs_tabs::is_tab_marker(line) {
                 let tab_indent = mkdocs_tabs::get_tab_indent(line).unwrap_or(0);
-                // Check if current line has proper tab content indentation
-                if mkdocs_tabs::is_tab_content(lines[i], tab_indent) {
-                    return true;
-                }
-                // If we found a tab but indentation doesn't match, we're not in it
-                return false;
+                current_tab_indent = Some(tab_indent);
+                in_tab_context[i] = true;
+                continue;
             }
 
-            // If we hit a non-indented, non-empty line that's not a tab, stop searching
-            if !line.trim().is_empty() && !line.starts_with("    ") && !mkdocs_tabs::is_tab_marker(line) {
-                break;
+            // If we have a current tab, check if this line is tab content
+            if let Some(tab_indent) = current_tab_indent {
+                if mkdocs_tabs::is_tab_content(line, tab_indent) {
+                    in_tab_context[i] = true;
+                } else if !line.trim().is_empty() && !line.starts_with("    ") {
+                    // Non-indented, non-empty line ends tab context
+                    current_tab_indent = None;
+                } else {
+                    // Empty or indented line maintains tab context
+                    in_tab_context[i] = true;
+                }
             }
         }
-        false
+
+        in_tab_context
     }
 
     fn check_unclosed_code_blocks(
@@ -433,12 +453,21 @@ impl MD046CodeBlockStyle {
         let mut fenced_line = usize::MAX;
         let mut indented_line = usize::MAX;
 
-        // First scan through all lines to find code blocks
+        // Pre-compute list and tab contexts for efficiency
+        let in_list_context = self.precompute_list_context(&lines);
+        let in_tab_context = if is_mkdocs {
+            self.precompute_mkdocs_tab_context(&lines)
+        } else {
+            vec![false; lines.len()]
+        };
+
+        // Scan through all lines to find code blocks
         for (i, line) in lines.iter().enumerate() {
             if self.is_fenced_code_block_start(line) {
                 fenced_found = true;
                 fenced_line = fenced_line.min(i);
-            } else if self.is_indented_code_block(&lines, i, is_mkdocs) {
+            } else if self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &in_list_context, &in_tab_context)
+            {
                 indented_found = true;
                 indented_line = indented_line.min(i);
             }
@@ -500,6 +529,14 @@ impl Rule for MD046CodeBlockStyle {
         // Check if we're in MkDocs mode
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
+        // Pre-compute list and tab contexts once for all checks
+        let in_list_context = self.precompute_list_context(&lines);
+        let in_tab_context = if is_mkdocs {
+            self.precompute_mkdocs_tab_context(&lines)
+        } else {
+            vec![false; lines.len()]
+        };
+
         // Determine the target style from the detected style in the document
         let target_style = match self.config.style {
             CodeBlockStyle::Consistent => self
@@ -512,10 +549,9 @@ impl Rule for MD046CodeBlockStyle {
         let line_index = LineIndex::new(ctx.content.to_string());
 
         // Pre-compute which lines are inside FENCED code blocks (not indented)
-        // We detect all code blocks, then filter for fenced ones only
-        let code_blocks = crate::utils::code_block_utils::CodeBlockUtils::detect_code_blocks(ctx.content);
+        // Use pre-computed code blocks from context
         let mut in_fenced_block = vec![false; lines.len()];
-        for &(start, end) in &code_blocks {
+        for &(start, end) in &ctx.code_blocks {
             // Check if this block is fenced by examining its content
             if start < ctx.content.len() && end <= ctx.content.len() {
                 let block_content = &ctx.content[start..end];
@@ -579,9 +615,18 @@ impl Rule for MD046CodeBlockStyle {
             }
 
             // Check for indented code blocks (when not inside a fenced block)
-            if self.is_indented_code_block(&lines, i, is_mkdocs) && target_style == CodeBlockStyle::Fenced {
+            if self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &in_list_context, &in_tab_context)
+                && target_style == CodeBlockStyle::Fenced
+            {
                 // Check if this is the start of a new indented block
-                let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1, is_mkdocs);
+                let prev_line_is_indented = i > 0
+                    && self.is_indented_code_block_with_context(
+                        &lines,
+                        i - 1,
+                        is_mkdocs,
+                        &in_list_context,
+                        &in_tab_context,
+                    );
 
                 if !prev_line_is_indented {
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
@@ -644,6 +689,14 @@ impl Rule for MD046CodeBlockStyle {
             _ => self.config.style,
         };
 
+        // Pre-compute list and tab contexts for efficiency
+        let in_list_context = self.precompute_list_context(&lines);
+        let in_tab_context = if is_mkdocs {
+            self.precompute_mkdocs_tab_context(&lines)
+        } else {
+            vec![false; lines.len()]
+        };
+
         let mut result = String::with_capacity(content.len());
         let mut in_fenced_block = false;
         let mut fenced_fence_type = None;
@@ -689,11 +742,19 @@ impl Rule for MD046CodeBlockStyle {
                     result.push_str(line);
                     result.push('\n');
                 }
-            } else if self.is_indented_code_block(&lines, i, is_mkdocs) {
+            } else if self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &in_list_context, &in_tab_context)
+            {
                 // This is an indented code block
 
                 // Check if we need to start a new fenced block
-                let prev_line_is_indented = i > 0 && self.is_indented_code_block(&lines, i - 1, is_mkdocs);
+                let prev_line_is_indented = i > 0
+                    && self.is_indented_code_block_with_context(
+                        &lines,
+                        i - 1,
+                        is_mkdocs,
+                        &in_list_context,
+                        &in_tab_context,
+                    );
 
                 if target_style == CodeBlockStyle::Fenced {
                     if !prev_line_is_indented && !in_indented_block {
@@ -709,8 +770,14 @@ impl Rule for MD046CodeBlockStyle {
                     }
 
                     // Check if this is the end of the indented block
-                    let _next_line_is_indented =
-                        i < lines.len() - 1 && self.is_indented_code_block(&lines, i + 1, is_mkdocs);
+                    let _next_line_is_indented = i < lines.len() - 1
+                        && self.is_indented_code_block_with_context(
+                            &lines,
+                            i + 1,
+                            is_mkdocs,
+                            &in_list_context,
+                            &in_tab_context,
+                        );
                     if !_next_line_is_indented && in_indented_block {
                         result.push_str("```\n");
                         in_indented_block = false;
