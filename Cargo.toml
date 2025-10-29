@@ -42,6 +42,10 @@ harness = false
 name = "range_utils_benchmark"
 harness = false
 
+[[bench]]
+name = "profile_lint_context_complete"
+harness = false
+
 [profile.release]
 lto = true           # Enable Link-Time Optimization
 strip = true         # Strip symbols from binary

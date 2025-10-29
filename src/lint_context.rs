@@ -401,8 +401,15 @@ impl<'a> LintContext<'a> {
         // Detect code blocks once and cache them
         let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
+        // Pre-compute HTML comment ranges ONCE for all operations
+        // MUST be done BEFORE compute_basic_line_info() which checks HTML comments for every line
+        // Also used by heading detection, link parsing, and image parsing
+        // This avoids O((N+H+L+I) × file_size) where N=lines, H=headings, L=links, I=images
+        let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
+
         // Pre-compute line information (without headings/blockquotes yet)
-        let mut lines = Self::compute_basic_line_info(content, &line_offsets, &code_blocks, flavor);
+        let mut lines =
+            Self::compute_basic_line_info(content, &line_offsets, &code_blocks, flavor, &html_comment_ranges);
 
         // Detect HTML blocks BEFORE heading detection
         // This ensures HTML content is never considered as markdown
@@ -411,11 +418,6 @@ impl<'a> LintContext<'a> {
         // Detect ESM import/export blocks in MDX files BEFORE heading detection
         // This ensures ESM blocks are never considered as markdown
         Self::detect_esm_blocks(&mut lines, flavor);
-
-        // Pre-compute HTML comment ranges ONCE for all operations
-        // Used by heading detection, link parsing, and image parsing
-        // This avoids O((H+L+I) × file_size) where H=headings, L=links, I=images
-        let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
 
         // Now detect headings and blockquotes, which will skip HTML blocks and ESM blocks
         Self::detect_headings_and_blockquotes(content, &mut lines, flavor, &html_comment_ranges);
@@ -1020,6 +1022,7 @@ impl<'a> LintContext<'a> {
         line_offsets: &[usize],
         code_blocks: &[(usize, usize)],
         flavor: MarkdownFlavor,
+        html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     ) -> Vec<LineInfo> {
         lazy_static! {
             // Regex for list detection - allow any whitespace including no space (to catch malformed lists)
@@ -1091,7 +1094,9 @@ impl<'a> LintContext<'a> {
             // Detect list items (skip if in frontmatter, in mkdocstrings block, or in HTML comment)
             let in_mkdocstrings = flavor == MarkdownFlavor::MkDocs
                 && crate::utils::mkdocstrings_refs::is_within_autodoc_block(content, byte_offset);
-            let in_html_comment = crate::utils::skip_context::is_in_html_comment(content, byte_offset);
+            // Use pre-computed ranges for efficiency (O(log n) vs O(file_size))
+            let in_html_comment =
+                crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, byte_offset);
             let list_item = if !(in_code_block
                 || is_blank
                 || in_mkdocstrings
