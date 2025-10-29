@@ -37,6 +37,8 @@ pub(crate) struct ConfigCacheEntry {
     pub(crate) config: Config,
     /// Config file path that was loaded (for invalidation)
     pub(crate) config_file: Option<PathBuf>,
+    /// True if this entry came from the global/user fallback (no project config)
+    pub(crate) from_global_fallback: bool,
 }
 
 /// Main LSP server for rumdl
@@ -524,10 +526,19 @@ impl RumdlLanguageServer {
         {
             let cache = self.config_cache.read().await;
             if let Some(entry) = cache.get(&search_dir) {
+                let source_owned: String; // ensure owned storage for logging
+                let source: &str = if entry.from_global_fallback {
+                    "global/user fallback"
+                } else if let Some(path) = &entry.config_file {
+                    source_owned = path.to_string_lossy().to_string();
+                    &source_owned
+                } else {
+                    "<unknown>"
+                };
                 log::debug!(
-                    "Config cache hit for directory: {} (loaded from: {:?})",
+                    "Config cache hit for directory: {} (loaded from: {})",
                     search_dir.display(),
-                    entry.config_file
+                    source
                 );
                 return entry.config.clone();
             }
@@ -590,16 +601,21 @@ impl RumdlLanguageServer {
             }
         }
 
-        // Use found config or fall back to default
-        let (config, config_file) = found_config.unwrap_or_else(|| {
-            log::debug!("No config found, using default config");
-            (Config::default(), None)
-        });
+        // Use found config or fall back to global/user config loaded at initialization
+        let (config, config_file) = if let Some((cfg, path)) = found_config {
+            (cfg, path)
+        } else {
+            log::debug!("No project config found; using global/user fallback config");
+            let fallback = self.rumdl_config.read().await.clone();
+            (fallback, None)
+        };
 
         // Cache the result
+        let from_global = config_file.is_none();
         let entry = ConfigCacheEntry {
             config: config.clone(),
             config_file,
+            from_global_fallback: from_global,
         };
 
         self.config_cache.write().await.insert(search_dir, entry);
