@@ -1233,8 +1233,12 @@ impl<'a> LintContext<'a> {
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
             let indent = line.len() - line.trim_start().len();
+
+            // Parse blockquote prefix once and reuse it (avoid redundant parsing)
+            let blockquote_parse = Self::parse_blockquote_prefix(line);
+
             // For blank detection, consider blockquote context
-            let is_blank = if let Some((_, content)) = Self::parse_blockquote_prefix(line) {
+            let is_blank = if let Some((_, content)) = blockquote_parse {
                 // In blockquote context, check if content after prefix is blank
                 content.trim().is_empty()
             } else {
@@ -1256,13 +1260,12 @@ impl<'a> LintContext<'a> {
                 || in_html_comment
                 || (front_matter_end > 0 && i < front_matter_end))
             {
-                // Strip blockquote prefix if present for list detection
-                let (line_for_list_check, blockquote_prefix_len) =
-                    if let Some((prefix, content)) = Self::parse_blockquote_prefix(line) {
-                        (content, prefix.len())
-                    } else {
-                        (&**line, 0)
-                    };
+                // Strip blockquote prefix if present for list detection (reuse cached result)
+                let (line_for_list_check, blockquote_prefix_len) = if let Some((prefix, content)) = blockquote_parse {
+                    (content, prefix.len())
+                } else {
+                    (&**line, 0)
+                };
 
                 if let Some((leading_spaces, marker, spacing, _content)) =
                     Self::parse_unordered_list(line_for_list_check)
