@@ -387,6 +387,51 @@ pub struct LintContext<'a> {
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
 }
 
+/// Detailed blockquote parse result with all components
+struct BlockquoteComponents<'a> {
+    indent: &'a str,
+    markers: &'a str,
+    spaces_after: &'a str,
+    content: &'a str,
+}
+
+/// Parse blockquote prefix with detailed components using manual parsing
+#[inline]
+fn parse_blockquote_detailed(line: &str) -> Option<BlockquoteComponents<'_>> {
+    let bytes = line.as_bytes();
+    let mut pos = 0;
+
+    // Parse leading whitespace (indent)
+    while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+        pos += 1;
+    }
+    let indent_end = pos;
+
+    // Must have at least one '>' marker
+    if pos >= bytes.len() || bytes[pos] != b'>' {
+        return None;
+    }
+
+    // Parse '>' markers
+    while pos < bytes.len() && bytes[pos] == b'>' {
+        pos += 1;
+    }
+    let markers_end = pos;
+
+    // Parse spaces after markers
+    while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+        pos += 1;
+    }
+    let spaces_end = pos;
+
+    Some(BlockquoteComponents {
+        indent: &line[0..indent_end],
+        markers: &line[indent_end..markers_end],
+        spaces_after: &line[markers_end..spaces_end],
+        content: &line[spaces_end..],
+    })
+}
+
 impl<'a> LintContext<'a> {
     pub fn new(content: &'a str, flavor: MarkdownFlavor) -> Self {
         use std::time::Instant;
@@ -1345,8 +1390,6 @@ impl<'a> LintContext<'a> {
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     ) {
         lazy_static! {
-            // Regex for blockquote prefix
-            static ref BLOCKQUOTE_REGEX_FULL: regex::Regex = regex::Regex::new(r"^(\s*)(>+)(\s*)(.*)$").unwrap();
 
             // Regex for heading detection
             static ref ATX_HEADING_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
@@ -1377,34 +1420,29 @@ impl<'a> LintContext<'a> {
             let line = content_lines[i];
 
             // Check for blockquotes (even on blank lines within blockquotes)
-            if let Some(caps) = BLOCKQUOTE_REGEX_FULL.captures(line) {
-                let indent_str = caps.get(1).map_or("", |m| m.as_str());
-                let markers = caps.get(2).map_or("", |m| m.as_str());
-                let spaces_after = caps.get(3).map_or("", |m| m.as_str());
-                let content = caps.get(4).map_or("", |m| m.as_str());
-
-                let nesting_level = markers.chars().filter(|&c| c == '>').count();
-                let marker_column = indent_str.len();
+            if let Some(bq) = parse_blockquote_detailed(line) {
+                let nesting_level = bq.markers.len(); // Each '>' is one level
+                let marker_column = bq.indent.len();
 
                 // Build the prefix (indentation + markers + space)
-                let prefix = format!("{indent_str}{markers}{spaces_after}");
+                let prefix = format!("{}{}{}", bq.indent, bq.markers, bq.spaces_after);
 
                 // Check for various blockquote issues
-                let has_no_space = spaces_after.is_empty() && !content.is_empty();
+                let has_no_space = bq.spaces_after.is_empty() && !bq.content.is_empty();
                 // Consider tabs as multiple spaces, or actual multiple spaces
-                let has_multiple_spaces = spaces_after.len() > 1 || spaces_after.contains('\t');
+                let has_multiple_spaces = bq.spaces_after.len() > 1 || bq.spaces_after.contains('\t');
 
                 // Check if needs MD028 fix (empty blockquote line without proper spacing)
                 // MD028 flags empty blockquote lines that don't have a single space after the marker
                 // Lines like "> " or ">> " are already correct and don't need fixing
-                let needs_md028_fix = content.is_empty() && spaces_after.is_empty();
+                let needs_md028_fix = bq.content.is_empty() && bq.spaces_after.is_empty();
 
                 lines[i].blockquote = Some(BlockquoteInfo {
                     nesting_level,
-                    indent: indent_str.to_string(),
+                    indent: bq.indent.to_string(),
                     marker_column,
                     prefix,
-                    content: content.to_string(),
+                    content: bq.content.to_string(),
                     has_no_space_after_marker: has_no_space,
                     has_multiple_spaces_after_marker: has_multiple_spaces,
                     needs_md028_fix,
