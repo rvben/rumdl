@@ -1253,15 +1253,52 @@ impl<'a> LintContext<'a> {
 
             let block_content = &content[safe_start..safe_end];
 
-            // Only consider multiline or fenced/indented code blocks
-            let is_multiline = block_content.contains('\n');
+            // Quick checks first: fenced code blocks are most common
             let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
-            let is_indented = !is_fenced
-                && block_content
-                    .lines()
-                    .all(|l| l.starts_with("    ") || l.starts_with("\t") || l.trim().is_empty());
 
-            if is_multiline || is_fenced || is_indented {
+            // For non-fenced blocks, check if it's an indented code block
+            // Only check this if needed, as it's expensive
+            let should_mark = if is_fenced {
+                true
+            } else {
+                // Check if all non-empty lines start with 4 spaces or tab
+                // Using manual byte scanning instead of .lines() iterator for speed
+                let bytes = block_content.as_bytes();
+                let mut i = 0;
+                let mut valid_indented = true;
+
+                while i < bytes.len() {
+                    let line_start = i;
+                    // Find end of line
+                    while i < bytes.len() && bytes[i] != b'\n' {
+                        i += 1;
+                    }
+
+                    // Check if this line is properly indented or empty
+                    let mut j = line_start;
+                    // Skip leading whitespace
+                    while j < i && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                        j += 1;
+                    }
+
+                    // If line has content, check indentation
+                    if j < i {
+                        // Line has non-whitespace content
+                        let indent_len = j - line_start;
+                        let starts_with_tab = line_start < bytes.len() && bytes[line_start] == b'\t';
+                        if indent_len < 4 && !starts_with_tab {
+                            valid_indented = false;
+                            break;
+                        }
+                    }
+
+                    i += 1; // Skip the newline
+                }
+
+                valid_indented
+            };
+
+            if should_mark {
                 // Mark all lines whose byte_offset falls within [start, end)
                 for (i, &byte_offset) in line_offsets.iter().enumerate() {
                     if byte_offset >= start && byte_offset < end {
@@ -1286,7 +1323,7 @@ impl<'a> LintContext<'a> {
         let content_lines: Vec<&str> = content.lines().collect();
         let mut lines = Vec::with_capacity(content_lines.len());
 
-        // Pre-compute which lines are in code blocks - O(m*n) done ONCE instead of O(n²)
+        // Pre-compute which lines are in code blocks
         let code_block_map = Self::compute_code_block_line_map(content, line_offsets, code_blocks);
 
         // Detect front matter boundaries FIRST, before any other parsing
