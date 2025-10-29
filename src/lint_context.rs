@@ -755,6 +755,34 @@ impl<'a> LintContext<'a> {
             .collect()
     }
 
+    /// Find the line index for a given byte offset using binary search.
+    /// Returns (line_index, line_number, column) where:
+    /// - line_index is the 0-based index in the lines array
+    /// - line_number is the 1-based line number
+    /// - column is the byte offset within that line
+    #[inline]
+    fn find_line_for_offset(lines: &[LineInfo], byte_offset: usize) -> (usize, usize, usize) {
+        // Binary search to find the line containing this byte offset
+        let idx = match lines.binary_search_by(|line| {
+            if byte_offset < line.byte_offset {
+                std::cmp::Ordering::Greater
+            } else if byte_offset > line.byte_offset + line.content.len() {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        }) {
+            Ok(idx) => idx,
+            Err(idx) => idx.saturating_sub(1),
+        };
+
+        let line = &lines[idx];
+        let line_num = idx + 1;
+        let col = byte_offset.saturating_sub(line.byte_offset);
+
+        (idx, line_num, col)
+    }
+
     /// Parse all links in the content
     fn parse_links(
         content: &str,
@@ -802,50 +830,16 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Skip if this link is on a MkDocs snippet line
-            // Find which line this link is on
-            let line_idx = lines
-                .iter()
-                .position(|line| {
-                    match_start >= line.byte_offset && (match_start < line.byte_offset + line.content.len() + 1)
-                })
-                .unwrap_or(0);
+            // Use binary search to find the line this link is on
+            let (line_idx, line_num, col_start) = Self::find_line_for_offset(lines, match_start);
 
+            // Skip if this link is on a MkDocs snippet line
             if is_mkdocs_snippet_line(&lines[line_idx].content, flavor) {
                 continue;
             }
 
-            // Find which line this link starts on
-            let mut line_num = 1;
-            let mut col_start = match_start;
-            for (idx, line_info) in lines.iter().enumerate() {
-                if match_start >= line_info.byte_offset {
-                    line_num = idx + 1;
-                    col_start = match_start - line_info.byte_offset;
-                } else {
-                    break;
-                }
-            }
-
-            // Find which line this link ends on (and calculate column on that line)
-            let mut end_line_num = 1;
-            let mut col_end = match_end;
-            for (idx, line_info) in lines.iter().enumerate() {
-                if match_end > line_info.byte_offset {
-                    end_line_num = idx + 1;
-                    col_end = match_end - line_info.byte_offset;
-                } else {
-                    break;
-                }
-            }
-
-            // For single-line links, use the same approach as before
-            if line_num == end_line_num {
-                // col_end is already correct
-            } else {
-                // For multi-line links, col_end represents the column on the ending line
-                // which is what we want
-            }
+            // Use binary search to find the end line
+            let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, match_end);
 
             let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
 
@@ -932,37 +926,11 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Find which line this image starts on
-            let mut line_num = 1;
-            let mut col_start = match_start;
-            for (idx, line_info) in lines.iter().enumerate() {
-                if match_start >= line_info.byte_offset {
-                    line_num = idx + 1;
-                    col_start = match_start - line_info.byte_offset;
-                } else {
-                    break;
-                }
-            }
+            // Use binary search to find the line this image is on
+            let (_, line_num, col_start) = Self::find_line_for_offset(lines, match_start);
 
-            // Find which line this image ends on (and calculate column on that line)
-            let mut end_line_num = 1;
-            let mut col_end = match_end;
-            for (idx, line_info) in lines.iter().enumerate() {
-                if match_end > line_info.byte_offset {
-                    end_line_num = idx + 1;
-                    col_end = match_end - line_info.byte_offset;
-                } else {
-                    break;
-                }
-            }
-
-            // For single-line images, use the same approach as before
-            if line_num == end_line_num {
-                // col_end is already correct
-            } else {
-                // For multi-line images, col_end represents the column on the ending line
-                // which is what we want
-            }
+            // Use binary search to find the end line
+            let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, match_end);
 
             let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
 
