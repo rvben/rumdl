@@ -21,6 +21,42 @@ lazy_static! {
     static ref INLINE_MATH_REGEX: Regex = Regex::new(r"\$(?:\$)?[^$]+\$(?:\$)?").unwrap();
 }
 
+/// Range representing a span of bytes (start inclusive, end exclusive)
+#[derive(Debug, Clone, Copy)]
+pub struct ByteRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Pre-compute all HTML comment ranges in the content
+/// Returns a sorted vector of byte ranges for efficient lookup
+pub fn compute_html_comment_ranges(content: &str) -> Vec<ByteRange> {
+    HTML_COMMENT_PATTERN
+        .find_iter(content)
+        .map(|m| ByteRange {
+            start: m.start(),
+            end: m.end(),
+        })
+        .collect()
+}
+
+/// Check if a byte position is within any of the pre-computed HTML comment ranges
+/// Uses binary search for O(log n) complexity
+pub fn is_in_html_comment_ranges(ranges: &[ByteRange], byte_pos: usize) -> bool {
+    // Binary search to find a range that might contain byte_pos
+    ranges
+        .binary_search_by(|range| {
+            if byte_pos < range.start {
+                std::cmp::Ordering::Greater
+            } else if byte_pos >= range.end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
 /// Check if a line is within front matter (both YAML and TOML)
 pub fn is_in_front_matter(content: &str, line_num: usize) -> bool {
     let lines: Vec<&str> = content.lines().collect();

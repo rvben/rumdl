@@ -419,9 +419,13 @@ impl<'a> LintContext<'a> {
         let ast = get_cached_ast(content);
         let code_spans = Self::parse_code_spans(content, &lines, &ast);
 
+        // Pre-compute HTML comment ranges once for link/image parsing
+        // This avoids O(L × file_size) where L = links+images
+        let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
+
         // Parse links, images, references, and list blocks
-        let links = Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor);
-        let images = Self::parse_images(content, &lines, &code_blocks, &code_spans);
+        let links = Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges);
+        let images = Self::parse_images(content, &lines, &code_blocks, &code_spans, &html_comment_ranges);
         let reference_defs = Self::parse_reference_defs(content, &lines);
         // Use line-by-line list parsing for MD032 compatibility
         // TODO: Consider using AST-based parsing in the future when MD032 is updated
@@ -790,8 +794,9 @@ impl<'a> LintContext<'a> {
         code_blocks: &[(usize, usize)],
         code_spans: &[CodeSpan],
         flavor: MarkdownFlavor,
+        html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     ) -> Vec<ParsedLink> {
-        use crate::utils::skip_context::{is_in_html_comment, is_mkdocs_snippet_line};
+        use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
 
         // Pre-size based on a heuristic: most markdown files have relatively few links
         let mut links = Vec::with_capacity(content.len() / 500); // ~1 link per 500 chars
@@ -825,8 +830,8 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Skip if in HTML comment
-            if is_in_html_comment(content, match_start) {
+            // Skip if in HTML comment (using pre-computed ranges for efficiency)
+            if is_in_html_comment_ranges(html_comment_ranges, match_start) {
                 continue;
             }
 
@@ -891,8 +896,9 @@ impl<'a> LintContext<'a> {
         lines: &[LineInfo],
         code_blocks: &[(usize, usize)],
         code_spans: &[CodeSpan],
+        html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     ) -> Vec<ParsedImage> {
-        use crate::utils::skip_context::is_in_html_comment;
+        use crate::utils::skip_context::is_in_html_comment_ranges;
 
         // Pre-size based on a heuristic: images are less common than links
         let mut images = Vec::with_capacity(content.len() / 1000); // ~1 image per 1000 chars
@@ -921,8 +927,8 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Skip if in HTML comment
-            if is_in_html_comment(content, match_start) {
+            // Skip if in HTML comment (using pre-computed ranges for efficiency)
+            if is_in_html_comment_ranges(html_comment_ranges, match_start) {
                 continue;
             }
 
@@ -1188,6 +1194,10 @@ impl<'a> LintContext<'a> {
 
         let content_lines: Vec<&str> = content.lines().collect();
 
+        // Pre-compute HTML comment ranges once for efficient lookup
+        // This changes complexity from O(H × file_size) to O(H × log C) where H = headings, C = comments
+        let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
+
         // Detect front matter boundaries to skip those lines
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
@@ -1259,8 +1269,8 @@ impl<'a> LintContext<'a> {
             };
 
             if !is_snippet_line && let Some(caps) = ATX_HEADING_REGEX.captures(line) {
-                // Skip headings inside HTML comments
-                if crate::utils::skip_context::is_in_html_comment(content, lines[i].byte_offset) {
+                // Skip headings inside HTML comments (using pre-computed ranges for efficiency)
+                if crate::utils::skip_context::is_in_html_comment_ranges(&html_comment_ranges, lines[i].byte_offset) {
                     continue;
                 }
                 let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
@@ -1369,8 +1379,9 @@ impl<'a> LintContext<'a> {
                         continue;
                     }
 
-                    // Skip Setext headings inside HTML comments
-                    if crate::utils::skip_context::is_in_html_comment(content, lines[i].byte_offset) {
+                    // Skip Setext headings inside HTML comments (using pre-computed ranges for efficiency)
+                    if crate::utils::skip_context::is_in_html_comment_ranges(&html_comment_ranges, lines[i].byte_offset)
+                    {
                         continue;
                     }
 
