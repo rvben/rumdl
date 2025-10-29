@@ -196,8 +196,8 @@ impl Rule for MD055TablePipeStyle {
             }
         };
 
-        // Use shared table detection for better performance
-        let table_blocks = TableUtils::find_table_blocks(content, ctx);
+        // Use pre-computed table blocks from context
+        let table_blocks = &ctx.table_blocks;
 
         // Process each table block
         for table_block in table_blocks {
@@ -292,8 +292,8 @@ impl Rule for MD055TablePipeStyle {
             }
         };
 
-        // Use shared table detection for better performance
-        let table_blocks = TableUtils::find_table_blocks(content, ctx);
+        // Use pre-computed table blocks from context
+        let table_blocks = &ctx.table_blocks;
 
         // Create a copy of lines that we can modify
         let mut result_lines = lines.iter().map(|&s| s.to_string()).collect::<Vec<String>>();

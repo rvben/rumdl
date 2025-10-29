@@ -389,6 +389,7 @@ pub struct LintContext<'a> {
     table_rows_cache: Mutex<Option<Arc<Vec<TableRow>>>>, // Lazy-loaded table rows
     bare_urls_cache: Mutex<Option<Arc<Vec<BareUrl>>>>, // Lazy-loaded bare URLs
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
+    pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
 }
 
@@ -552,6 +553,14 @@ impl<'a> LintContext<'a> {
             eprintln!("[PROFILE] Char frequency: {:?}", start.elapsed());
         }
 
+        // Pre-compute table blocks for rules that need them (MD013, MD055, MD056, MD058)
+        let start = Instant::now();
+        let table_blocks =
+            crate::utils::table_utils::TableUtils::find_table_blocks_with_code_info(content, &code_blocks, &code_spans);
+        if profile {
+            eprintln!("[PROFILE] Table blocks: {:?}", start.elapsed());
+        }
+
         Self {
             content,
             line_offsets,
@@ -568,6 +577,7 @@ impl<'a> LintContext<'a> {
             table_rows_cache: Mutex::new(None),
             bare_urls_cache: Mutex::new(None),
             html_comment_ranges,
+            table_blocks,
             flavor,
         }
     }

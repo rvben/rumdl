@@ -190,11 +190,11 @@ impl Rule for MD013LineLength {
             .map(|(idx, _)| idx + 1)
             .collect();
 
-        // Use TableUtils to find all table blocks
+        // Use pre-computed table blocks from context
         // We need this for both the table skip check AND the paragraphs check
-        let table_blocks = TableUtils::find_table_blocks(content, ctx);
+        let table_blocks = &ctx.table_blocks;
         let mut table_lines_set = std::collections::HashSet::new();
-        for table in &table_blocks {
+        for table in table_blocks {
             table_lines_set.insert(table.header_line + 1);
             table_lines_set.insert(table.delimiter_line + 1);
             for &line in &table.content_lines {

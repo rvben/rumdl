@@ -2,7 +2,6 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::range_utils::LineIndex;
-use crate::utils::table_utils::TableUtils;
 use serde::{Deserialize, Serialize};
 
 /// Rule MD058: Blanks around tables
@@ -117,8 +116,8 @@ impl Rule for MD058BlanksAroundTables {
 
         let lines: Vec<&str> = content.lines().collect();
 
-        // Use shared table detection for better performance
-        let table_blocks = TableUtils::find_table_blocks(content, ctx);
+        // Use pre-computed table blocks from context
+        let table_blocks = &ctx.table_blocks;
 
         for table_block in table_blocks {
             // Check for sufficient blank lines before table
@@ -300,6 +299,7 @@ impl Rule for MD058BlanksAroundTables {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+    use crate::utils::table_utils::TableUtils;
 
     #[test]
     fn test_table_with_blanks() {
