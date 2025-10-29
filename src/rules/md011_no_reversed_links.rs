@@ -11,11 +11,94 @@ use crate::utils::skip_context::{is_in_html_comment, is_in_math_context};
 // Reversed link detection pattern
 const REVERSED_LINK_REGEX_STR: &str = r"(^|[^\\])\(([^()]+)\)\[([^\]]+)\]";
 
+/// Classification of a link component
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkComponent {
+    /// Clear URL: has protocol, www., mailto:, or path prefix
+    ClearUrl,
+    /// Multiple words or sentence-like (likely link text, not URL)
+    MultiWord,
+    /// Single word - could be either URL or text
+    Ambiguous,
+}
+
+/// Information about a detected reversed link pattern
+#[derive(Debug, Clone)]
+struct ReversedLinkInfo {
+    line_num: usize,
+    column: usize,
+    /// Content found in parentheses
+    paren_content: String,
+    /// Content found in square brackets
+    bracket_content: String,
+    /// Classification of parentheses content
+    paren_type: LinkComponent,
+    /// Classification of bracket content
+    bracket_type: LinkComponent,
+}
+
+impl ReversedLinkInfo {
+    /// Determine the correct order: returns (text, url)
+    fn correct_order(&self) -> (&str, &str) {
+        use LinkComponent::*;
+
+        match (self.paren_type, self.bracket_type) {
+            // One side is clearly a URL - that's the URL
+            (ClearUrl, _) => (&self.bracket_content, &self.paren_content),
+            (_, ClearUrl) => (&self.paren_content, &self.bracket_content),
+
+            // One side is multi-word - that's the text, other is URL
+            (MultiWord, _) => (&self.paren_content, &self.bracket_content),
+            (_, MultiWord) => (&self.bracket_content, &self.paren_content),
+
+            // Both ambiguous: assume standard reversed pattern (url)[text]
+            (Ambiguous, Ambiguous) => (&self.bracket_content, &self.paren_content),
+        }
+    }
+
+    /// Get the original pattern as it appears in the source
+    fn original_pattern(&self) -> String {
+        format!("({})[{}]", self.paren_content, self.bracket_content)
+    }
+
+    /// Get the corrected pattern
+    fn corrected_pattern(&self) -> String {
+        let (text, url) = self.correct_order();
+        format!("[{text}]({url})")
+    }
+}
+
 #[derive(Clone)]
 pub struct MD011NoReversedLinks;
 
 impl MD011NoReversedLinks {
-    fn find_reversed_links(content: &str) -> Vec<(usize, usize, String, String)> {
+    /// Classify a link component as URL, multi-word text, or ambiguous
+    fn classify_component(s: &str) -> LinkComponent {
+        let trimmed = s.trim();
+
+        // Check for clear URL indicators
+        if trimmed.starts_with("http://")
+            || trimmed.starts_with("https://")
+            || trimmed.starts_with("ftp://")
+            || trimmed.starts_with("www.")
+            || (trimmed.starts_with("mailto:") && trimmed.contains('@'))
+            || (trimmed.starts_with('/') && trimmed.len() > 1)
+            || (trimmed.starts_with("./") || trimmed.starts_with("../"))
+            || (trimmed.starts_with('#') && trimmed.len() > 1 && !trimmed[1..].contains(' '))
+        {
+            return LinkComponent::ClearUrl;
+        }
+
+        // Multi-word text is likely a description, not a URL
+        if trimmed.contains(' ') {
+            return LinkComponent::MultiWord;
+        }
+
+        // Single word - could be either
+        LinkComponent::Ambiguous
+    }
+
+    fn find_reversed_links(content: &str) -> Vec<ReversedLinkInfo> {
         let mut results = Vec::new();
         let mut line_num = 1;
 
@@ -28,11 +111,11 @@ impl MD011NoReversedLinks {
             {
                 let match_obj = cap.get(0).unwrap();
                 let prechar = &cap[1];
-                let url = &cap[2];
-                let text = &cap[3];
+                let paren_content = cap[2].to_string();
+                let bracket_content = cap[3].to_string();
 
                 // Check if the brackets at the end are escaped
-                if text.ends_with('\\') {
+                if bracket_content.ends_with('\\') {
                     last_end += match_obj.end();
                     continue;
                 }
@@ -45,10 +128,22 @@ impl MD011NoReversedLinks {
                     continue;
                 }
 
+                // Classify both components
+                let paren_type = Self::classify_component(&paren_content);
+                let bracket_type = Self::classify_component(&bracket_content);
+
                 // Calculate the actual column (accounting for any prefix character)
                 let column = last_end + match_obj.start() + prechar.len() + 1;
 
-                results.push((line_num, column, text.to_string(), url.to_string()));
+                results.push(ReversedLinkInfo {
+                    line_num,
+                    column,
+                    paren_content,
+                    bracket_content,
+                    paren_type,
+                    bracket_type,
+                });
+
                 last_end += match_obj.end();
             }
 
@@ -90,11 +185,11 @@ impl Rule for MD011NoReversedLinks {
             {
                 let match_obj = cap.get(0).unwrap();
                 let prechar = &cap[1];
-                let url = &cap[2];
-                let text = &cap[3];
+                let paren_content = cap[2].to_string();
+                let bracket_content = cap[3].to_string();
 
                 // Check if the brackets at the end are escaped
-                if text.ends_with('\\') {
+                if bracket_content.ends_with('\\') {
                     last_end += match_obj.end();
                     continue;
                 }
@@ -120,6 +215,21 @@ impl Rule for MD011NoReversedLinks {
                     last_end += match_obj.end();
                     continue;
                 }
+
+                // Classify both components and determine correct order
+                let paren_type = Self::classify_component(&paren_content);
+                let bracket_type = Self::classify_component(&bracket_content);
+
+                let info = ReversedLinkInfo {
+                    line_num,
+                    column: match_start + 1,
+                    paren_content,
+                    bracket_content,
+                    paren_type,
+                    bracket_type,
+                };
+
+                let (text, url) = info.correct_order();
 
                 // Calculate the range for the actual reversed link (excluding prechar)
                 let actual_length = match_obj.len() - prechar.len();
@@ -159,13 +269,12 @@ impl Rule for MD011NoReversedLinks {
         // Create LineIndex for correct byte position calculations across all line ending types
         let line_index = LineIndex::new(content.to_string());
 
-        for (line_num, column, text, url) in Self::find_reversed_links(content) {
+        for info in Self::find_reversed_links(content) {
             // Calculate absolute position in original content using LineIndex
-            let line_start = line_index.get_line_start_byte(line_num).unwrap_or(0);
-            let pos = line_start + (column - 1);
+            let line_start = line_index.get_line_start_byte(info.line_num).unwrap_or(0);
+            let pos = line_start + (info.column - 1);
 
             // Skip if in front matter using centralized utility
-            // line_num is 1-based from find_reversed_links, so we need 0-based index
             if ctx.is_in_front_matter(pos) {
                 continue;
             }
@@ -177,8 +286,10 @@ impl Rule for MD011NoReversedLinks {
                 && !is_in_jinja_template(content, pos)
             {
                 let adjusted_pos = (pos as isize + offset) as usize;
-                let original = format!("({url})[{text}]");
-                let replacement = format!("[{text}]({url})");
+
+                // Use the info struct to get both original and corrected patterns
+                let original = info.original_pattern();
+                let replacement = info.corrected_pattern();
 
                 // Make sure we have the right substring before replacing
                 let end_pos = adjusted_pos + original.len();
