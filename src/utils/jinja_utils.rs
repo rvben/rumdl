@@ -8,6 +8,25 @@ static JINJA_EXPRESSION_REGEX: Lazy<Regex> =
 static JINJA_STATEMENT_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\{%.*?%\}").expect("Failed to compile Jinja statement regex"));
 
+/// Pre-compute all Jinja template ranges in the content
+pub fn find_jinja_ranges(content: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+
+    // Collect Jinja expressions {{ ... }}
+    for mat in JINJA_EXPRESSION_REGEX.find_iter(content) {
+        ranges.push((mat.start(), mat.end()));
+    }
+
+    // Collect Jinja statements {% ... %}
+    for mat in JINJA_STATEMENT_REGEX.find_iter(content) {
+        ranges.push((mat.start(), mat.end()));
+    }
+
+    // Sort by start position for efficient binary search later
+    ranges.sort_by_key(|r| r.0);
+    ranges
+}
+
 /// Check if a position is within a Jinja2 template expression or statement
 pub fn is_in_jinja_template(content: &str, pos: usize) -> bool {
     // Check Jinja expressions {{ ... }}

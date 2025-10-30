@@ -391,6 +391,7 @@ pub struct LintContext<'a> {
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
     pub line_index: crate::utils::range_utils::LineIndex, // Pre-computed line index for byte position calculations
+    jinja_ranges: Vec<(usize, usize)>,    // Pre-computed Jinja template ranges ({{ }}, {% %})
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
 }
 
@@ -569,6 +570,13 @@ impl<'a> LintContext<'a> {
             eprintln!("[PROFILE] Line index: {:?}", start.elapsed());
         }
 
+        // Pre-compute Jinja template ranges once for all rules (eliminates O(n×m) in MD011)
+        let start = Instant::now();
+        let jinja_ranges = crate::utils::jinja_utils::find_jinja_ranges(content);
+        if profile {
+            eprintln!("[PROFILE] Jinja ranges: {:?}", start.elapsed());
+        }
+
         Self {
             content,
             line_offsets,
@@ -587,6 +595,7 @@ impl<'a> LintContext<'a> {
             html_comment_ranges,
             table_blocks,
             line_index,
+            jinja_ranges,
             flavor,
         }
     }
@@ -783,6 +792,13 @@ impl<'a> LintContext<'a> {
         self.html_comment_ranges
             .iter()
             .any(|range| byte_pos >= range.start && byte_pos < range.end)
+    }
+
+    /// Check if a byte position is within a Jinja template ({{ }} or {% %})
+    pub fn is_in_jinja_range(&self, byte_pos: usize) -> bool {
+        self.jinja_ranges
+            .iter()
+            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
     }
 
     /// Check if content has any instances of a specific character (fast)

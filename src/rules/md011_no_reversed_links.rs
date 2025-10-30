@@ -3,7 +3,6 @@
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::jinja_utils::is_in_jinja_template;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::get_cached_regex;
 use crate::utils::skip_context::is_in_math_context;
@@ -164,7 +163,6 @@ impl Rule for MD011NoReversedLinks {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let mut warnings = Vec::new();
 
         let line_index = &ctx.line_index;
@@ -209,7 +207,7 @@ impl Rule for MD011NoReversedLinks {
                 if ctx.is_in_code_block_or_span(match_byte_pos)
                     || ctx.is_in_html_comment(match_byte_pos)
                     || is_in_math_context(ctx, match_byte_pos)
-                    || is_in_jinja_template(content, match_byte_pos)
+                    || ctx.is_in_jinja_range(match_byte_pos)
                 {
                     last_end += match_obj.end();
                     continue;
@@ -281,7 +279,7 @@ impl Rule for MD011NoReversedLinks {
             if !ctx.is_in_code_block_or_span(pos)
                 && !ctx.is_in_html_comment(pos)
                 && !is_in_math_context(ctx, pos)
-                && !is_in_jinja_template(content, pos)
+                && !ctx.is_in_jinja_range(pos)
             {
                 let adjusted_pos = (pos as isize + offset) as usize;
 
