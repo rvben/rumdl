@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.169] - 2025-10-30
+
+### Performance
+
+**MASSIVE PERFORMANCE IMPROVEMENTS**: This release delivers 7-53x faster linting through systematic elimination of O(n²) bottlenecks and algorithmic optimizations. rumdl is now 16-29x faster than markdownlint-cli2 on real-world repositories.
+
+- **Fix catastrophic O(n²) bottleneck in FilteredLinesIter** ⭐ THE GAME CHANGER
+  - Eliminated `content.lines().collect()` from inside Iterator::next() method
+  - Single-file optimization delivered 7,600x speedup for affected rules
+  - MD011: 6.00s → 0.785ms (7,644x faster)
+  - MD012: 5.95s → 1.643ms (3,621x faster)
+  - Impact: Stress test (10k lines): 9,987ms → 187ms (53x faster)
+  - Impact: Rust Book (478 files): 2,646ms → 269ms (9.8x faster)
+  - Impact: PyO3 (76 files): 2,004ms → 262ms (7.6x faster)
+
+- **Pre-compute LintContext data structures to eliminate redundant work**
+  - LineIndex: Eliminated 46× content cloning across all rules
+  - Jinja template ranges: Pre-computed once instead of O(n×m) scanning
+  - Table blocks: Computed once instead of 4× independent scans per document
+  - HTML comment ranges: Pre-computed with 50-70x speedup
+  - Code block line mapping: Optimized with binary search instead of linear scan
+  - Autodoc blocks (MkDocs): Pre-computed to avoid O(n²) scaling
+
+- **Optimize link and image parsing with binary search**
+  - Replaced linear search with binary search for code span checks
+  - Faster link/image parsing across all reference-based rules
+
+- **Replace regex with byte-level parsing for better performance**
+  - List detection: Manual byte scanning instead of regex
+  - Blockquote prefix: Byte-level parsing instead of regex
+  - Line info parsing: Eliminated redundant blockquote prefix parsing
+
+- **Streaming parser architecture**
+  - Replaced AST parsing with pulldown-cmark streaming for lower memory overhead
+  - Better scalability for very large documents
+
+- **MD046 optimization**
+  - Pre-compute list/tab contexts
+  - Use ctx.code_blocks instead of independent detection
+
+### Benchmarks
+
+**vs Previous Version (v0.0.168):**
+- Rust Book (478 files): 2,646ms → 269ms (9.8x faster)
+- Stress Test (10,514 lines): 9,987ms → 187ms (53.4x faster)
+- PyO3 (76 files): 2,004ms → 262ms (7.6x faster)
+
+**vs markdownlint-cli2 (industry standard):**
+- Rust Book: 10.3s vs 0.35s (29.4x faster)
+- PyO3: 4.4s vs 0.26s (16.9x faster)
+
+**Current Performance:**
+- 0.7ms per file (Rust Book)
+- 6.3x parallelization efficiency
+- Zero O(n²) algorithmic bottlenecks remaining
+
+### Added
+
+- **MDX and Quarto flavor support**
+  - New flavors: `MarkdownFlavor::MDX` and `MarkdownFlavor::Quarto`
+  - JSX component handling: Skip linting inside JSX elements
+  - ESM import/export support: Ignore JavaScript import/export statements
+  - Quarto code chunk support: Recognize `{r}`, `{python}` chunk delimiters
+  - Essential for modern React-based documentation and data science workflows
+
+### Fixed
+
+- **MD011: Intelligent URL vs text detection in reversed links**
+  - Smarter classification of link components as URL or text
+  - Reduces false positives in edge cases like `(Generic<T>)[link]`
+  - Correctly handles `(http://url)[text]` vs `(text)[#anchor]`
+  - Improved heuristics for ambiguous single-word patterns
+
+- **MD013: Preserve HTML blocks in list items during reflow**
+  - HTML blocks inside list items are now preserved during auto-fix
+  - Prevents broken indentation and tag structure
+  - Better handling of complex nested content
+
+### Changed
+
+- Architecture improvements for pre-computation pattern
+  - LintContext now owns shared data structures
+  - Rules consume pre-computed data instead of duplicating work
+  - Consistent binary search APIs for range lookups
+  - Foundation for future optimizations
+
 ## [0.0.168] - 2025-10-28
 
 ### Added

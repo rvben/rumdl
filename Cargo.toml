@@ -1,6 +1,6 @@
 [package]
 name = "rumdl"
-version = "0.0.168"
+version = "0.0.169"
 edition = "2024"
 rust-version = "1.89.0"
 description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"
@@ -21,30 +21,6 @@ crate-type = ["rlib"]
 [[bin]]
 name = "rumdl"
 path = "src/main.rs"
-
-[[bench]]
-name = "rule_performance"
-harness = false
-
-[[bench]]
-name = "fix_performance"
-harness = false
-
-[[bench]]
-name = "range_performance"
-harness = false
-
-[[bench]]
-name = "simple_fix_bench"
-harness = false
-
-[[bench]]
-name = "range_utils_benchmark"
-harness = false
-
-[[bench]]
-name = "profile_lint_context_complete"
-harness = false
 
 [profile.release]
 lto = true           # Enable Link-Time Optimization
