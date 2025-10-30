@@ -1321,8 +1321,23 @@ impl<'a> LintContext<'a> {
 
             let block_content = &content[safe_start..safe_end];
 
+            // Strip blockquote markers to check the actual code block content
+            // Code blocks inside blockquotes have the format: "> ```" or ">     code"
+            let content_to_check = block_content
+                .lines()
+                .map(|line| {
+                    let mut stripped = line.to_string();
+                    while crate::rules::blockquote_utils::BlockquoteUtils::is_blockquote(&stripped) {
+                        stripped = crate::rules::blockquote_utils::BlockquoteUtils::extract_content(&stripped);
+                    }
+                    stripped
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
             // Quick checks first: fenced code blocks are most common
-            let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
+            let is_fenced =
+                content_to_check.trim_start().starts_with("```") || content_to_check.trim_start().starts_with("~~~");
 
             // For non-fenced blocks, check if it's an indented code block
             // Only check this if needed, as it's expensive
@@ -1331,7 +1346,7 @@ impl<'a> LintContext<'a> {
             } else {
                 // Check if all non-empty lines start with 4 spaces or tab
                 // Using manual byte scanning instead of .lines() iterator for speed
-                let bytes = block_content.as_bytes();
+                let bytes = content_to_check.as_bytes();
                 let mut i = 0;
                 let mut valid_indented = true;
 
