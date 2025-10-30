@@ -168,9 +168,8 @@ impl Rule for MD002FirstHeadingH1 {
                     );
 
                     // Use line content range to replace the entire heading line
-                    let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
                     Some(Fix {
-                        range: line_index.line_content_range(line_num + 1), // Convert to 1-indexed
+                        range: ctx.line_index.line_content_range(line_num + 1), // Convert to 1-indexed
                         replacement,
                     })
                 };

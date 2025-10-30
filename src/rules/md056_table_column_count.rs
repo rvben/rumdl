@@ -1,5 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use crate::utils::table_utils::TableUtils;
 
 /// Rule MD056: Table column count
@@ -136,7 +136,7 @@ impl Rule for MD056TableColumnCount {
                         end_column: end_col,
                         severity: Severity::Warning,
                         fix: fix_result.map(|fixed_row| Fix {
-                            range: LineIndex::new(content.to_string()).line_col_to_byte_range(line_idx + 1, 1),
+                            range: ctx.line_index.line_col_to_byte_range(line_idx + 1, 1),
                             replacement: fixed_row,
                         }),
                     });

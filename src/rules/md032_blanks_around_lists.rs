@@ -454,7 +454,7 @@ impl Rule for MD032BlanksAroundLists {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let lines: Vec<&str> = content.lines().collect();
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         // Early return for empty content
         if lines.is_empty() {
@@ -467,7 +467,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(Vec::new());
         }
 
-        self.perform_checks(ctx, &lines, &list_blocks, &line_index)
+        self.perform_checks(ctx, &lines, &list_blocks, line_index)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

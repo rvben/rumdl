@@ -5,7 +5,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::mkdocs_admonitions;
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD031 rule
@@ -119,7 +119,7 @@ impl Rule for MD031BlanksAroundFences {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -298,7 +298,7 @@ impl Rule for MD031BlanksAroundFences {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         // Check if original content ended with newline
         let had_trailing_newline = content.ends_with('\n');

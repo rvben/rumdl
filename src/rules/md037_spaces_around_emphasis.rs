@@ -7,7 +7,6 @@ use crate::utils::emphasis_utils::{
     EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
 };
 use crate::utils::kramdown_utils::has_span_ial;
-use crate::utils::range_utils::LineIndex;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use crate::utils::skip_context::{is_in_html_comment, is_in_math_context, is_in_table_cell};
 
@@ -68,7 +67,7 @@ impl Rule for MD037NoSpaceInEmphasis {
         }
 
         // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 
@@ -129,7 +128,7 @@ impl Rule for MD037NoSpaceInEmphasis {
         }
 
         // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         // Apply fixes
         let mut result = content.to_string();

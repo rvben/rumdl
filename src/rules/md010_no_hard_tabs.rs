@@ -3,7 +3,7 @@ use crate::rule_config_serde::RuleConfig;
 /// Rule MD010: No tabs
 ///
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::{HTML_COMMENT_END, HTML_COMMENT_START};
 
 mod md010_config;
@@ -117,7 +117,7 @@ impl Rule for MD010NoHardTabs {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -198,7 +198,7 @@ impl Rule for MD010NoHardTabs {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();

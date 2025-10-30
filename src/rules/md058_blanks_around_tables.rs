@@ -1,7 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
-use crate::utils::range_utils::LineIndex;
 use serde::{Deserialize, Serialize};
 
 /// Rule MD058: Blanks around tables
@@ -106,7 +105,7 @@ impl Rule for MD058BlanksAroundTables {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
         // Early return for empty content or content without tables
@@ -193,7 +192,7 @@ impl Rule for MD058BlanksAroundTables {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut warnings = self.check(ctx)?;
         if warnings.is_empty() {

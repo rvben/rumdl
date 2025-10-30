@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::{BOLD_ASTERISK_REGEX, BOLD_UNDERSCORE_REGEX};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
@@ -200,7 +200,7 @@ impl Rule for MD050StrongStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 

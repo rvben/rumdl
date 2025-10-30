@@ -1,5 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 
 /// Rule MD040: Fenced code blocks should have a language
 ///
@@ -19,7 +19,7 @@ impl Rule for MD040FencedCodeLanguage {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 
@@ -144,7 +144,7 @@ impl Rule for MD040FencedCodeLanguage {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut result = String::new();
         let mut in_code_block = false;

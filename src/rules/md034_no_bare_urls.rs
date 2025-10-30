@@ -402,7 +402,7 @@ impl Rule for MD034NoBareUrls {
         }
 
         // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         // Get code spans for exclusion
         let code_spans = ctx.code_spans();
@@ -414,7 +414,7 @@ impl Rule for MD034NoBareUrls {
         // This uses the filtered iterator API which centralizes the skip logic
         for line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
             let mut line_warnings =
-                self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers, &line_index);
+                self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers, line_index);
 
             // Filter out warnings that are inside code spans
             line_warnings.retain(|warning| {

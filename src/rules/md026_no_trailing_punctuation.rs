@@ -200,7 +200,7 @@ impl Rule for MD026NoTrailingPunctuation {
         };
 
         // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         // Use pre-computed heading information from LintContext
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
@@ -243,7 +243,7 @@ impl Rule for MD026NoTrailingPunctuation {
                             message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: self.get_line_byte_range(content, line_num + 1, &line_index),
+                                range: self.get_line_byte_range(content, line_num + 1, line_index),
                                 replacement: if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                                     self.fix_atx_heading(line, &re)
                                 } else {

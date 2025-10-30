@@ -3,7 +3,7 @@
 //!
 //! See [docs/md035.md](../../docs/md035.md) for full documentation, configuration, and examples.
 
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::regex_cache::{
@@ -104,7 +104,7 @@ impl Rule for MD035HRStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -164,7 +164,7 @@ impl Rule for MD035HRStyle {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();

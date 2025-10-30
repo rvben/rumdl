@@ -5,7 +5,6 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::element_cache::ElementCache;
-use crate::utils::range_utils::LineIndex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -267,7 +266,7 @@ impl Rule for MD057ExistingRelativeLinks {
         // Use LintContext links instead of expensive regex parsing
         if !ctx.links.is_empty() {
             // Use LineIndex for correct position calculation across all line ending types
-            let line_index = LineIndex::new(content.to_string());
+            let line_index = &ctx.line_index;
 
             // Create element cache once for all links
             let element_cache = ElementCache::new(content);

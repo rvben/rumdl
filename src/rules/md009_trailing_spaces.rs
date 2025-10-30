@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::range_utils::{LineIndex, calculate_trailing_range};
+use crate::utils::range_utils::calculate_trailing_range;
 use crate::utils::regex_cache::{ORDERED_LIST_MARKER_REGEX, UNORDERED_LIST_MARKER_REGEX, get_cached_regex};
 
 mod md009_config;
@@ -60,7 +60,7 @@ impl Rule for MD009TrailingSpaces {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 

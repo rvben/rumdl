@@ -1,5 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use crate::utils::table_utils::TableUtils;
 
 mod md055_config;
@@ -178,7 +178,7 @@ impl Rule for MD055TablePipeStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
         // Early return handled by should_skip()

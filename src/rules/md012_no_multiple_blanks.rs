@@ -1,5 +1,5 @@
 use crate::filtered_lines::FilteredLinesExt;
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use std::collections::HashSet;
 use toml;
 
@@ -62,7 +62,7 @@ impl Rule for MD012NoMultipleBlanks {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 

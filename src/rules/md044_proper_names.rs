@@ -1,5 +1,4 @@
 use crate::utils::fast_hash;
-use crate::utils::range_utils::LineIndex;
 use crate::utils::regex_cache::{escape_regex, get_cached_fancy_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
@@ -488,7 +487,7 @@ impl Rule for MD044ProperNames {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
         let violations = self.find_name_violations(content, ctx);
 
         let warnings = violations

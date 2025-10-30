@@ -4,7 +4,7 @@
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::jinja_utils::is_in_jinja_template;
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::get_cached_regex;
 use crate::utils::skip_context::is_in_math_context;
 
@@ -167,8 +167,7 @@ impl Rule for MD011NoReversedLinks {
         let content = ctx.content;
         let mut warnings = Vec::new();
 
-        // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         // Use filtered_lines() to automatically skip front-matter
         for filtered_line in ctx.filtered_lines().skip_front_matter() {
@@ -266,8 +265,7 @@ impl Rule for MD011NoReversedLinks {
         let mut result = content.to_string();
         let mut offset: isize = 0;
 
-        // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         for info in Self::find_reversed_links(content) {
             // Calculate absolute position in original content using LineIndex

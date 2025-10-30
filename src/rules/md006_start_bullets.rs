@@ -1,5 +1,3 @@
-use crate::utils::range_utils::LineIndex;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 
@@ -51,7 +49,7 @@ impl MD006StartBullets {
     /// Optimized check using centralized list blocks
     fn check_optimized(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
         let mut result = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
@@ -277,7 +275,7 @@ impl Rule for MD006StartBullets {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let warnings = self.check(ctx)?;
         if warnings.is_empty() {

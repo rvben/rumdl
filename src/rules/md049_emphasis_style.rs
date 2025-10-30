@@ -2,7 +2,6 @@ use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
-use crate::utils::range_utils::LineIndex;
 
 mod md049_config;
 use md049_config::MD049Config;
@@ -94,7 +93,6 @@ impl Rule for MD049EmphasisStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = vec![];
-        let content = ctx.content;
 
         // Early return if no emphasis markers
         if !ctx.likely_has_emphasis() {
@@ -103,7 +101,7 @@ impl Rule for MD049EmphasisStyle {
 
         // Use LintContext to skip code blocks
         // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = &ctx.line_index;
 
         // Collect all emphasis from the document
         let mut emphasis_info = vec![];

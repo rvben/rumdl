@@ -5,7 +5,7 @@
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::get_cached_regex;
 use toml;
 
@@ -173,7 +173,7 @@ impl Rule for MD014CommandsShowOutput {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 
@@ -257,7 +257,7 @@ impl Rule for MD014CommandsShowOutput {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = LineIndex::new(content.to_string());
+        let _line_index = &ctx.line_index;
 
         let mut result = String::new();
 
