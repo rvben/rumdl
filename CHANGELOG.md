@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.170] - 2025-10-31
+
+### Added
+
+- **Include non-standard file extensions** (#127)
+  - New `--include` CLI flag to check files with non-standard extensions
+  - Example: `rumdl check --include "*.txt" --include "*.text"`
+  - Useful for documentation files with custom extensions
+  - Respects `.rumdl.toml` configuration: `include = ["*.txt", "*.text"]`
+
+### Fixed
+
+- **MD055: Preserve user formatting when fixing pipe placement** (#129)
+  - Changed from full table reconstruction to surgical pipe addition/removal
+  - User's intentional spacing and alignment are now preserved
+  - Follows Unix philosophy: do one thing (fix pipes) well
+  - Example: `| Cell 1   | Cell 2` → `| Cell 1   | Cell 2 |` (spacing preserved)
+
+- **MD053: Allow backtick references with `::` and spaces** (#128)
+  - Fixed false positives for Rust-style references like `` [`std::vec::Vec`] ``
+  - Now correctly handles references containing `::` within backticks
+  - Improves accuracy for Rust documentation and technical content
+
+### Documentation
+
+- **MD028: Clarified rule behavior for consecutive blockquotes** (#126)
+  - Updated documentation to accurately reflect that MD028 flags consecutive blockquote *starts*
+  - Not a bug - working as designed per markdownlint specification
+  - Prevents confusion about expected behavior
+
+### Changed
+
+- **Rust toolchain updated to 1.91.0** (from 1.89.0)
+  - Ensures compatibility with latest Rust features and improvements
+  - Better performance and compilation times
+
 ## [0.0.169] - 2025-10-30
 
 ### Performance
