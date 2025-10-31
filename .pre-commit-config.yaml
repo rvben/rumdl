@@ -24,21 +24,21 @@ repos:
     hooks:
       - id: cargo-fmt
         name: cargo fmt
-        entry: cargo fmt --all --
+        entry: mise exec -- cargo fmt --all --
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: make lint
+        entry: mise exec -- make lint
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-test-quick
         name: cargo test (quick)
-        entry: make test-pre-commit
+        entry: mise exec -- make test-pre-commit
         language: system
         types: [rust]
         pass_filenames: false
@@ -46,7 +46,7 @@ repos:
 
       - id: cargo-lock-check
         name: check Cargo.lock is up-to-date
-        entry: cargo check --locked
+        entry: mise exec -- cargo check --locked
         language: system
         files: ^(Cargo\.(toml|lock)|.*\.rs)$
         pass_filenames: false
