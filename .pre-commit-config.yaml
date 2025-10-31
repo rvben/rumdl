@@ -85,7 +85,7 @@ repos:
     hooks:
       - id: cargo-test-full
         name: cargo test (full suite)
-        entry: make test-push
+        entry: mise exec -- make test-push
         language: system
         types: [rust]
         pass_filenames: false
