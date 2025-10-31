@@ -16,12 +16,12 @@ ERRORS=0
 
 # Check 1: Verify Cargo.lock is up-to-date
 echo -n "Checking Cargo.lock is up-to-date... "
-if cargo check --locked &>/dev/null; then
+if mise exec -- cargo check --locked &>/dev/null; then
     echo -e "${GREEN}✓${NC}"
 else
     echo -e "${RED}✗${NC}"
     echo -e "${RED}ERROR: Cargo.lock is out of date or missing${NC}"
-    echo "Run: cargo check"
+    echo "Run: mise exec -- cargo check"
     echo "Then commit the updated Cargo.lock"
     ((ERRORS++))
 fi
