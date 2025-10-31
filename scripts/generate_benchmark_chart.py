@@ -98,8 +98,8 @@ def generate_chart():
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-    # X-axis label and ticks - medium gray
-    ax.set_xlabel("Time (seconds)", fontsize=10, color="#666666")
+    # X-axis: remove label (values already shown on bars), keep ticks subtle
+    ax.set_xlabel("")
     ax.tick_params(axis="x", labelsize=9, colors="#666666")
 
     # No title - let the data speak
