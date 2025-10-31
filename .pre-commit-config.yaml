@@ -94,7 +94,7 @@ repos:
 
       - id: cargo-lint-full
         name: cargo clippy (all targets)
-        entry: make lint
+        entry: mise exec -- make lint
         language: system
         types: [rust]
         pass_filenames: false
@@ -103,7 +103,7 @@ repos:
 
       - id: cargo-doc-check
         name: cargo doc (check)
-        entry: cargo doc --no-deps --all-features
+        entry: mise exec -- cargo doc --no-deps --all-features
         language: system
         types: [rust]
         pass_filenames: false
@@ -112,7 +112,7 @@ repos:
 
       - id: cargo-lock-check-push
         name: verify Cargo.lock is committed and up-to-date
-        entry: cargo check --locked
+        entry: mise exec -- cargo check --locked
         language: system
         files: ^(Cargo\.(toml|lock)|.*\.rs)$
         pass_filenames: false
