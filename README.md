@@ -48,6 +48,14 @@ It offers:
 - 📏 **Modern CLI** with detailed error reporting
 - 🔄 **CI/CD friendly** with non-zero exit code on errors
 
+### Performance
+
+rumdl is designed for speed. Benchmarked on the [Rust Book](https://github.com/rust-lang/book) repository (478 markdown files, October 2025):
+
+![Cold start benchmark comparison](assets/benchmark.svg)
+
+With intelligent caching, subsequent runs are even faster - rumdl only re-lints files that have changed, making it ideal for watch mode and editor integration.
+
 ## Table of Contents
 
 - [rumdl - A high-performance Markdown linter, written in Rust](#rumdl---a-high-performance-markdown-linter-written-in-rust)

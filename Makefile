@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help benchmark benchmark-run benchmark-chart
 
 # Development environment setup
 setup-mise:
@@ -398,3 +398,14 @@ prepare-release:
 release-major-full: prepare-release version-major version-push
 release-minor-full: prepare-release version-minor version-push
 release-patch-full: prepare-release version-patch version-push
+
+# Benchmark targets
+benchmark: benchmark-run benchmark-chart
+
+benchmark-run:
+	@echo "Running cold start benchmarks..."
+	@python3 scripts/benchmark_cold_start.py
+
+benchmark-chart:
+	@echo "Generating benchmark chart..."
+	@uv run --with matplotlib python3 scripts/generate_benchmark_chart.py
