@@ -393,7 +393,7 @@ fn test_fragment_generation_performance() {
     let punctuation_heavy = format!("Punctuation {}", "!@#$%^&*() ".repeat(100));
     let hyphen_heavy = format!("Hyphens {}", "-".repeat(500));
     let mixed_complex = "Mixed 🎉 café & more --> test".repeat(100);
-    let fragment_test_cases = vec![
+    let fragment_test_cases = [
         ("Simple Heading", "simple case"),
         ("Complex: (Pattern) & More!!!", "complex punctuation"),
         ("Unicode: Café & 中文 & Русский", "unicode case"),

@@ -55,19 +55,14 @@ use toml;
 mod md004_config;
 use md004_config::MD004Config;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UnorderedListStyle {
-    Asterisk,   // "*"
-    Plus,       // "+"
-    Dash,       // "-"
+    Asterisk, // "*"
+    Plus,     // "+"
+    Dash,     // "-"
+    #[default]
     Consistent, // Use the first marker in a file consistently
-    Sublist,    // Each nesting level uses a different marker (*, +, -, cycling)
-}
-
-impl Default for UnorderedListStyle {
-    fn default() -> Self {
-        Self::Consistent
-    }
+    Sublist,  // Each nesting level uses a different marker (*, +, -, cycling)
 }
 
 /// Rule MD004: Unordered list style
