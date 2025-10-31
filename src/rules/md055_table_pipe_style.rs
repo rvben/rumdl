@@ -94,68 +94,80 @@ impl MD055TablePipeStyle {
     }
 
     /// Fix a table row to match the target style
+    /// Uses surgical fixes: only adds/removes pipes, preserves all user formatting
     fn fix_table_row(&self, line: &str, target_style: &str) -> String {
         let trimmed = line.trim();
         if !trimmed.contains('|') {
             return line.to_string();
         }
 
-        // Check if this is a delimiter row (contains dashes)
-        let is_delimiter_row = trimmed.contains('-')
-            && trimmed
-                .chars()
-                .all(|c| c == '-' || c == ':' || c == '|' || c.is_whitespace());
+        let has_leading = trimmed.starts_with('|');
+        let has_trailing = trimmed.ends_with('|');
 
-        // Split the line by pipes to get the content
-        let parts: Vec<&str> = trimmed.split('|').collect();
-        let mut content_parts = Vec::new();
-
-        // Extract the actual content (skip empty leading/trailing parts)
-        let start_idx = if parts.first().is_some_and(|p| p.trim().is_empty()) {
-            1
-        } else {
-            0
-        };
-        let end_idx = if parts.last().is_some_and(|p| p.trim().is_empty()) {
-            if !parts.is_empty() { parts.len() - 1 } else { 0 }
-        } else {
-            parts.len()
-        };
-
-        for part in parts.iter().take(end_idx).skip(start_idx) {
-            // Trim each part to remove extra spaces, but preserve the content
-            content_parts.push(part.trim());
-        }
-
-        // Rebuild the line with the target style
         match target_style {
             "leading_and_trailing" => {
-                if is_delimiter_row {
-                    format!("| {} |", content_parts.join("|"))
-                } else {
-                    format!("| {} |", content_parts.join(" | "))
+                let mut result = trimmed.to_string();
+
+                // Add leading pipe if missing
+                if !has_leading {
+                    result = format!("| {result}");
                 }
-            }
-            "leading_only" => {
-                if is_delimiter_row {
-                    format!("| {}", content_parts.join("|"))
-                } else {
-                    format!("| {}", content_parts.join(" | "))
+
+                // Add trailing pipe if missing
+                if !has_trailing {
+                    result = format!("{result} |");
                 }
-            }
-            "trailing_only" => {
-                if is_delimiter_row {
-                    format!("{} |", content_parts.join("|"))
-                } else {
-                    format!("{} |", content_parts.join(" | "))
-                }
+
+                result
             }
             "no_leading_or_trailing" => {
-                if is_delimiter_row {
-                    content_parts.join("|")
-                } else {
-                    content_parts.join(" | ")
+                let mut result = trimmed;
+
+                // Remove leading pipe if present
+                if has_leading {
+                    result = result.strip_prefix('|').unwrap_or(result);
+                    result = result.trim_start();
                 }
+
+                // Remove trailing pipe if present
+                if has_trailing {
+                    result = result.strip_suffix('|').unwrap_or(result);
+                    result = result.trim_end();
+                }
+
+                result.to_string()
+            }
+            "leading_only" => {
+                let mut result = trimmed.to_string();
+
+                // Add leading pipe if missing
+                if !has_leading {
+                    result = format!("| {result}");
+                }
+
+                // Remove trailing pipe if present
+                if has_trailing {
+                    result = result.strip_suffix('|').unwrap_or(&result).trim_end().to_string();
+                }
+
+                result
+            }
+            "trailing_only" => {
+                let mut result = trimmed;
+
+                // Remove leading pipe if present
+                if has_leading {
+                    result = result.strip_prefix('|').unwrap_or(result).trim_start();
+                }
+
+                let mut result = result.to_string();
+
+                // Add trailing pipe if missing
+                if !has_trailing {
+                    result = format!("{result} |");
+                }
+
+                result
             }
             _ => line.to_string(),
         }
@@ -380,7 +392,8 @@ mod tests {
         let result = rule.fix(&ctx).unwrap();
 
         // With the fixed implementation, the delimiter row should have pipes removed
-        let expected = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1 | Data 2 | Data 3";
+        // Spacing is preserved from original input
+        let expected = "Header 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3";
 
         assert_eq!(result, expected);
 
@@ -400,12 +413,9 @@ mod tests {
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
-        // Output the actual result for debugging
-        log::info!("Actual leading_and_trailing result:\n{}", result.replace('\n', "\\n"));
-
-        // The delimiter row should have pipes added with spacing as in the implementation
-        let expected =
-            "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
+        // The delimiter row should have pipes added
+        // Spacing is preserved from original input
+        let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1   | Data 2   | Data 3 |";
 
         assert_eq!(result, expected);
     }
@@ -440,8 +450,9 @@ mod tests {
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
-        // The table should be fixed, with delimiter row pipes properly removed
-        let expected = "# Table Example\n\nHere's a table with leading and trailing pipes:\n\nHeader 1 | Header 2 | Header 3\n----------|----------|----------\nData 1 | Data 2 | Data 3\nData 4 | Data 5 | Data 6\n\nMore content after the table.";
+        // The table should be fixed, with pipes removed
+        // Spacing is preserved from original input
+        let expected = "# Table Example\n\nHere's a table with leading and trailing pipes:\n\nHeader 1 | Header 2 | Header 3\n----------|----------|----------\nData 1   | Data 2   | Data 3\nData 4   | Data 5   | Data 6\n\nMore content after the table.";
 
         assert_eq!(result, expected);
 
@@ -465,14 +476,10 @@ mod tests {
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.fix(&ctx).unwrap();
 
-        // Output the actual result for debugging
-        log::info!("Actual result with invalid style:\n{}", result.replace('\n', "\\n"));
+        // Should default to "leading_and_trailing"
+        // Already has leading and trailing pipes, so no changes needed - spacing is preserved
+        let expected = "| Header 1 | Header 2 | Header 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |";
 
-        // Should default to "leading_and_trailing" and fix any inconsistencies with that style
-        let expected =
-            "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
-
-        // Should match the expected output after processing with the default style
         assert_eq!(result, expected);
 
         // Now check a content that needs actual modification
@@ -481,8 +488,8 @@ mod tests {
         let result = rule.fix(&ctx2).unwrap();
 
         // Should add pipes to match the default "leading_and_trailing" style
-        let expected =
-            "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1 | Data 2 | Data 3 |";
+        // Spacing is preserved from original input
+        let expected = "| Header 1 | Header 2 | Header 3 |\n| ----------|----------|---------- |\n| Data 1   | Data 2   | Data 3 |";
         assert_eq!(result, expected);
 
         // Check that warning messages also work with the fallback style
