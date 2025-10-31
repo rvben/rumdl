@@ -130,9 +130,8 @@ impl MD053LinkImageReferenceDefinitions {
         Self { config }
     }
 
-    /// Check if a pattern is likely NOT a markdown reference
-    /// Returns true if this pattern should be skipped
-    fn is_likely_not_reference(text: &str) -> bool {
+    /// Returns true if this pattern should be skipped during reference detection
+    fn should_skip_pattern(text: &str) -> bool {
         // Don't skip pure numeric patterns - they could be footnote references like [1]
         // Only skip numeric ranges like [1:3], [0:10], etc.
         if text.contains(':') && text.chars().all(|c| c.is_ascii_digit() || c == ':') {
@@ -157,7 +156,8 @@ impl MD053LinkImageReferenceDefinitions {
 
         // Skip descriptive patterns with colon like [default: the project root]
         // But allow simple numeric ranges which are handled above
-        if text.contains(':') && text.contains(' ') {
+        // And allow patterns with backticks (valid code references)
+        if text.contains(':') && text.contains(' ') && !text.contains('`') {
             return true;
         }
 
@@ -359,8 +359,7 @@ impl MD053LinkImageReferenceDefinitions {
                     if !in_code_span {
                         let ref_id = ref_id_match.as_str().trim();
 
-                        // Skip patterns that are likely not markdown references
-                        if !Self::is_likely_not_reference(ref_id) {
+                        if !Self::should_skip_pattern(ref_id) {
                             let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
                             usages.insert(normalized_id);
                         }

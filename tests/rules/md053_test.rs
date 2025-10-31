@@ -399,3 +399,17 @@ From the Python documentation on [`dataclasses.InitVar`]:
         "Case-insensitive matching should work for backtick references"
     );
 }
+
+#[test]
+fn test_backtick_reference_with_double_colon_and_comma() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test case from GitHub issue #128: backtick reference with `::` and `, `
+    // Previously filtered out because it contains both `:` and space
+    let content = "See [`Bound<'_, PyAny>::is_callable`] function.\n\n[`Bound<'_, PyAny>::is_callable`]: foo\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Backtick references with :: and comma should not be filtered out (GitHub issue #128)"
+    );
+}
