@@ -189,26 +189,34 @@ pub fn find_markdown_files(
     }
 
     // --- Add Markdown File Type Definition ---
-    let mut types_builder = ignore::types::TypesBuilder::new();
-    types_builder.add_defaults(); // Add standard types
-    types_builder.add("markdown", "*.md").unwrap();
-    types_builder.add("markdown", "*.markdown").unwrap();
-    types_builder.add("markdown", "*.mdx").unwrap();
-    types_builder.add("markdown", "*.mkd").unwrap();
-    types_builder.add("markdown", "*.mkdn").unwrap();
-    types_builder.add("markdown", "*.mdown").unwrap();
-    types_builder.add("markdown", "*.mdwn").unwrap();
-    types_builder.add("markdown", "*.qmd").unwrap();
-    types_builder.add("markdown", "*.rmd").unwrap();
-    types_builder.add("markdown", "*.Rmd").unwrap();
-    types_builder.select("markdown"); // Select ONLY markdown for processing
-    let types = types_builder.build().unwrap();
-    walk_builder.types(types);
+    // Only apply type filtering if --include is NOT provided
+    // When --include is provided, let the include patterns determine which files to process
+    if args.include.is_none() {
+        let mut types_builder = ignore::types::TypesBuilder::new();
+        types_builder.add_defaults(); // Add standard types
+        types_builder.add("markdown", "*.md").unwrap();
+        types_builder.add("markdown", "*.markdown").unwrap();
+        types_builder.add("markdown", "*.mdx").unwrap();
+        types_builder.add("markdown", "*.mkd").unwrap();
+        types_builder.add("markdown", "*.mkdn").unwrap();
+        types_builder.add("markdown", "*.mdown").unwrap();
+        types_builder.add("markdown", "*.mdwn").unwrap();
+        types_builder.add("markdown", "*.qmd").unwrap();
+        types_builder.add("markdown", "*.rmd").unwrap();
+        types_builder.add("markdown", "*.Rmd").unwrap();
+        types_builder.select("markdown"); // Select ONLY markdown for processing
+        let types = types_builder.build().unwrap();
+        walk_builder.types(types);
+    }
     // -----------------------------------------
 
     // Determine if running in discovery mode (e.g., "rumdl ." or "rumdl check ." or "rumdl check")
     // Adjusted to handle both legacy and subcommand paths
     let is_discovery_mode = paths.is_empty() || paths == ["."];
+
+    // Track if --include was explicitly provided via CLI
+    // This is used to decide whether to apply the final extension filter
+    let has_explicit_cli_include = args.include.is_some();
 
     // --- Determine Effective Include/Exclude Patterns ---
 
@@ -327,14 +335,8 @@ pub fn find_markdown_files(
             if !path.exists() {
                 return Err(format!("File not found: {path_str}").into());
             }
-            // If it's a file, check if it's a markdown file
-            if path.is_file()
-                && let Some(ext) = path.extension()
-                && matches!(
-                    ext.to_str(),
-                    Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn" | "qmd" | "rmd" | "Rmd")
-                )
-            {
+            // If it's a file, process it (trust user's explicit intent)
+            if path.is_file() {
                 processed_explicit_files = true;
                 // Convert to relative path for pattern matching
                 // This ensures patterns like "docs/*" work with both relative and absolute paths
@@ -436,17 +438,21 @@ pub fn find_markdown_files(
     file_paths.dedup();
 
     // --- Final Explicit Markdown Filter ---
-    // Ensure only files with markdown extensions are returned,
-    // regardless of how ignore crate overrides interacted with type filters.
-    file_paths.retain(|path_str| {
-        let path = Path::new(path_str);
-        path.extension().is_some_and(|ext| {
-            matches!(
-                ext.to_str(),
-                Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn" | "qmd" | "rmd" | "Rmd")
-            )
-        })
-    });
+    // Only apply the extension filter if --include was NOT explicitly provided via CLI
+    // When --include is provided, respect the user's explicit intent about which files to check
+    if !has_explicit_cli_include {
+        // Ensure only files with markdown extensions are returned,
+        // regardless of how ignore crate overrides interacted with type filters.
+        file_paths.retain(|path_str| {
+            let path = Path::new(path_str);
+            path.extension().is_some_and(|ext| {
+                matches!(
+                    ext.to_str(),
+                    Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn" | "qmd" | "rmd" | "Rmd")
+                )
+            })
+        });
+    }
     // -------------------------------------
 
     Ok(file_paths) // Ensure the function returns the result

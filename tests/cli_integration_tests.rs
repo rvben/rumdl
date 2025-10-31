@@ -1552,3 +1552,118 @@ fn test_fmt_command() {
     assert_eq!(stderr, "");
     assert!(output.status.success());
 }
+
+/// Test that --include allows checking files with non-standard extensions (issue #127)
+#[test]
+fn test_include_nonstandard_extensions() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let dir_path = temp_dir.path();
+
+    // Create files with both standard and non-standard extensions
+    fs::write(
+        dir_path.join("template.md.jinja"),
+        "# Template\n\nThis is a Jinja2 template.\n",
+    )?;
+    fs::write(
+        dir_path.join("regular.md"),
+        "# Regular\n\nThis is a regular markdown file.\n",
+    )?;
+    fs::write(dir_path.join("config.yml.j2"), "# Not markdown\n\nThis is YAML.\n")?;
+
+    // Test 1: Default behavior should only find regular.md
+    let mut cmd = Command::cargo_bin("rumdl")?;
+    cmd.arg("check").arg(".").arg("--verbose").current_dir(dir_path);
+
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("Processing file: regular.md"))
+        .stdout(predicates::str::contains("template.md.jinja").not())
+        .stdout(predicates::str::contains("config.yml.j2").not());
+
+    // Test 2: --include with *.md.jinja should find template.md.jinja
+    let mut cmd = Command::cargo_bin("rumdl")?;
+    cmd.arg("check")
+        .arg(".")
+        .arg("--include")
+        .arg("**/*.md.jinja")
+        .arg("--verbose")
+        .current_dir(dir_path);
+
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("Processing file: template.md.jinja"));
+
+    // Test 3: --include should still respect patterns (not find yml.j2)
+    let mut cmd = Command::cargo_bin("rumdl")?;
+    cmd.arg("check")
+        .arg(".")
+        .arg("--include")
+        .arg("**/*.md.jinja")
+        .arg("--verbose")
+        .current_dir(dir_path);
+
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("config.yml.j2").not());
+
+    Ok(())
+}
+
+/// Test that explicit file paths work with non-standard extensions (issue #127)
+#[test]
+fn test_explicit_path_nonstandard_extensions() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let dir_path = temp_dir.path();
+
+    // Create a file with non-standard extension
+    let jinja_file = dir_path.join("template.md.jinja");
+    fs::write(&jinja_file, "# Jinja Template\n\nThis should be checked.\n")?;
+
+    // Test: Explicitly providing the file path should work
+    let mut cmd = Command::cargo_bin("rumdl")?;
+    cmd.arg("check").arg(&jinja_file).arg("--verbose");
+
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("Processing file:"))
+        .stdout(predicates::str::contains("template.md.jinja"));
+
+    Ok(())
+}
+
+/// Test that --include works with multiple non-standard extensions
+#[test]
+fn test_include_multiple_nonstandard_extensions() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let dir_path = temp_dir.path();
+
+    // Create files with various extensions
+    fs::write(dir_path.join("template.md.jinja"), "# Jinja\n")?;
+    fs::write(dir_path.join("readme.md.tmpl"), "# Template\n")?;
+    fs::write(dir_path.join("doc.md.erb"), "# ERB\n")?;
+    fs::write(dir_path.join("regular.md"), "# Regular\n")?;
+
+    // Test: Include multiple non-standard extensions
+    let mut cmd = Command::cargo_bin("rumdl")?;
+    cmd.arg("check")
+        .arg(".")
+        .arg("--include")
+        .arg("**/*.md.jinja,**/*.md.tmpl,**/*.md.erb")
+        .arg("--verbose")
+        .current_dir(dir_path);
+
+    let output = cmd.output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should find all three non-standard extension files
+    assert!(stdout.contains("template.md.jinja"), "Should find .md.jinja file");
+    assert!(stdout.contains("readme.md.tmpl"), "Should find .md.tmpl file");
+    assert!(stdout.contains("doc.md.erb"), "Should find .md.erb file");
+    // Should NOT find regular.md (not in include pattern)
+    assert!(
+        !stdout.contains("regular.md"),
+        "Should not find regular.md when using specific --include"
+    );
+
+    Ok(())
+}
