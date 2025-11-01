@@ -620,4 +620,84 @@ mod edge_cases {
         let result = server.diagnostic(diagnostic_params).await;
         assert!(result.is_ok());
     }
+
+    /// Test config fallback when no project config exists
+    /// This test would have caught the bug where LSP fell back to Config::default()
+    /// instead of using the global/user config passed via initialization_options
+    #[tokio::test]
+    async fn test_global_config_fallback_when_no_project_config() {
+        let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+        let server = service.inner();
+
+        // Use non-existent path - we're testing config fallback, not file I/O
+        // The LSP server works with in-memory content passed via did_open
+        let fake_workspace = Url::parse("file:///nonexistent/workspace").unwrap();
+
+        // Configure global config via initialization_options to disable a specific rule
+        // If the server incorrectly falls back to defaults, this rule will still be enabled
+        let init_params = InitializeParams {
+            process_id: None,
+            root_path: None,
+            root_uri: Some(fake_workspace),
+            initialization_options: Some(serde_json::json!({
+                "enableLinting": true,
+                "disableRules": ["MD041"]  // Disable "First line should be H1"
+            })),
+            capabilities: ClientCapabilities::default(),
+            trace: None,
+            workspace_folders: None,
+            client_info: None,
+            locale: None,
+        };
+
+        server.initialize(init_params).await.unwrap();
+        server.initialized(InitializedParams {}).await;
+
+        // Open a document in memory (no actual file needed)
+        // Content would trigger MD041 with default config but not with our global config
+        let uri = Url::parse("file:///nonexistent/test.md").unwrap();
+        let content = "This is not a heading\n\n# Heading later";
+
+        let open_params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "markdown".to_string(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+
+        server.did_open(open_params).await;
+
+        // Request diagnostics
+        let diagnostic_params = DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier { uri },
+            identifier: None,
+            previous_result_id: None,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let result = server.diagnostic(diagnostic_params).await.unwrap();
+
+        // Verify diagnostics
+        match result {
+            DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) => {
+                // MD041 should NOT be in the diagnostics because we disabled it in global config
+                // If the bug exists, MD041 would appear because server used Config::default()
+                let has_md041 = report
+                    .full_document_diagnostic_report
+                    .items
+                    .iter()
+                    .any(|d| matches!(&d.code, Some(NumberOrString::String(code)) if code == "MD041"));
+
+                assert!(
+                    !has_md041,
+                    "MD041 should be disabled via global config, but it was triggered. \
+                     This indicates the server fell back to Config::default() instead of using global config."
+                );
+            }
+            _ => panic!("Expected full diagnostic report"),
+        }
+    }
 }
