@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CLI: `rumdl server config` command for LSP configuration inspection**
+  - New `rumdl server config` command provides per-file configuration resolution
+  - Subcommands: `file` (show config file path), `get <key>` (query specific settings)
+  - Supports `--file` option to resolve configuration for a specific markdown file (as the LSP server would)
+  - Outputs configuration with provenance information (showing which config file each setting came from)
+  - Supports `--output json|toml` for different output formats
+  - Use `--defaults` to see only default values
+
+### Fixed
+
+- **LSP**: Fix global config fallback when no project config found
+  - Configuration file discovery and loading for LSP behaved differently.
+
 ## [0.0.170] - 2025-10-31
 
 ### Added

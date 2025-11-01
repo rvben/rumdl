@@ -2035,6 +2035,47 @@ impl SourcedConfig {
     ) -> Result<Self, ConfigError> {
         Self::load_with_discovery_impl(config_path, cli_overrides, skip_auto_discovery, None)
     }
+
+    /// Resolve configuration for a specific file path (as the LSP server would).
+    /// Searches upward from the file's directory for config files, stopping at the filesystem root.
+    /// Returns the resolved SourcedConfig and the path to the config file it was loaded from (if any).
+    pub fn resolve_for_file(file_path: &std::path::Path) -> Result<(Self, Option<String>), ConfigError> {
+        // Get the directory to start searching from
+        let search_dir = file_path.parent().unwrap_or(file_path).to_path_buf();
+
+        // Search upward from the file's directory
+        let mut current_dir = search_dir;
+
+        loop {
+            // Try to find a config file in the current directory
+            const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml", ".markdownlint.json"];
+
+            for config_file_name in CONFIG_FILES {
+                let config_path = current_dir.join(config_file_name);
+                if config_path.exists() {
+                    let path_str = config_path.to_string_lossy().to_string();
+                    match Self::load_with_discovery(Some(&path_str), None, false) {
+                        Ok(sourced) => return Ok((sourced, Some(path_str))),
+                        Err(_) => {
+                            // Continue searching if this config file fails to load
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Move up to parent directory
+            if let Some(parent) = current_dir.parent() {
+                current_dir = parent.to_path_buf();
+            } else {
+                // Hit filesystem root - use global/user fallback config
+                break;
+            }
+        }
+
+        // Fall back to global/user config
+        Self::load_with_discovery(None, None, false).map(|cfg| (cfg, None))
+    }
 }
 
 impl From<SourcedConfig> for Config {
