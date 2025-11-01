@@ -257,6 +257,8 @@ enum Commands {
     },
     /// Start the Language Server Protocol server
     Server {
+        #[command(subcommand)]
+        subcmd: Option<ServerSubcommand>,
         /// TCP port to listen on (for debugging)
         #[arg(long)]
         port: Option<u16>,
@@ -304,6 +306,32 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum ConfigSubcommand {
+    /// Query a specific config key (e.g. global.exclude or MD013.line_length)
+    Get { key: String },
+    /// Show the absolute path of the configuration file that was loaded
+    File,
+}
+
+#[derive(Subcommand, Debug)]
+enum ServerSubcommand {
+    /// Show server configuration
+    Config {
+        #[command(subcommand)]
+        subcmd: Option<ServerConfigSubcommand>,
+        /// File path to resolve configuration for (e.g. src/readme.md)
+        #[arg(long)]
+        file: Option<String>,
+        /// Show only the default configuration values
+        #[arg(long)]
+        defaults: bool,
+        /// Output format (e.g. toml, json)
+        #[arg(long)]
+        output: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServerConfigSubcommand {
     /// Query a specific config key (e.g. global.exclude or MD013.line_length)
     Get { key: String },
     /// Show the absolute path of the configuration file that was loaded
@@ -539,6 +567,261 @@ fn offer_vscode_extension_install() {
     println!("\nSetup complete! You can now:");
     println!("  • Run {} to lint your Markdown files", "rumdl check .".cyan());
     println!("  • Open your editor to see real-time linting");
+}
+
+/// Handle `rumdl server config` subcommands
+fn handle_server_config(
+    subcmd: Option<ServerConfigSubcommand>,
+    file: Option<String>,
+    defaults: bool,
+    output: Option<String>,
+) {
+    use std::path::Path;
+
+    // Resolve config for the file (or use global config if no file specified)
+    let (sourced, config_file) = if let Some(file_path) = file {
+        let path = Path::new(&file_path);
+        match rumdl_config::SourcedConfig::resolve_for_file(path) {
+            Ok((cfg, config_path)) => (cfg, config_path),
+            Err(e) => {
+                eprintln!("{}: {}", "Config error".red().bold(), e);
+                exit::tool_error();
+            }
+        }
+    } else {
+        // No file specified, use global config
+        match rumdl_config::SourcedConfig::load_with_discovery(None, None, false) {
+            Ok(cfg) => {
+                // loaded_files already contains the config file(s)
+                let config_file = if cfg.loaded_files.is_empty() {
+                    None
+                } else {
+                    Some(cfg.loaded_files[0].clone())
+                };
+                (cfg, config_file)
+            }
+            Err(e) => {
+                eprintln!("{}: {}", "Config error".red().bold(), e);
+                exit::tool_error();
+            }
+        }
+    };
+
+    // Handle config subcommands
+    if let Some(ServerConfigSubcommand::Get { key }) = subcmd {
+        // Reuse the same logic as the config command
+        if let Some((section_part, field_part)) = key.split_once('.') {
+            let final_config: rumdl_config::Config = sourced.clone().into();
+
+            let normalized_field = normalize_key(field_part);
+
+            // Handle GLOBAL keys
+            if section_part.eq_ignore_ascii_case("global") {
+                let maybe_value_source: Option<(toml::Value, ConfigSource)> = match normalized_field.as_str() {
+                    "enable" => Some((
+                        toml::Value::Array(
+                            final_config
+                                .global
+                                .enable
+                                .iter()
+                                .map(|s| toml::Value::String(s.clone()))
+                                .collect(),
+                        ),
+                        sourced.global.enable.source,
+                    )),
+                    "disable" => Some((
+                        toml::Value::Array(
+                            final_config
+                                .global
+                                .disable
+                                .iter()
+                                .map(|s| toml::Value::String(s.clone()))
+                                .collect(),
+                        ),
+                        sourced.global.disable.source,
+                    )),
+                    "exclude" => Some((
+                        toml::Value::Array(
+                            final_config
+                                .global
+                                .exclude
+                                .iter()
+                                .map(|s| toml::Value::String(s.clone()))
+                                .collect(),
+                        ),
+                        sourced.global.exclude.source,
+                    )),
+                    "include" => Some((
+                        toml::Value::Array(
+                            final_config
+                                .global
+                                .include
+                                .iter()
+                                .map(|s| toml::Value::String(s.clone()))
+                                .collect(),
+                        ),
+                        sourced.global.include.source,
+                    )),
+                    "respect-gitignore" => Some((
+                        toml::Value::Boolean(final_config.global.respect_gitignore),
+                        sourced.global.respect_gitignore.source,
+                    )),
+                    "output-format" | "output_format" => {
+                        if let Some(ref output_format) = final_config.global.output_format {
+                            Some((
+                                toml::Value::String(output_format.clone()),
+                                sourced
+                                    .global
+                                    .output_format
+                                    .as_ref()
+                                    .map(|v| v.source)
+                                    .unwrap_or(ConfigSource::Default),
+                            ))
+                        } else {
+                            None
+                        }
+                    }
+                    "flavor" => Some((
+                        toml::Value::String(format!("{:?}", final_config.global.flavor).to_lowercase()),
+                        sourced.global.flavor.source,
+                    )),
+                    _ => None,
+                };
+
+                if let Some((value, source)) = maybe_value_source {
+                    println!(
+                        "{} = {} [from {}]",
+                        key,
+                        formatter::format_toml_value(&value),
+                        formatter::format_provenance(source)
+                    );
+                } else {
+                    eprintln!("Unknown global key: {field_part}");
+                    exit::tool_error();
+                }
+            }
+            // Handle RULE keys (MDxxx.field)
+            else {
+                let normalized_rule_name = normalize_key(section_part);
+
+                // Try to get the value from the final config first
+                let final_value: Option<&toml::Value> = final_config
+                    .rules
+                    .get(&normalized_rule_name)
+                    .and_then(|rule_cfg| rule_cfg.values.get(&normalized_field));
+
+                if let Some(value) = final_value {
+                    let provenance = sourced
+                        .rules
+                        .get(&normalized_rule_name)
+                        .and_then(|sc| sc.values.get(&normalized_field))
+                        .map_or(ConfigSource::Default, |sv| sv.source);
+
+                    println!(
+                        "{}.{} = {} [from {}]",
+                        normalized_rule_name,
+                        normalized_field,
+                        formatter::format_toml_value(value),
+                        formatter::format_provenance(provenance)
+                    );
+                } else {
+                    let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
+                    if let Some(rule) = all_rules.iter().find(|r| r.name() == section_part)
+                        && let Some((_, toml::Value::Table(table))) = rule.default_config_section()
+                        && let Some(v) = table.get(&normalized_field)
+                    {
+                        let value_str = formatter::format_toml_value(v);
+                        println!("{normalized_rule_name}.{normalized_field} = {value_str} [from default]");
+                        return;
+                    }
+                    eprintln!("Unknown config key: {normalized_rule_name}.{normalized_field}");
+                    exit::tool_error();
+                }
+            }
+        } else {
+            eprintln!("Key must be in the form global.key or MDxxx.key");
+            exit::tool_error();
+        }
+    } else if let Some(ServerConfigSubcommand::File) = subcmd {
+        // Show which config file is being used
+        if let Some(cfg_file) = config_file {
+            match std::fs::canonicalize(&cfg_file) {
+                Ok(absolute_path) => {
+                    println!("{}", absolute_path.display());
+                }
+                Err(_) => {
+                    println!("{cfg_file}");
+                }
+            }
+        } else if sourced.loaded_files.is_empty() {
+            println!("No configuration file found (using global/user config or defaults)");
+        } else {
+            for file_path in &sourced.loaded_files {
+                match std::fs::canonicalize(file_path) {
+                    Ok(absolute_path) => {
+                        println!("{}", absolute_path.display());
+                    }
+                    Err(_) => {
+                        println!("{file_path}");
+                    }
+                }
+            }
+        }
+    } else {
+        // No subcommand - show full merged config with provenance
+        let config_to_print = if defaults {
+            // For defaults, create a SourcedConfig that includes all rule defaults
+            let mut default_sourced = rumdl_config::SourcedConfig::default();
+
+            // Add default configurations from all rules
+            let all_rules_reg = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
+            for rule in &all_rules_reg {
+                if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section() {
+                    let mut rule_config = rumdl_config::SourcedRuleConfig::default();
+                    for (key, value) in table {
+                        rule_config.values.insert(
+                            key.clone(),
+                            rumdl_config::SourcedValue::new(value.clone(), rumdl_config::ConfigSource::Default),
+                        );
+                    }
+                    default_sourced.rules.insert(rule_name.to_string(), rule_config);
+                }
+            }
+            default_sourced
+        } else {
+            sourced.clone()
+        };
+
+        if let Some(output_format) = output {
+            if output_format.to_lowercase() == "json" {
+                let config_to_print_final: rumdl_config::Config = config_to_print.into();
+
+                match serde_json::to_string_pretty(&config_to_print_final) {
+                    Ok(s) => println!("{s}"),
+                    Err(e) => {
+                        eprintln!("Failed to serialize config to JSON: {e}");
+                        exit::tool_error();
+                    }
+                }
+            } else if output_format.to_lowercase() == "toml" {
+                let config_to_print_final: rumdl_config::Config = config_to_print.into();
+
+                match toml::to_string_pretty(&config_to_print_final) {
+                    Ok(s) => println!("{s}"),
+                    Err(e) => {
+                        eprintln!("Failed to serialize config to TOML: {e}");
+                        exit::tool_error();
+                    }
+                }
+            } else {
+                eprintln!("Unknown output format: {output_format}. Use 'json' or 'toml'");
+                exit::tool_error();
+            }
+        } else {
+            // Print with provenance
+            formatter::print_config_with_provenance(&config_to_print);
+        }
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -1011,7 +1294,25 @@ build-backend = "setuptools.build_meta"
             Commands::Schema { action } => {
                 handle_schema_command(action);
             }
-            Commands::Server { port, stdio, verbose } => {
+            Commands::Server {
+                subcmd,
+                port,
+                stdio,
+                verbose,
+            } => {
+                // Handle server config subcommands if present
+                if let Some(ServerSubcommand::Config {
+                    subcmd: config_subcmd,
+                    file,
+                    defaults,
+                    output,
+                }) = subcmd
+                {
+                    // Handle server config subcommands
+                    handle_server_config(config_subcmd, file, defaults, output);
+                    return;
+                }
+
                 // Setup logging for the LSP server
                 if verbose {
                     env_logger::Builder::from_default_env()
