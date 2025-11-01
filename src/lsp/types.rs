@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::*;
 
 /// Configuration for the rumdl LSP server (from initialization options)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct RumdlLspConfig {
     /// Path to rumdl configuration file
     pub config_path: Option<String>,
