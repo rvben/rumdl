@@ -866,18 +866,19 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(dir_path.join("test.md"), "# MD File\n")?;
     fs::write(dir_path.join("test.txt"), "Text file")?;
 
-    // Test 1: Trying to include non-markdown files should yield nothing
+    // Test 1: --include allows checking non-markdown files (e.g., .txt)
     let mut cmd1 = Command::cargo_bin("rumdl")?;
     cmd1.arg("check")
         .arg(".")
         .arg("--include")
         .arg("*.txt")
-        .arg("--verbose") // Use verbose to ensure no "Processing file:" messages appear
+        .arg("--verbose")
         .current_dir(dir_path);
     cmd1.assert()
-        .success()
-        .stdout(predicates::str::contains("No markdown files found to check."))
-        .stdout(predicates::str::contains("Processing file:").not());
+        .code(1) // Should fail because test.txt has linting issues
+        .stdout(predicates::str::contains("Processing file: test.txt"))
+        .stdout(predicates::str::contains("MD041")) // First line should be heading
+        .stdout(predicates::str::contains("MD047")); // Should end with newline
 
     // Test 2: Excluding all .md files when only .md files exist
     let mut cmd2 = Command::cargo_bin("rumdl")?;
