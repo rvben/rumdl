@@ -920,7 +920,7 @@ This produces structured JSON output:
 
 ### Prerequisites
 
-- Rust 1.70 or higher
+- Rust 1.91 or higher
 - Make (for development commands)
 
 ### Building
