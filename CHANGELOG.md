@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.171] - 2025-11-03
+
+### Added
+
+- **MD060: Table column formatting with markdownlint compatibility**
+  - Full table formatting rule with auto-fix capability
+  - Four formatting styles: `aligned`, `compact`, `tight`, and `any` (default)
+  - `any` style detects existing formatting and enforces consistency
+  - Supports CJK characters and emoji
+  - Handles alignment indicators (`:---`, `:---:`, `---:`)
+  - Skips ZWJ emoji sequences to prevent corruption
+  - Configuration: `MD060.enabled = false` (opt-in), `MD060.style = "any"`
+
+### Fixed
+
+- **MD053: CommonMark compliance for list continuations**
+  - Fixed false positives when backtick references appear in list continuation paragraphs
+  - Enhanced ordered list marker detection for multi-digit lists (10., 123.)
+  - Implemented column-based indentation model per CommonMark spec
+  - Distinguishes list continuation paragraphs from code-in-lists
+  - Validated against 1,562 markdown files with 0 false positives
+
+- **LSP: Global config fallback**
+  - Fixed global config loading when no project-specific config exists
+  - Now properly falls back to `~/.config/rumdl/.rumdl.toml`
+  - Added test coverage for fallback behavior
+
+- **LSP: camelCase initialization options**
+  - Accept both `snake_case` and `camelCase` initialization options from LSP clients
+  - Improves compatibility with various LSP client implementations
+
+- **Fix mode: Type-safe exit code semantics**
+  - Added `FixMode` enum for clear fix/check mode distinction
+  - Improved code maintainability and type safety
+
+### Changed
+
+- **⚠️ BREAKING: MD013 `tables` default changed to `false`**
+  - Previously defaulted to `true`, causing conflicts with table formatting rules
+  - Now defaults to `false` for better user experience
+  - **Migration**: If you rely on MD013 checking table line lengths, add to `.rumdl.toml`:
+    ```toml
+    [MD013]
+    tables = true
+    ```
+  - This prevents false positives when using MD060 or other table formatting tools
+
 ## [0.0.170] - 2025-10-31
 
 ### Added
