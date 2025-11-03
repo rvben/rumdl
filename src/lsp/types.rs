@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 
 /// Configuration for the rumdl LSP server (from initialization options)
+///
+/// Uses camelCase for all fields per LSP specification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RumdlLspConfig {
@@ -413,11 +415,11 @@ mod tests {
             disable_rules: None,
         };
 
-        // Test serialization
+        // Test serialization (uses camelCase)
         let json = serde_json::to_string(&config).unwrap();
-        assert!(json.contains("\"config_path\":\"/path/to/config.toml\""));
-        assert!(json.contains("\"enable_linting\":false"));
-        assert!(json.contains("\"enable_auto_fix\":true"));
+        assert!(json.contains("\"configPath\":\"/path/to/config.toml\""));
+        assert!(json.contains("\"enableLinting\":false"));
+        assert!(json.contains("\"enableAutoFix\":true"));
 
         // Test deserialization
         let deserialized: RumdlLspConfig = serde_json::from_str(&json).unwrap();
@@ -692,8 +694,8 @@ mod tests {
 
     #[test]
     fn test_lsp_config_partial_deserialization() {
-        // Test that partial JSON can be deserialized with defaults
-        let json = r#"{"enable_linting": false}"#;
+        // Test that partial JSON can be deserialized with defaults (uses camelCase per LSP spec)
+        let json = r#"{"enableLinting": false}"#;
         let config: RumdlLspConfig = serde_json::from_str(json).unwrap();
 
         assert!(!config.enable_linting);

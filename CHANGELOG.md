@@ -34,9 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Now properly falls back to `~/.config/rumdl/.rumdl.toml`
   - Added test coverage for fallback behavior
 
-- **LSP: camelCase initialization options**
-  - Accept both `snake_case` and `camelCase` initialization options from LSP clients
-  - Improves compatibility with various LSP client implementations
+- **LSP: Fixed test expectations for camelCase serialization**
+  - LSP initialization options use camelCase per LSP specification
+  - Corrected test assertions to match actual camelCase behavior
 
 - **Fix mode: Type-safe exit code semantics**
   - Added `FixMode` enum for clear fix/check mode distinction
