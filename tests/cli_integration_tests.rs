@@ -1554,6 +1554,62 @@ fn test_fmt_command() {
     assert!(output.status.success());
 }
 
+#[test]
+fn test_fmt_vs_check_fix_exit_codes() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test content with an unfixable violation (MD041 - first line heading)
+    // and fixable violations (missing blank line before heading - MD022)
+    let input = "Some text\n# Title\n";
+
+    // Test 1: fmt should exit 0 even if unfixable violations remain
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("fmt").arg("-").arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn fmt command");
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for fmt command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should output formatted content (blank line added before heading)
+    assert_eq!(stdout, "Some text\n\n# Title\n");
+    // fmt should exit 0 even though MD041 violation remains
+    assert!(output.status.success(), "fmt should exit 0 on successful formatting");
+
+    // Test 2: check --fix should exit 1 if unfixable violations remain
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("--fix").arg("-").arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn check --fix command");
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .expect("Failed to wait for check --fix command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should output formatted content (same as fmt)
+    assert_eq!(stdout, "Some text\n\n# Title\n");
+    // check --fix should exit 1 because MD041 violation remains
+    assert!(
+        !output.status.success(),
+        "check --fix should exit 1 when unfixable violations remain"
+    );
+    assert_eq!(output.status.code(), Some(1), "check --fix should exit with code 1");
+}
+
 /// Test that --include allows checking files with non-standard extensions (issue #127)
 #[test]
 fn test_include_nonstandard_extensions() -> Result<(), Box<dyn std::error::Error>> {

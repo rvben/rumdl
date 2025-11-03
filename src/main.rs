@@ -310,6 +310,15 @@ enum ConfigSubcommand {
     File,
 }
 
+/// Fix mode determines exit code behavior: Check/CheckFix exit 1 on violations, Format exits 0
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FixMode {
+    #[default]
+    Check,
+    CheckFix,
+    Format,
+}
+
 #[derive(Args, Debug)]
 pub struct CheckArgs {
     /// Files or directories to lint (use '-' for stdin)
@@ -423,6 +432,9 @@ pub struct CheckArgs {
     /// Directory to store cache files
     #[arg(long, help = "Directory to store cache files (default: .rumdl-cache)")]
     cache_dir: Option<String>,
+
+    #[arg(skip)]
+    pub fix_mode: FixMode,
 }
 
 /// Offer to install the VS Code extension during init
@@ -640,8 +652,9 @@ build-backend = "setuptools.build_meta"
                     }
                 }
             }
-            Commands::Check(args) => {
-                // If --no-config or --isolated is set, skip config loading
+            Commands::Check(mut args) => {
+                args.fix_mode = if args._fix { FixMode::CheckFix } else { FixMode::Check };
+
                 if cli.no_config || cli.isolated {
                     run_check(&args, None, cli.no_config || cli.isolated);
                 } else {
@@ -649,9 +662,9 @@ build-backend = "setuptools.build_meta"
                 }
             }
             Commands::Fmt(mut args) => {
-                // fmt is an alias for check --fix
                 args._fix = true;
-                // If --no-config or --isolated is set, skip config loading
+                args.fix_mode = FixMode::Format;
+
                 if cli.no_config || cli.isolated {
                     run_check(&args, None, cli.no_config || cli.isolated);
                 } else {
@@ -1388,9 +1401,8 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         None
     };
 
-    // Perform the check and exit if issues were found
     let has_issues = watch::perform_check_run(args, &config, quiet, cache);
-    if has_issues {
+    if has_issues && args.fix_mode != FixMode::Format {
         exit::violations_found();
     }
 }

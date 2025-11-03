@@ -134,12 +134,10 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                 );
             }
 
-            // Exit with success if all issues were fixed, error if issues remain
-            if !remaining_warnings.is_empty() {
+            if !remaining_warnings.is_empty() && args.fix_mode != crate::FixMode::Format {
                 exit::violations_found();
             }
         } else {
-            // No issues found, output the original content unchanged
             print!("{content}");
         }
 

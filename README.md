@@ -23,9 +23,11 @@ cargo install rumdl
 # Lint Markdown files in the current directory
 rumdl check .
 
-# Format files (automatically fix issues)
+# Format files (exits 0 on success, even if unfixable violations remain)
 rumdl fmt .
-# Alternative: rumdl check --fix .
+
+# Auto-fix and report unfixable violations (exits 1 if violations remain)
+rumdl check --fix .
 
 # Create a default configuration file
 rumdl init
@@ -406,7 +408,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 
 #### `fmt [PATHS...]`
 
-Format Markdown files (alias for `check --fix`)
+Format Markdown files and output the result. Always exits with code 0 on successful formatting, making it ideal for editor integration.
 
 **Arguments:**
 
@@ -513,13 +515,12 @@ These options are available for all commands:
 
 ### Exit Codes
 
-rumdl uses exit codes following Ruff's convention for easy CI/CD integration:
+- `0`: Success
+- `1`: Violations found (or remain after `--fix`)
+- `2`: Tool error
 
-- `0`: Success - no issues found
-- `1`: Linting violations found
-- `2`: Tool error (configuration error, file access error, invalid arguments, etc.)
-
-This allows scripts and CI/CD systems to distinguish between "the tool found problems in your files" (exit 1) and "the tool couldn't run properly" (exit 2).
+**Note:** `rumdl fmt` exits 0 on successful formatting (even if unfixable violations remain), making it compatible with editor integrations. `rumdl check --fix` exits 1 if violations remain, useful
+for pre-commit hooks.
 
 ### Usage Examples
 
@@ -527,9 +528,11 @@ This allows scripts and CI/CD systems to distinguish between "the tool found pro
 # Lint all Markdown files in the current directory
 rumdl check .
 
-# Format files (automatically fix issues)
+# Format files (exits 0 on success, even if unfixable violations remain)
 rumdl fmt .
-# Alternative: rumdl check --fix .
+
+# Auto-fix and report unfixable violations (exits 1 if violations remain)
+rumdl check --fix .
 
 # Preview what would be fixed without modifying files
 rumdl check --diff .
