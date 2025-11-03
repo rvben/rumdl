@@ -86,8 +86,15 @@ impl CodeBlockUtils {
         // Find indented code blocks (4+ spaces or tab at start of line)
         // According to CommonMark, indented code blocks must be preceded by a blank line
         // (unless they're at the start of the document or after a block-level element)
+        //
+        // IMPORTANT: We must handle list contexts correctly:
+        // - At document level: 4 spaces + blank line before = code block
+        // - In a list context: 4 spaces = continuation paragraph (NOT a code block)
+        // - In a list context: 8+ spaces (depending on list marker) = code block
         let mut in_indented_block = false;
         let mut indented_block_start = 0;
+        let mut in_list_context = false;
+        let mut list_continuation_indent: usize = 0;
 
         for (line_idx, line) in lines.iter().enumerate() {
             let line_start = if line_idx < line_positions.len() {
@@ -102,16 +109,38 @@ impl CodeBlockUtils {
                 line_without_blockquote = BlockquoteUtils::extract_content(&line_without_blockquote);
             }
 
-            // Check if this line is indented code (after stripping blockquote markers)
+            // Calculate the indent level
+            let indent_level = line_without_blockquote.len() - line_without_blockquote.trim_start().len();
             let is_indented = line_without_blockquote.starts_with("    ") || line_without_blockquote.starts_with("\t");
 
             // Check if this looks like a list item (has list marker after indentation)
             let trimmed = line_without_blockquote.trim_start();
-            let is_list_item = trimmed.starts_with("- ")
-                || trimmed.starts_with("* ")
-                || trimmed.starts_with("+ ")
-                || trimmed.chars().next().is_some_and(|c| c.is_numeric())
-                    && trimmed.chars().nth(1).is_some_and(|c| c == '.' || c == ')');
+
+            // Check for ordered list marker: 1-9 digits followed by . or )
+            // Must be followed by at least one space
+            let is_ordered_list = {
+                let mut chars = trimmed.chars();
+                let first_char = chars.next();
+                if !first_char.is_some_and(|c| c.is_numeric()) {
+                    false
+                } else {
+                    // Find delimiter position (. or ))
+                    let delimiter_pos = trimmed.chars().position(|c| c == '.' || c == ')');
+                    match delimiter_pos {
+                        Some(pos) if pos > 0 => {
+                            // All chars before delimiter must be digits
+                            let all_digits = trimmed[..pos].chars().all(|c| c.is_numeric());
+                            // Must be followed by space or tab
+                            let has_space = trimmed.chars().nth(pos + 1).is_some_and(|c| c == ' ' || c == '\t');
+                            all_digits && has_space
+                        }
+                        _ => false,
+                    }
+                }
+            };
+
+            let is_list_item =
+                trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") || is_ordered_list;
 
             // Check if previous line was blank (after stripping blockquote markers)
             let prev_line_without_blockquote = if line_idx > 0 {
@@ -125,15 +154,70 @@ impl CodeBlockUtils {
             };
             let prev_blank = line_idx > 0 && prev_line_without_blockquote.trim().is_empty();
 
+            // Update list context tracking
+            if is_list_item {
+                // We're starting or continuing a list
+                in_list_context = true;
+
+                // Calculate continuation indent per CommonMark spec:
+                // "The spaces of indentation after the list marker determine how much
+                // relative indentation is needed. The first continuation block must be
+                // indented to the column of the first character other than a space after the marker."
+
+                let marker_column = indent_level;
+                let marker_width =
+                    if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+                        1 // Single character marker (-, *, +)
+                    } else {
+                        // Ordered list marker: count digits + delimiter (. or ))
+                        trimmed.chars().take_while(|c| c.is_numeric()).count() + 1
+                    };
+
+                // Count actual spaces/tabs after marker (CommonMark allows 1-4 spaces)
+                // Find the first non-space character after the marker
+                let after_marker = &trimmed[marker_width..];
+                let spaces_after_marker = after_marker.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+
+                // Continuation indent = marker column + marker width + actual spaces
+                // This is the column where the first content character appears
+                list_continuation_indent = marker_column + marker_width + spaces_after_marker;
+            } else if in_list_context
+                && !line_without_blockquote.trim().is_empty()
+                && indent_level < list_continuation_indent
+            {
+                // Outdented non-empty line ends the list context
+                in_list_context = false;
+                list_continuation_indent = 0;
+            }
+
+            // Determine if this indented line is:
+            // 1. A list continuation paragraph (indent >= continuation_indent, < continuation_indent + 4)
+            // 2. A code block within a list (indent >= continuation_indent + 4)
+            // 3. A document-level code block (not in list context)
+
+            let is_list_continuation_paragraph = in_list_context
+                && indent_level >= list_continuation_indent
+                && indent_level < (list_continuation_indent + 4);
+
+            let is_code_block_in_list = in_list_context && indent_level >= (list_continuation_indent + 4);
+
+            // Handle indented code blocks
             if is_indented && !line_without_blockquote.trim().is_empty() && !is_list_item {
-                if !in_indented_block {
-                    // Only start an indented code block if preceded by a blank line
-                    if prev_blank {
+                if is_code_block_in_list {
+                    // Code block within list (CommonMark Example 270, 273, 274)
+                    // Requires continuation_indent + 4 spaces, and must have blank line before
+                    if !in_indented_block && prev_blank {
                         in_indented_block = true;
                         indented_block_start = line_start;
                     }
-                    // Otherwise, this is just an indented line, not a code block
+                } else if !is_list_continuation_paragraph {
+                    // Document-level indented code block (not in list)
+                    if !in_indented_block && prev_blank {
+                        in_indented_block = true;
+                        indented_block_start = line_start;
+                    }
                 }
+                // If is_list_continuation_paragraph, don't treat as code block
             } else if in_indented_block {
                 // End of indented code block
                 let block_end = if line_idx > 0 && line_idx - 1 < line_positions.len() {

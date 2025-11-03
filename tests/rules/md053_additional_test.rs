@@ -339,3 +339,66 @@ fn test_shortcut_reference_with_colon() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
+
+#[test]
+fn test_reference_in_list_continuation_paragraph() {
+    // This is the exact example from PyO3 documentation that triggered the bug
+    let content = r#"- `__richcmp__(<self>, object, pyo3::basic::CompareOp) -> object`
+
+    Implements Python comparison operations.
+    You can use [`CompareOp::matches`] to adapt.
+
+[`CompareOp::matches`]: https://example.com
+"#;
+
+    let rule = MD053LinkImageReferenceDefinitions::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+
+    // Debug: Print line info to see what's happening
+    eprintln!("\nDEBUG: List continuation test");
+    for (i, line) in ctx.lines.iter().enumerate() {
+        eprintln!(
+            "Line {}: in_code_block={}, content={:?}",
+            i + 1,
+            line.in_code_block,
+            line.content
+        );
+    }
+
+    let result = rule.check(&ctx).unwrap();
+
+    // The reference [`CompareOp::matches`] IS used in the list continuation paragraph
+    // It should NOT be reported as unused
+    assert_eq!(
+        result.len(),
+        0,
+        "Reference should not be reported as unused. Got warnings: {result:?}"
+    );
+}
+
+#[test]
+fn test_list_continuation_not_marked_as_code_block() {
+    // Test that list continuation paragraphs are not marked as code blocks in LintContext
+    let content = r#"- List item
+
+    This is a continuation paragraph with 4 spaces.
+    It should NOT be marked as in_code_block.
+
+- Another item
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+
+    // Line 3 (index 2) is the continuation paragraph
+    let continuation_line = ctx.lines.get(2).expect("Line 3 should exist");
+    assert!(
+        continuation_line.content.trim().starts_with("This is a continuation"),
+        "Got unexpected line content: {:?}",
+        continuation_line.content
+    );
+
+    assert!(
+        !continuation_line.in_code_block,
+        "List continuation paragraph should NOT be marked as in_code_block"
+    );
+}

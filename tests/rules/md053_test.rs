@@ -413,3 +413,23 @@ fn test_backtick_reference_with_double_colon_and_comma() {
         "Backtick references with :: and comma should not be filtered out (GitHub issue #128)"
     );
 }
+
+#[test]
+fn test_backtick_reference_in_list_continuation() {
+    let rule = MD053LinkImageReferenceDefinitions::default();
+    // Test case from GitHub issue #128 follow-up: backtick reference in list item continuation
+    // The reference usage is in indented list content (4 spaces)
+    let content = r#"- `__richcmp__(<self>, object, pyo3::basic::CompareOp) -> object`
+
+    Implements Python comparison operations.
+    You can use [`CompareOp::matches`] to adapt.
+
+[`CompareOp::matches`]: https://example.com
+"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Backtick references in list item continuations should be detected (GitHub issue #128 follow-up)"
+    );
+}

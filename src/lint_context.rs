@@ -1319,79 +1319,26 @@ impl<'a> LintContext<'a> {
                 end.min(content.len())
             };
 
-            let block_content = &content[safe_start..safe_end];
+            // Trust the code blocks detected by CodeBlockUtils::detect_code_blocks()
+            // That function now has proper list context awareness (see code_block_utils.rs)
+            // and correctly distinguishes between:
+            // - Fenced code blocks (``` or ~~~)
+            // - Indented code blocks at document level (4 spaces + blank line before)
+            // - List continuation paragraphs (NOT code blocks, even with 4 spaces)
+            //
+            // We no longer need to re-validate here. The original validation logic
+            // was causing false positives by marking list continuation paragraphs as
+            // code blocks when they have 4 spaces of indentation.
 
-            // Strip blockquote markers to check the actual code block content
-            // Code blocks inside blockquotes have the format: "> ```" or ">     code"
-            let content_to_check = block_content
-                .lines()
-                .map(|line| {
-                    let mut stripped = line.to_string();
-                    while crate::rules::blockquote_utils::BlockquoteUtils::is_blockquote(&stripped) {
-                        stripped = crate::rules::blockquote_utils::BlockquoteUtils::extract_content(&stripped);
-                    }
-                    stripped
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            // Use binary search to find the first and last line indices
+            // line_offsets is sorted, so we can use partition_point for O(log n) lookup
+            // Use safe_start/safe_end (UTF-8 boundaries) for consistent line mapping
+            let first_line = line_offsets.partition_point(|&offset| offset < safe_start);
+            let last_line = line_offsets.partition_point(|&offset| offset < safe_end);
 
-            // Quick checks first: fenced code blocks are most common
-            let is_fenced =
-                content_to_check.trim_start().starts_with("```") || content_to_check.trim_start().starts_with("~~~");
-
-            // For non-fenced blocks, check if it's an indented code block
-            // Only check this if needed, as it's expensive
-            let should_mark = if is_fenced {
-                true
-            } else {
-                // Check if all non-empty lines start with 4 spaces or tab
-                // Using manual byte scanning instead of .lines() iterator for speed
-                let bytes = content_to_check.as_bytes();
-                let mut i = 0;
-                let mut valid_indented = true;
-
-                while i < bytes.len() {
-                    let line_start = i;
-                    // Find end of line
-                    while i < bytes.len() && bytes[i] != b'\n' {
-                        i += 1;
-                    }
-
-                    // Check if this line is properly indented or empty
-                    let mut j = line_start;
-                    // Skip leading whitespace
-                    while j < i && (bytes[j] == b' ' || bytes[j] == b'\t') {
-                        j += 1;
-                    }
-
-                    // If line has content, check indentation
-                    if j < i {
-                        // Line has non-whitespace content
-                        let indent_len = j - line_start;
-                        let starts_with_tab = line_start < bytes.len() && bytes[line_start] == b'\t';
-                        if indent_len < 4 && !starts_with_tab {
-                            valid_indented = false;
-                            break;
-                        }
-                    }
-
-                    i += 1; // Skip the newline
-                }
-
-                valid_indented
-            };
-
-            if should_mark {
-                // Use binary search to find the first and last line indices
-                // line_offsets is sorted, so we can use partition_point for O(log n) lookup
-                // Use safe_start/safe_end (UTF-8 boundaries) for consistent line mapping
-                let first_line = line_offsets.partition_point(|&offset| offset < safe_start);
-                let last_line = line_offsets.partition_point(|&offset| offset < safe_end);
-
-                // Mark all lines in the range at once
-                for flag in in_code_block.iter_mut().take(last_line).skip(first_line) {
-                    *flag = true;
-                }
+            // Mark all lines in the range at once
+            for flag in in_code_block.iter_mut().take(last_line).skip(first_line) {
+                *flag = true;
             }
         }
 
