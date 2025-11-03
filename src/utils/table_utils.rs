@@ -88,6 +88,7 @@ impl TableUtils {
         // Split by pipes and check each part
         let parts: Vec<&str> = trimmed.split('|').collect();
         let mut valid_delimiter_parts = 0;
+        let mut total_non_empty_parts = 0;
 
         for part in &parts {
             let part_trimmed = part.trim();
@@ -95,13 +96,16 @@ impl TableUtils {
                 continue; // Skip empty parts from leading/trailing pipes
             }
 
+            total_non_empty_parts += 1;
+
             // Check if this part looks like a delimiter (contains dashes and optionally colons)
             if part_trimmed.chars().all(|c| c == '-' || c == ':' || c.is_whitespace()) && part_trimmed.contains('-') {
                 valid_delimiter_parts += 1;
             }
         }
 
-        valid_delimiter_parts >= 2
+        // All non-empty parts must be valid delimiters, and there must be at least one
+        total_non_empty_parts > 0 && valid_delimiter_parts == total_non_empty_parts
     }
 
     /// Find all table blocks in the content with optimized detection
@@ -224,7 +228,7 @@ impl TableUtils {
     }
 
     /// Mask pipes inside inline code blocks with a placeholder character
-    fn mask_pipes_in_inline_code(text: &str) -> String {
+    pub fn mask_pipes_in_inline_code(text: &str) -> String {
         let mut result = String::new();
         let chars: Vec<char> = text.chars().collect();
         let mut i = 0;

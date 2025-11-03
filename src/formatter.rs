@@ -186,6 +186,7 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD055TablePipeStyle::default()),
         Box::new(MD056TableColumnCount),
         Box::new(MD058BlanksAroundTables::default()),
+        Box::new(MD059TableFormat::default()),
     ];
     let mut rule_names: Vec<_> = all_rules.iter().map(|r| r.name().to_string()).collect();
     rule_names.sort();

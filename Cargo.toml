@@ -55,6 +55,7 @@ url = { version = "2", features = ["serde"] }
 unicode-normalization = "0.1"
 memmap2 = "0.9"
 schemars = "0.8"
+unicode-width = "0.2"
 
 # LSP dependencies
 tower-lsp = "0.20"
@@ -83,7 +84,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.9.1"
 pretty_assertions = "1.4"
 unicode-segmentation = "1.12"
-unicode-width = "0.2"
 serial_test = "3.2"
 jsonschema = "0.22"
 

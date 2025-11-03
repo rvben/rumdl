@@ -663,8 +663,11 @@ Text after.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // Single column tables are not detected by table_utils (requires 2+ columns)
-        assert_eq!(result.len(), 0);
+        // Single column tables ARE now detected (fixed to support 1+ columns)
+        // Expects 2 warnings: missing blank before and after table
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("before"));
+        assert!(result[1].message.contains("after"));
     }
 
     #[test]

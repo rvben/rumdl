@@ -79,6 +79,7 @@ mod md056_test;
 mod md057_test;
 mod md058_kramdown_test;
 mod md058_test;
+mod md059_test;
 
 // Unicode-specific test modules
 mod md001_unicode_test;
