@@ -63,7 +63,7 @@ fn default_code_blocks() -> bool {
 }
 
 fn default_tables() -> bool {
-    true
+    false
 }
 
 fn default_headings() -> bool {
