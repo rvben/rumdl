@@ -317,7 +317,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- New rule MD059 for checking table formatting
+- New rule MD060 for checking table formatting
 - Support for custom rule plugins
 - Performance optimizations for large files
 

@@ -218,7 +218,7 @@ MD014: false
 MD024:
   siblings_only: true
 MD046: false
-MD059: false
+MD060: false
 "#;
 
     let config_map: HashMap<String, serde_yaml::Value> =
@@ -226,7 +226,7 @@ MD059: false
     let ml_config = MarkdownlintConfig(config_map);
     let fragment = ml_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
 
-    // Check that all disabled rules (except MD059 which doesn't exist in rumdl) are in the disable list
+    // Check that all disabled rules (except MD060 which doesn't exist in rumdl) are in the disable list
     let expected_disabled = vec!["MD013", "MD014", "MD033", "MD041", "MD046"];
     let disabled = &fragment.global.disable.value;
 

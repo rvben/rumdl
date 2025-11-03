@@ -1787,7 +1787,7 @@ mod tests {
         let rule = MD013LineLength::default();
         assert_eq!(rule.config.line_length, 80);
         assert!(rule.config.code_blocks); // Default is true
-        assert!(!rule.config.tables); // Default is false (changed to prevent conflicts with MD059)
+        assert!(!rule.config.tables); // Default is false (changed to prevent conflicts with MD060)
         assert!(rule.config.headings); // Default is true
         assert!(!rule.config.strict);
     }
