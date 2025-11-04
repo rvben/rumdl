@@ -1,5 +1,5 @@
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 /// Common test markdown content used across multiple tests
 pub struct TestFixtures;
@@ -36,7 +36,7 @@ exclude = [".git", "node_modules"]
 }
 
 /// Pre-computed test file sets for common scenarios
-pub static TEST_FILE_SETS: Lazy<HashMap<&'static str, Vec<(&'static str, &'static str)>>> = Lazy::new(|| {
+pub static TEST_FILE_SETS: LazyLock<HashMap<&'static str, Vec<(&'static str, &'static str)>>> = LazyLock::new(|| {
     let mut sets = HashMap::new();
 
     // Basic project structure

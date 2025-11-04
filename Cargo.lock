@@ -2006,7 +2006,6 @@ dependencies = [
  "mimalloc",
  "notify",
  "num_cpus",
- "once_cell",
  "predicates",
  "pretty_assertions",
  "proptest",

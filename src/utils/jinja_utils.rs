@@ -1,12 +1,12 @@
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 // Jinja2 template delimiters
-static JINJA_EXPRESSION_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\{\{.*?\}\}").expect("Failed to compile Jinja expression regex"));
+static JINJA_EXPRESSION_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{.*?\}\}").expect("Failed to compile Jinja expression regex"));
 
-static JINJA_STATEMENT_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\{%.*?%\}").expect("Failed to compile Jinja statement regex"));
+static JINJA_STATEMENT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{%.*?%\}").expect("Failed to compile Jinja statement regex"));
 
 /// Pre-compute all Jinja template ranges in the content
 pub fn find_jinja_ranges(content: &str) -> Vec<(usize, usize)> {
