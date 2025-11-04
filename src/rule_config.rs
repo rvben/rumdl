@@ -136,12 +136,12 @@ mod tests {
 
     #[test]
     fn test_impl_default_config_macro_empty() {
-        // Test macro with no fields
-        let config = impl_default_config!("MD002");
+        // Test macro with no fields (using MD023 which has no config)
+        let config = impl_default_config!("MD023");
 
         assert!(config.is_some());
         let (rule_name, value) = config.unwrap();
-        assert_eq!(rule_name, "MD002");
+        assert_eq!(rule_name, "MD023");
 
         if let Value::Table(table) = value {
             assert!(table.is_empty());

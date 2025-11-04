@@ -16,18 +16,6 @@ fn test_md001_heading_increment() {
 }
 
 #[test]
-fn test_md002_first_heading_h1() {
-    // With markdownlint compatibility, MD002 doesn't trigger when heading is on first line
-    // Test with heading not on first line
-    let test = simple_test(
-        "MD002",
-        "Some text\n\n## Second level heading",
-        ExpectedWarning::new(3, 1, 3, 24, "## Second level heading"),
-    );
-    test_character_ranges(test);
-}
-
-#[test]
 fn test_md018_missing_space_atx() {
     let test = simple_test("MD018", "#Heading without space", ExpectedWarning::new(1, 2, 1, 2, ""));
     test_character_ranges(test);

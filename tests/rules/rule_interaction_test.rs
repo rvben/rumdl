@@ -1,7 +1,7 @@
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{
-    MD004UnorderedListStyle, MD005ListIndent, MD006StartBullets, MD007ULIndent, MD009TrailingSpaces, MD010NoHardTabs,
+    MD004UnorderedListStyle, MD005ListIndent, MD007ULIndent, MD009TrailingSpaces, MD010NoHardTabs,
     MD012NoMultipleBlanks, MD022BlanksAroundHeadings, MD023HeadingStartLeft, MD028NoBlanksBlockquote,
     MD030ListMarkerSpace, MD031BlanksAroundFences, MD032BlanksAroundLists, MD047SingleTrailingNewline,
 };
@@ -207,32 +207,6 @@ fn test_md047_with_other_rules() {
         "Single trailing newline"
     );
     assert!(!final_fixed.lines().any(|l| l.ends_with(' ')), "No trailing spaces");
-}
-
-#[test]
-fn test_three_way_rule_interaction() {
-    let md006 = MD006StartBullets;
-    let md007 = MD007ULIndent::default();
-    let md030 = MD030ListMarkerSpace::default();
-
-    // Complex nested list with multiple issues
-    let content = "   * Item 1\n      * Nested 1\n         * Deep nested\n   * Item 2";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
-
-    // Apply fixes in sequence
-    let fixed_md006 = md006.fix(&ctx).unwrap();
-    let ctx_after_md006 = LintContext::new(&fixed_md006, rumdl_lib::config::MarkdownFlavor::Standard);
-
-    let fixed_md007 = md007.fix(&ctx_after_md006).unwrap();
-    let ctx_after_md007 = LintContext::new(&fixed_md007, rumdl_lib::config::MarkdownFlavor::Standard);
-
-    let final_fixed = md030.fix(&ctx_after_md007).unwrap();
-    let final_ctx = LintContext::new(&final_fixed, rumdl_lib::config::MarkdownFlavor::Standard);
-
-    // All three rules should be satisfied
-    assert_eq!(md006.check(&final_ctx).unwrap().len(), 0, "MD006 satisfied");
-    assert_eq!(md007.check(&final_ctx).unwrap().len(), 0, "MD007 satisfied");
-    assert_eq!(md030.check(&final_ctx).unwrap().len(), 0, "MD030 satisfied");
 }
 
 #[test]

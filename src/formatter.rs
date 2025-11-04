@@ -135,11 +135,9 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
     // All rules, but only if they have config items
     let all_rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement),
-        Box::new(MD002FirstHeadingH1::default()),
         Box::new(MD003HeadingStyle::default()),
         Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
         Box::new(MD005ListIndent::default()),
-        Box::new(MD006StartBullets),
         Box::new(MD007ULIndent::default()),
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD010NoHardTabs::default()),

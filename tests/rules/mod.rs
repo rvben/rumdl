@@ -1,10 +1,8 @@
 mod md001_test;
-mod md002_test;
 mod md003_test;
 mod md004_test;
 mod md005_dynamic_indent_test;
 mod md005_test;
-mod md006_test;
 mod md007_test;
 mod md009_test;
 mod md010_test;
@@ -84,7 +82,6 @@ mod md060_test;
 // Unicode-specific test modules
 mod md001_unicode_test;
 mod md005_unicode_test;
-mod md006_unicode_test;
 mod md029_unicode_test;
 mod md054_unicode_test;
 

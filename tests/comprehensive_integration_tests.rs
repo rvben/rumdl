@@ -35,12 +35,11 @@ fn test_init_command_creates_and_loads_config() {
     let combined_output = format!("{stdout}\n{stderr}");
 
     // Check for specific rules that should trigger:
-    // - MD002: First heading should be level 1 (found level 3)
     // - MD022: Missing blank lines around headings
     // - MD041: First line in file should be a level 1 heading
     assert!(
-        combined_output.contains("MD002") || combined_output.contains("MD022") || combined_output.contains("MD041"),
-        "Should detect at least one of: MD002 (first heading h1), MD022 (blanks around headings), or MD041 (first line heading)"
+        combined_output.contains("MD022") || combined_output.contains("MD041"),
+        "Should detect at least one of: MD022 (blanks around headings) or MD041 (first line heading)"
     );
 }
 

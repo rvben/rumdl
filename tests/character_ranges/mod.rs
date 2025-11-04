@@ -192,11 +192,9 @@ pub fn extract_highlighted_text(content: &str, warning: &LintWarning) -> String 
 pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
     match rule_name {
         "MD001" => Some(Box::new(MD001HeadingIncrement)),
-        "MD002" => Some(Box::new(MD002FirstHeadingH1::new(1))),
         "MD003" => Some(Box::new(MD003HeadingStyle::new(HeadingStyle::Consistent))),
         "MD004" => Some(Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent))),
         "MD005" => Some(Box::new(MD005ListIndent::default())),
-        "MD006" => Some(Box::new(MD006StartBullets)),
         "MD007" => Some(Box::new(MD007ULIndent::new(2))),
         "MD009" => Some(Box::new(MD009TrailingSpaces::new(2, false))),
         "MD010" => Some(Box::new(MD010NoHardTabs::new(4))),

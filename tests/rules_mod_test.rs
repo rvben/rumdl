@@ -7,8 +7,8 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 55 rules as defined in the RULES array
-    assert_eq!(rules.len(), 55);
+    // Should return all 53 rules as defined in the RULES array (MD002 and MD006 removed)
+    assert_eq!(rules.len(), 53);
 
     // Verify some specific rules are present
     let rule_names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
@@ -35,7 +35,7 @@ fn test_filter_rules_disable_specific_rules() {
     let all = all_rules(&config);
 
     let global_config = GlobalConfig {
-        disable: vec!["MD001".to_string(), "MD002".to_string(), "MD003".to_string()],
+        disable: vec!["MD001".to_string(), "MD004".to_string(), "MD003".to_string()],
         ..Default::default()
     };
 
@@ -47,11 +47,11 @@ fn test_filter_rules_disable_specific_rules() {
     // Verify disabled rules are not present
     let rule_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
     assert!(!rule_names.contains("MD001"));
-    assert!(!rule_names.contains("MD002"));
+    assert!(!rule_names.contains("MD004"));
     assert!(!rule_names.contains("MD003"));
 
     // Verify other rules are still present
-    assert!(rule_names.contains("MD004"));
+    assert!(rule_names.contains("MD005"));
     assert!(rule_names.contains("MD058"));
 }
 
@@ -93,7 +93,6 @@ fn test_filter_rules_disable_all_but_enable_specific() {
     assert!(rule_names.contains("MD010"));
 
     // Verify other rules are not present
-    assert!(!rule_names.contains("MD002"));
     assert!(!rule_names.contains("MD003"));
     assert!(!rule_names.contains("MD004"));
 }
@@ -104,7 +103,7 @@ fn test_filter_rules_enable_only_specific() {
     let all = all_rules(&config);
 
     let global_config = GlobalConfig {
-        enable: vec!["MD001".to_string(), "MD002".to_string()],
+        enable: vec!["MD001".to_string(), "MD004".to_string()],
         ..Default::default()
     };
 
@@ -115,7 +114,7 @@ fn test_filter_rules_enable_only_specific() {
 
     let rule_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
     assert!(rule_names.contains("MD001"));
-    assert!(rule_names.contains("MD002"));
+    assert!(rule_names.contains("MD004"));
     assert!(!rule_names.contains("MD003"));
 }
 
@@ -125,8 +124,8 @@ fn test_filter_rules_enable_with_disable_override() {
     let all = all_rules(&config);
 
     let global_config = GlobalConfig {
-        enable: vec!["MD001".to_string(), "MD002".to_string(), "MD003".to_string()],
-        disable: vec!["MD002".to_string()],
+        enable: vec!["MD001".to_string(), "MD004".to_string(), "MD003".to_string()],
+        disable: vec!["MD004".to_string()],
         ..Default::default()
     };
 
@@ -137,7 +136,7 @@ fn test_filter_rules_enable_with_disable_override() {
 
     let rule_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
     assert!(rule_names.contains("MD001"));
-    assert!(!rule_names.contains("MD002")); // Disabled takes precedence
+    assert!(!rule_names.contains("MD004")); // Disabled takes precedence
     assert!(rule_names.contains("MD003"));
 }
 
@@ -150,7 +149,6 @@ fn test_filter_rules_complex_scenario() {
     let global_config = GlobalConfig {
         disable: vec![
             "MD001".to_string(),
-            "MD002".to_string(),
             "MD003".to_string(),
             "MD004".to_string(),
             "MD005".to_string(),
@@ -160,18 +158,19 @@ fn test_filter_rules_complex_scenario() {
 
     let filtered = filter_rules(&all, &global_config);
 
-    // Should have all rules minus the 5 disabled ones
-    assert_eq!(filtered.len(), all.len() - 5);
+    // Should have all rules minus the 4 disabled ones
+    assert_eq!(filtered.len(), all.len() - 4);
 
     let rule_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
 
     // Verify disabled rules are not present
-    for i in 1..=5 {
-        assert!(!rule_names.contains(&format!("MD00{i}")));
-    }
+    assert!(!rule_names.contains("MD001"));
+    assert!(!rule_names.contains("MD003"));
+    assert!(!rule_names.contains("MD004"));
+    assert!(!rule_names.contains("MD005"));
 
     // Verify some other rules are still present
-    assert!(rule_names.contains("MD006"));
+    assert!(rule_names.contains("MD007"));
     assert!(rule_names.contains("MD010"));
     assert!(rule_names.contains("MD058"));
 }

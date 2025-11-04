@@ -943,7 +943,7 @@ line-length = 100 # Set to 100 characters
         let config_path = temp_dir.path().join(".rumdl.toml");
 
         let config_content = r#"
-[MD002]
+[MD003]
 levels = [1, 2, 3]
 tags = ["important", "critical"]
 mixed = [1, "two", true]
@@ -954,7 +954,7 @@ mixed = [1, "two", true]
         let config: Config = sourced.into();
 
         // Arrays should now be properly parsed
-        let rule_config = config.rules.get("MD002").expect("MD002 config should exist");
+        let rule_config = config.rules.get("MD003").expect("MD003 config should exist");
 
         // Check that arrays are present and correctly parsed
         assert!(rule_config.values.contains_key("levels"));

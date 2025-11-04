@@ -72,7 +72,6 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
 fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn Rule>)> {
     match rule_name {
         "MD001" => Some(("# H1\n### H3 (should be H2)", Box::new(MD001HeadingIncrement))),
-        "MD002" => Some(("## H2 (should start with H1)", Box::new(MD002FirstHeadingH1::default()))),
         "MD003" => Some(("# ATX\nSetext\n======", Box::new(MD003HeadingStyle::default()))),
         "MD004" => Some((
             "* Item 1\n- Item 2",
@@ -81,10 +80,6 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD005" => Some((
             "* Item 1\n   * Item with 3 spaces (should be 2)",
             Box::new(MD005ListIndent::default()),
-        )),
-        "MD006" => Some((
-            "  * Indented list item that should trigger MD006",
-            Box::new(MD006StartBullets),
         )),
         "MD007" => Some(("- Item 1\n   - Wrong indent", Box::new(MD007ULIndent::default()))),
         "MD009" => Some(("Line with trailing spaces   ", Box::new(MD009TrailingSpaces::default()))),
@@ -274,34 +269,6 @@ mod tests {
     }
 
     #[test]
-    fn test_md006_vscode_fix_no_duplication() {
-        let rule = MD006StartBullets;
-        let content = "  * Indented list item that should trigger MD006";
-
-        let result = simulate_vscode_fix(content, &rule);
-
-        // If MD006 has a fix, it should not duplicate content
-        if let Ok(fixed) = result {
-            assert!(!fixed.contains("* *"), "Should not contain duplicated list markers");
-            assert!(!fixed.contains("  * *"), "Should not contain duplicated content");
-            // The fix should start with a bullet marker and not have the original indentation
-            assert!(fixed.starts_with("*"), "Should start with bullet marker");
-            assert!(
-                !fixed.starts_with("  *"),
-                "Should not start with indented bullet marker"
-            );
-            // Expected: "* Indented list item that should trigger MD006"
-            // But we'll be lenient about exact spacing as long as there's no duplication
-            assert!(
-                fixed.contains("Indented list item that should trigger MD006"),
-                "Should contain the original content"
-            );
-        } else {
-            panic!("Expected MD006 to provide a fix");
-        }
-    }
-
-    #[test]
     fn test_md005_vscode_fix_no_duplication() {
         let rule = MD005ListIndent::default();
         let content = "* Item 1\n   * Item with 3 spaces (should be 2)\n* Item 3";
@@ -409,11 +376,11 @@ mod tests {
     #[test]
     fn test_all_rules_vscode_fix_no_duplication() {
         let rules_to_test = vec![
-            "MD001", "MD002", "MD003", "MD004", "MD005", "MD006", "MD007", "MD009", "MD010", "MD011", "MD012", "MD013",
-            "MD014", "MD018", "MD019", "MD020", "MD021", "MD022", "MD023", "MD024", "MD025", "MD026", "MD027", "MD028",
-            "MD029", "MD030", "MD031", "MD032", "MD033", "MD034", "MD035", "MD036", "MD037", "MD038", "MD039", "MD040",
-            "MD041", "MD042", "MD043", "MD044", "MD045", "MD046", "MD047", "MD048", "MD049", "MD050", "MD051", "MD052",
-            "MD053", "MD054", "MD055", "MD056", "MD057", "MD058",
+            "MD001", "MD003", "MD004", "MD005", "MD007", "MD009", "MD010", "MD011", "MD012", "MD013", "MD014", "MD018",
+            "MD019", "MD020", "MD021", "MD022", "MD023", "MD024", "MD025", "MD026", "MD027", "MD028", "MD029", "MD030",
+            "MD031", "MD032", "MD033", "MD034", "MD035", "MD036", "MD037", "MD038", "MD039", "MD040", "MD041", "MD042",
+            "MD043", "MD044", "MD045", "MD046", "MD047", "MD048", "MD049", "MD050", "MD051", "MD052", "MD053", "MD054",
+            "MD055", "MD056", "MD057", "MD058",
         ];
 
         let mut tested_rules = 0;

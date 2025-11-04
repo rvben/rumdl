@@ -1,16 +1,9 @@
 //! Extended Character Range Tests
 //!
 //! This module contains character range tests for additional rules
-//! covering MD006-MD053.
+//! covering MD007-MD053.
 
 use super::{ExpectedWarning, multi_warning_test, simple_test, test_character_ranges};
-
-// MD006 - Start bullets at beginning of line
-#[test]
-fn test_md006_start_bullets() {
-    let test = simple_test("MD006", "  - Indented bullet", ExpectedWarning::new(1, 1, 1, 5, "  - "));
-    test_character_ranges(test);
-}
 
 // MD007 - Unordered list indentation
 #[test]

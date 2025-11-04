@@ -675,11 +675,9 @@ build-backend = "setuptools.build_meta"
                 use rumdl_lib::rules::*;
                 let all_rules: Vec<Box<dyn Rule>> = vec![
                     Box::new(MD001HeadingIncrement),
-                    Box::new(MD002FirstHeadingH1::default()),
                     Box::new(MD003HeadingStyle::default()),
                     Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
                     Box::new(MD005ListIndent::default()),
-                    Box::new(MD006StartBullets),
                     Box::new(MD007ULIndent::default()),
                     Box::new(MD009TrailingSpaces::default()),
                     Box::new(MD010NoHardTabs::default()),
@@ -1414,11 +1412,9 @@ fn handle_explain_command(rule_query: &str) {
     // Get all rules
     let all_rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement),
-        Box::new(MD002FirstHeadingH1::default()),
         Box::new(MD003HeadingStyle::default()),
         Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
         Box::new(MD005ListIndent::default()),
-        Box::new(MD006StartBullets),
         Box::new(MD007ULIndent::default()),
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD010NoHardTabs::default()),

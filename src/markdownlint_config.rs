@@ -32,11 +32,9 @@ fn markdownlint_to_rumdl_rule_key(key: &str) -> Option<&'static str> {
     let normalized_key = key.to_ascii_uppercase().replace('_', "-");
     match normalized_key.as_str() {
         "MD001" | "HEADING-INCREMENT" => Some("MD001"),
-        "MD002" | "FIRST-HEADING-H1" => Some("MD002"),
         "MD003" | "HEADING-STYLE" => Some("MD003"),
         "MD004" | "UL-STYLE" => Some("MD004"),
         "MD005" | "LIST-INDENT" => Some("MD005"),
-        "MD006" | "UL-START-LEFT" => Some("MD006"),
         "MD007" | "UL-INDENT" => Some("MD007"),
         "MD008" => Some("MD008"),
         "MD009" | "NO-TRAILING-SPACES" => Some("MD009"),
@@ -352,7 +350,6 @@ mod tests {
         // Test aliases with hyphens
         assert_eq!(markdownlint_to_rumdl_rule_key("heading-increment"), Some("MD001"));
         assert_eq!(markdownlint_to_rumdl_rule_key("HEADING-INCREMENT"), Some("MD001"));
-        assert_eq!(markdownlint_to_rumdl_rule_key("first-heading-h1"), Some("MD002"));
         assert_eq!(markdownlint_to_rumdl_rule_key("ul-style"), Some("MD004"));
         assert_eq!(markdownlint_to_rumdl_rule_key("no-trailing-spaces"), Some("MD009"));
         assert_eq!(markdownlint_to_rumdl_rule_key("line-length"), Some("MD013"));
@@ -365,7 +362,6 @@ mod tests {
         // Test aliases with underscores (should also work)
         assert_eq!(markdownlint_to_rumdl_rule_key("heading_increment"), Some("MD001"));
         assert_eq!(markdownlint_to_rumdl_rule_key("HEADING_INCREMENT"), Some("MD001"));
-        assert_eq!(markdownlint_to_rumdl_rule_key("first_heading_h1"), Some("MD002"));
         assert_eq!(markdownlint_to_rumdl_rule_key("ul_style"), Some("MD004"));
         assert_eq!(markdownlint_to_rumdl_rule_key("no_trailing_spaces"), Some("MD009"));
         assert_eq!(markdownlint_to_rumdl_rule_key("line_length"), Some("MD013"));
@@ -681,11 +677,9 @@ ul-style:
         // Test that all documented aliases map correctly
         let aliases = vec![
             ("heading-increment", "MD001"),
-            ("first-heading-h1", "MD002"),
             ("heading-style", "MD003"),
             ("ul-style", "MD004"),
             ("list-indent", "MD005"),
-            ("ul-start-left", "MD006"),
             ("ul-indent", "MD007"),
             ("no-trailing-spaces", "MD009"),
             ("no-hard-tabs", "MD010"),

@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements 54 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements 53 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -24,6 +24,8 @@ For information on global configuration settings (file selection, rule enablemen
 
 Some rule numbers are not implemented in rumdl:
 
+- **MD002** - Deprecated and removed from markdownlint v0.13.0 (replaced by MD041); removed from rumdl for compatibility
+- **MD006** - Not implemented in DavidAnson/markdownlint (JavaScript version); removed from rumdl for compatibility
 - **MD008** - Originally intended for "Unordered list spacing" but not implemented in modern markdownlint
 - **MD015, MD016, MD017** - These rule numbers were never assigned in either the Ruby or Node.js versions of markdownlint
 
@@ -34,7 +36,6 @@ These gaps in numbering are maintained for compatibility with markdownlint rule 
 | Rule ID | Rule Name | Description |
 |---------|-----------|-------------|
 | [MD001](md001.md) | Heading increment | Headings should only increment by one level at a time |
-| [MD002](md002.md) | First heading h1 | First heading should be a top-level heading |
 | [MD003](md003.md) | Heading style | Heading style should be consistent |
 | [MD018](md018.md) | No space atx | No space after hash on atx style heading |
 | [MD019](md019.md) | Multiple space atx | Multiple spaces after hash on atx style heading |
@@ -54,7 +55,6 @@ These gaps in numbering are maintained for compatibility with markdownlint rule 
 |---------|-----------|-------------|
 | [MD004](md004.md) | UL style | Unordered list style |
 | [MD005](md005.md) | List indent | Inconsistent indentation for list items at the same level |
-| [MD006](md006.md) | Start bullets | Consider starting bulleted lists at the beginning of the line |
 | [MD007](md007.md) | UL indent | Unordered list indentation |
 | [MD029](md029.md) | OL prefix | Ordered list item prefix |
 | [MD030](md030.md) | List marker space | Spaces after list markers |

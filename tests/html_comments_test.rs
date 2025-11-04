@@ -5,9 +5,7 @@
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
-use rumdl_lib::rules::{
-    MD005ListIndent, MD006StartBullets, MD039NoSpaceInLinks, MD042NoEmptyLinks, MD052ReferenceLinkImages,
-};
+use rumdl_lib::rules::{MD005ListIndent, MD039NoSpaceInLinks, MD042NoEmptyLinks, MD052ReferenceLinkImages};
 
 /// Test that links inside HTML comments are ignored (MD039, MD042)
 #[test]
@@ -45,7 +43,7 @@ fn test_links_in_html_comments_ignored() {
     );
 }
 
-/// Test that list items inside HTML comments are ignored (MD005, MD006)
+/// Test that list items inside HTML comments are ignored (MD005)
 #[test]
 fn test_lists_in_html_comments_ignored() {
     let content = r#"# Valid heading
@@ -65,16 +63,6 @@ fn test_lists_in_html_comments_ignored() {
         result.len(),
         0,
         "MD005 should not flag list indentation inside HTML comments. Found {} issues",
-        result.len()
-    );
-
-    // MD006: List start at beginning of line
-    let md006 = MD006StartBullets;
-    let result = md006.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        0,
-        "MD006 should not flag list start inside HTML comments. Found {} issues",
         result.len()
     );
 }

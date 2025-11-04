@@ -9,11 +9,9 @@ pub mod strong_style;
 pub mod blockquote_utils;
 
 mod md001_heading_increment;
-mod md002_first_heading_h1;
 mod md003_heading_style;
 pub mod md004_unordered_list_style;
 mod md005_list_indent;
-mod md006_start_bullets;
 mod md007_ul_indent;
 mod md009_trailing_spaces;
 mod md010_no_hard_tabs;
@@ -57,12 +55,10 @@ mod md058_blanks_around_tables;
 mod md060_table_format;
 
 pub use md001_heading_increment::MD001HeadingIncrement;
-pub use md002_first_heading_h1::MD002FirstHeadingH1;
 pub use md003_heading_style::MD003HeadingStyle;
 pub use md004_unordered_list_style::MD004UnorderedListStyle;
 pub use md004_unordered_list_style::UnorderedListStyle;
 pub use md005_list_indent::MD005ListIndent;
-pub use md006_start_bullets::MD006StartBullets;
 pub use md007_ul_indent::MD007ULIndent;
 pub use md009_trailing_spaces::MD009TrailingSpaces;
 pub use md010_no_hard_tabs::MD010NoHardTabs;
@@ -136,11 +132,9 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
     type RuleCtor = fn(&crate::config::Config) -> Box<dyn Rule>;
     const RULES: &[(&str, RuleCtor)] = &[
         ("MD001", MD001HeadingIncrement::from_config),
-        ("MD002", MD002FirstHeadingH1::from_config),
         ("MD003", MD003HeadingStyle::from_config),
         ("MD004", MD004UnorderedListStyle::from_config),
         ("MD005", MD005ListIndent::from_config),
-        ("MD006", MD006StartBullets::from_config),
         ("MD007", MD007ULIndent::from_config),
         ("MD009", MD009TrailingSpaces::from_config),
         ("MD010", MD010NoHardTabs::from_config),
