@@ -165,19 +165,13 @@ impl Rule for MD059LinkText {
             }
 
             // Check if link text is prohibited
-            if let Some(prohibited) = self.is_prohibited(&link.text) {
+            if self.is_prohibited(&link.text).is_some() {
                 warnings.push(LintWarning {
                     line: link.line,
-                    column: link.start_col,
+                    column: link.start_col + 2, // Point to first char of text (skip '[')
                     end_line: link.line,
                     end_column: link.end_col,
-                    message: format!(
-                        "Link text \"{}\" is not descriptive (prohibited: \"{}\"). \
-                         Use descriptive text that explains the destination to help \
-                         users with screen readers.",
-                        link.text.trim(),
-                        prohibited
-                    ),
+                    message: "Link text should be descriptive".to_string(),
                     severity: Severity::Warning,
                     fix: None, // Not auto-fixable - requires human judgment
                     rule_name: Some(self.name().to_string()),
@@ -211,10 +205,10 @@ mod tests {
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 4);
 
-        assert!(warnings[0].message.contains("click here"));
-        assert!(warnings[1].message.contains("here"));
-        assert!(warnings[2].message.contains("link"));
-        assert!(warnings[3].message.contains("more"));
+        // All warnings should have the same descriptive message
+        for warning in &warnings {
+            assert_eq!(warning.message, "Link text should be descriptive");
+        }
     }
 
     #[test]
