@@ -60,7 +60,10 @@ fn handle_schema_command(action: SchemaAction) {
 
     // Post-process the schema to add additionalProperties for flattened rules
     // This allows [MD###] sections at the root level alongside [global] and [per-file-ignores]
-    let mut schema_value: serde_json::Value = serde_json::to_value(&schema).expect("Failed to convert schema to Value");
+    let mut schema_value: serde_json::Value = serde_json::to_value(&schema).unwrap_or_else(|e| {
+        eprintln!("{}: Failed to convert schema to Value: {}", "Error".red().bold(), e);
+        exit::tool_error();
+    });
 
     if let Some(schema_obj) = schema_value.as_object_mut() {
         // Add additionalProperties that reference the RuleConfig definition
@@ -74,7 +77,10 @@ fn handle_schema_command(action: SchemaAction) {
         );
     }
 
-    let schema_json = serde_json::to_string_pretty(&schema_value).expect("Failed to serialize schema");
+    let schema_json = serde_json::to_string_pretty(&schema_value).unwrap_or_else(|e| {
+        eprintln!("{}: Failed to serialize schema: {}", "Error".red().bold(), e);
+        exit::tool_error();
+    });
 
     match action {
         SchemaAction::Print => {
@@ -91,7 +97,10 @@ fn handle_schema_command(action: SchemaAction) {
             if existing_schema.as_ref() == Some(&schema_json) {
                 println!("Schema is already up-to-date: {}", schema_path.display());
             } else {
-                fs::write(&schema_path, &schema_json).expect("Failed to write schema file");
+                fs::write(&schema_path, &schema_json).unwrap_or_else(|e| {
+                    eprintln!("{}: Failed to write schema file: {}", "Error".red().bold(), e);
+                    exit::tool_error();
+                });
                 println!("Schema updated: {}", schema_path.display());
             }
         }
@@ -117,7 +126,10 @@ fn handle_schema_command(action: SchemaAction) {
 /// Get the path to the project's schema file
 fn get_project_schema_path() -> std::path::PathBuf {
     // Try to find the project root by looking for Cargo.toml
-    let mut current_dir = std::env::current_dir().expect("Failed to get current directory");
+    let mut current_dir = std::env::current_dir().unwrap_or_else(|e| {
+        eprintln!("{}: Failed to get current directory: {}", "Error".red().bold(), e);
+        exit::tool_error();
+    });
 
     loop {
         let cargo_toml = current_dir.join("Cargo.toml");
@@ -129,7 +141,10 @@ fn get_project_schema_path() -> std::path::PathBuf {
             // Reached filesystem root without finding Cargo.toml
             // Fall back to current directory
             return std::env::current_dir()
-                .expect("Failed to get current directory")
+                .unwrap_or_else(|e| {
+                    eprintln!("{}: Failed to get current directory: {}", "Error".red().bold(), e);
+                    exit::tool_error();
+                })
                 .join("rumdl.schema.json");
         }
     }
@@ -1052,7 +1067,10 @@ build-backend = "setuptools.build_meta"
                 }
 
                 // Start the LSP server
-                let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+                let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
+                    eprintln!("{}: Failed to create Tokio runtime: {}", "Error".red().bold(), e);
+                    exit::tool_error();
+                });
 
                 runtime.block_on(async {
                     if let Some(port) = port {

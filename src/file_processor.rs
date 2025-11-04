@@ -194,18 +194,18 @@ pub fn find_markdown_files(
     if args.include.is_none() {
         let mut types_builder = ignore::types::TypesBuilder::new();
         types_builder.add_defaults(); // Add standard types
-        types_builder.add("markdown", "*.md").unwrap();
-        types_builder.add("markdown", "*.markdown").unwrap();
-        types_builder.add("markdown", "*.mdx").unwrap();
-        types_builder.add("markdown", "*.mkd").unwrap();
-        types_builder.add("markdown", "*.mkdn").unwrap();
-        types_builder.add("markdown", "*.mdown").unwrap();
-        types_builder.add("markdown", "*.mdwn").unwrap();
-        types_builder.add("markdown", "*.qmd").unwrap();
-        types_builder.add("markdown", "*.rmd").unwrap();
-        types_builder.add("markdown", "*.Rmd").unwrap();
+        types_builder.add("markdown", "*.md")?;
+        types_builder.add("markdown", "*.markdown")?;
+        types_builder.add("markdown", "*.mdx")?;
+        types_builder.add("markdown", "*.mkd")?;
+        types_builder.add("markdown", "*.mkdn")?;
+        types_builder.add("markdown", "*.mdown")?;
+        types_builder.add("markdown", "*.mdwn")?;
+        types_builder.add("markdown", "*.qmd")?;
+        types_builder.add("markdown", "*.rmd")?;
+        types_builder.add("markdown", "*.Rmd")?;
         types_builder.select("markdown"); // Select ONLY markdown for processing
-        let types = types_builder.build().unwrap();
+        let types = types_builder.build()?;
         walk_builder.types(types);
     }
     // -----------------------------------------
