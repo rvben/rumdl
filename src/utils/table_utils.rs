@@ -57,14 +57,17 @@ impl TableUtils {
             }
         }
 
-        // All non-empty parts must be valid (no newlines) for the row to be valid
-        if total_non_empty_parts == 0 {
+        // Check if all non-empty parts are valid (no newlines)
+        if total_non_empty_parts > 0 && valid_parts != total_non_empty_parts {
+            // Some cells contain newlines, not a valid table row
             return false;
         }
 
-        if valid_parts != total_non_empty_parts {
-            // Some cells contain newlines, not a valid table row
-            return false;
+        // GFM allows tables with all empty cells (e.g., |||)
+        // These are valid if they have proper table formatting (leading and trailing pipes)
+        if total_non_empty_parts == 0 {
+            // Empty cells are only valid with proper pipe formatting
+            return trimmed.starts_with('|') && trimmed.ends_with('|') && parts.len() >= 3;
         }
 
         // GFM allows single-column tables, so >= 1 valid part is enough
@@ -356,6 +359,11 @@ mod tests {
 
         // Cells with newlines
         assert!(!TableUtils::is_potential_table_row("| Cell with\nnewline | Other |"));
+
+        // Empty cells (Issue #129)
+        assert!(TableUtils::is_potential_table_row("|||")); // Two empty cells
+        assert!(TableUtils::is_potential_table_row("||||")); // Three empty cells
+        assert!(TableUtils::is_potential_table_row("| | |")); // Two empty cells with spaces
     }
 
     #[test]

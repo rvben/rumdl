@@ -422,3 +422,45 @@ fn test_md060_minimum_width_with_alignment_indicators() {
     assert!(lines[1].contains("---:"), "Right alignment should be preserved");
     assert!(lines[1].contains(":---:"), "Center alignment should be preserved");
 }
+
+#[test]
+fn test_md060_empty_header_table() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "|||\n|-|-|\n|lorem|ipsum|";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    // Empty headers should be formatted with proper spacing
+    let expected = "|       |       |\n| ----- | ----- |\n| lorem | ipsum |";
+    assert_eq!(fixed, expected, "Empty header table should be formatted");
+
+    // Verify all rows have equal length in aligned mode
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+}
+
+#[test]
+fn test_md060_delimiter_width_does_not_affect_alignment() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // The first delimiter has many dashes, but that shouldn't affect column width
+    let content = "|lorem|ipsum|\n|--------------|-|\n|dolor|sit|";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    // Column width should be based on content (lorem/dolor), not delimiter dashes
+    let expected = "| lorem | ipsum |\n| ----- | ----- |\n| dolor | sit   |";
+    assert_eq!(
+        fixed, expected,
+        "Delimiter row width should not affect column alignment"
+    );
+
+    // Verify all rows have equal length in aligned mode
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+}

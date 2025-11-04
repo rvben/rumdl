@@ -155,15 +155,29 @@ impl MD060TableFormat {
         if row.is_empty() {
             return false;
         }
-        row.iter()
-            .all(|cell| cell.trim().chars().all(|c| c == '-' || c == ':' || c.is_whitespace()))
+        row.iter().all(|cell| {
+            let trimmed = cell.trim();
+            // A delimiter cell must contain at least one dash
+            // Empty cells are not delimiter cells
+            !trimmed.is_empty()
+                && trimmed.contains('-')
+                && trimmed.chars().all(|c| c == '-' || c == ':' || c.is_whitespace())
+        })
     }
 
     fn calculate_column_widths(table_lines: &[&str]) -> Vec<usize> {
         let mut column_widths = Vec::new();
+        let mut delimiter_cells: Option<Vec<String>> = None;
 
         for line in table_lines {
             let cells = Self::parse_table_row(line);
+
+            // Save delimiter row for later processing, but don't use it for width calculation
+            if Self::is_delimiter_row(&cells) {
+                delimiter_cells = Some(cells);
+                continue;
+            }
+
             for (i, cell) in cells.iter().enumerate() {
                 let width = Self::calculate_cell_display_width(cell);
                 if i >= column_widths.len() {
@@ -176,7 +190,26 @@ impl MD060TableFormat {
 
         // GFM requires delimiter rows to have at least 3 dashes per column.
         // To ensure visual alignment, all columns must be at least width 3.
-        column_widths.iter().map(|&w| w.max(3)).collect()
+        let mut final_widths: Vec<usize> = column_widths.iter().map(|&w| w.max(3)).collect();
+
+        // Adjust column widths to accommodate alignment indicators (colons) in delimiter row
+        // This ensures the delimiter row has the same length as content rows
+        if let Some(delimiter_cells) = delimiter_cells {
+            for (i, cell) in delimiter_cells.iter().enumerate() {
+                if i < final_widths.len() {
+                    let trimmed = cell.trim();
+                    let has_left_colon = trimmed.starts_with(':');
+                    let has_right_colon = trimmed.ends_with(':');
+                    let colon_count = (has_left_colon as usize) + (has_right_colon as usize);
+
+                    // Minimum width needed: 3 dashes + colons
+                    let min_width_for_delimiter = 3 + colon_count;
+                    final_widths[i] = final_widths[i].max(min_width_for_delimiter);
+                }
+            }
+        }
+
+        final_widths
     }
 
     fn format_table_row(cells: &[String], column_widths: &[usize], is_delimiter: bool) -> String {
