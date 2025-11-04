@@ -4,32 +4,25 @@ This document provides a detailed comparison between rumdl and markdownlint, cov
 
 ## Quick Summary
 
-rumdl aims to be **largely compatible** with markdownlint while offering significant performance improvements and some design enhancements. The goal is to make migration from markdownlint as smooth as
-possible.
+rumdl is **fully compatible** with markdownlint while offering significant performance improvements and design enhancements. All 53 markdownlint rules are implemented, making migration seamless.
 
 **Key Differences:**
 
 - **Performance**: rumdl is significantly faster (30-100x in many cases) thanks to Rust and intelligent caching
-- **Rule Coverage**: ~95% compatible; most markdownlint rules are implemented with the same behavior
-- **Unique Features**: Built-in LSP server, VS Code extension, CommonMark compliance focus
+- **Rule Coverage**: 100% compatible - all 53 markdownlint rules are implemented with the same behavior
+- **Unique Features**: Built-in LSP server, VS Code extension, CommonMark compliance focus, MD057 (relative link validation)
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
 
 ### Implemented Rules
 
-rumdl implements **52 of 60** markdownlint rules with compatible behavior:
+rumdl implements **all 53 markdownlint rules** with compatible behavior (100% compatibility):
 
 ✅ MD001, MD003, MD004, MD005, MD007, MD009, MD010, MD011, MD012, MD013, MD014, MD018, MD019, MD020, MD021, MD022, MD023, MD024, MD025, MD026, MD027, MD028, MD029, MD030, MD031, MD032,
-MD033, MD034, MD035, MD036, MD037, MD038, MD039, MD040, MD041, MD042, MD043, MD044, MD045, MD046, MD047, MD048, MD049, MD050, MD051, MD052, MD053, MD054, MD055, MD056, MD058, MD060
+MD033, MD034, MD035, MD036, MD037, MD038, MD039, MD040, MD041, MD042, MD043, MD044, MD045, MD046, MD047, MD048, MD049, MD050, MD051, MD052, MD053, MD054, MD055, MD056, MD058, MD059, MD060
 
-### Not Yet Implemented
-
-❌ **MD059** (Link text should be descriptive)
-
-- **Status**: Planned for future release
-- **Workaround**: Use descriptive link text as best practice
-- **Impact**: Low - this is a style preference rule
+**Note:** Although rule numbers go from MD001 to MD060 (60 slots), markdownlint only implements 53 rules due to 7 gaps in numbering (see "Skipped Rule Numbers" below).
 
 ### Rules Not in markdownlint
 
@@ -44,12 +37,13 @@ rumdl implements additional rules not found in markdownlint:
 
 ### Skipped Rule Numbers
 
-Both tools skip these rule numbers for historical reasons:
+These rule numbers are not implemented in markdownlint:
 
 - **MD002**: Deprecated and removed from markdownlint v0.13.0 (replaced by MD041); removed from rumdl for compatibility
 - **MD006**: Not implemented in DavidAnson/markdownlint (JavaScript version); removed from rumdl for compatibility
-- **MD008**: Originally planned for "Unordered list spacing" but never implemented in either tool
-- **MD015, MD016, MD017**: Not assigned in the original markdownlint
+- **MD008**: Originally planned for "Unordered list spacing" but never implemented
+- **MD015, MD016, MD017**: Never assigned in markdownlint
+- **MD057**: Not implemented in markdownlint; rumdl uses this number for "Existing relative links" validation
 
 ## Intentional Design Differences
 

@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements 53 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements 54 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -108,6 +108,7 @@ These gaps in numbering are maintained for compatibility with markdownlint rule 
 | [MD052](md052.md) | Reference links images | References should be defined |
 | [MD053](md053.md) | Link image definitions | Link and image reference definitions should be needed |
 | [MD054](md054.md) | Link image style | Link and image style |
+| [MD059](md059.md) | Link text | Link text should be descriptive |
 
 ## Table Rules
 
