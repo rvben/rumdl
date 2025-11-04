@@ -19,13 +19,13 @@ pub struct MD012NoMultipleBlanks {
 }
 
 impl MD012NoMultipleBlanks {
-    pub fn new(maximum: usize) -> Self {
+    pub const fn new(maximum: usize) -> Self {
         Self {
             config: MD012Config { maximum },
         }
     }
 
-    pub fn from_config_struct(config: MD012Config) -> Self {
+    pub const fn from_config_struct(config: MD012Config) -> Self {
         Self { config }
     }
 }

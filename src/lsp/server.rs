@@ -809,9 +809,8 @@ impl LanguageServer for RumdlLanguageServer {
         }
 
         // Get the current document content
-        let text = match self.get_document_content(&params.text_document.uri).await {
-            Some(content) => content,
-            None => return Ok(None),
+        let Some(text) = self.get_document_content(&params.text_document.uri).await else {
+            return Ok(None);
         };
 
         // Apply all fixes

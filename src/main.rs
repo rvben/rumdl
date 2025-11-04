@@ -10,8 +10,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use clap::{Args, Parser, Subcommand};
 use colored::*;
+use core::error::Error;
 use memmap2::Mmap;
-use std::error::Error;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
@@ -477,9 +477,8 @@ fn offer_vscode_extension_install() {
         println!("\nDetected you're using {}.", editor_name.green());
         println!("Would you like to install the rumdl extension? [Y/n]");
 
-        let answer = match prompt_user("> ") {
-            Some(a) => a,
-            None => return, // I/O error, exit gracefully
+        let Some(answer) = prompt_user("> ") else {
+            return; // I/O error, exit gracefully
         };
 
         if answer.trim().is_empty() || answer.trim().eq_ignore_ascii_case("y") {
@@ -508,9 +507,8 @@ fn offer_vscode_extension_install() {
                 println!("\n{} detected.", editor_name.green());
                 println!("Would you like to install the rumdl extension for real-time linting? [y/N]");
 
-                let answer = match prompt_user("> ") {
-                    Some(a) => a,
-                    None => return, // I/O error, exit gracefully
+                let Some(answer) = prompt_user("> ") else {
+                    return; // I/O error, exit gracefully
                 };
 
                 if answer.trim().eq_ignore_ascii_case("y") {
@@ -537,10 +535,10 @@ fn offer_vscode_extension_install() {
                     available_editors.len()
                 );
 
-                let answer = match prompt_user("> ") {
-                    Some(a) => a.trim().to_lowercase(),
-                    None => return, // I/O error, exit gracefully
+                let Some(response) = prompt_user("> ") else {
+                    return; // I/O error, exit gracefully
                 };
+                let answer = response.trim().to_lowercase();
 
                 if answer == "a" || answer == "all" {
                     // Install in all editors
@@ -606,12 +604,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // pyproject.toml exists, ask to append
                         println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
 
-                        let answer = match prompt_user("> ") {
-                            Some(a) => a,
-                            None => {
-                                eprintln!("Error: Failed to read user input");
-                                exit::tool_error();
-                            }
+                        let Some(answer) = prompt_user("> ") else {
+                            eprintln!("Error: Failed to read user input");
+                            exit::tool_error();
                         };
 
                         if answer.trim().eq_ignore_ascii_case("y") {

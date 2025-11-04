@@ -18,13 +18,13 @@ pub struct MD010NoHardTabs {
 }
 
 impl MD010NoHardTabs {
-    pub fn new(spaces_per_tab: usize) -> Self {
+    pub const fn new(spaces_per_tab: usize) -> Self {
         Self {
             config: MD010Config { spaces_per_tab },
         }
     }
 
-    pub fn from_config_struct(config: MD010Config) -> Self {
+    pub const fn from_config_struct(config: MD010Config) -> Self {
         Self { config }
     }
 

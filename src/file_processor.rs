@@ -3,6 +3,7 @@
 use crate::cache::LintCache;
 use crate::formatter;
 use colored::*;
+use core::error::Error;
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use rumdl_config::normalize_key;
@@ -10,7 +11,6 @@ use rumdl_lib::config as rumdl_config;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
-use std::error::Error;
 use std::path::Path;
 
 pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {

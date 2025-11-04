@@ -14,7 +14,7 @@ pub struct MD009TrailingSpaces {
 }
 
 impl MD009TrailingSpaces {
-    pub fn new(br_spaces: usize, strict: bool) -> Self {
+    pub const fn new(br_spaces: usize, strict: bool) -> Self {
         Self {
             config: MD009Config {
                 br_spaces,
@@ -24,7 +24,7 @@ impl MD009TrailingSpaces {
         }
     }
 
-    pub fn from_config_struct(config: MD009Config) -> Self {
+    pub const fn from_config_struct(config: MD009Config) -> Self {
         Self { config }
     }
 
