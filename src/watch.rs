@@ -147,7 +147,6 @@ pub fn perform_check_run(
             let warnings = crate::file_processor::process_file_collect_warnings(
                 file_path,
                 &enabled_rules,
-                args._fix,
                 args.verbose && !args.silent,
                 quiet,
                 config,
@@ -207,7 +206,7 @@ pub fn perform_check_run(
                     crate::file_processor::process_file_with_formatter(
                         file_path,
                         &enabled_rules_arc,
-                        args._fix,
+                        args.fix_mode,
                         args.diff,
                         args.verbose && !args.silent,
                         quiet,
@@ -264,7 +263,7 @@ pub fn perform_check_run(
                     crate::file_processor::process_file_with_formatter(
                         file_path,
                         &enabled_rules,
-                        args._fix,
+                        args.fix_mode,
                         args.diff,
                         args.verbose && !args.silent,
                         quiet,

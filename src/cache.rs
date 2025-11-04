@@ -23,7 +23,7 @@ pub struct CacheStats {
 }
 
 impl CacheStats {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
         if total == 0 {
@@ -67,19 +67,12 @@ impl LintCache {
     /// # Arguments
     /// * `cache_dir` - Base directory for cache (e.g., ".rumdl-cache")
     /// * `enabled` - Whether caching is enabled
-    #[allow(dead_code)]
     pub fn new(cache_dir: PathBuf, enabled: bool) -> Self {
         Self {
             cache_dir,
             enabled,
             stats: CacheStats::default(),
         }
-    }
-
-    /// Get default cache directory for a project
-    #[allow(dead_code)]
-    pub fn default_cache_dir() -> PathBuf {
-        PathBuf::from(".rumdl-cache")
     }
 
     /// Compute Blake3 hash of content
@@ -194,7 +187,7 @@ impl LintCache {
     }
 
     /// Clear the entire cache
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn clear(&self) -> std::io::Result<()> {
         if self.cache_dir.exists() {
             fs::remove_dir_all(&self.cache_dir)?;
@@ -203,7 +196,6 @@ impl LintCache {
     }
 
     /// Initialize cache directory structure
-    #[allow(dead_code)]
     pub fn init(&self) -> std::io::Result<()> {
         if !self.enabled {
             return Ok(());
@@ -232,15 +224,9 @@ impl LintCache {
     }
 
     /// Get cache statistics
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn stats(&self) -> &CacheStats {
         &self.stats
-    }
-
-    /// Check if caching is enabled
-    #[allow(dead_code)]
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
     }
 }
 

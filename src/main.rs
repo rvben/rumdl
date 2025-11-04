@@ -327,7 +327,7 @@ pub struct CheckArgs {
 
     /// Fix issues automatically where possible
     #[arg(short, long, default_value = "false")]
-    pub _fix: bool,
+    fix: bool,
 
     /// Show diff of what would be fixed instead of fixing files
     #[arg(long, help = "Show diff of what would be fixed instead of fixing files")]
@@ -653,7 +653,7 @@ build-backend = "setuptools.build_meta"
                 }
             }
             Commands::Check(mut args) => {
-                args.fix_mode = if args._fix { FixMode::CheckFix } else { FixMode::Check };
+                args.fix_mode = if args.fix { FixMode::CheckFix } else { FixMode::Check };
 
                 if cli.no_config || cli.isolated {
                     run_check(&args, None, cli.no_config || cli.isolated);
@@ -662,7 +662,6 @@ build-backend = "setuptools.build_meta"
                 }
             }
             Commands::Fmt(mut args) => {
-                args._fix = true;
                 args.fix_mode = FixMode::Format;
 
                 if cli.no_config || cli.isolated {
@@ -1075,11 +1074,19 @@ build-backend = "setuptools.build_meta"
                 // Convert to rumdl config format
                 let fragment = ml_config.map_to_sourced_rumdl_config_fragment(Some(&file));
 
+                // Determine if we're outputting to pyproject.toml
+                let is_pyproject = output
+                    .as_ref()
+                    .is_some_and(|p| p.ends_with("pyproject.toml") || p == "pyproject.toml");
+
                 // Generate the output
                 let output_content = match format.as_str() {
                     "toml" => {
                         // Convert to TOML format
                         let mut output = String::new();
+
+                        // For pyproject.toml, wrap everything in [tool.rumdl]
+                        let section_prefix = if is_pyproject { "tool.rumdl." } else { "" };
 
                         // Add global settings if any
                         if !fragment.global.enable.value.is_empty()
@@ -1088,7 +1095,7 @@ build-backend = "setuptools.build_meta"
                             || !fragment.global.include.value.is_empty()
                             || fragment.global.line_length.value != 80
                         {
-                            output.push_str("[global]\n");
+                            output.push_str(&format!("[{section_prefix}global]\n"));
                             if !fragment.global.enable.value.is_empty() {
                                 output.push_str(&format!("enable = {:?}\n", fragment.global.enable.value));
                             }
@@ -1110,7 +1117,7 @@ build-backend = "setuptools.build_meta"
                         // Add rule-specific settings
                         for (rule_name, rule_config) in &fragment.rules {
                             if !rule_config.values.is_empty() {
-                                output.push_str(&format!("[{rule_name}]\n"));
+                                output.push_str(&format!("[{section_prefix}{rule_name}]\n"));
                                 for (key, sourced_value) in &rule_config.values {
                                     // Skip the generic "value" key if we have more specific keys
                                     if key == "value" && rule_config.values.len() > 1 {
@@ -1319,7 +1326,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     let quiet = args.quiet || args.silent;
 
     // Validate mutually exclusive options
-    if args.diff && args._fix {
+    if args.diff && args.fix {
         eprintln!("{}: --diff and --fix cannot be used together", "Error".red().bold());
         eprintln!("Use --diff to preview changes, or --fix to apply them");
         exit::tool_error();

@@ -480,7 +480,7 @@ pub fn is_rule_actually_fixable(config: &rumdl_config::Config, rule_name: &str) 
 pub fn process_file_with_formatter(
     file_path: &str,
     rules: &[Box<dyn Rule>],
-    _fix: bool,
+    fix_mode: crate::FixMode,
     diff: bool,
     verbose: bool,
     quiet: bool,
@@ -500,7 +500,7 @@ pub fn process_file_with_formatter(
     }
 
     // Format and output warnings
-    if !quiet && !_fix {
+    if !quiet && fix_mode == crate::FixMode::Check {
         if diff {
             // In diff mode, only show warnings for unfixable issues
             let unfixable_warnings: Vec<_> = all_warnings.iter().filter(|w| w.fix.is_none()).cloned().collect();
@@ -540,7 +540,7 @@ pub fn process_file_with_formatter(
 
         // Don't actually write the file in diff mode
         return (total_warnings > 0, total_warnings, 0, fixable_warnings, all_warnings);
-    } else if _fix {
+    } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
         warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, config);
 
@@ -852,7 +852,6 @@ pub fn apply_fixes_coordinated(
 pub fn process_file_collect_warnings(
     file_path: &str,
     rules: &[Box<dyn Rule>],
-    _fix: bool,
     verbose: bool,
     quiet: bool,
     config: &rumdl_config::Config,

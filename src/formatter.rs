@@ -39,7 +39,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
     // Show results summary
     if has_issues {
         // If fix mode is enabled, only show the fixed summary
-        if args._fix && total_issues_fixed > 0 {
+        if args.fix_mode != crate::FixMode::Check && total_issues_fixed > 0 {
             println!(
                 "\n{} Fixed {}/{} issues in {} {} ({}ms)",
                 "Fixed:".green().bold(),
@@ -68,7 +68,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
                 duration_ms
             );
 
-            if !args._fix && total_fixable_issues > 0 {
+            if args.fix_mode == crate::FixMode::Check && total_fixable_issues > 0 {
                 // Display the exact count of fixable issues
                 println!("Run `rumdl fmt` to automatically fix {total_fixable_issues} of the {total_issues} issues");
             }

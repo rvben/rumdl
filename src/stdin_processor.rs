@@ -16,12 +16,12 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     // If silent mode is enabled, also enable quiet mode
     let quiet = args.quiet || args.silent;
 
-    // In check mode without --fix, diagnostics should go to stderr by default
-    // In fix mode, fixed content goes to stdout, so diagnostics also go to stdout unless --stderr is specified
-    let use_stderr = if args._fix {
+    // In check mode, diagnostics go to stderr by default
+    // In fix/format modes, fixed content goes to stdout, so diagnostics go to stdout unless --stderr is specified
+    let use_stderr = if args.fix_mode != crate::FixMode::Check {
         args.stderr
     } else {
-        true // Check mode: diagnostics to stderr by default
+        true
     };
     // Create output writer for linting results
     let output_writer = OutputWriter::new(use_stderr, quiet, args.silent);
@@ -101,7 +101,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     let has_issues = !all_warnings.is_empty();
 
     // Apply fixes if requested
-    if args._fix {
+    if args.fix_mode != crate::FixMode::Check {
         if has_issues {
             let mut fixed_content = content.clone();
             let warnings_fixed =
