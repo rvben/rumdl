@@ -1,7 +1,7 @@
 use crate::config::MarkdownFlavor;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
-use pulldown_cmark::{Event, Parser};
+use pulldown_cmark::{Event, LinkType, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -952,22 +952,121 @@ impl<'a> LintContext<'a> {
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     ) -> Vec<ParsedLink> {
         use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
+        use std::collections::HashSet;
 
-        // Pre-size based on a heuristic: most markdown files have relatively few links
-        let mut links = Vec::with_capacity(content.len() / 500); // ~1 link per 500 chars
+        let mut links = Vec::with_capacity(content.len() / 500);
 
-        // Parse links across the entire content, not line by line
+        // Track byte positions of links found by pulldown-cmark
+        let mut found_positions = HashSet::new();
+
+        // Use pulldown-cmark's streaming parser with byte offsets
+        // This automatically handles:
+        // - Escaped links (won't generate events)
+        // - Links in code blocks/spans (won't generate Link events)
+        // - Images (generates Tag::Image instead)
+        // - Reference resolution (dest_url is already resolved!)
+        let parser = Parser::new(content).into_offset_iter();
+
+        let mut link_stack: Vec<(usize, String, LinkType, String)> = Vec::new();
+        let mut text_buffer = String::new();
+
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::Link {
+                    link_type,
+                    dest_url,
+                    id,
+                    ..
+                }) => {
+                    // Link start - record position, URL, and reference ID
+                    link_stack.push((range.start, dest_url.to_string(), link_type, id.to_string()));
+                    text_buffer.clear();
+                }
+                Event::Text(text) if !link_stack.is_empty() => {
+                    // Accumulate text content for the link
+                    text_buffer.push_str(&text);
+                }
+                Event::Code(code) if !link_stack.is_empty() => {
+                    // Include inline code in link text (with backticks)
+                    text_buffer.push('`');
+                    text_buffer.push_str(&code);
+                    text_buffer.push('`');
+                }
+                Event::End(TagEnd::Link) => {
+                    if let Some((start_pos, url, link_type, ref_id)) = link_stack.pop() {
+                        // Skip if in HTML comment
+                        if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
+                            text_buffer.clear();
+                            continue;
+                        }
+
+                        // Find line and column information
+                        let (line_idx, line_num, col_start) = Self::find_line_for_offset(lines, start_pos);
+
+                        // Skip if this link is on a MkDocs snippet line
+                        if is_mkdocs_snippet_line(&lines[line_idx].content, flavor) {
+                            text_buffer.clear();
+                            continue;
+                        }
+
+                        let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, range.end);
+
+                        let is_reference = matches!(
+                            link_type,
+                            LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
+                        );
+
+                        // For reference links, use the actual reference ID from pulldown-cmark
+                        let reference_id = if is_reference && !ref_id.is_empty() {
+                            Some(ref_id.to_lowercase())
+                        } else if is_reference {
+                            // For collapsed/shortcut references without explicit ID, use the link text
+                            Some(text_buffer.to_lowercase())
+                        } else {
+                            None
+                        };
+
+                        // Track this position as found
+                        found_positions.insert(start_pos);
+
+                        links.push(ParsedLink {
+                            line: line_num,
+                            start_col: col_start,
+                            end_col: col_end,
+                            byte_offset: start_pos,
+                            byte_end: range.end,
+                            text: text_buffer.clone(),
+                            url,
+                            is_reference,
+                            reference_id,
+                        });
+
+                        text_buffer.clear();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Also find undefined references using regex
+        // These are patterns like [text][ref] that pulldown-cmark didn't parse as links
+        // because the reference is undefined
         for cap in LINK_PATTERN.captures_iter(content) {
             let full_match = cap.get(0).unwrap();
             let match_start = full_match.start();
             let match_end = full_match.end();
 
-            // Skip if the opening bracket is escaped (preceded by \)
+            // Skip if this was already found by pulldown-cmark (it's a valid link)
+            if found_positions.contains(&match_start) {
+                continue;
+            }
+
+            // Skip if escaped
             if match_start > 0 && content.as_bytes().get(match_start - 1) == Some(&b'\\') {
                 continue;
             }
 
-            // Skip if this is actually an image (preceded by !)
+            // Skip if it's an image
             if match_start > 0 && content.as_bytes().get(match_start - 1) == Some(&b'!') {
                 continue;
             }
@@ -982,12 +1081,12 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Skip if in HTML comment (using pre-computed ranges for efficiency)
+            // Skip if in HTML comment
             if is_in_html_comment_ranges(html_comment_ranges, match_start) {
                 continue;
             }
 
-            // Use binary search to find the line this link is on
+            // Find line and column information
             let (line_idx, line_num, col_start) = Self::find_line_for_offset(lines, match_start);
 
             // Skip if this link is on a MkDocs snippet line
@@ -995,29 +1094,12 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            // Use binary search to find the end line
             let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, match_end);
 
             let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
 
-            // URL can be in group 2 (angle brackets) or group 3 (bare)
-            let inline_url = cap.get(2).or_else(|| cap.get(3));
-
-            if let Some(url_match) = inline_url {
-                // Inline link
-                links.push(ParsedLink {
-                    line: line_num,
-                    start_col: col_start,
-                    end_col: col_end,
-                    byte_offset: match_start,
-                    byte_end: match_end,
-                    text,
-                    url: url_match.as_str().to_string(),
-                    is_reference: false,
-                    reference_id: None,
-                });
-            } else if let Some(ref_id) = cap.get(6) {
-                // Reference link
+            // Only process reference links (group 6)
+            if let Some(ref_id) = cap.get(6) {
                 let ref_id_str = ref_id.as_str();
                 let normalized_ref = if ref_id_str.is_empty() {
                     text.to_lowercase() // Implicit reference
@@ -1025,6 +1107,7 @@ impl<'a> LintContext<'a> {
                     ref_id_str.to_lowercase()
                 };
 
+                // This is an undefined reference (pulldown-cmark didn't parse it)
                 links.push(ParsedLink {
                     line: line_num,
                     start_col: col_start,
@@ -1032,7 +1115,7 @@ impl<'a> LintContext<'a> {
                     byte_offset: match_start,
                     byte_end: match_end,
                     text,
-                    url: String::new(), // Will be resolved with reference_defs
+                    url: String::new(), // Empty URL indicates undefined reference
                     is_reference: true,
                     reference_id: Some(normalized_ref),
                 });

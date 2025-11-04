@@ -3,7 +3,6 @@
 //! Provides reusable traits and functions for rule implementations and core linter logic.
 
 pub mod anchor_styles;
-pub mod ast_utils;
 pub mod code_block_utils;
 // DocumentStructure has been merged into LintContext
 // pub mod document_structure;
@@ -32,7 +31,6 @@ pub mod string_interner;
 pub mod table_utils;
 pub mod text_reflow;
 
-pub use ast_utils::AstCache;
 pub use code_block_utils::CodeBlockUtils;
 // pub use document_structure::DocumentStructure;
 pub use line_ending::{

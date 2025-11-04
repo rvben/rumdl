@@ -28,6 +28,12 @@ strip = true         # Strip symbols from binary
 opt-level = "z"      # Optimize for size (alternative: "s" for small, "3" for speed)
 codegen-units = 1    # Better optimization but slower compile times
 
+[profile.profiling]
+inherits = "release"
+debug = true         # Keep debug symbols for profiling
+strip = false        # Don't strip symbols
+opt-level = 3        # Maximum optimization for realistic performance
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 colored = "3.0.0"
@@ -39,12 +45,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9.34"
 serde_json = "1.0"
 toml = "0.8.20"
-strsim = "0.11"
 thiserror = "2.0.12"
 globset = "0.4.16"
 anyhow = "1.0"
 log = "0.4.27"
-markdown = "1.0"
 pulldown-cmark = "0.12.2"
 regex = "1.11"
 toml_edit = "0.22"
@@ -62,7 +66,6 @@ tokio-util = "0.7"
 tower = "0.5.2"
 tower-service = "0.3"
 env_logger = "0.11"
-num_cpus = "1.16"
 chrono = { version = "0.4", features = ["serde"] }
 notify = "6.1"
 etcetera = "0.8"
@@ -90,3 +93,7 @@ tikv-jemallocator = "0.6"
 
 [target.'cfg(target_env = "msvc")'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
+
+[[bench]]
+name = "link_parsing_manual"
+harness = false

@@ -226,80 +226,11 @@ pub fn get_regex_cache_stats() -> std::collections::HashMap<String, u64> {
     crate::utils::regex_cache::get_cache_stats()
 }
 
-/// Get AST cache statistics for performance monitoring
-pub fn get_ast_cache_stats() -> std::collections::HashMap<u64, u64> {
-    crate::utils::ast_utils::get_ast_cache_stats()
-}
-
-/// Clear all caches (useful for testing and memory management)
-pub fn clear_all_caches() {
-    crate::utils::ast_utils::clear_ast_cache();
-    // Note: Regex cache is intentionally not cleared as it's global and shared
-}
-
-/// Get comprehensive cache performance report
-pub fn get_cache_performance_report() -> String {
-    let regex_stats = get_regex_cache_stats();
-    let ast_stats = get_ast_cache_stats();
-
-    let mut report = String::new();
-
-    report.push_str("=== Cache Performance Report ===\n\n");
-
-    // Regex cache statistics
-    report.push_str("Regex Cache:\n");
-    if regex_stats.is_empty() {
-        report.push_str("  No regex patterns cached\n");
-    } else {
-        let total_usage: u64 = regex_stats.values().sum();
-        report.push_str(&format!("  Total patterns: {}\n", regex_stats.len()));
-        report.push_str(&format!("  Total usage: {total_usage}\n"));
-
-        // Show top 5 most used patterns
-        let mut sorted_patterns: Vec<_> = regex_stats.iter().collect();
-        sorted_patterns.sort_by(|a, b| b.1.cmp(a.1));
-
-        report.push_str("  Top patterns by usage:\n");
-        for (pattern, count) in sorted_patterns.iter().take(5) {
-            let truncated_pattern = if pattern.len() > 50 {
-                format!("{}...", &pattern[..47])
-            } else {
-                pattern.to_string()
-            };
-            report.push_str(&format!(
-                "    {} ({}x): {}\n",
-                count,
-                pattern.len().min(50),
-                truncated_pattern
-            ));
-        }
-    }
-
-    report.push('\n');
-
-    // AST cache statistics
-    report.push_str("AST Cache:\n");
-    if ast_stats.is_empty() {
-        report.push_str("  No ASTs cached\n");
-    } else {
-        let total_usage: u64 = ast_stats.values().sum();
-        report.push_str(&format!("  Total ASTs: {}\n", ast_stats.len()));
-        report.push_str(&format!("  Total usage: {total_usage}\n"));
-
-        if total_usage > ast_stats.len() as u64 {
-            let cache_hit_rate = ((total_usage - ast_stats.len() as u64) as f64 / total_usage as f64) * 100.0;
-            report.push_str(&format!("  Cache hit rate: {cache_hit_rate:.1}%\n"));
-        }
-    }
-
-    report
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::rule::Rule;
-    use crate::rules::{MD001HeadingIncrement, MD009TrailingSpaces, MD012NoMultipleBlanks};
+    use crate::rules::{MD001HeadingIncrement, MD009TrailingSpaces};
 
     #[test]
     fn test_content_characteristics_analyze() {
@@ -486,53 +417,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_ast_cache_stats() {
-        let stats = get_ast_cache_stats();
-        // Stats should be a valid HashMap (might be empty)
-        assert!(stats.is_empty() || !stats.is_empty());
-
-        // If not empty, all values should be positive
-        for count in stats.values() {
-            assert!(*count > 0);
-        }
-    }
-
-    #[test]
-    fn test_clear_all_caches() {
-        // Test that clear_all_caches doesn't panic
-        clear_all_caches();
-
-        // Function completes successfully - cache state is process-global and may
-        // be modified by other tests, so we don't assert on specific state
-    }
-
-    #[test]
-    fn test_get_cache_performance_report() {
-        // Test that the report generation works and has the correct structure
-        let report = get_cache_performance_report();
-
-        // Report should always contain expected section headers
-        assert!(report.contains("Cache Performance Report"));
-        assert!(report.contains("Regex Cache:"));
-        assert!(report.contains("AST Cache:"));
-
-        // Report should contain either usage stats or "no cache" messages
-        // (depends on whether other tests have populated the cache)
-        assert!(report.contains("Total patterns:") || report.contains("No regex patterns cached"));
-        assert!(report.contains("Total ASTs:") || report.contains("No ASTs cached"));
-    }
-
-    #[test]
-    fn test_lint_with_ast_rules() {
-        // Create content that would benefit from AST parsing
-        let content = "# Heading\n\nParagraph with **bold** text.";
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD012NoMultipleBlanks::new(1))];
-
-        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard);
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn test_content_characteristics_edge_cases() {
         // Test setext heading edge case
         let chars = ContentCharacteristics::analyze("-"); // Single dash, not a heading
@@ -551,19 +435,5 @@ mod tests {
         // Test blockquote must be at start of line
         let chars = ContentCharacteristics::analyze("text > not a quote");
         assert!(!chars.has_blockquotes);
-    }
-
-    #[test]
-    fn test_cache_performance_report_formatting() {
-        // Add some data to caches to test formatting
-        // (Would require actual usage of the caches, which happens during linting)
-
-        let report = get_cache_performance_report();
-
-        // Test truncation of long patterns
-        // Since we can't easily add a long pattern to the cache in this test,
-        // we'll just verify the report structure is correct
-        assert!(!report.is_empty());
-        assert!(report.lines().count() > 3); // Should have multiple lines
     }
 }
