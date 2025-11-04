@@ -171,7 +171,15 @@ pub fn perform_check_run(
             OutputFormat::Junit => {
                 rumdl_lib::output::formatters::junit::format_junit_report(&all_file_warnings, duration_ms)
             }
-            _ => unreachable!(),
+            other => {
+                eprintln!("Warning: Unexpected output format '{other:?}', falling back to text format");
+                let formatter = OutputFormat::Text.create_formatter();
+                all_file_warnings
+                    .iter()
+                    .map(|(path, warnings)| formatter.format_warnings(warnings, path))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
         };
 
         output_writer.writeln(&output).unwrap_or_else(|e| {

@@ -573,9 +573,13 @@ impl RumdlLanguageServer {
                     log::debug!("Found config file: {}", config_path.display());
 
                     // Load the config
-                    if let Ok(sourced) = Self::load_config_for_lsp(Some(config_path.to_str().unwrap())) {
-                        found_config = Some((sourced.into(), Some(config_path)));
-                        break;
+                    if let Some(config_path_str) = config_path.to_str() {
+                        if let Ok(sourced) = Self::load_config_for_lsp(Some(config_path_str)) {
+                            found_config = Some((sourced.into(), Some(config_path)));
+                            break;
+                        }
+                    } else {
+                        log::warn!("Skipping config file with non-UTF-8 path: {}", config_path.display());
                     }
                 }
             }

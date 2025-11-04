@@ -2763,7 +2763,11 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                                     .exclude
                                     .push_override(final_values, source, file.clone(), None)
                             }
-                            _ => unreachable!(), // Should not happen due to outer match
+                            other => {
+                                log::warn!(
+                                    "[WARN] Unexpected global key '{other}' in {path} after normalization, skipping"
+                                );
+                            }
                         }
                     } else {
                         log::warn!(

@@ -217,7 +217,10 @@ impl ListUtils {
                 "*" => ListMarkerType::Asterisk,
                 "+" => ListMarkerType::Plus,
                 "-" => ListMarkerType::Minus,
-                _ => unreachable!(), // Regex ensures this
+                other => {
+                    eprintln!("Warning: Unexpected list marker '{other}', defaulting to dash");
+                    ListMarkerType::Minus
+                }
             };
 
             return Some(ListItem {

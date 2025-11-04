@@ -14,7 +14,6 @@ use std::time::Instant;
 
 /// Test data structure to capture baseline behavior
 #[derive(Debug)]
-#[allow(dead_code)]
 struct FixBaseline {
     rule_name: &'static str,
     original_content: &'static str,
@@ -168,6 +167,15 @@ http://bare-url.com
             baseline.fixed_content, second_fix,
             "Fix for '{}' should be deterministic",
             baseline.rule_name
+        );
+
+        // Verify fixes reduced or maintained warning count (never increased)
+        assert!(
+            baseline.warnings_after <= baseline.warnings_before,
+            "Fix for '{}' should not increase warnings ({} -> {})",
+            baseline.rule_name,
+            baseline.warnings_before,
+            baseline.warnings_after
         );
     }
 }

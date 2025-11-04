@@ -162,7 +162,11 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings),
             OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings),
             OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0),
-            _ => unreachable!(),
+            other => {
+                eprintln!("Warning: Unexpected output format '{other:?}', falling back to text format");
+                let formatter = OutputFormat::Text.create_formatter();
+                formatter.format_warnings(&file_warnings[0].1, display_filename)
+            }
         };
 
         output_writer.writeln(&output).unwrap_or_else(|e| {
