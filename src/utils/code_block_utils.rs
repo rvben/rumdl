@@ -2,8 +2,6 @@
 //! Utility functions for detecting and handling code blocks and code spans in Markdown for rumdl.
 
 use crate::rules::blockquote_utils::BlockquoteUtils;
-use lazy_static::lazy_static;
-use regex::Regex;
 
 /// Classification of code blocks relative to list contexts
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,11 +12,6 @@ pub enum CodeBlockContext {
     Indented,
     /// Code block adjacent to list content (edge case, defaults to non-breaking)
     Adjacent,
-}
-
-lazy_static! {
-    static ref CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(```|~~~)").unwrap();
-    static ref CODE_SPAN_PATTERN: Regex = Regex::new(r"`+").unwrap();
 }
 
 /// Utility functions for detecting and handling code blocks in Markdown

@@ -1,6 +1,6 @@
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 /// Types of Markdown elements that can be detected
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,33 +30,32 @@ pub struct MarkdownElement {
     pub quality: ElementQuality,  // Whether the element is well-formed or malformed
 }
 
-lazy_static! {
-    // Code block patterns
-    static ref CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap();
-    static ref CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)(```|~~~)\s*$").unwrap();
-    static ref CODE_SPAN_PATTERN: Regex = Regex::new(r"`+").unwrap();
+// Code block patterns
+static CODE_BLOCK_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap());
 
-    // Heading patterns
-    static ref ATX_HEADING: Regex = Regex::new(r"^(\s*)(#{1,6})(\s*)([^#\n]*?)(?:\s+(#{1,6}))?\s*$").unwrap();
-    static ref ATX_HEADING_NO_SPACE: Regex = Regex::new(r"^(\s*)(#{1,6})([^#\s][^#\n]*?)(?:\s+(#{1,6}))?\s*$").unwrap();
-    static ref SETEXT_HEADING_1: Regex = Regex::new(r"^(\s*)(=+)(\s*)$").unwrap();
-    static ref SETEXT_HEADING_2: Regex = Regex::new(r"^(\s*)(-+)(\s*)$").unwrap();
+// Heading patterns
+static ATX_HEADING: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s*)([^#\n]*?)(?:\s+(#{1,6}))?\s*$").unwrap());
+static ATX_HEADING_NO_SPACE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})([^#\s][^#\n]*?)(?:\s+(#{1,6}))?\s*$").unwrap());
+static SETEXT_HEADING_1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(=+)(\s*)$").unwrap());
+static SETEXT_HEADING_2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(-+)(\s*)$").unwrap());
 
-    // List patterns
-    static ref UNORDERED_LIST: Regex = Regex::new(r"^(\s*)([*+-])(\s+)").unwrap();
-    static ref ORDERED_LIST: Regex = Regex::new(r"^(\s*)(\d+\.)(\s+)").unwrap();
+// List patterns
+static UNORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-])(\s+)").unwrap());
+static ORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(\d+\.)(\s+)").unwrap());
 
-    // Malformed list patterns
-    static ref MALFORMED_UNORDERED_LIST: Regex = Regex::new(r"^(\s*)([*+-])([^\s])").unwrap();
-    static ref MALFORMED_ORDERED_LIST: Regex = Regex::new(r"^(\s*)(\d+\.)([^\s])").unwrap();
-    static ref MALFORMED_ORDERED_LIST_WRONG_MARKER: Regex = Regex::new(r"^(\s*)(\d+[)\]])(\s*)").unwrap();
+// Malformed list patterns
+static MALFORMED_UNORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-])([^\s])").unwrap());
+static MALFORMED_ORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(\d+\.)([^\s])").unwrap());
+static MALFORMED_ORDERED_LIST_WRONG_MARKER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(\d+[)\]])(\s*)").unwrap());
 
-    // Empty list patterns (just marker without content)
-    static ref EMPTY_UNORDERED_LIST: Regex = Regex::new(r"^(\s*)([*+-])\s*$").unwrap();
+// Empty list patterns (just marker without content)
+static EMPTY_UNORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-])\s*$").unwrap());
 
-    // Front matter pattern
-    static ref FRONT_MATTER_DELIMITER: Regex = Regex::new(r"^---\s*$").unwrap();
-}
+// Front matter pattern
+static FRONT_MATTER_DELIMITER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^---\s*$").unwrap());
 
 /// Utility struct for working with Markdown elements
 pub struct MarkdownElements;
@@ -281,9 +280,8 @@ impl MarkdownElements {
         };
 
         // Pattern to match horizontal rule or front matter markers
-        lazy_static! {
-            static ref HORIZONTAL_RULE: Regex = Regex::new(r"^(\s*)(-{3,}|\*{3,}|_{3,})(\s*)$").unwrap();
-        }
+        static HORIZONTAL_RULE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"^(\s*)(-{3,}|\*{3,}|_{3,})(\s*)$").unwrap());
 
         for (i, line) in lines.iter().enumerate() {
             // Skip lines in code blocks or frontmatter

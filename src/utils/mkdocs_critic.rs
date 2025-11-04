@@ -1,3 +1,4 @@
+use regex::Regex;
 /// MkDocs Critic Markup detection utilities
 ///
 /// Critic Markup is a PyMdown Extensions feature for tracking changes in documents.
@@ -11,14 +12,13 @@
 /// - `{>>comment<<}` - Comment
 ///
 /// These patterns should be skipped from processing by most rules to avoid false positives.
-use lazy_static::lazy_static;
-use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Pattern to match Critic Markup syntax
-    /// Matches: {++...++}, {--...--}, {~~...~~}, {==...==}, {>>...<<}
-    /// Simplified without lookahead/lookbehind for compatibility
-    static ref CRITIC_PATTERN: Regex = Regex::new(
+/// Pattern to match Critic Markup syntax
+/// Matches: {++...++}, {--...--}, {~~...~~}, {==...==}, {>>...<<}
+/// Simplified without lookahead/lookbehind for compatibility
+static CRITIC_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"(?x)
         \{                          # Opening brace
         (?:
@@ -43,12 +43,13 @@ lazy_static! {
             <<                      # Comment end
         )
         \}                          # Closing brace
-        "
-    ).unwrap();
+        ",
+    )
+    .unwrap()
+});
 
-    /// Simple pattern to quickly check if a line might contain Critic Markup
-    static ref CRITIC_QUICK_CHECK: Regex = Regex::new(r"\{(?:\+\+|--|~~|==|>>)").unwrap();
-}
+/// Simple pattern to quickly check if a line might contain Critic Markup
+static CRITIC_QUICK_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(?:\+\+|--|~~|==|>>)").unwrap());
 
 /// Check if a line contains Critic Markup
 pub fn contains_critic_markup(line: &str) -> bool {

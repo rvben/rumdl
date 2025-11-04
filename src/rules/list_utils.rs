@@ -1,23 +1,24 @@
 use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Optimized list detection patterns with anchors and non-capturing groups
-    static ref UNORDERED_LIST_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])(\s+)").unwrap();
-    static ref ORDERED_LIST_PATTERN: Regex = Regex::new(r"^(\s*)(\d+\.)(\s+)").unwrap();
+// Optimized list detection patterns with anchors and non-capturing groups
+static UNORDERED_LIST_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-])(\s+)").unwrap());
+static ORDERED_LIST_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(\d+\.)(\s+)").unwrap());
 
-    // Patterns for lists without proper spacing - now excluding emphasis markers
-    static ref UNORDERED_LIST_NO_SPACE_PATTERN: FancyRegex = FancyRegex::new(r"^(\s*)(?:(?<!\*)\*(?!\*)|[+-])([^\s\*])").unwrap();
-    static ref ORDERED_LIST_NO_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)(\d+\.)([^\s])").unwrap();
+// Patterns for lists without proper spacing - now excluding emphasis markers
+static UNORDERED_LIST_NO_SPACE_PATTERN: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"^(\s*)(?:(?<!\*)\*(?!\*)|[+-])([^\s\*])").unwrap());
+static ORDERED_LIST_NO_SPACE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(\d+\.)([^\s])").unwrap());
 
-    // Patterns for lists with multiple spaces
-    static ref UNORDERED_LIST_MULTIPLE_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)([*+-])(\s{2,})").unwrap();
-    static ref ORDERED_LIST_MULTIPLE_SPACE_PATTERN: Regex = Regex::new(r"^(\s*)(\d+\.)(\s{2,})").unwrap();
+// Patterns for lists with multiple spaces
+static UNORDERED_LIST_MULTIPLE_SPACE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)([*+-])(\s{2,})").unwrap());
+static ORDERED_LIST_MULTIPLE_SPACE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(\d+\.)(\s{2,})").unwrap());
 
-    // Regex to capture list markers and the spaces *after* them
-    pub static ref LIST_REGEX: Regex = Regex::new(r"^(\s*)([-*+]|\d+\.)(\s*)").unwrap();
-}
+// Regex to capture list markers and the spaces *after* them
+pub static LIST_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([-*+]|\d+\.)(\s*)").unwrap());
 
 /// Enum representing different types of list markers
 #[derive(Debug, Clone, PartialEq)]
@@ -217,10 +218,7 @@ impl ListUtils {
                 "*" => ListMarkerType::Asterisk,
                 "+" => ListMarkerType::Plus,
                 "-" => ListMarkerType::Minus,
-                other => {
-                    eprintln!("Warning: Unexpected list marker '{other}', defaulting to dash");
-                    ListMarkerType::Minus
-                }
+                _ => unreachable!("UNORDERED_LIST_PATTERN regex guarantees marker is [*+-]"),
             };
 
             return Some(ListItem {

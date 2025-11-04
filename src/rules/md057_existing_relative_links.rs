@@ -5,20 +5,19 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::element_cache::ElementCache;
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
 mod md057_config;
 use md057_config::MD057Config;
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
-lazy_static! {
-    static ref FILE_EXISTENCE_CACHE: Arc<Mutex<HashMap<PathBuf, bool>>> = Arc::new(Mutex::new(HashMap::new()));
-}
+static FILE_EXISTENCE_CACHE: LazyLock<Arc<Mutex<HashMap<PathBuf, bool>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 // Reset the file existence cache (typically between rule runs)
 fn reset_file_existence_cache() {
@@ -36,35 +35,24 @@ fn file_exists_with_cache(path: &Path) -> bool {
     *cache.entry(path.to_path_buf()).or_insert_with(|| path.exists())
 }
 
-lazy_static! {
-    // Regex to match the start of a link - simplified for performance
-    static ref LINK_START_REGEX: Regex =
-        Regex::new(r"!?\[[^\]]*\]").unwrap();
+// Regex to match the start of a link - simplified for performance
+static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\]]*\]").unwrap());
 
-    /// Regex to extract the URL from a markdown link
-    /// Format: `](URL)` or `](URL "title")`
-    static ref URL_EXTRACT_REGEX: Regex =
-        Regex::new("\\]\\(\\s*<?([^>\\)\\s#]+)(#[^)\\s]*)?\\s*(?:\"[^\"]*\")?\\s*>?\\s*\\)").unwrap();
+/// Regex to extract the URL from a markdown link
+/// Format: `](URL)` or `](URL "title")`
+static URL_EXTRACT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new("\\]\\(\\s*<?([^>\\)\\s#]+)(#[^)\\s]*)?\\s*(?:\"[^\"]*\")?\\s*>?\\s*\\)").unwrap());
 
-    /// Regex to detect code fence blocks
-    static ref CODE_FENCE_REGEX: Regex =
-        Regex::new(r"^( {0,3})(`{3,}|~{3,})").unwrap();
+/// Regex to detect protocol and domain for external links
+static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(https?://|ftp://|mailto:|www\.)").unwrap());
 
-    /// Regex to detect protocol and domain for external links
-    static ref PROTOCOL_DOMAIN_REGEX: Regex =
-        Regex::new(r"^(https?://|ftp://|mailto:|www\.)").unwrap();
+/// Regex to detect media file types
+static MEDIA_FILE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.(jpg|jpeg|png|gif|bmp|svg|webp|tiff|mp3|mp4|avi|mov|webm|wav|ogg|pdf)$").unwrap());
 
-    /// Regex to detect media file types
-    static ref MEDIA_FILE_REGEX: Regex =
-        Regex::new(r"\.(jpg|jpeg|png|gif|bmp|svg|webp|tiff|mp3|mp4|avi|mov|webm|wav|ogg|pdf)$").unwrap();
-
-    /// Regex to detect fragment-only links
-    static ref FRAGMENT_ONLY_REGEX: Regex =
-        Regex::new(r"^#").unwrap();
-
-    // Current working directory
-    static ref CURRENT_DIR: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-}
+// Current working directory
+static CURRENT_DIR: LazyLock<PathBuf> = LazyLock::new(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
 /// Rule MD057: Existing relative links should point to valid files or directories.
 #[derive(Debug, Default, Clone)]

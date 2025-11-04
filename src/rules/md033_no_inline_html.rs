@@ -8,6 +8,7 @@ use crate::utils::kramdown_utils::{is_kramdown_block_attribute, is_kramdown_exte
 use crate::utils::range_utils::calculate_html_tag_range;
 use crate::utils::regex_cache::*;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 mod md033_config;
 use md033_config::MD033Config;
@@ -215,9 +216,8 @@ impl MD033NoInlineHtml {
         }
 
         // Simple approach: use regex to find patterns like <tagname and then look for closing >
-        lazy_static::lazy_static! {
-            static ref INCOMPLETE_TAG_START: regex::Regex = regex::Regex::new(r"(?i)<[a-zA-Z][^>]*$").unwrap();
-        }
+        static INCOMPLETE_TAG_START: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"(?i)<[a-zA-Z][^>]*$").unwrap());
 
         let lines: Vec<&str> = content.lines().collect();
 

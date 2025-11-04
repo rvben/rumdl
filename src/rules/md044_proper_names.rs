@@ -3,20 +3,18 @@ use crate::utils::regex_cache::{escape_regex, get_cached_fancy_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex;
-use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
 mod md044_config;
 use md044_config::MD044Config;
 
-lazy_static! {
-    static ref HTML_COMMENT_REGEX: Regex = Regex::new(r"<!--([\s\S]*?)-->").unwrap();
-    // Reference definition pattern - matches [ref]: url "title"
-    static ref REF_DEF_REGEX: regex::Regex = regex::Regex::new(
-        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
-    ).unwrap();
-}
+static HTML_COMMENT_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--([\s\S]*?)-->").unwrap());
+// Reference definition pattern - matches [ref]: url "title"
+static REF_DEF_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#).unwrap()
+});
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
 

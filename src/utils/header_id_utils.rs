@@ -24,27 +24,23 @@
 //! The module provides functions to detect and extract IDs from both inline
 //! and standalone (next-line) attr-list syntax.
 
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Pattern for custom header IDs supporting both kramdown and python-markdown attr-list formats
-    /// Supports: {#id}, { #id }, {:#id}, {: #id } and full attr-list with classes/attributes
-    /// Must contain #id but can have other attributes: {: #id .class data="value" }
-    /// More conservative: only matches when there's actually a hash followed by valid ID characters
-    static ref HEADER_ID_PATTERN: Regex = Regex::new(r"\s*\{\s*:?\s*([^}]*?#[^}]*?)\s*\}\s*$").unwrap();
+/// Pattern for custom header IDs supporting both kramdown and python-markdown attr-list formats
+/// Supports: {#id}, { #id }, {:#id}, {: #id } and full attr-list with classes/attributes
+/// Must contain #id but can have other attributes: {: #id .class data="value" }
+/// More conservative: only matches when there's actually a hash followed by valid ID characters
+static HEADER_ID_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s*\{\s*:?\s*([^}]*?#[^}]*?)\s*\}\s*$").unwrap());
 
-    /// Pattern to extract and validate ID from attr-list content
-    /// Finds #id and validates it contains only valid characters (no dots, etc.)
-    static ref ID_EXTRACT_PATTERN: Regex = Regex::new(r"#([a-zA-Z0-9_\-:]+)(?:\s|$|[^a-zA-Z0-9_\-:])").unwrap();
+/// Pattern to validate that an ID contains only valid characters
+static ID_VALIDATE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_\-:]+$").unwrap());
 
-    /// Pattern to validate that an ID contains only valid characters
-    static ref ID_VALIDATE_PATTERN: Regex = Regex::new(r"^[a-zA-Z0-9_\-:]+$").unwrap();
-
-    /// Pattern for standalone attr-list lines (Jekyll/kramdown style on line after heading)
-    /// Matches lines that are just attr-list syntax: {#id}, {: #id .class }, etc.
-    static ref STANDALONE_ATTR_LIST_PATTERN: Regex = Regex::new(r"^\s*\{\s*:?\s*([^}]*#[a-zA-Z0-9_\-:]+[^}]*)\s*\}\s*$").unwrap();
-}
+/// Pattern for standalone attr-list lines (Jekyll/kramdown style on line after heading)
+/// Matches lines that are just attr-list syntax: {#id}, {: #id .class }, etc.
+static STANDALONE_ATTR_LIST_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\{\s*:?\s*([^}]*#[a-zA-Z0-9_\-:]+[^}]*)\s*\}\s*$").unwrap());
 
 /// Extract custom header ID from a line if present, returning clean text and ID
 ///

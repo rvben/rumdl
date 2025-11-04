@@ -1,6 +1,6 @@
 use crate::rules::heading_utils::HeadingStyle;
 use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
 use regex::Regex;
 
 /// A struct that contains pre-computed information about a markdown document structure
@@ -172,14 +172,12 @@ pub struct Image {
 }
 
 // Cached regex patterns for performance
-lazy_static! {
     // Quick check patterns
-    static ref CONTAINS_ATX_HEADING: Regex = Regex::new(r"(?m)^(\s*)#{1,6}").unwrap();
-    static ref CONTAINS_SETEXT_UNDERLINE: Regex = Regex::new(r"(?m)^(\s*)(=+|-+)\s*$").unwrap();
-    static ref CONTAINS_LIST_MARKERS: Regex = Regex::new(r"(?m)^(\s*)([*+-]|\d+\.)").unwrap();
-    static ref CONTAINS_BLOCKQUOTE: Regex = Regex::new(r"(?m)^(\s*)>").unwrap();
-    static ref CONTAINS_HTML_BLOCK: Regex = Regex::new(r"(?m)^(\s*)<[a-zA-Z]").unwrap();
-}
+    static CONTAINS_ATX_HEADING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^(\s*)#{1,6}").unwrap());
+    static CONTAINS_SETEXT_UNDERLINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^(\s*)(=+|-+)\s*$").unwrap());
+    static CONTAINS_LIST_MARKERS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^(\s*)([*+-]|\d+\.)").unwrap());
+    static CONTAINS_BLOCKQUOTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^(\s*)>").unwrap());
+    static CONTAINS_HTML_BLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^(\s*)<[a-zA-Z]").unwrap());
 
 impl DocumentStructure {
     /// Create a new DocumentStructure by analyzing the document content
@@ -362,10 +360,8 @@ impl DocumentStructure {
 
     /// Detect headings in the document
     fn detect_headings(&mut self, content: &str) {
-        lazy_static! {
-            static ref ATX_HEADING: Regex = Regex::new(r"^(\s*)(#{1,6})(\s+|[^\s#])").unwrap();
-            static ref SETEXT_HEADING_UNDERLINE: Regex = Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
-        }
+                    static ATX_HEADING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s+|[^\s#])").unwrap());
+            static SETEXT_HEADING_UNDERLINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap());
 
         // Clear existing data
         self.heading_lines.clear();
@@ -466,11 +462,9 @@ impl DocumentStructure {
 
     /// Compute code blocks in the document
     fn compute_code_blocks(&self, content: &str) -> Vec<CodeBlock> {
-        lazy_static! {
-            // Fenced code blocks can be indented 0-3 spaces according to CommonMark
-            static ref FENCED_START: Regex = Regex::new(r"^(\s{0,3})(`{3,}|~{3,})\s*([^`\s]*)").unwrap();
-            static ref FENCED_END: Regex = Regex::new(r"^(\s{0,3})(`{3,}|~{3,})\s*$").unwrap();
-        }
+                    // Fenced code blocks can be indented 0-3 spaces according to CommonMark
+            static FENCED_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{0,3})(`{3,}|~{3,})\s*([^`\s]*)").unwrap());
+            static FENCED_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{0,3})(`{3,}|~{3,})\s*$").unwrap());
 
         let mut code_blocks = Vec::new();
         let mut in_code_block = false;
@@ -693,12 +687,11 @@ impl DocumentStructure {
     /// This is used to prevent list items from being detected as indented code blocks
     #[inline]
     fn is_potential_list_item(line: &str) -> bool {
-        lazy_static! {
-            // Simple regex to detect potential list items
+                    // Simple regex to detect potential list items
             // Matches lines that start with optional whitespace followed by a list marker
-            static ref LIST_ITEM_PATTERN: Regex = Regex::new(
+            static LIST_ITEM_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(
                 r"^[ \t]*([*+-]|\d+[.)]])[ \t]"
-            ).unwrap();
+            ).unwrap());
         }
         LIST_ITEM_PATTERN.is_match(line)
     }
@@ -810,39 +803,38 @@ impl DocumentStructure {
 
     /// OPTIMIZATION 2: Detect links and images in the document
     fn detect_links_and_images(&mut self, content: &str) {
-        lazy_static! {
-            // Regex for inline links: [text](url) - handles escaped brackets
-            static ref INLINE_LINK: FancyRegex = FancyRegex::new(r"(?x)
+                    // Regex for inline links: [text](url) - handles escaped brackets
+            static INLINE_LINK: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"(?x)
                 (?<!\\)                               # Not preceded by backslash
                 \[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]  # Link text (handles nested brackets and escapes)
                 \(([^)]*)\)                           # URL in parentheses
-            ").unwrap();
+            ").unwrap());
             // Regex for reference links: [text][id] or [text][] (implicit) - handles escaped brackets
-            static ref REFERENCE_LINK: FancyRegex = FancyRegex::new(r"(?x)
+            static REFERENCE_LINK: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"(?x)
                 (?<!\\)                               # Not preceded by backslash
                 \[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]  # Link text (handles nested brackets and escapes)
                 \[([^\]]*)\]                          # Reference ID
-            ").unwrap();
+            ").unwrap());
             // Regex for shortcut reference links: [text]
-            static ref SHORTCUT_LINK: FancyRegex = FancyRegex::new(r"(?x)
+            static SHORTCUT_LINK: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"(?x)
                 (?<!\\)                               # Not preceded by backslash
                 \[([^\]]+)\]                          # Link text
                 (?!\(|\[)                             # Not followed by ( or [
-            ").unwrap();
+            ").unwrap());
             // Regex for link definitions: [id]: url
-            static ref LINK_DEFINITION: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
+            static LINK_DEFINITION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap());
             // Regex for inline images: ![alt](src) - handles escaped brackets
-            static ref INLINE_IMAGE: FancyRegex = FancyRegex::new(r"(?x)
+            static INLINE_IMAGE: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"(?x)
                 (?<!\\)                               # Not preceded by backslash
                 !\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\] # Alt text (handles nested brackets and escapes)
                 \(([^)]*)\)                           # Source URL
-            ").unwrap();
+            ").unwrap());
             // Regex for reference images: ![alt][id] - handles escaped brackets
-            static ref REFERENCE_IMAGE: FancyRegex = FancyRegex::new(r"(?x)
+            static REFERENCE_IMAGE: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"(?x)
                 (?<!\\)                               # Not preceded by backslash
                 !\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\] # Alt text (handles nested brackets and escapes)
                 \[([^\]]*)\]                          # Reference ID
-            ").unwrap();
+            ").unwrap());
         }
 
         // Clear existing data
@@ -1049,15 +1041,14 @@ impl DocumentStructure {
         // - At least one space/tab after the marker
         // - Use lookbehind to ensure marker is at the start or after whitespace
         // - Use Unicode support for whitespace
-        lazy_static! {
-            static ref UL_MARKER: FancyRegex =
+                    static ref UL_MARKER: FancyRegex =
                 FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
             static ref OL_MARKER: FancyRegex =
                 FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]+)(?P<content>.*)$").unwrap();
-            static ref TASK_MARKER: FancyRegex = FancyRegex::new(
+            static TASK_MARKER: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(
                 r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]+)\[(?P<checked>[ xX])\](?P<content>.*)$"
             )
-            .unwrap();
+            .unwrap());
         }
         self.list_items.clear();
         self.list_lines.clear();
@@ -1117,9 +1108,7 @@ impl DocumentStructure {
 
     /// OPTIMIZATION 4: Detect blockquotes in the document
     fn detect_blockquotes(&mut self, content: &str) {
-        lazy_static! {
-            static ref BLOCKQUOTE_MARKER: Regex = Regex::new(r"^\s*>(.*)$").unwrap();
-        }
+                    static BLOCKQUOTE_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*>(.*)$").unwrap());
 
         // Clear existing data
         self.blockquotes.clear();
@@ -1170,12 +1159,10 @@ impl DocumentStructure {
 
     /// Detect horizontal rules in the document
     fn detect_horizontal_rules(&mut self, content: &str) {
-        lazy_static! {
-            // Horizontal rule patterns - simplified to match Markdown spec
-            static ref HR_HYPHEN: Regex = Regex::new(r"^[ \t]*-[ \t]*-[ \t]*-[ \t-]*$").unwrap();
-            static ref HR_ASTERISK: Regex = Regex::new(r"^[ \t]*\*[ \t]*\*[ \t]*\*[ \t\*]*$").unwrap();
-            static ref HR_UNDERSCORE: Regex = Regex::new(r"^[ \t]*_[ \t]*_[ \t]*_[ \t_]*$").unwrap();
-        }
+                    // Horizontal rule patterns - simplified to match Markdown spec
+            static HR_HYPHEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[ \t]*-[ \t]*-[ \t]*-[ \t-]*$").unwrap());
+            static HR_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[ \t]*\*[ \t]*\*[ \t]*\*[ \t\*]*$").unwrap());
+            static HR_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[ \t]*_[ \t]*_[ \t]*_[ \t_]*$").unwrap());
 
         // Clear existing data
         self.horizontal_rule_lines.clear();

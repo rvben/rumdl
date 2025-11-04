@@ -25,41 +25,41 @@
 //! - ReDoS-resistant regex patterns with complexity limits
 //! - Comprehensive emoji detection including country flags and keycaps
 
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 use unicode_normalization::UnicodeNormalization;
 
 // Security limits for input validation
 const MAX_INPUT_LENGTH: usize = 10240; // 10KB maximum input
 
-lazy_static! {
-    // ReDoS-resistant patterns with atomic grouping and possessive quantifiers where possible
-    // Limited repetition depth to prevent catastrophic backtracking
-    // Match both asterisk and underscore emphasis (with proper nesting handling)
-    static ref EMPHASIS_ASTERISK: Regex = Regex::new(r"\*{1,3}([^*]+?)\*{1,3}").unwrap();
-    // Match emphasis underscores - only when they wrap text, not in snake_case
-    // This pattern matches _text_ or __text__ but not test_with_underscores
-    static ref EMPHASIS_UNDERSCORE: Regex = Regex::new(r"\b_{1,2}([^_\s][^_]*?)_{1,2}\b").unwrap();
-    static ref CODE_PATTERN: Regex = Regex::new(r"`([^`]{0,500})`").unwrap();
-    // Match image and link patterns
-    // Using simple approach: match the brackets and parentheses, extract only the bracket content
-    static ref IMAGE_PATTERN: Regex = Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap();
-    static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap();
+// ReDoS-resistant patterns with atomic grouping and possessive quantifiers where possible
+// Limited repetition depth to prevent catastrophic backtracking
+// Match both asterisk and underscore emphasis (with proper nesting handling)
+static EMPHASIS_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*{1,3}([^*]+?)\*{1,3}").unwrap());
+// Match emphasis underscores - only when they wrap text, not in snake_case
+// This pattern matches _text_ or __text__ but not test_with_underscores
+static EMPHASIS_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b_{1,2}([^_\s][^_]*?)_{1,2}\b").unwrap());
+static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]{0,500})`").unwrap());
+// Match image and link patterns
+// Using simple approach: match the brackets and parentheses, extract only the bracket content
+static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap());
+static LINK_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap());
 
-    // Zero-width character patterns - remove these entirely for security
-    static ref ZERO_WIDTH_PATTERN: Regex = Regex::new(r"[\u200B-\u200D\u2060\uFEFF]").unwrap();
+// Zero-width character patterns - remove these entirely for security
+static ZERO_WIDTH_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\u200B-\u200D\u2060\uFEFF]").unwrap());
 
-    // RTL override and dangerous Unicode control patterns
-    static ref DANGEROUS_UNICODE_PATTERN: Regex = Regex::new(r"[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]").unwrap();
+// RTL override and dangerous Unicode control patterns
+static DANGEROUS_UNICODE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]").unwrap());
 
-    // Ampersand and copyright with whitespace patterns
-    static ref AMPERSAND_WITH_SPACES: Regex = Regex::new(r"\s+&\s+").unwrap();
-    static ref COPYRIGHT_WITH_SPACES: Regex = Regex::new(r"\s+©\s+").unwrap();
+// Ampersand and copyright with whitespace patterns
+static AMPERSAND_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+&\s+").unwrap());
+static COPYRIGHT_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+©\s+").unwrap());
 
-    // Angle bracket removal (e.g., Generic<T> → GenericT, import <FILE> → import FILE)
-    // GitHub removes only the angle brackets themselves, preserving the content
-    static ref ANGLE_BRACKETS: Regex = Regex::new(r"<([^>]*)>").unwrap();
-}
+// Angle bracket removal (e.g., Generic<T> → GenericT, import <FILE> → import FILE)
+// GitHub removes only the angle brackets themselves, preserving the content
+static ANGLE_BRACKETS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([^>]*)>").unwrap());
 
 /// Generate GitHub.com style anchor fragment from heading text with security hardening
 ///

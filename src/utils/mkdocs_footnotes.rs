@@ -1,4 +1,5 @@
 use super::mkdocs_common::{BytePositionTracker, ContextStateMachine, MKDOCS_CONTENT_INDENT, get_line_indent};
+use regex::Regex;
 /// MkDocs Footnotes detection utilities
 ///
 /// The Footnotes extension provides support for footnotes with references
@@ -9,22 +10,20 @@ use super::mkdocs_common::{BytePositionTracker, ContextStateMachine, MKDOCS_CONT
 /// - `[^note]` - Named footnote reference
 /// - `[^1]: Definition` - Footnote definition
 /// - Multi-line footnote definitions with 4-space indentation
-use lazy_static::lazy_static;
-use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Pattern to match footnote references in text [^1] or [^name]
-    static ref FOOTNOTE_REF: Regex = Regex::new(
-        r"\[\^[a-zA-Z0-9_-]+\]"
-    ).unwrap();
+/// Pattern to match footnote references in text `[^1]` or `[^name]`
+static FOOTNOTE_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\^[a-zA-Z0-9_-]+\]").unwrap());
 
-    /// Pattern to match footnote definitions at start of line
-    /// [^1]: Definition text
-    /// Lenient: accepts empty definitions for real-world markdown
-    static ref FOOTNOTE_DEF: Regex = Regex::new(
-        r"^(\s*)\[\^([a-zA-Z0-9_-]+)\]:\s*"  // \s* instead of \s+ to allow empty
-    ).unwrap();
-}
+/// Pattern to match footnote definitions at start of line
+/// `[^1]: Definition text`
+/// Lenient: accepts empty definitions for real-world markdown
+static FOOTNOTE_DEF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\s*)\[\^([a-zA-Z0-9_-]+)\]:\s*", // \s* instead of \s+ to allow empty
+    )
+    .unwrap()
+});
 
 /// Check if a line contains a footnote definition
 pub fn is_footnote_definition(line: &str) -> bool {

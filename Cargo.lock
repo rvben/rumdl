@@ -2000,7 +2000,6 @@ dependencies = [
  "ignore",
  "itertools 0.14.0",
  "jsonschema",
- "lazy_static",
  "log",
  "markdown",
  "memmap2",

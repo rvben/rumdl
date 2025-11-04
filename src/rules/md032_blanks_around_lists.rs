@@ -1,14 +1,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
-use lazy_static::lazy_static;
 use regex::Regex;
-
-lazy_static! {
-    static ref BLANK_LINE_RE: Regex = Regex::new(r"^\s*$").unwrap();
-    // Detects ordered list items starting with a number other than 1
-    static ref ORDERED_LIST_NON_ONE_RE: Regex = Regex::new(r"^\s*([2-9]|\d{2,})\.\s").unwrap();
-}
+use std::sync::LazyLock;
+// Detects ordered list items starting with a number other than 1
+static ORDERED_LIST_NON_ONE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([2-9]|\d{2,})\.\s").unwrap());
 
 /// Rule MD032: Lists should be surrounded by blank lines
 ///

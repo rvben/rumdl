@@ -1,6 +1,6 @@
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::fmt;
+use std::sync::LazyLock;
 
 /// The style for code fence markers (MD048)
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash)]
@@ -26,9 +26,7 @@ impl fmt::Display for CodeFenceStyle {
 
 /// Get regex pattern for finding code fence markers
 pub fn get_code_fence_pattern() -> &'static Regex {
-    lazy_static! {
-        static ref CODE_FENCE_PATTERN: Regex = Regex::new(r"^(```|~~~)").unwrap();
-    }
+    static CODE_FENCE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(```|~~~)").unwrap());
     &CODE_FENCE_PATTERN
 }
 

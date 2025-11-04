@@ -1,17 +1,16 @@
 use crate::utils::range_utils::LineIndex;
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::fmt;
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Standard code block detection patterns
-    static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap();
-    static ref FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)```\s*$").unwrap();
-    static ref ALTERNATE_FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap();
-    static ref ALTERNATE_FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)~~~\s*$").unwrap();
-    static ref INDENTED_CODE_BLOCK: Regex = Regex::new(r"^(\s{4,})").unwrap();
-    static ref LIST_ITEM_RE: Regex = Regex::new(r"^(\s*)([*+-]|\d+[.)])(\s*)(.*)$").unwrap();
-}
+// Standard code block detection patterns
+static FENCED_CODE_BLOCK_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap());
+static FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```\s*$").unwrap());
+static ALTERNATE_FENCED_CODE_BLOCK_START: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap());
+static ALTERNATE_FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)~~~\s*$").unwrap());
+static INDENTED_CODE_BLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})").unwrap());
+static LIST_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-]|\d+[.)])(\s*)(.*)$").unwrap());
 
 /// Utility functions for detecting and handling code blocks in Markdown documents
 pub struct CodeBlockUtils;
@@ -187,11 +186,8 @@ impl CodeBlockUtils {
 }
 
 // Cached regex patterns for better performance
-lazy_static! {
-    static ref FENCED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(?:```|~~~)").unwrap();
-    static ref INDENTED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s{4,})").unwrap();
-    static ref BACKTICK_PATTERN: Regex = Regex::new(r"(`+)").unwrap();
-}
+static FENCED_CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:```|~~~)").unwrap());
+static INDENTED_CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})").unwrap());
 
 /// Tracks which lines are inside code blocks and their types
 #[derive(Debug, PartialEq, Clone, Copy)]

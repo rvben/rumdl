@@ -1,3 +1,4 @@
+use regex::Regex;
 /// MkDocstrings cross-references detection utilities
 ///
 /// MkDocstrings provides automatic cross-references to documented code objects
@@ -8,34 +9,26 @@
 /// - `[module.Class][]` - Cross-reference link
 /// - `[text][module.Class]` - Cross-reference with custom text
 /// - `::: module.Class` with options block (YAML indented)
-use lazy_static::lazy_static;
-use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Pattern to match auto-doc insertion markers
-    /// ::: module.path.ClassName or ::: handler:module.path
-    /// Lenient: accepts any non-whitespace after ::: to detect potentially dangerous patterns
-    /// Security validation should happen at a different layer (e.g., a specific rule)
-    static ref AUTODOC_MARKER: Regex = Regex::new(
-        r"^(\s*):::\s+\S+.*$"  // Just need non-whitespace after :::
-    ).unwrap();
+/// Pattern to match auto-doc insertion markers
+/// ::: module.path.ClassName or ::: handler:module.path
+/// Lenient: accepts any non-whitespace after ::: to detect potentially dangerous patterns
+/// Security validation should happen at a different layer (e.g., a specific rule)
+static AUTODOC_MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\s*):::\s+\S+.*$", // Just need non-whitespace after :::
+    )
+    .unwrap()
+});
 
-    /// Pattern to match cross-reference links in various forms
-    /// [module.Class][], [text][module.Class], [module.Class]
-    static ref CROSSREF_PATTERN: Regex = Regex::new(
+/// Pattern to match cross-reference links in various forms
+/// [module.Class][], [text][module.Class], [module.Class]
+static CROSSREF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"\[(?:[^\]]*)\]\[[a-zA-Z_][a-zA-Z0-9_]*(?:[:\.][a-zA-Z_][a-zA-Z0-9_]*)*\]|\[[a-zA-Z_][a-zA-Z0-9_]*(?:[:\.][a-zA-Z_][a-zA-Z0-9_]*)*\]\[\]"
-    ).unwrap();
-
-    /// Pattern to match handler options in YAML format (indented under :::)
-    static ref HANDLER_OPTIONS: Regex = Regex::new(
-        r"^(\s{4,})\w+:"
-    ).unwrap();
-
-    /// Pattern to validate module/class names
-    static ref VALID_MODULE_PATH: Regex = Regex::new(
-        r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*$"
-    ).unwrap();
-}
+    ).unwrap()
+});
 
 /// Check if a line is an auto-doc insertion marker
 pub fn is_autodoc_marker(line: &str) -> bool {

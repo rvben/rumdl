@@ -1,21 +1,22 @@
 use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
-lazy_static! {
-    // Efficient regex patterns
-    static ref CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap();
-    static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)\s*$").unwrap();
-    static ref INDENTED_CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s{4,})(.+)$").unwrap();
+// Efficient regex patterns
+static CODE_BLOCK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap());
+static INDENTED_CODE_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})(.+)$").unwrap());
 
-    // List detection patterns
-    static ref UNORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]*)(?P<content>.*)$").unwrap();
-    static ref ORDERED_LIST_REGEX: FancyRegex = FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]*)(?P<content>.*)$").unwrap();
+// List detection patterns
+static UNORDERED_LIST_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| {
+    FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>[*+-])(?P<after>[ \t]*)(?P<content>.*)$").unwrap()
+});
+static ORDERED_LIST_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| {
+    FancyRegex::new(r"^(?P<indent>[ \t]*)(?P<marker>\d+\.)(?P<after>[ \t]*)(?P<content>.*)$").unwrap()
+});
 
-    // Inline code span pattern
-    static ref CODE_SPAN_REGEX: Regex = Regex::new(r"`+").unwrap();
-}
+// Inline code span pattern
+static CODE_SPAN_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+").unwrap());
 
 /// Represents a range in the document with start and end positions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -522,9 +523,7 @@ impl ElementCache {
 }
 
 // Global cache for sharing across threads
-lazy_static! {
-    static ref ELEMENT_CACHE: Arc<Mutex<Option<ElementCache>>> = Arc::new(Mutex::new(None));
-}
+static ELEMENT_CACHE: LazyLock<Arc<Mutex<Option<ElementCache>>>> = LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 /// Get or create element cache for document content
 pub fn get_element_cache(content: &str) -> ElementCache {

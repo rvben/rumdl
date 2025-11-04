@@ -4,7 +4,6 @@
 
 use crate::rule::Rule;
 use crate::rules;
-use lazy_static::lazy_static;
 use log;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -115,21 +114,6 @@ impl MarkdownFlavor {
             Self::Quarto => "Quarto",
         }
     }
-}
-
-lazy_static! {
-    // Map common markdownlint config keys to rumdl rule names
-    static ref MARKDOWNLINT_KEY_MAP: HashMap<&'static str, &'static str> = {
-        let mut m = HashMap::new();
-        // Add mappings based on common markdownlint config names
-        // From https://github.com/DavidAnson/markdownlint/blob/main/schema/.markdownlint.jsonc
-        m.insert("ul-style", "md004");
-        m.insert("code-block-style", "md046");
-        m.insert("ul-indent", "md007"); // Example
-        m.insert("line-length", "md013"); // Example of a common one that might be top-level
-        // Add more mappings as needed based on markdownlint schema or observed usage
-        m
-    };
 }
 
 /// Normalizes configuration keys (rule names, option names) to lowercase kebab-case.
@@ -2763,11 +2747,7 @@ fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, 
                                     .exclude
                                     .push_override(final_values, source, file.clone(), None)
                             }
-                            other => {
-                                log::warn!(
-                                    "[WARN] Unexpected global key '{other}' in {path} after normalization, skipping"
-                                );
-                            }
+                            _ => unreachable!("Outer match guarantees only enable/disable/include/exclude"),
                         }
                     } else {
                         log::warn!(

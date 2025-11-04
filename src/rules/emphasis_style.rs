@@ -1,6 +1,6 @@
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::fmt;
+use std::sync::LazyLock;
 
 /// The style for emphasis (MD049)
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash)]
@@ -36,10 +36,10 @@ impl From<&str> for EmphasisStyle {
 
 /// Get regex pattern for finding emphasis markers based on style
 pub fn get_emphasis_pattern(style: EmphasisStyle) -> &'static Regex {
-    lazy_static! {
-        static ref ASTERISK_EMPHASIS: Regex = Regex::new(r"\*([^\s*][^*]*?[^\s*]|[^\s*])\*").unwrap();
-        static ref UNDERSCORE_EMPHASIS: Regex = Regex::new(r"_([^\s_][^_]*?[^\s_]|[^\s_])_").unwrap();
-    }
+    static ASTERISK_EMPHASIS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\*([^\s*][^*]*?[^\s*]|[^\s*])\*").unwrap());
+    static UNDERSCORE_EMPHASIS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"_([^\s_][^_]*?[^\s_]|[^\s_])_").unwrap());
 
     match style {
         EmphasisStyle::Asterisk => &ASTERISK_EMPHASIS,

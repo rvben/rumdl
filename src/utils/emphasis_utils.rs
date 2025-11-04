@@ -1,29 +1,22 @@
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Front matter detection
-    static ref FRONT_MATTER_DELIM: Regex = Regex::new(r"^---\s*$").unwrap();
+// Better detection of inline code with support for multiple backticks
+static INLINE_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(`+)([^`]|[^`].*?[^`])(`+)").unwrap());
 
-    // Better detection of inline code with support for multiple backticks
-    static ref INLINE_CODE: Regex = Regex::new(r"(`+)([^`]|[^`].*?[^`])(`+)").unwrap();
+// List markers pattern - used to avoid confusion with emphasis
+static LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[*+-]\s+").unwrap());
 
-    // List markers pattern - used to avoid confusion with emphasis
-    static ref LIST_MARKER: Regex = Regex::new(r"^\s*[*+-]\s+").unwrap();
+// Documentation style patterns
+static DOC_METADATA_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\*?\s*\*\*[^*]+\*\*\s*:").unwrap());
 
-    // Valid emphasis at start of line that should not be treated as lists
-    static ref VALID_START_EMPHASIS: Regex = Regex::new(r"^(\*\*[^*\s]|\*[^*\s]|__[^_\s]|_[^_\s])").unwrap();
+// Bold text pattern (for preserving bold text in documentation) - only match valid bold without spaces
+static BOLD_TEXT_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\*\*[^*\s][^*]*[^*\s]\*\*|\*\*[^*\s]\*\*").unwrap());
 
-    // Documentation style patterns
-    static ref DOC_METADATA_PATTERN: Regex = Regex::new(r"^\s*\*?\s*\*\*[^*]+\*\*\s*:").unwrap();
-
-    // Bold text pattern (for preserving bold text in documentation) - only match valid bold without spaces
-    static ref BOLD_TEXT_PATTERN: Regex = Regex::new(r"\*\*[^*\s][^*]*[^*\s]\*\*|\*\*[^*\s]\*\*").unwrap();
-
-    // Pre-compiled patterns for quick checks
-    static ref QUICK_DOC_CHECK: Regex = Regex::new(r"^\s*\*\s+\*").unwrap();
-    static ref QUICK_BOLD_CHECK: Regex = Regex::new(r"\*\*[^*\s]").unwrap();
-}
+// Pre-compiled patterns for quick checks
+static QUICK_DOC_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\*\s+\*").unwrap());
+static QUICK_BOLD_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*[^*\s]").unwrap());
 
 /// Represents an emphasis marker found in text
 #[derive(Debug, Clone, PartialEq)]

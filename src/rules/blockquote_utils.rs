@@ -1,25 +1,23 @@
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Pattern to match blockquote lines
-    static ref BLOCKQUOTE_LINE: Regex = Regex::new(r"^(\s*)>\s?(.*)$").unwrap();
+// Pattern to match blockquote lines
+static BLOCKQUOTE_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>\s?(.*)$").unwrap());
 
-    // Pattern to match empty blockquote lines (> with no space or content)
-    static ref EMPTY_BLOCKQUOTE_LINE: Regex = Regex::new(r"^(\s*)>$").unwrap();
+// Pattern to match empty blockquote lines (> with no space or content)
+static EMPTY_BLOCKQUOTE_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>$").unwrap());
 
-    // Pattern to match nested empty blockquote lines (>> with no space or content)
-    static ref NESTED_EMPTY_BLOCKQUOTE_LINE: Regex = Regex::new(r"^(\s*)>+$").unwrap();
+// Pattern to match nested empty blockquote lines (>> with no space or content)
+static NESTED_EMPTY_BLOCKQUOTE_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>+$").unwrap());
 
-    // Pattern to match blockquote lines with no space after >
-    static ref BLOCKQUOTE_NO_SPACE: Regex = Regex::new(r"^(\s*)>([^\s].*)$").unwrap();
+// Pattern to match blockquote lines with no space after >
+static BLOCKQUOTE_NO_SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>([^\s].*)$").unwrap());
 
-    // Pattern to match blockquote lines with multiple spaces after >
-    static ref BLOCKQUOTE_MULTIPLE_SPACES: Regex = Regex::new(r"^(\s*)>(\s{2,})(.*)$").unwrap();
+// Pattern to match blockquote lines with multiple spaces after >
+static BLOCKQUOTE_MULTIPLE_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>(\s{2,})(.*)$").unwrap());
 
-    // Pattern to match nested blockquotes
-    static ref NESTED_BLOCKQUOTE: Regex = Regex::new(r"^(\s*)>((?:\s*>)+)(\s*.*)$").unwrap();
-}
+// Pattern to match nested blockquotes
+static NESTED_BLOCKQUOTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>((?:\s*>)+)(\s*.*)$").unwrap());
 
 /// Utility functions for detecting and handling blockquotes in Markdown documents
 pub struct BlockquoteUtils;

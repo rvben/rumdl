@@ -1,15 +1,13 @@
 //!
 //! This module provides profiling utilities for measuring and reporting execution times in rumdl.
 
-use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 // Global profiler state
-lazy_static! {
-    static ref PROFILER: Mutex<Profiler> = Mutex::new(Profiler::new());
-}
+static PROFILER: LazyLock<Mutex<Profiler>> = LazyLock::new(|| Mutex::new(Profiler::new()));
 
 // Enable/disable profiling with a feature flag
 #[cfg(feature = "profiling")]

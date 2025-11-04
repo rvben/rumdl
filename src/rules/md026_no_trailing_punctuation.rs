@@ -3,25 +3,26 @@
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::LazyLock;
 use std::sync::RwLock;
 
 mod md026_config;
 use md026_config::{DEFAULT_PUNCTUATION, MD026Config};
 
-lazy_static! {
-    // Optimized single regex for all ATX heading types (normal, closed, indented 1-3 spaces)
-    static ref ATX_HEADING_UNIFIED: Regex = Regex::new(r"^( {0,3})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap();
+// Optimized single regex for all ATX heading types (normal, closed, indented 1-3 spaces)
+static ATX_HEADING_UNIFIED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^( {0,3})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap());
 
-    // Fast check patterns for early returns - match defaults
-    static ref QUICK_PUNCTUATION_CHECK: Regex = Regex::new(&format!(r"[{}]", regex::escape(DEFAULT_PUNCTUATION))).unwrap();
+// Fast check patterns for early returns - match defaults
+static QUICK_PUNCTUATION_CHECK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"[{}]", regex::escape(DEFAULT_PUNCTUATION))).unwrap());
 
-    // Regex cache for punctuation patterns
-    static ref PUNCTUATION_REGEX_CACHE: RwLock<HashMap<String, Regex>> = RwLock::new(HashMap::new());
-}
+// Regex cache for punctuation patterns
+static PUNCTUATION_REGEX_CACHE: LazyLock<RwLock<HashMap<String, Regex>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Rule MD026: Trailing punctuation in heading
 #[derive(Clone, Default)]

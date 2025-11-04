@@ -1,4 +1,5 @@
 use super::mkdocs_common::{BytePositionTracker, ContextStateMachine, MKDOCS_CONTENT_INDENT, get_line_indent};
+use regex::Regex;
 /// MkDocs Content Tabs detection utilities
 ///
 /// The Tabbed extension provides support for grouped content tabs
@@ -8,22 +9,20 @@ use super::mkdocs_common::{BytePositionTracker, ContextStateMachine, MKDOCS_CONT
 /// - `=== "Tab 1"` - Tab with label
 /// - `=== Tab` - Tab without quotes
 /// - Content indented with 4 spaces under each tab
-use lazy_static::lazy_static;
-use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Pattern to match tab markers
-    /// Matches: === "Label" or === Label
-    /// Lenient: accepts unclosed quotes, escaped quotes within quotes
-    static ref TAB_MARKER: Regex = Regex::new(
-        r"^(\s*)===\s+.*$"  // Just need content after ===
-    ).unwrap();
+/// Pattern to match tab markers
+/// Matches: === "Label" or === Label
+/// Lenient: accepts unclosed quotes, escaped quotes within quotes
+static TAB_MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\s*)===\s+.*$", // Just need content after ===
+    )
+    .unwrap()
+});
 
-    /// Simple pattern to check for any tab marker
-    static ref TAB_START: Regex = Regex::new(
-        r"^(\s*)===\s+"
-    ).unwrap();
-}
+/// Simple pattern to check for any tab marker
+static TAB_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)===\s+").unwrap());
 
 /// Check if a line is a tab marker
 pub fn is_tab_marker(line: &str) -> bool {

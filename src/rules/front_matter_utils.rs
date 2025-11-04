@@ -1,34 +1,32 @@
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Standard front matter delimiter (three dashes)
-    static ref STANDARD_FRONT_MATTER_START: Regex = Regex::new(r"^---\s*$").unwrap();
-    static ref STANDARD_FRONT_MATTER_END: Regex = Regex::new(r"^---\s*$").unwrap();
+// Standard front matter delimiter (three dashes)
+static STANDARD_FRONT_MATTER_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^---\s*$").unwrap());
+static STANDARD_FRONT_MATTER_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^---\s*$").unwrap());
 
-    // TOML front matter delimiter (three plus signs)
-    static ref TOML_FRONT_MATTER_START: Regex = Regex::new(r"^\+\+\+\s*$").unwrap();
-    static ref TOML_FRONT_MATTER_END: Regex = Regex::new(r"^\+\+\+\s*$").unwrap();
+// TOML front matter delimiter (three plus signs)
+static TOML_FRONT_MATTER_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\+\+\+\s*$").unwrap());
+static TOML_FRONT_MATTER_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\+\+\+\s*$").unwrap());
 
-    // JSON front matter delimiter (curly braces)
-    static ref JSON_FRONT_MATTER_START: Regex = Regex::new(r"^\{\s*$").unwrap();
-    static ref JSON_FRONT_MATTER_END: Regex = Regex::new(r"^\}\s*$").unwrap();
+// JSON front matter delimiter (curly braces)
+static JSON_FRONT_MATTER_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\{\s*$").unwrap());
+static JSON_FRONT_MATTER_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\}\s*$").unwrap());
 
-    // Common malformed front matter (dash space dash dash)
-    static ref MALFORMED_FRONT_MATTER_START1: Regex = Regex::new(r"^- --\s*$").unwrap();
-    static ref MALFORMED_FRONT_MATTER_END1: Regex = Regex::new(r"^- --\s*$").unwrap();
+// Common malformed front matter (dash space dash dash)
+static MALFORMED_FRONT_MATTER_START1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^- --\s*$").unwrap());
+static MALFORMED_FRONT_MATTER_END1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^- --\s*$").unwrap());
 
-    // Alternate malformed front matter (dash dash space dash)
-    static ref MALFORMED_FRONT_MATTER_START2: Regex = Regex::new(r"^-- -\s*$").unwrap();
-    static ref MALFORMED_FRONT_MATTER_END2: Regex = Regex::new(r"^-- -\s*$").unwrap();
+// Alternate malformed front matter (dash dash space dash)
+static MALFORMED_FRONT_MATTER_START2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^-- -\s*$").unwrap());
+static MALFORMED_FRONT_MATTER_END2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^-- -\s*$").unwrap());
 
-    // Front matter field pattern
-    static ref FRONT_MATTER_FIELD: Regex = Regex::new(r"^([^:]+):\s*(.*)$").unwrap();
+// Front matter field pattern
+static FRONT_MATTER_FIELD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([^:]+):\s*(.*)$").unwrap());
 
-    // TOML field pattern
-    static ref TOML_FIELD_PATTERN: Regex = Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap();
-}
+// TOML field pattern
+static TOML_FIELD_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^([^=]+)\s*=\s*"?([^"]*)"?$"#).unwrap());
 
 /// Represents the type of front matter found in a document
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

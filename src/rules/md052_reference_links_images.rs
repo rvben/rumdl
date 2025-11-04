@@ -3,40 +3,42 @@ use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::{HTML_COMMENT_PATTERN, SHORTCUT_REF_REGEX};
 use crate::utils::skip_context::{is_in_math_context, is_in_table_cell};
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Pattern to match reference definitions [ref]: url
-    // Note: \S* instead of \S+ to allow empty definitions like [ref]:
-    // The capturing group handles nested brackets to support cases like [`union[t, none]`]:
-    static ref REF_REGEX: Regex = Regex::new(r"^\s*\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]:\s*.*").unwrap();
+// Pattern to match reference definitions [ref]: url
+// Note: \S* instead of \S+ to allow empty definitions like [ref]:
+// The capturing group handles nested brackets to support cases like [`union[t, none]`]:
+static REF_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]:\s*.*").unwrap());
 
-    // Pattern for list items to exclude from reference checks (standard regex is fine)
-    static ref LIST_ITEM_REGEX: Regex = Regex::new(r"^\s*[-*+]\s+(?:\[[xX\s]\]\s+)?").unwrap();
+// Pattern for list items to exclude from reference checks (standard regex is fine)
+static LIST_ITEM_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[-*+]\s+(?:\[[xX\s]\]\s+)?").unwrap());
 
-    // Pattern for code blocks (standard regex is fine)
-    static ref FENCED_CODE_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
+// Pattern for code blocks (standard regex is fine)
+static FENCED_CODE_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap());
 
-    // Pattern for output example sections (standard regex is fine)
-    static ref OUTPUT_EXAMPLE_START: Regex = Regex::new(r"^#+\s*(?:Output|Example|Output Style|Output Format)\s*$").unwrap();
+// Pattern for output example sections (standard regex is fine)
+static OUTPUT_EXAMPLE_START: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^#+\s*(?:Output|Example|Output Style|Output Format)\s*$").unwrap());
 
-    // Pattern for GitHub alerts/callouts in blockquotes (e.g., > [!NOTE], > [!TIP], etc.)
-    // Extended to include additional common alert types
-    static ref GITHUB_ALERT_REGEX: Regex = Regex::new(r"^\s*>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|INFO|SUCCESS|FAILURE|DANGER|BUG|EXAMPLE|QUOTE)\]").unwrap();
+// Pattern for GitHub alerts/callouts in blockquotes (e.g., > [!NOTE], > [!TIP], etc.)
+// Extended to include additional common alert types
+static GITHUB_ALERT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|INFO|SUCCESS|FAILURE|DANGER|BUG|EXAMPLE|QUOTE)\]")
+        .unwrap()
+});
 
-    // Pattern to detect URLs that may contain brackets (IPv6, API endpoints, etc.)
-    // This pattern specifically looks for:
-    // - IPv6 addresses: https://[::1] or https://[2001:db8::1]
-    // - IPv6 with zone IDs: https://[fe80::1%eth0]
-    // - IPv6 mixed notation: https://[::ffff:192.0.2.1]
-    // - API paths with array notation: https://api.example.com/users[0]
-    // But NOT markdown reference links that happen to follow URLs
-    static ref URL_WITH_BRACKETS: Regex = Regex::new(
-        r"https?://(?:\[[0-9a-fA-F:.%]+\]|[^\s\[\]]+/[^\s]*\[\d+\])"
-    ).unwrap();
-}
+// Pattern to detect URLs that may contain brackets (IPv6, API endpoints, etc.)
+// This pattern specifically looks for:
+// - IPv6 addresses: https://[::1] or https://[2001:db8::1]
+// - IPv6 with zone IDs: https://[fe80::1%eth0]
+// - IPv6 mixed notation: https://[::ffff:192.0.2.1]
+// - API paths with array notation: https://api.example.com/users[0]
+// But NOT markdown reference links that happen to follow URLs
+static URL_WITH_BRACKETS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"https?://(?:\[[0-9a-fA-F:.%]+\]|[^\s\[\]]+/[^\s]*\[\d+\])").unwrap());
 
 /// Rule MD052: Reference links and images should use reference style
 ///

@@ -1,21 +1,18 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::utils::regex_cache::get_cached_regex;
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
-
-lazy_static! {
-    // Pre-compiled optimized patterns for quick checks
-    static ref QUICK_MARKDOWN_CHECK: Regex = Regex::new(r"[*_`\[\]]").unwrap();
-    // GitHub only strips asterisks (*), not underscores (_) - underscores are preserved
-    static ref EMPHASIS_PATTERN: Regex = Regex::new(r"\*+([^*]+)\*+").unwrap();
-    static ref CODE_PATTERN: Regex = Regex::new(r"`([^`]+)`").unwrap();
-    static ref LINK_PATTERN: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|\[([^\]]+)\]\[[^\]]*\]").unwrap();
-    // HTML tags with id or name attributes (supports any HTML element, not just <a>)
-    // This pattern only captures the first id/name attribute in a tag
-    static ref HTML_ANCHOR_PATTERN: Regex = Regex::new(r#"\b(?:id|name)\s*=\s*["']([^"']+)["']"#).unwrap();
-}
+use std::sync::LazyLock;
+// GitHub only strips asterisks (*), not underscores (_) - underscores are preserved
+static EMPHASIS_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*+([^*]+)\*+").unwrap());
+static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
+static LINK_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\(([^)]+)\)|\[([^\]]+)\]\[[^\]]*\]").unwrap());
+// HTML tags with id or name attributes (supports any HTML element, not just <a>)
+// This pattern only captures the first id/name attribute in a tag
+static HTML_ANCHOR_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\b(?:id|name)\s*=\s*["']([^"']+)["']"#).unwrap());
 
 /// Rule MD051: Link fragments
 ///

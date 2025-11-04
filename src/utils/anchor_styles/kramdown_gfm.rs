@@ -13,31 +13,32 @@
 //! 6. Convert spaces to hyphens, consolidate multiple hyphens
 //! 7. Remove leading and trailing hyphens
 
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 use unicode_normalization::UnicodeNormalization;
 
 // Input size limit for security (1MB)
 const MAX_INPUT_SIZE: usize = 1024 * 1024;
 
-lazy_static! {
-    // Improved markdown removal patterns with better nested handling
-    // Match emphasis patterns - asterisks and underscores
-    // Process multiple times to handle nested patterns
-    static ref ASTERISK_PATTERN: Regex = Regex::new(r"\*+([^*]*?)\*+").unwrap();
-    // Match emphasis underscores only at word boundaries, not in snake_case
-    static ref UNDERSCORE_PATTERN: Regex = Regex::new(r"\b_+([^_\s][^_]*?)_+\b").unwrap();
-    static ref CODE_PATTERN: Regex = Regex::new(r"`+([^`]*?)`+").unwrap();
-    // Match images and links separately to handle nested brackets properly
-    static ref IMAGE_PATTERN: Regex = Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap();
-    static ref LINK_PATTERN: Regex = Regex::new(r"\[((?:[^\[\]]|\[[^\]]*\])*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap();
+// Improved markdown removal patterns with better nested handling
+// Match emphasis patterns - asterisks and underscores
+// Process multiple times to handle nested patterns
+static ASTERISK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*+([^*]*?)\*+").unwrap());
+// Match emphasis underscores only at word boundaries, not in snake_case
+static UNDERSCORE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b_+([^_\s][^_]*?)_+\b").unwrap());
+static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+([^`]*?)`+").unwrap());
+// Match images and links separately to handle nested brackets properly
+static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap());
+static LINK_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[((?:[^\[\]]|\[[^\]]*\])*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap());
 
-    // Control character and dangerous Unicode filtering
-    static ref CONTROL_CHARS: Regex = Regex::new(r"[\x00-\x1F\x7F-\x9F\u200B-\u200D\uFEFF]").unwrap();
+// Control character and dangerous Unicode filtering
+static CONTROL_CHARS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\x00-\x1F\x7F-\x9F\u200B-\u200D\uFEFF]").unwrap());
 
-    // Whitespace normalization (tabs, Unicode spaces)
-    static ref WHITESPACE_NORMALIZE: Regex = Regex::new(r"[\t\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]").unwrap();
-}
+// Whitespace normalization (tabs, Unicode spaces)
+static WHITESPACE_NORMALIZE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\t\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]").unwrap());
 
 /// Checks if a character is a safe Unicode letter (ASCII + common Latin extended)
 fn is_safe_unicode_letter(c: char) -> bool {
@@ -362,9 +363,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // Pattern: n ≡ 1 (mod 3) AND n ≥ 4 → single hyphen (4,7,10,13...)
     // All other sequences of 2+ hyphens → removed
     // BUT: Smart typography markers are preserved and replaced AFTER consolidation
-    lazy_static! {
-        static ref HYPHEN_PATTERN: Regex = Regex::new(r"-{2,}").unwrap();
-    }
+    static HYPHEN_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-{2,}").unwrap());
 
     let result = HYPHEN_PATTERN
         .replace_all(&result, |caps: &regex::Captures| {

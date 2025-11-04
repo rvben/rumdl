@@ -5,9 +5,9 @@
 //! reparsing the same Markdown content multiple times across different rules.
 
 use crate::rule::MarkdownAst;
-use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::panic;
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
 /// Cache for parsed AST nodes
@@ -70,10 +70,8 @@ impl AstCache {
     }
 }
 
-lazy_static! {
-    /// Global AST cache instance
-    static ref GLOBAL_AST_CACHE: Arc<Mutex<AstCache>> = Arc::new(Mutex::new(AstCache::new()));
-}
+/// Global AST cache instance
+static GLOBAL_AST_CACHE: LazyLock<Arc<Mutex<AstCache>>> = LazyLock::new(|| Arc::new(Mutex::new(AstCache::new())));
 
 /// Get or parse AST from the global cache
 pub fn get_cached_ast(content: &str) -> Arc<MarkdownAst> {

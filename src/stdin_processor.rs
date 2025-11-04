@@ -151,51 +151,48 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     }
 
     // Normal check mode (no fix) - output diagnostics
-    // For formats that need collection
-    if matches!(
-        output_format,
-        OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit
-    ) {
-        let file_warnings = vec![(display_filename.to_string(), all_warnings)];
-        let output = match output_format {
-            OutputFormat::Json => rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings),
-            OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings),
-            OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings),
-            OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0),
-            other => {
-                eprintln!("Warning: Unexpected output format '{other:?}', falling back to text format");
-                let formatter = OutputFormat::Text.create_formatter();
-                formatter.format_warnings(&file_warnings[0].1, display_filename)
-            }
-        };
+    // Batch formats need all warnings collected before formatting
+    match output_format {
+        OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit => {
+            let file_warnings = vec![(display_filename.to_string(), all_warnings)];
+            let output = match output_format {
+                OutputFormat::Json => rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings),
+                OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings),
+                OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings),
+                OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0),
+                _ => unreachable!("Outer match guarantees only batch formats here"),
+            };
 
-        output_writer.writeln(&output).unwrap_or_else(|e| {
-            eprintln!("Error writing output: {e}");
-        });
-    } else {
-        // Use formatter for line-by-line output
-        let formatter = output_format.create_formatter();
-        if !all_warnings.is_empty() {
-            let formatted = formatter.format_warnings(&all_warnings, display_filename);
-            output_writer.writeln(&formatted).unwrap_or_else(|e| {
+            output_writer.writeln(&output).unwrap_or_else(|e| {
                 eprintln!("Error writing output: {e}");
             });
         }
+        // Streaming formats (Text, Concise, Grouped, JsonLines, GitHub, Pylint, Azure)
+        _ => {
+            // Use formatter for line-by-line output
+            let formatter = output_format.create_formatter();
+            if !all_warnings.is_empty() {
+                let formatted = formatter.format_warnings(&all_warnings, display_filename);
+                output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                    eprintln!("Error writing output: {e}");
+                });
+            }
 
-        // Print summary if not quiet
-        if !quiet {
-            if has_issues {
-                output_writer
-                    .writeln(&format!(
-                        "\nFound {} issue(s) in {}",
-                        all_warnings.len(),
-                        display_filename
-                    ))
-                    .ok();
-            } else {
-                output_writer
-                    .writeln(&format!("No issues found in {display_filename}"))
-                    .ok();
+            // Print summary if not quiet
+            if !quiet {
+                if has_issues {
+                    output_writer
+                        .writeln(&format!(
+                            "\nFound {} issue(s) in {}",
+                            all_warnings.len(),
+                            display_filename
+                        ))
+                        .ok();
+                } else {
+                    output_writer
+                        .writeln(&format!("No issues found in {display_filename}"))
+                        .ok();
+                }
             }
         }
     }

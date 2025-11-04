@@ -5,23 +5,19 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
 mod md054_config;
 use md054_config::MD054Config;
 
-lazy_static! {
-    // Updated regex patterns that work with Unicode characters
-    static ref AUTOLINK_RE: Regex = Regex::new(r"<([^<>]+)>").unwrap();
-    static ref INLINE_RE: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
-    static ref URL_INLINE_RE: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
-    static ref SHORTCUT_RE: Regex = Regex::new(r"\[([^\]]+)\]").unwrap();
-    static ref COLLAPSED_RE: Regex = Regex::new(r"\[([^\]]+)\]\[\]").unwrap();
-    static ref FULL_RE: Regex = Regex::new(r"\[([^\]]+)\]\[([^\]]+)\]").unwrap();
-    static ref CODE_BLOCK_DELIMITER: Regex = Regex::new(r"^(```|~~~)").unwrap();
-    static ref REFERENCE_DEF_RE: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
-}
+// Updated regex patterns that work with Unicode characters
+static AUTOLINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([^<>]+)>").unwrap());
+static INLINE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap());
+static SHORTCUT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]").unwrap());
+static COLLAPSED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\[\]").unwrap());
+static FULL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\[([^\]]+)\]").unwrap());
+static REFERENCE_DEF_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap());
 
 /// Rule MD054: Link and image style should be consistent
 ///

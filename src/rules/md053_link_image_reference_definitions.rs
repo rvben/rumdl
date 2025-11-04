@@ -2,39 +2,23 @@ use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_line_range;
 use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Link reference format: [text][reference]
-    // REMOVED: static ref LINK_REFERENCE_REGEX: FancyRegex = FancyRegex::new(r"\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
+// Shortcut reference links: [reference] - must not be followed by another bracket
+// Allow references followed by punctuation like colon, period, comma (e.g., "[reference]:", "[reference].")
+// Don't exclude references followed by ": " in the middle of a line (only at start of line)
+static SHORTCUT_REFERENCE_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!\[)").unwrap());
 
-    // Image reference format: ![text][reference]
-    // REMOVED: static ref IMAGE_REFERENCE_REGEX: FancyRegex = FancyRegex::new(r"!\[([^\]]*)\]\s*\[([^\]]*)\]").unwrap();
+// Link/image reference definition format: [reference]: URL
+static REFERENCE_DEFINITION_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap());
 
-    // Shortcut reference links: [reference] - must not be followed by another bracket
-    // Allow references followed by punctuation like colon, period, comma (e.g., "[reference]:", "[reference].")
-    // Don't exclude references followed by ": " in the middle of a line (only at start of line)
-    static ref SHORTCUT_REFERENCE_REGEX: FancyRegex =
-        FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!\[)").unwrap();
-
-    // REMOVED: Empty reference links: [text][] or ![text][]
-    // static ref EMPTY_LINK_REFERENCE_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\s*\[\s*\]").unwrap();
-    // static ref EMPTY_IMAGE_REFERENCE_REGEX: Regex = Regex::new(r"!\[([^\]]+)\]\s*\[\s*\]").unwrap();
-
-    // Link/image reference definition format: [reference]: URL
-    static ref REFERENCE_DEFINITION_REGEX: Regex =
-        Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
-
-    // Multi-line reference definition continuation pattern
-    static ref CONTINUATION_REGEX: Regex = Regex::new(r"^\s+(.+)$").unwrap();
-
-    // Code block regex - support indented code blocks for MkDocs tabs
-    static ref CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
-    static ref CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})\s*$").unwrap();
-}
+// Multi-line reference definition continuation pattern
+static CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s+(.+)$").unwrap());
 
 /// Configuration for MD053 rule
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

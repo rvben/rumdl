@@ -1,28 +1,34 @@
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Pattern to match quote lines with multiple spaces after >
-    static ref BLOCKQUOTE_MULTIPLE_SPACES: Regex = Regex::new(r"^(\s*)>(\s{2,})(.*)$").unwrap();
-
-    // New patterns for detecting malformed blockquote attempts where user intent is clear
-    static ref MALFORMED_BLOCKQUOTE_PATTERNS: Vec<(Regex, &'static str)> = vec![
+// New patterns for detecting malformed blockquote attempts where user intent is clear
+static MALFORMED_BLOCKQUOTE_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    vec![
         // Double > without space: >>text (looks like nested but missing spaces)
-        (Regex::new(r"^(\s*)>>([^\s>].*|$)").unwrap(), "missing spaces in nested blockquote"),
-
+        (
+            Regex::new(r"^(\s*)>>([^\s>].*|$)").unwrap(),
+            "missing spaces in nested blockquote",
+        ),
         // Triple > without space: >>>text
-        (Regex::new(r"^(\s*)>>>([^\s>].*|$)").unwrap(), "missing spaces in deeply nested blockquote"),
-
+        (
+            Regex::new(r"^(\s*)>>>([^\s>].*|$)").unwrap(),
+            "missing spaces in deeply nested blockquote",
+        ),
         // Space then > then text: > >text (extra > by mistake)
-        (Regex::new(r"^(\s*)>\s+>([^\s>].*|$)").unwrap(), "extra blockquote marker"),
-
+        (
+            Regex::new(r"^(\s*)>\s+>([^\s>].*|$)").unwrap(),
+            "extra blockquote marker",
+        ),
         // Multiple spaces then >: (spaces)>text (indented blockquote without space)
-        (Regex::new(r"^(\s{4,})>([^\s].*|$)").unwrap(), "indented blockquote missing space"),
-    ];
-}
+        (
+            Regex::new(r"^(\s{4,})>([^\s].*|$)").unwrap(),
+            "indented blockquote missing space",
+        ),
+    ]
+});
 
 /// Rule MD027: No multiple spaces after blockquote symbol
 ///

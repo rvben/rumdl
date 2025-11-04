@@ -3,35 +3,34 @@
 //! Kramdown is a superset of Markdown that adds additional features like
 //! Inline Attribute Lists (IAL) for adding attributes to elements.
 
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Pattern for Kramdown span IAL: text{:.class #id key="value"}
-    static ref SPAN_IAL_PATTERN: Regex = Regex::new(r"\{[:\.#][^}]*\}$").unwrap();
+/// Pattern for Kramdown span IAL: text{:.class #id key="value"}
+static SPAN_IAL_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{[:\.#][^}]*\}$").unwrap());
 
-    /// Pattern for Kramdown extensions opening: {::comment}, {::nomarkdown}, etc.
-    static ref EXTENSION_OPEN_PATTERN: Regex = Regex::new(r"^\s*\{::([a-z]+)(?:\s+[^}]*)?\}\s*$").unwrap();
+/// Pattern for Kramdown extensions opening: {::comment}, {::nomarkdown}, etc.
+static EXTENSION_OPEN_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\{::([a-z]+)(?:\s+[^}]*)?\}\s*$").unwrap());
 
-    /// Pattern for Kramdown extensions closing: {:/comment}, {:/}, etc.
-    static ref EXTENSION_CLOSE_PATTERN: Regex = Regex::new(r"^\s*\{:/([a-z]+)?\}\s*$").unwrap();
+/// Pattern for Kramdown extensions closing: {:/comment}, {:/}, etc.
+static EXTENSION_CLOSE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\{:/([a-z]+)?\}\s*$").unwrap());
 
-    /// Pattern for Kramdown options: {::options key="value" /}
-    static ref OPTIONS_PATTERN: Regex = Regex::new(r"^\s*\{::options\s+[^}]+/\}\s*$").unwrap();
+/// Pattern for Kramdown options: {::options key="value" /}
+static OPTIONS_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\{::options\s+[^}]+/\}\s*$").unwrap());
 
-    /// Pattern for footnote references: [^footnote]
-    static ref FOOTNOTE_REF_PATTERN: Regex = Regex::new(r"\[\^[a-zA-Z0-9_\-]+\]").unwrap();
+/// Pattern for footnote references: [^footnote]
+static FOOTNOTE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\^[a-zA-Z0-9_\-]+\]").unwrap());
 
-    /// Pattern for footnote definitions: [^footnote]: definition
-    static ref FOOTNOTE_DEF_PATTERN: Regex = Regex::new(r"^\[\^[a-zA-Z0-9_\-]+\]:").unwrap();
+/// Pattern for footnote definitions: [^footnote]: definition
+static FOOTNOTE_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[\^[a-zA-Z0-9_\-]+\]:").unwrap());
 
-    /// Pattern for abbreviations: *[HTML]: HyperText Markup Language
-    static ref ABBREVIATION_PATTERN: Regex = Regex::new(r"^\*\[[^\]]+\]:").unwrap();
+/// Pattern for abbreviations: *[HTML]: HyperText Markup Language
+static ABBREVIATION_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\*\[[^\]]+\]:").unwrap());
 
-    /// Pattern for math blocks: $$ or $
-    static ref MATH_BLOCK_PATTERN: Regex = Regex::new(r"^\$\$").unwrap();
-    static ref MATH_INLINE_PATTERN: Regex = Regex::new(r"\$[^$]+\$").unwrap();
-}
+/// Pattern for math blocks: $$ or $
+static MATH_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\$\$").unwrap());
+static MATH_INLINE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$[^$]+\$").unwrap());
 
 /// Check if a line is a Kramdown block attribute (IAL - Inline Attribute List)
 ///

@@ -1,16 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_heading_range;
-use lazy_static::lazy_static;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
-
-lazy_static! {
-    // Pattern for ATX headings
-    static ref ATX_HEADING: Regex = Regex::new(r"^(#+)\s+(.+)$").unwrap();
-    // Pattern for setext heading underlines
-    static ref SETEXT_UNDERLINE: Regex = Regex::new(r"^([=-]+)$").unwrap();
-}
 
 /// Configuration for MD043 rule
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

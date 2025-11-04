@@ -13,13 +13,11 @@ use crate::utils::mkdocs_snippets;
 use crate::utils::mkdocs_tabs;
 use crate::utils::mkdocstrings_refs;
 use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Enhanced inline math pattern that handles both single $ and double $$ delimiters
-    static ref INLINE_MATH_REGEX: Regex = Regex::new(r"\$(?:\$)?[^$]+\$(?:\$)?").unwrap();
-}
+/// Enhanced inline math pattern that handles both single $ and double $$ delimiters
+static INLINE_MATH_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$(?:\$)?[^$]+\$(?:\$)?").unwrap());
 
 /// Range representing a span of bytes (start inclusive, end exclusive)
 #[derive(Debug, Clone, Copy)]

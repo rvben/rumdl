@@ -1,14 +1,14 @@
 use crate::config::MarkdownFlavor;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
-use lazy_static::lazy_static;
 use pulldown_cmark::{Event, Parser};
 use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    // Comprehensive link pattern that captures both inline and reference links
-    // Use (?s) flag to make . match newlines
-    static ref LINK_PATTERN: Regex = Regex::new(
+// Comprehensive link pattern that captures both inline and reference links
+// Use (?s) flag to make . match newlines
+static LINK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r#"(?sx)
         \[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]          # Link text in group 1 (handles nested brackets)
         (?:
@@ -16,11 +16,13 @@ lazy_static! {
             |
             \[([^\]]*)\]      # Reference ID in group 6
         )"#
-    ).unwrap();
+    ).unwrap()
+});
 
-    // Image pattern (similar to links but with ! prefix)
-    // Use (?s) flag to make . match newlines
-    static ref IMAGE_PATTERN: Regex = Regex::new(
+// Image pattern (similar to links but with ! prefix)
+// Use (?s) flag to make . match newlines
+static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r#"(?sx)
         !\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]         # Alt text in group 1 (handles nested brackets)
         (?:
@@ -28,37 +30,26 @@ lazy_static! {
             |
             \[([^\]]*)\]      # Reference ID in group 6
         )"#
-    ).unwrap();
+    ).unwrap()
+});
 
-    // Reference definition pattern
-    static ref REF_DEF_PATTERN: Regex = Regex::new(
-        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#
-    ).unwrap();
+// Reference definition pattern
+static REF_DEF_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#).unwrap());
 
-    // Code span pattern - matches backticks and captures content
-    // This handles multi-backtick code spans correctly
-    static ref CODE_SPAN_PATTERN: Regex = Regex::new(
-        r"`+"
-    ).unwrap();
-
-    // Pattern for bare URLs
-    static ref BARE_URL_PATTERN: Regex = Regex::new(
+// Pattern for bare URLs
+static BARE_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r#"(https?|ftp)://[^\s<>\[\]()\\'"`]+(?:\.[^\s<>\[\]()\\'"`]+)*(?::\d+)?(?:/[^\s<>\[\]()\\'"`]*)?(?:\?[^\s<>\[\]()\\'"`]*)?(?:#[^\s<>\[\]()\\'"`]*)?"#
-    ).unwrap();
+    ).unwrap()
+});
 
-    // Pattern for email addresses
-    static ref BARE_EMAIL_PATTERN: Regex = Regex::new(
-        r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-    ).unwrap();
+// Pattern for email addresses
+static BARE_EMAIL_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap());
 
-    // Pattern for angle bracket links (to exclude from bare URL detection)
-    static ref ANGLE_BRACKET_PATTERN: Regex = Regex::new(
-        r"<((?:https?|ftp)://[^>]+|[^@\s]+@[^@\s]+\.[^@\s>]+)>"
-    ).unwrap();
-
-    // Pattern for blockquote prefix in parse_list_blocks
-    static ref BLOCKQUOTE_PREFIX_REGEX: Regex = Regex::new(r"^(\s*>+\s*)").unwrap();
-}
+// Pattern for blockquote prefix in parse_list_blocks
+static BLOCKQUOTE_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*>+\s*)").unwrap());
 
 /// Pre-computed information about a line
 #[derive(Debug, Clone)]
@@ -1467,12 +1458,11 @@ impl<'a> LintContext<'a> {
         flavor: MarkdownFlavor,
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     ) {
-        lazy_static! {
-
-            // Regex for heading detection
-            static ref ATX_HEADING_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap();
-            static ref SETEXT_UNDERLINE_REGEX: regex::Regex = regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap();
-        }
+        // Regex for heading detection
+        static ATX_HEADING_REGEX: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap());
+        static SETEXT_UNDERLINE_REGEX: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap());
 
         let content_lines: Vec<&str> = content.lines().collect();
 
@@ -2466,10 +2456,8 @@ impl<'a> LintContext<'a> {
         code_blocks: &[(usize, usize)],
         flavor: MarkdownFlavor,
     ) -> Vec<HtmlTag> {
-        lazy_static! {
-            static ref HTML_TAG_REGEX: regex::Regex =
-                regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap();
-        }
+        static HTML_TAG_REGEX: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap());
 
         let mut html_tags = Vec::with_capacity(content.matches('<').count());
 
@@ -2526,10 +2514,8 @@ impl<'a> LintContext<'a> {
 
     /// Parse emphasis spans in the content
     fn parse_emphasis_spans(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<EmphasisSpan> {
-        lazy_static! {
-            static ref EMPHASIS_REGEX: regex::Regex =
-                regex::Regex::new(r"(\*{1,3}|_{1,3})([^*_\s][^*_]*?)(\*{1,3}|_{1,3})").unwrap();
-        }
+        static EMPHASIS_REGEX: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"(\*{1,3}|_{1,3})([^*_\s][^*_]*?)(\*{1,3}|_{1,3})").unwrap());
 
         let mut emphasis_spans = Vec::with_capacity(content.matches('*').count() + content.matches('_').count() / 4);
 

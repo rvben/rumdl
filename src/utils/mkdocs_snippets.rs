@@ -1,3 +1,4 @@
+use regex::Regex;
 /// MkDocs Snippets extension detection utilities
 ///
 /// The Snippets extension allows including content from external files
@@ -9,37 +10,36 @@
 /// - `<!-- --8<-- [start:section] -->` - Start marker for section
 /// - `<!-- --8<-- [end:section] -->` - End marker for section
 ///
-use lazy_static::lazy_static;
-use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Pattern to match valid snippet markers: -{1,}8<-{1,}
-    /// Based on PyMdown Extensions Snippets specification
-    static ref BARE_SNIPPET_MARKER: Regex = Regex::new(
-        r"^;*-+8<-+$"  // Optional semicolons, then dashes-8<-dashes only
-    ).unwrap();
+/// Pattern to match valid snippet markers: -{1,}8<-{1,}
+/// Based on PyMdown Extensions Snippets specification
+static BARE_SNIPPET_MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^;*-+8<-+$", // Optional semicolons, then dashes-8<-dashes only
+    )
+    .unwrap()
+});
 
-    /// Pattern to match snippet with quoted file path
-    /// Lenient: accepts unclosed quotes for detection (can warn later)
-    static ref SNIPPET_WITH_FILE: Regex = Regex::new(
-        r#"-+8<-+\s+["']"#  // Just check for quote after snippet marker
-    ).unwrap();
+/// Pattern to match snippet with quoted file path
+/// Lenient: accepts unclosed quotes for detection (can warn later)
+static SNIPPET_WITH_FILE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"-+8<-+\s+["']"#, // Just check for quote after snippet marker
+    )
+    .unwrap()
+});
 
-    /// Pattern to match section markers
-    static ref SECTION_MARKER: Regex = Regex::new(
-        r"-+8<-+\s*\[(start|end):[^\]]*\]"
-    ).unwrap();
+/// Pattern to match section markers
+static SECTION_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-+8<-+\s*\[(start|end):[^\]]*\]").unwrap());
 
-    /// Pattern to match snippet in HTML comment
-    static ref SNIPPET_IN_COMMENT: Regex = Regex::new(
-        r"<!--\s*-+8<-+\s*-->"
-    ).unwrap();
-
-    /// Pattern to match invalid asymmetric marker
-    static ref INVALID_ASYMMETRIC: Regex = Regex::new(
-        r#"(?:^|\s)--8<-\s+["']"#  // --8<- followed by quote is invalid
-    ).unwrap();
-}
+/// Pattern to match invalid asymmetric marker
+static INVALID_ASYMMETRIC: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?:^|\s)--8<-\s+["']"#, // --8<- followed by quote is invalid
+    )
+    .unwrap()
+});
 
 /// Check if a line contains MkDocs snippet syntax
 pub fn is_snippet_marker(line: &str) -> bool {

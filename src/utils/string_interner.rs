@@ -1,6 +1,5 @@
-use lazy_static::lazy_static;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 /// String interner for reducing memory allocations of common strings
 #[derive(Debug)]
@@ -43,10 +42,9 @@ impl StringInterner {
     }
 }
 
-lazy_static! {
-    /// Global string interner for common patterns
-    static ref GLOBAL_INTERNER: Arc<Mutex<StringInterner>> = Arc::new(Mutex::new(StringInterner::new()));
-}
+/// Global string interner for common patterns
+static GLOBAL_INTERNER: LazyLock<Arc<Mutex<StringInterner>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(StringInterner::new())));
 
 /// Intern a string globally
 pub fn intern_string(s: &str) -> Arc<str> {
@@ -57,37 +55,35 @@ pub fn intern_string(s: &str) -> Arc<str> {
 /// Common interned strings for performance
 pub mod common {
     use super::*;
-    use lazy_static::lazy_static;
+    use std::sync::LazyLock;
 
-    lazy_static! {
-        // Rule names
-        pub static ref MD001: Arc<str> = intern_string("MD001");
-        pub static ref MD002: Arc<str> = intern_string("MD002");
-        pub static ref MD003: Arc<str> = intern_string("MD003");
-        pub static ref MD004: Arc<str> = intern_string("MD004");
-        pub static ref MD005: Arc<str> = intern_string("MD005");
-        pub static ref MD006: Arc<str> = intern_string("MD006");
-        pub static ref MD007: Arc<str> = intern_string("MD007");
-        pub static ref MD009: Arc<str> = intern_string("MD009");
-        pub static ref MD010: Arc<str> = intern_string("MD010");
-        pub static ref MD013: Arc<str> = intern_string("MD013");
-        pub static ref MD034: Arc<str> = intern_string("MD034");
+    // Rule names
+    pub static MD001: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD001"));
+    pub static MD002: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD002"));
+    pub static MD003: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD003"));
+    pub static MD004: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD004"));
+    pub static MD005: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD005"));
+    pub static MD006: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD006"));
+    pub static MD007: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD007"));
+    pub static MD009: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD009"));
+    pub static MD010: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD010"));
+    pub static MD013: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD013"));
+    pub static MD034: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("MD034"));
 
-        // Common messages
-        pub static ref TRAILING_SPACES: Arc<str> = intern_string("Trailing spaces found");
-        pub static ref HARD_TABS: Arc<str> = intern_string("Hard tabs found");
-        pub static ref LINE_TOO_LONG: Arc<str> = intern_string("Line length exceeds limit");
-        pub static ref BARE_URL: Arc<str> = intern_string("Bare URL found");
+    // Common messages
+    pub static TRAILING_SPACES: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("Trailing spaces found"));
+    pub static HARD_TABS: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("Hard tabs found"));
+    pub static LINE_TOO_LONG: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("Line length exceeds limit"));
+    pub static BARE_URL: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("Bare URL found"));
 
-        // Common patterns
-        pub static ref EMPTY_STRING: Arc<str> = intern_string("");
-        pub static ref SPACE: Arc<str> = intern_string(" ");
-        pub static ref NEWLINE: Arc<str> = intern_string("\n");
-        pub static ref HASH: Arc<str> = intern_string("#");
-        pub static ref ASTERISK: Arc<str> = intern_string("*");
-        pub static ref DASH: Arc<str> = intern_string("-");
-        pub static ref PLUS: Arc<str> = intern_string("+");
-    }
+    // Common patterns
+    pub static EMPTY_STRING: LazyLock<Arc<str>> = LazyLock::new(|| intern_string(""));
+    pub static SPACE: LazyLock<Arc<str>> = LazyLock::new(|| intern_string(" "));
+    pub static NEWLINE: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("\n"));
+    pub static HASH: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("#"));
+    pub static ASTERISK: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("*"));
+    pub static DASH: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("-"));
+    pub static PLUS: LazyLock<Arc<str>> = LazyLock::new(|| intern_string("+"));
 }
 
 #[cfg(test)]

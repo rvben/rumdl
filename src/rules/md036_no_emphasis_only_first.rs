@@ -5,29 +5,28 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_emphasis_range;
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 use toml;
 
 mod md036_config;
 use md036_config::MD036Config;
 
-lazy_static! {
-    // Optimize regex patterns with compilation once at startup
-    // Note: The content between emphasis markers should not contain other emphasis markers
-    // to avoid matching nested emphasis like _**text**_ or **_text_**
-    static ref RE_ASTERISK_SINGLE: Regex = Regex::new(r"^\s*\*([^*_\n]+)\*\s*$").unwrap();
-    static ref RE_UNDERSCORE_SINGLE: Regex = Regex::new(r"^\s*_([^*_\n]+)_\s*$").unwrap();
-    static ref RE_ASTERISK_DOUBLE: Regex = Regex::new(r"^\s*\*\*([^*_\n]+)\*\*\s*$").unwrap();
-    static ref RE_UNDERSCORE_DOUBLE: Regex = Regex::new(r"^\s*__([^*_\n]+)__\s*$").unwrap();
-    static ref LIST_MARKER: Regex = Regex::new(r"^\s*(?:[*+-]|\d+\.)\s+").unwrap();
-    static ref BLOCKQUOTE_MARKER: Regex = Regex::new(r"^\s*>").unwrap();
-    static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)(`{3,}|~{3,})").unwrap();
-    static ref HEADING_MARKER: Regex = Regex::new(r"^#+\s").unwrap();
-    static ref HEADING_WITH_EMPHASIS: Regex = Regex::new(r"^(#+\s+).*(?:\*\*|\*|__|_)").unwrap();
-    // Pattern to match common Table of Contents labels that should not be converted to headings
-    static ref TOC_LABEL_PATTERN: Regex = Regex::new(r"^\s*(?:\*\*|\*|__|_)(?:Table of Contents|Contents|TOC|Index)(?:\*\*|\*|__|_)\s*$").unwrap();
-}
+// Optimize regex patterns with compilation once at startup
+// Note: The content between emphasis markers should not contain other emphasis markers
+// to avoid matching nested emphasis like _**text**_ or **_text_**
+static RE_ASTERISK_SINGLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\*([^*_\n]+)\*\s*$").unwrap());
+static RE_UNDERSCORE_SINGLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*_([^*_\n]+)_\s*$").unwrap());
+static RE_ASTERISK_DOUBLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\*\*([^*_\n]+)\*\*\s*$").unwrap());
+static RE_UNDERSCORE_DOUBLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*__([^*_\n]+)__\s*$").unwrap());
+static LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*(?:[*+-]|\d+\.)\s+").unwrap());
+static BLOCKQUOTE_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*>").unwrap());
+static HEADING_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#+\s").unwrap());
+static HEADING_WITH_EMPHASIS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(#+\s+).*(?:\*\*|\*|__|_)").unwrap());
+// Pattern to match common Table of Contents labels that should not be converted to headings
+static TOC_LABEL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:\*\*|\*|__|_)(?:Table of Contents|Contents|TOC|Index)(?:\*\*|\*|__|_)\s*$").unwrap()
+});
 
 /// Rule MD036: Emphasis used instead of a heading
 #[derive(Clone, Default)]

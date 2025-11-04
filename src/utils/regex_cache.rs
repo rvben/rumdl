@@ -20,9 +20,9 @@
 //! - Use the utility functions for fast content checks before running regexes.
 
 use fancy_regex::Regex as FancyRegex;
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
 /// Global regex cache for dynamic patterns
@@ -92,10 +92,8 @@ impl RegexCache {
     }
 }
 
-lazy_static! {
-    /// Global regex cache instance
-    static ref GLOBAL_REGEX_CACHE: Arc<Mutex<RegexCache>> = Arc::new(Mutex::new(RegexCache::new()));
-}
+/// Global regex cache instance
+static GLOBAL_REGEX_CACHE: LazyLock<Arc<Mutex<RegexCache>>> = LazyLock::new(|| Arc::new(Mutex::new(RegexCache::new())));
 
 /// Get a regex from the global cache
 pub fn get_cached_regex(pattern: &str) -> Result<Arc<Regex>, regex::Error> {
@@ -135,9 +133,7 @@ pub fn get_cache_stats() -> HashMap<String, u64> {
 #[macro_export]
 macro_rules! regex_lazy {
     ($pattern:expr) => {{
-        lazy_static::lazy_static! {
-            static ref REGEX: regex::Regex = regex::Regex::new($pattern).unwrap();
-        }
+        static REGEX: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new($pattern).unwrap());
         &*REGEX
     }};
 }
@@ -167,171 +163,203 @@ macro_rules! fancy_regex_cached {
 // Also make the macro available directly from this module
 pub use crate::regex_lazy;
 
-lazy_static! {
-    // URL patterns
-    pub static ref URL_REGEX: Regex = Regex::new(r#"(?:https?|ftp)://[^\s<>\[\]()'"]+[^\s<>\[\]()"'.,]"#).unwrap();
-    pub static ref BARE_URL_REGEX: Regex = Regex::new(r"(?:https?|ftp)://[^\s<>]+[^\s<>.]").unwrap();
-    pub static ref URL_PATTERN: Regex = Regex::new(r"((?:https?|ftp)://[^\s\)<>]+[^\s\)<>.,])").unwrap();
+// URL patterns
+pub static URL_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?:https?|ftp)://[^\s<>\[\]()'"]+[^\s<>\[\]()"'.,]"#).unwrap());
+pub static BARE_URL_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:https?|ftp)://[^\s<>]+[^\s<>.]").unwrap());
+pub static URL_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"((?:https?|ftp)://[^\s\)<>]+[^\s\)<>.,])").unwrap());
 
-    // Heading patterns
-    pub static ref ATX_HEADING_REGEX: Regex = Regex::new(r"^(\s*)(#{1,6})(\s+|$)").unwrap();
-    pub static ref CLOSED_ATX_HEADING_REGEX: Regex = Regex::new(r"^(\s*)(#{1,6})(\s+)(.*)(\s+)(#+)(\s*)$").unwrap();
-    pub static ref SETEXT_HEADING_REGEX: Regex = Regex::new(r"^(\s*)[^\s]+.*\n(\s*)(=+|-+)\s*$").unwrap();
-    pub static ref TRAILING_PUNCTUATION_REGEX: Regex = Regex::new(r"[.,:;!?]$").unwrap();
+// Heading patterns
+pub static ATX_HEADING_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s+|$)").unwrap());
+pub static CLOSED_ATX_HEADING_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s+)(.*)(\s+)(#+)(\s*)$").unwrap());
+pub static SETEXT_HEADING_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)[^\s]+.*\n(\s*)(=+|-+)\s*$").unwrap());
+pub static TRAILING_PUNCTUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[.,:);!?]$").unwrap());
 
-    // ATX heading patterns for MD051 and other rules
-    pub static ref ATX_HEADING_WITH_CAPTURE: Regex = Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#*\s*)?$").unwrap();
-    pub static ref SETEXT_HEADING_WITH_CAPTURE: FancyRegex = FancyRegex::new(r"^([^\n]+)\n([=\-])\2+\s*$").unwrap();
+// ATX heading patterns for MD051 and other rules
+pub static ATX_HEADING_WITH_CAPTURE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#*\s*)?$").unwrap());
+pub static SETEXT_HEADING_WITH_CAPTURE: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"^([^\n]+)\n([=\-])\2+\s*$").unwrap());
 
-    // List patterns
-    pub static ref UNORDERED_LIST_MARKER_REGEX: Regex = Regex::new(r"^(\s*)([*+-])(\s+)").unwrap();
-    pub static ref ORDERED_LIST_MARKER_REGEX: Regex = Regex::new(r"^(\s*)(\d+)([.)])(\s+)").unwrap();
-    pub static ref LIST_MARKER_ANY_REGEX: Regex = Regex::new(r"^(\s*)(?:([*+-])|(\d+)[.)])(\s+)").unwrap();
+// List patterns
+pub static UNORDERED_LIST_MARKER_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-])(\s+)").unwrap());
+pub static ORDERED_LIST_MARKER_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(\d+)([.)])(\s+)").unwrap());
+pub static LIST_MARKER_ANY_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(?:([*+-])|(\d+)[.)])(\s+)").unwrap());
 
-    // Code block patterns
-    pub static ref FENCED_CODE_BLOCK_START_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap();
-    pub static ref FENCED_CODE_BLOCK_END_REGEX: Regex = Regex::new(r"^(\s*)(```|~~~)(\s*)$").unwrap();
-    pub static ref INDENTED_CODE_BLOCK_REGEX: Regex = Regex::new(r"^(\s{4,})(.*)$").unwrap();
-    pub static ref CODE_FENCE_REGEX: Regex = Regex::new(r"^(`{3,}|~{3,})").unwrap();
+// Code block patterns
+pub static FENCED_CODE_BLOCK_START_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap());
+pub static FENCED_CODE_BLOCK_END_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(```|~~~)(\s*)$").unwrap());
+pub static INDENTED_CODE_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})(.*)$").unwrap());
+pub static CODE_FENCE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(`{3,}|~{3,})").unwrap());
 
-    // Emphasis patterns
-    pub static ref EMPHASIS_REGEX: FancyRegex = FancyRegex::new(r"(\s|^)(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=\S)(\2)(\s|$)").unwrap();
-    pub static ref SPACE_IN_EMPHASIS_REGEX: FancyRegex = FancyRegex::new(r"(\*|_)(\s+)(.+?)(\s+)(\1)").unwrap();
+// Emphasis patterns
+pub static EMPHASIS_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"(\s|^)(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=\S)(\2)(\s|$)").unwrap());
+pub static SPACE_IN_EMPHASIS_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"(\*|_)(\s+)(.+?)(\s+)(\1)").unwrap());
 
-    // MD037 specific emphasis patterns - improved to avoid false positives
-    // Only match emphasis with spaces that are actually complete emphasis blocks
-    // Use word boundaries and negative lookbehind/lookahead to avoid matching across emphasis boundaries
-    pub static ref ASTERISK_EMPHASIS: Regex = Regex::new(r"(?:^|[^*])\*(\s+[^*]+\s*|\s*[^*]+\s+)\*(?:[^*]|$)").unwrap();
-    pub static ref UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(?:^|[^_])_(\s+[^_]+\s*|\s*[^_]+\s+)_(?:[^_]|$)").unwrap();
-    pub static ref DOUBLE_UNDERSCORE_EMPHASIS: Regex = Regex::new(r"(?:^|[^_])__(\s+[^_]+\s*|\s*[^_]+\s+)__(?:[^_]|$)").unwrap();
-    pub static ref DOUBLE_ASTERISK_EMPHASIS: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\s+\*\*").unwrap();
-    pub static ref DOUBLE_ASTERISK_SPACE_START: FancyRegex = FancyRegex::new(r"\*\*\s+([^*]+?)\*\*").unwrap();
-    pub static ref DOUBLE_ASTERISK_SPACE_END: FancyRegex = FancyRegex::new(r"\*\*([^*]+?)\s+\*\*").unwrap();
+// MD037 specific emphasis patterns - improved to avoid false positives
+// Only match emphasis with spaces that are actually complete emphasis blocks
+// Use word boundaries and negative lookbehind/lookahead to avoid matching across emphasis boundaries
+pub static ASTERISK_EMPHASIS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:^|[^*])\*(\s+[^*]+\s*|\s*[^*]+\s+)\*(?:[^*]|$)").unwrap());
+pub static UNDERSCORE_EMPHASIS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:^|[^_])_(\s+[^_]+\s*|\s*[^_]+\s+)_(?:[^_]|$)").unwrap());
+pub static DOUBLE_UNDERSCORE_EMPHASIS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:^|[^_])__(\s+[^_]+\s*|\s*[^_]+\s+)__(?:[^_]|$)").unwrap());
+pub static DOUBLE_ASTERISK_EMPHASIS: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\*\*\s+([^*]+?)\s+\*\*").unwrap());
+pub static DOUBLE_ASTERISK_SPACE_START: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\*\*\s+([^*]+?)\*\*").unwrap());
+pub static DOUBLE_ASTERISK_SPACE_END: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\*\*([^*]+?)\s+\*\*").unwrap());
 
-    // Code block patterns
-    pub static ref FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap();
-    pub static ref FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)```\s*$").unwrap();
-    pub static ref ALTERNATE_FENCED_CODE_BLOCK_START: Regex = Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap();
-    pub static ref ALTERNATE_FENCED_CODE_BLOCK_END: Regex = Regex::new(r"^(\s*)~~~\s*$").unwrap();
-    pub static ref INDENTED_CODE_BLOCK_PATTERN: Regex = Regex::new(r"^(\s{4,})").unwrap();
+// Code block patterns
+pub static FENCED_CODE_BLOCK_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap());
+pub static FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```\s*$").unwrap());
+pub static ALTERNATE_FENCED_CODE_BLOCK_START: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap());
+pub static ALTERNATE_FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)~~~\s*$").unwrap());
+pub static INDENTED_CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})").unwrap());
 
-    // HTML patterns
-    pub static ref HTML_TAG_REGEX: Regex = Regex::new(r"<([a-zA-Z][^>]*)>").unwrap();
-    pub static ref HTML_SELF_CLOSING_TAG_REGEX: Regex = Regex::new(r"<([a-zA-Z][^>]*/)>").unwrap();
-    pub static ref HTML_TAG_FINDER: Regex = Regex::new("(?i)</?[a-zA-Z][^>]*>").unwrap();
-    pub static ref HTML_OPENING_TAG_FINDER: Regex = Regex::new("(?i)<[a-zA-Z][^>]*>").unwrap();
-    pub static ref HTML_TAG_QUICK_CHECK: Regex = Regex::new("(?i)</?[a-zA-Z]").unwrap();
+// HTML patterns
+pub static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([a-zA-Z][^>]*)>").unwrap());
+pub static HTML_SELF_CLOSING_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([a-zA-Z][^>]*/)>").unwrap());
+pub static HTML_TAG_FINDER: LazyLock<Regex> = LazyLock::new(|| Regex::new("(?i)</?[a-zA-Z][^>]*>").unwrap());
+pub static HTML_OPENING_TAG_FINDER: LazyLock<Regex> = LazyLock::new(|| Regex::new("(?i)<[a-zA-Z][^>]*>").unwrap());
+pub static HTML_TAG_QUICK_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new("(?i)</?[a-zA-Z]").unwrap());
 
-    // Link patterns for MD051 and other rules
-    pub static ref LINK_REFERENCE_DEFINITION_REGEX: Regex = Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap();
-    pub static ref INLINE_LINK_REGEX: Regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
-    pub static ref LINK_TEXT_REGEX: Regex = Regex::new(r"\[([^\]]*)\]").unwrap();
-    pub static ref LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]*)\]\(([^)#]*)#([^)]+)\)").unwrap();
-    pub static ref EXTERNAL_URL_REGEX: FancyRegex = FancyRegex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap();
+// Link patterns for MD051 and other rules
+pub static LINK_REFERENCE_DEFINITION_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap());
+pub static INLINE_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap());
+pub static LINK_TEXT_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]*)\]").unwrap());
+pub static LINK_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"(?<!\\)\[([^\]]*)\]\(([^)#]*)#([^)]+)\)").unwrap());
+pub static EXTERNAL_URL_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap());
 
-    // Image patterns
-    pub static ref IMAGE_REGEX: Regex = Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
+// Image patterns
+pub static IMAGE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap());
 
-    // Whitespace patterns
-    pub static ref TRAILING_WHITESPACE_REGEX: Regex = Regex::new(r"\s+$").unwrap();
-    pub static ref MULTIPLE_BLANK_LINES_REGEX: Regex = Regex::new(r"\n{3,}").unwrap();
+// Whitespace patterns
+pub static TRAILING_WHITESPACE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+$").unwrap());
+pub static MULTIPLE_BLANK_LINES_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n{3,}").unwrap());
 
-    // Front matter patterns
-    pub static ref FRONT_MATTER_REGEX: Regex = Regex::new(r"^---\n.*?\n---\n").unwrap();
+// Front matter patterns
+pub static FRONT_MATTER_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^---\n.*?\n---\n").unwrap());
 
-    // MD051 specific patterns
-    pub static ref INLINE_CODE_REGEX: FancyRegex = FancyRegex::new(r"`[^`]+`").unwrap();
-    pub static ref BOLD_ASTERISK_REGEX: Regex = Regex::new(r"\*\*(.+?)\*\*").unwrap();
-    pub static ref BOLD_UNDERSCORE_REGEX: Regex = Regex::new(r"__(.+?)__").unwrap();
-    pub static ref ITALIC_ASTERISK_REGEX: Regex = Regex::new(r"\*([^*]+?)\*").unwrap();
-    pub static ref ITALIC_UNDERSCORE_REGEX: Regex = Regex::new(r"_([^_]+?)_").unwrap();
-    pub static ref LINK_TEXT_FULL_REGEX: FancyRegex = FancyRegex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap();
-    pub static ref STRIKETHROUGH_REGEX: Regex = Regex::new(r"~~(.+?)~~").unwrap();
-    pub static ref MULTIPLE_HYPHENS: Regex = Regex::new(r"-{2,}").unwrap();
-    pub static ref TOC_SECTION_START: Regex = Regex::new(r"^#+\s*(?:Table of Contents|Contents|TOC)\s*$").unwrap();
+// MD051 specific patterns
+pub static INLINE_CODE_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"`[^`]+`").unwrap());
+pub static BOLD_ASTERISK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*(.+?)\*\*").unwrap());
+pub static BOLD_UNDERSCORE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"__(.+?)__").unwrap());
+pub static ITALIC_ASTERISK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*([^*]+?)\*").unwrap());
+pub static ITALIC_UNDERSCORE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"_([^_]+?)_").unwrap());
+pub static LINK_TEXT_FULL_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
+pub static STRIKETHROUGH_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"~~(.+?)~~").unwrap());
+pub static MULTIPLE_HYPHENS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-{2,}").unwrap());
+pub static TOC_SECTION_START: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^#+\s*(?:Table of Contents|Contents|TOC)\s*$").unwrap());
 
-    // Blockquote patterns
-    pub static ref BLOCKQUOTE_PREFIX_RE: Regex = Regex::new(r"^(\s*>+\s*)").unwrap();
+// Blockquote patterns
+pub static BLOCKQUOTE_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*>+\s*)").unwrap());
 
-    // MD013 specific patterns
-    pub static ref IMAGE_REF_PATTERN: Regex = Regex::new(r"^!\[.*?\]\[.*?\]$").unwrap();
-    pub static ref LINK_REF_PATTERN: Regex = Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap();
-    pub static ref URL_IN_TEXT: Regex = Regex::new(r"https?://\S+").unwrap();
-    pub static ref SENTENCE_END: Regex = Regex::new(r"[.!?]\s+[A-Z]").unwrap();
-    pub static ref ABBREVIATION: Regex = Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap();
-    pub static ref DECIMAL_NUMBER: Regex = Regex::new(r"\d+\.\s*\d+").unwrap();
-    pub static ref LIST_ITEM: Regex = Regex::new(r"^\s*\d+\.\s+").unwrap();
-    pub static ref REFERENCE_LINK: Regex = Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap();
+// MD013 specific patterns
+pub static IMAGE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^!\[.*?\]\[.*?\]$").unwrap());
+pub static LINK_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap());
+pub static URL_IN_TEXT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://\S+").unwrap());
+pub static SENTENCE_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[.!?]\s+[A-Z]").unwrap());
+pub static ABBREVIATION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap()
+});
+pub static DECIMAL_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+\.\s*\d+").unwrap());
+pub static LIST_ITEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\d+\.\s+").unwrap());
+pub static REFERENCE_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap());
 
-    // Email pattern
-    pub static ref EMAIL_PATTERN: Regex = Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap();
-}
+// Email pattern
+pub static EMAIL_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap());
 
 // Third lazy_static block for link and image patterns used by MD052 and text_reflow
-lazy_static! {
-    // Reference link patterns (shared by MD052 and text_reflow)
-    // Pattern to match reference links: [text][reference] or [text][]
-    pub static ref REF_LINK_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
+// Reference link patterns (shared by MD052 and text_reflow)
+// Pattern to match reference links: [text][reference] or [text][]
+pub static REF_LINK_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap());
 
-    // Pattern for shortcut reference links: [reference]
-    // Must not be preceded by ] or ) (to avoid matching second part of [text][ref])
-    // Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
-    // The capturing group handles nested brackets to support cases like [`Union[T, None]`]
-    pub static ref SHORTCUT_REF_REGEX: FancyRegex = FancyRegex::new(r"(?<![\\)\]])\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\](?!\s*[\[\(])").unwrap();
+// Pattern for shortcut reference links: [reference]
+// Must not be preceded by ] or ) (to avoid matching second part of [text][ref])
+// Must not be followed by [ or ( (to avoid matching first part of [text][ref] or [text](url))
+// The capturing group handles nested brackets to support cases like [`Union[T, None]`]
+pub static SHORTCUT_REF_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"(?<![\\)\]])\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\](?!\s*[\[\(])").unwrap());
 
-    // Inline link with fancy regex for better escaping handling (used by text_reflow)
-    pub static ref INLINE_LINK_FANCY_REGEX: FancyRegex = FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap();
+// Inline link with fancy regex for better escaping handling (used by text_reflow)
+pub static INLINE_LINK_FANCY_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap());
 
-    // Inline image with fancy regex (used by MD052 and text_reflow)
-    pub static ref INLINE_IMAGE_FANCY_REGEX: FancyRegex = FancyRegex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
+// Inline image with fancy regex (used by MD052 and text_reflow)
+pub static INLINE_IMAGE_FANCY_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap());
 
-    // Reference image: ![alt][ref] or ![alt][]
-    pub static ref REF_IMAGE_REGEX: FancyRegex = FancyRegex::new(r"!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap();
+// Reference image: ![alt][ref] or ![alt][]
+pub static REF_IMAGE_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap());
 
-    // Footnote reference: [^note]
-    pub static ref FOOTNOTE_REF_REGEX: FancyRegex = FancyRegex::new(r"\[\^([^\]]+)\]").unwrap();
+// Footnote reference: [^note]
+pub static FOOTNOTE_REF_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"\[\^([^\]]+)\]").unwrap());
 
-    // Strikethrough with fancy regex: ~~text~~
-    pub static ref STRIKETHROUGH_FANCY_REGEX: FancyRegex = FancyRegex::new(r"~~([^~]+)~~").unwrap();
+// Strikethrough with fancy regex: ~~text~~
+pub static STRIKETHROUGH_FANCY_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"~~([^~]+)~~").unwrap());
 
-    // Wiki-style links: [[wiki]] or [[wiki|display text]]
-    pub static ref WIKI_LINK_REGEX: FancyRegex = FancyRegex::new(r"\[\[([^\]]+)\]\]").unwrap();
+// Wiki-style links: [[wiki]] or [[wiki|display text]]
+pub static WIKI_LINK_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"\[\[([^\]]+)\]\]").unwrap());
 
-    // Math formulas: $inline$ or $$display$$
-    pub static ref INLINE_MATH_REGEX: FancyRegex = FancyRegex::new(r"(?<!\$)\$(?!\$)([^\$]+)\$(?!\$)").unwrap();
-    pub static ref DISPLAY_MATH_REGEX: FancyRegex = FancyRegex::new(r"\$\$([^\$]+)\$\$").unwrap();
+// Math formulas: $inline$ or $$display$$
+pub static INLINE_MATH_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"(?<!\$)\$(?!\$)([^\$]+)\$(?!\$)").unwrap());
+pub static DISPLAY_MATH_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"\$\$([^\$]+)\$\$").unwrap());
 
-    // Emoji shortcodes: :emoji:
-    pub static ref EMOJI_SHORTCODE_REGEX: FancyRegex = FancyRegex::new(r":([a-zA-Z0-9_+-]+):").unwrap();
+// Emoji shortcodes: :emoji:
+pub static EMOJI_SHORTCODE_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r":([a-zA-Z0-9_+-]+):").unwrap());
 
-    // HTML tags (opening, closing, self-closing)
-    pub static ref HTML_TAG_PATTERN: FancyRegex = FancyRegex::new(r"</?[a-zA-Z][^>]*>|<[a-zA-Z][^>]*/\s*>").unwrap();
+// HTML tags (opening, closing, self-closing)
+pub static HTML_TAG_PATTERN: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"</?[a-zA-Z][^>]*>|<[a-zA-Z][^>]*/\s*>").unwrap());
 
-    // HTML entities: &nbsp; &mdash; etc
-    pub static ref HTML_ENTITY_REGEX: FancyRegex = FancyRegex::new(r"&[a-zA-Z][a-zA-Z0-9]*;|&#\d+;|&#x[0-9a-fA-F]+;").unwrap();
-}
+// HTML entities: &nbsp; &mdash; etc
+pub static HTML_ENTITY_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"&[a-zA-Z][a-zA-Z0-9]*;|&#\d+;|&#x[0-9a-fA-F]+;").unwrap());
 
 // Fourth lazy_static block for additional patterns
-lazy_static! {
-    // HTML comment patterns
-    pub static ref HTML_COMMENT_START: Regex = Regex::new(r"<!--").unwrap();
-    pub static ref HTML_COMMENT_END: Regex = Regex::new(r"-->").unwrap();
-    pub static ref HTML_COMMENT_PATTERN: Regex = Regex::new(r"<!--[\s\S]*?-->").unwrap();
+// HTML comment patterns
+pub static HTML_COMMENT_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--").unwrap());
+pub static HTML_COMMENT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-->").unwrap());
+pub static HTML_COMMENT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--[\s\S]*?-->").unwrap());
 
-    // HTML heading pattern (matches <h1> through <h6> tags)
-    pub static ref HTML_HEADING_PATTERN: FancyRegex = FancyRegex::new(r"^\s*<h([1-6])(?:\s[^>]*)?>.*</h\1>\s*$").unwrap();
+// HTML heading pattern (matches <h1> through <h6> tags)
+pub static HTML_HEADING_PATTERN: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"^\s*<h([1-6])(?:\s[^>]*)?>.*</h\1>\s*$").unwrap());
 
-    // Heading quick check pattern
-    pub static ref HEADING_CHECK: Regex = Regex::new(r"(?m)^(?:\s*)#").unwrap();
+// Heading quick check pattern
+pub static HEADING_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^(?:\s*)#").unwrap());
 
-    // Horizontal rule patterns
-    pub static ref HR_DASH: Regex = Regex::new(r"^\-{3,}\s*$").unwrap();
-    pub static ref HR_ASTERISK: Regex = Regex::new(r"^\*{3,}\s*$").unwrap();
-    pub static ref HR_UNDERSCORE: Regex = Regex::new(r"^_{3,}\s*$").unwrap();
-    pub static ref HR_SPACED_DASH: Regex = Regex::new(r"^(\-\s+){2,}\-\s*$").unwrap();
-    pub static ref HR_SPACED_ASTERISK: Regex = Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap();
-    pub static ref HR_SPACED_UNDERSCORE: Regex = Regex::new(r"^(_\s+){2,}_\s*$").unwrap();
-}
+// Horizontal rule patterns
+pub static HR_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\-{3,}\s*$").unwrap());
+pub static HR_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\*{3,}\s*$").unwrap());
+pub static HR_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^_{3,}\s*$").unwrap());
+pub static HR_SPACED_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\-\s+){2,}\-\s*$").unwrap());
+pub static HR_SPACED_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap());
+pub static HR_SPACED_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(_\s+){2,}_\s*$").unwrap());
 
 /// Utility functions for quick content checks
 /// Check if content contains any headings (quick check before regex)

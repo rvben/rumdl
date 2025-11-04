@@ -1,3 +1,4 @@
+use regex::Regex;
 /// MkDocs Admonitions detection utilities
 ///
 /// The Admonitions extension provides specially-styled content blocks for
@@ -10,28 +11,21 @@
 /// - `!!! note` - Admonition without title (uses type as title)
 /// - `!!! type inline` - Inline admonition (left-aligned)
 /// - `!!! type inline end` - Inline admonition (right-aligned)
-use lazy_static::lazy_static;
-use regex::Regex;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Pattern to match admonition start markers
-    /// Matches: !!! type, ??? type, ???+ type, with optional "title" and modifiers
-    /// Type must be alphanumeric with optional dashes/underscores (no special chars)
-    /// Lenient: accepts unclosed quotes for real-world markdown handling
-    static ref ADMONITION_START: Regex = Regex::new(
-        r#"^(\s*)(?:!!!|\?\?\?\+?)\s+([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+(?:inline(?:\s+end)?))?.*$"#
-    ).unwrap();
+/// Pattern to match admonition start markers
+/// Matches: !!! type, ??? type, ???+ type, with optional "title" and modifiers
+/// Type must be alphanumeric with optional dashes/underscores (no special chars)
+/// Lenient: accepts unclosed quotes for real-world markdown handling
+static ADMONITION_START: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^(\s*)(?:!!!|\?\?\?\+?)\s+([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+(?:inline(?:\s+end)?))?.*$"#).unwrap()
+});
 
-    /// Pattern to match just the admonition marker without capturing groups
-    static ref ADMONITION_MARKER: Regex = Regex::new(
-        r"^(\s*)(?:!!!|\?\?\?\+?)\s+"
-    ).unwrap();
+/// Pattern to match just the admonition marker without capturing groups
+static ADMONITION_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(?:!!!|\?\?\?\+?)\s+").unwrap());
 
-    /// Pattern to validate admonition type characters
-    static ref VALID_TYPE: Regex = Regex::new(
-        r"^[a-zA-Z][a-zA-Z0-9_-]*$"
-    ).unwrap();
-}
+/// Pattern to validate admonition type characters
+static VALID_TYPE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z][a-zA-Z0-9_-]*$").unwrap());
 
 // Common admonition types recognized by MkDocs
 // Note: Any word is valid as a custom type, so this list is informational
