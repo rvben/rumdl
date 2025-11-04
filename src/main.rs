@@ -35,6 +35,22 @@ mod watch;
 /// Threshold for using memory-mapped I/O (1MB)
 const MMAP_THRESHOLD: u64 = 1024 * 1024;
 
+/// Prompt user for input and read their response
+/// Returns None if I/O errors occur (stdin closed, pipe broken, etc.)
+fn prompt_user(prompt: &str) -> Option<String> {
+    print!("{prompt}");
+    if io::stdout().flush().is_err() {
+        return None;
+    }
+
+    let mut answer = String::new();
+    if io::stdin().read_line(&mut answer).is_err() {
+        return None;
+    }
+
+    Some(answer)
+}
+
 /// Handle the schema subcommand
 fn handle_schema_command(action: SchemaAction) {
     use schemars::schema_for;
@@ -445,11 +461,11 @@ fn offer_vscode_extension_install() {
     if let Some((cmd, editor_name)) = VsCodeExtension::current_editor_from_env() {
         println!("\nDetected you're using {}.", editor_name.green());
         println!("Would you like to install the rumdl extension? [Y/n]");
-        print!("> ");
-        io::stdout().flush().unwrap();
 
-        let mut answer = String::new();
-        io::stdin().read_line(&mut answer).unwrap();
+        let answer = match prompt_user("> ") {
+            Some(a) => a,
+            None => return, // I/O error, exit gracefully
+        };
 
         if answer.trim().is_empty() || answer.trim().eq_ignore_ascii_case("y") {
             match VsCodeExtension::with_command(cmd) {
@@ -476,11 +492,11 @@ fn offer_vscode_extension_install() {
                 let (cmd, editor_name) = available_editors[0];
                 println!("\n{} detected.", editor_name.green());
                 println!("Would you like to install the rumdl extension for real-time linting? [y/N]");
-                print!("> ");
-                io::stdout().flush().unwrap();
 
-                let mut answer = String::new();
-                io::stdin().read_line(&mut answer).unwrap();
+                let answer = match prompt_user("> ") {
+                    Some(a) => a,
+                    None => return, // I/O error, exit gracefully
+                };
 
                 if answer.trim().eq_ignore_ascii_case("y") {
                     match VsCodeExtension::with_command(cmd) {
@@ -505,12 +521,11 @@ fn offer_vscode_extension_install() {
                     "\nInstall the rumdl extension? [1-{}/a=all/n=none]:",
                     available_editors.len()
                 );
-                print!("> ");
-                io::stdout().flush().unwrap();
 
-                let mut answer = String::new();
-                io::stdin().read_line(&mut answer).unwrap();
-                let answer = answer.trim().to_lowercase();
+                let answer = match prompt_user("> ") {
+                    Some(a) => a.trim().to_lowercase(),
+                    None => return, // I/O error, exit gracefully
+                };
 
                 if answer == "a" || answer == "all" {
                     // Install in all editors
@@ -575,11 +590,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if Path::new("pyproject.toml").exists() {
                         // pyproject.toml exists, ask to append
                         println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
-                        print!("> ");
-                        io::stdout().flush().unwrap();
 
-                        let mut answer = String::new();
-                        io::stdin().read_line(&mut answer).unwrap();
+                        let answer = match prompt_user("> ") {
+                            Some(a) => a,
+                            None => {
+                                eprintln!("Error: Failed to read user input");
+                                exit::tool_error();
+                            }
+                        };
 
                         if answer.trim().eq_ignore_ascii_case("y") {
                             // Append to existing file

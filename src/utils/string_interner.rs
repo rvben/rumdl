@@ -50,7 +50,7 @@ lazy_static! {
 
 /// Intern a string globally
 pub fn intern_string(s: &str) -> Arc<str> {
-    let mut interner = GLOBAL_INTERNER.lock().unwrap();
+    let mut interner = GLOBAL_INTERNER.lock().expect("String interner mutex poisoned");
     interner.intern(s)
 }
 

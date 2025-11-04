@@ -449,7 +449,12 @@ impl ElementCache {
                     "*" => ListMarkerType::Asterisk,
                     "+" => ListMarkerType::Plus,
                     "-" => ListMarkerType::Minus,
-                    _ => unreachable!(),
+                    other => {
+                        // This should never happen due to regex validation,
+                        // but default to dash if it does
+                        eprintln!("Warning: Unexpected list marker '{other}', defaulting to dash");
+                        ListMarkerType::Minus
+                    }
                 };
                 let nesting_level = self.calculate_nesting_level(indentation, blockquote_depth, prev_items);
                 // Find parent: most recent previous item with lower nesting_level and same blockquote depth
@@ -525,7 +530,7 @@ lazy_static! {
 pub fn get_element_cache(content: &str) -> ElementCache {
     // Try to get existing cache
     {
-        let cache_guard = ELEMENT_CACHE.lock().unwrap();
+        let cache_guard = ELEMENT_CACHE.lock().expect("Element cache mutex poisoned");
 
         // If cache exists and content matches, return it
         if let Some(existing_cache) = &*cache_guard
@@ -541,7 +546,7 @@ pub fn get_element_cache(content: &str) -> ElementCache {
 
     // Store in global cache
     {
-        let mut cache_guard = ELEMENT_CACHE.lock().unwrap();
+        let mut cache_guard = ELEMENT_CACHE.lock().expect("Element cache mutex poisoned");
         *cache_guard = Some(new_cache.clone());
     }
 
@@ -550,7 +555,7 @@ pub fn get_element_cache(content: &str) -> ElementCache {
 
 /// Reset the element cache
 pub fn reset_element_cache() {
-    let mut cache_guard = ELEMENT_CACHE.lock().unwrap();
+    let mut cache_guard = ELEMENT_CACHE.lock().expect("Element cache mutex poisoned");
     *cache_guard = None;
 }
 

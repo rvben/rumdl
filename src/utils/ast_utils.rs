@@ -77,19 +77,19 @@ lazy_static! {
 
 /// Get or parse AST from the global cache
 pub fn get_cached_ast(content: &str) -> Arc<MarkdownAst> {
-    let mut cache = GLOBAL_AST_CACHE.lock().unwrap();
+    let mut cache = GLOBAL_AST_CACHE.lock().expect("AST cache mutex poisoned");
     cache.get_or_parse(content)
 }
 
 /// Get AST cache statistics
 pub fn get_ast_cache_stats() -> HashMap<u64, u64> {
-    let cache = GLOBAL_AST_CACHE.lock().unwrap();
+    let cache = GLOBAL_AST_CACHE.lock().expect("AST cache mutex poisoned");
     cache.get_stats()
 }
 
 /// Clear the global AST cache
 pub fn clear_ast_cache() {
-    let mut cache = GLOBAL_AST_CACHE.lock().unwrap();
+    let mut cache = GLOBAL_AST_CACHE.lock().expect("AST cache mutex poisoned");
     cache.clear();
 }
 

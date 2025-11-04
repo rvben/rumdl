@@ -602,64 +602,53 @@ impl<'a> LintContext<'a> {
 
     /// Get code spans - computed lazily on first access
     pub fn code_spans(&self) -> Arc<Vec<CodeSpan>> {
-        let mut cache = self.code_spans_cache.lock().unwrap();
+        let mut cache = self.code_spans_cache.lock().expect("Code spans cache mutex poisoned");
 
-        // Check if we need to compute code spans
-        if cache.is_none() {
-            let code_spans = Self::parse_code_spans(self.content, &self.lines);
-            *cache = Some(Arc::new(code_spans));
-        }
-
-        // Return a reference to the cached code spans
-        cache.as_ref().unwrap().clone()
+        Arc::clone(cache.get_or_insert_with(|| Arc::new(Self::parse_code_spans(self.content, &self.lines))))
     }
 
     /// Get HTML tags - computed lazily on first access
     pub fn html_tags(&self) -> Arc<Vec<HtmlTag>> {
-        let mut cache = self.html_tags_cache.lock().unwrap();
+        let mut cache = self.html_tags_cache.lock().expect("HTML tags cache mutex poisoned");
 
-        if cache.is_none() {
-            let html_tags = Self::parse_html_tags(self.content, &self.lines, &self.code_blocks, self.flavor);
-            *cache = Some(Arc::new(html_tags));
-        }
-
-        cache.as_ref().unwrap().clone()
+        Arc::clone(cache.get_or_insert_with(|| {
+            Arc::new(Self::parse_html_tags(
+                self.content,
+                &self.lines,
+                &self.code_blocks,
+                self.flavor,
+            ))
+        }))
     }
 
     /// Get emphasis spans - computed lazily on first access
     pub fn emphasis_spans(&self) -> Arc<Vec<EmphasisSpan>> {
-        let mut cache = self.emphasis_spans_cache.lock().unwrap();
+        let mut cache = self
+            .emphasis_spans_cache
+            .lock()
+            .expect("Emphasis spans cache mutex poisoned");
 
-        if cache.is_none() {
-            let emphasis_spans = Self::parse_emphasis_spans(self.content, &self.lines, &self.code_blocks);
-            *cache = Some(Arc::new(emphasis_spans));
-        }
-
-        cache.as_ref().unwrap().clone()
+        Arc::clone(
+            cache.get_or_insert_with(|| {
+                Arc::new(Self::parse_emphasis_spans(self.content, &self.lines, &self.code_blocks))
+            }),
+        )
     }
 
     /// Get table rows - computed lazily on first access
     pub fn table_rows(&self) -> Arc<Vec<TableRow>> {
-        let mut cache = self.table_rows_cache.lock().unwrap();
+        let mut cache = self.table_rows_cache.lock().expect("Table rows cache mutex poisoned");
 
-        if cache.is_none() {
-            let table_rows = Self::parse_table_rows(&self.lines);
-            *cache = Some(Arc::new(table_rows));
-        }
-
-        cache.as_ref().unwrap().clone()
+        Arc::clone(cache.get_or_insert_with(|| Arc::new(Self::parse_table_rows(&self.lines))))
     }
 
     /// Get bare URLs - computed lazily on first access
     pub fn bare_urls(&self) -> Arc<Vec<BareUrl>> {
-        let mut cache = self.bare_urls_cache.lock().unwrap();
+        let mut cache = self.bare_urls_cache.lock().expect("Bare URLs cache mutex poisoned");
 
-        if cache.is_none() {
-            let bare_urls = Self::parse_bare_urls(self.content, &self.lines, &self.code_blocks);
-            *cache = Some(Arc::new(bare_urls));
-        }
-
-        cache.as_ref().unwrap().clone()
+        Arc::clone(
+            cache.get_or_insert_with(|| Arc::new(Self::parse_bare_urls(self.content, &self.lines, &self.code_blocks))),
+        )
     }
 
     /// Map a byte offset to (line, column)

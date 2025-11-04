@@ -675,7 +675,7 @@ pub fn process_file_inner(
 
     // Try to get from cache first (lock briefly for cache read)
     if let Some(ref cache_arc) = cache {
-        let mut cache_guard = cache_arc.lock().unwrap();
+        let mut cache_guard = cache_arc.lock().expect("Cache mutex poisoned");
         if let Some(cached_warnings) = cache_guard.get(&content, &config_hash, &rules_hash) {
             drop(cache_guard); // Release lock immediately
 
@@ -779,7 +779,7 @@ pub fn process_file_inner(
 
     // Store in cache before returning (lock briefly for cache write)
     if let Some(ref cache_arc) = cache {
-        let mut cache_guard = cache_arc.lock().unwrap();
+        let mut cache_guard = cache_arc.lock().expect("Cache mutex poisoned");
         cache_guard.set(&content, &config_hash, &rules_hash, all_warnings.clone());
         // Unlock happens automatically when cache_guard goes out of scope
     }

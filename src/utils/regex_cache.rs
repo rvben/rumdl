@@ -99,25 +99,34 @@ lazy_static! {
 
 /// Get a regex from the global cache
 pub fn get_cached_regex(pattern: &str) -> Result<Arc<Regex>, regex::Error> {
-    let mut cache = GLOBAL_REGEX_CACHE.lock().unwrap();
+    let mut cache = GLOBAL_REGEX_CACHE.lock().expect("Regex cache mutex poisoned");
     cache.get_regex(pattern)
 }
 
 /// Get a fancy regex from the global cache
 pub fn get_cached_fancy_regex(pattern: &str) -> Result<Arc<FancyRegex>, Box<fancy_regex::Error>> {
-    let mut cache = GLOBAL_REGEX_CACHE.lock().unwrap();
+    let mut cache = GLOBAL_REGEX_CACHE.lock().expect("Regex cache mutex poisoned");
     cache.get_fancy_regex(pattern)
 }
 
 /// Get cache usage statistics
 pub fn get_cache_stats() -> HashMap<String, u64> {
-    let cache = GLOBAL_REGEX_CACHE.lock().unwrap();
+    let cache = GLOBAL_REGEX_CACHE.lock().expect("Regex cache mutex poisoned");
     cache.get_stats()
 }
 
 /// Macro for defining a lazily-initialized, cached regex pattern.
+///
 /// Use this for ad-hoc regexes that are not already defined in this module.
-/// Example:
+///
+/// # Panics
+///
+/// This macro will panic at initialization if the regex pattern is invalid.
+/// This is intentional for compile-time constant patterns - we want to catch
+/// invalid patterns during development, not at runtime.
+///
+/// # Example
+///
 /// ```
 /// use rumdl_lib::regex_lazy;
 /// let my_re = regex_lazy!(r"^foo.*bar$");
@@ -133,13 +142,23 @@ macro_rules! regex_lazy {
     }};
 }
 
-/// Macro for getting regex from global cache
+/// Macro for getting regex from global cache.
+///
+/// # Panics
+///
+/// Panics if the regex pattern is invalid. This is acceptable for static patterns
+/// where we want to fail fast during development.
 #[macro_export]
 macro_rules! regex_cached {
     ($pattern:expr) => {{ $crate::utils::regex_cache::get_cached_regex($pattern).expect("Failed to compile regex") }};
 }
 
-/// Macro for getting fancy regex from global cache
+/// Macro for getting fancy regex from global cache.
+///
+/// # Panics
+///
+/// Panics if the regex pattern is invalid. This is acceptable for static patterns
+/// where we want to fail fast during development.
 #[macro_export]
 macro_rules! fancy_regex_cached {
     ($pattern:expr) => {{ $crate::utils::regex_cache::get_cached_fancy_regex($pattern).expect("Failed to compile fancy regex") }};

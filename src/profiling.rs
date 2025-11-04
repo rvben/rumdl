@@ -115,7 +115,7 @@ impl Profiler {
 /// Start a timer for a section
 pub fn start_timer(section: &str) {
     if PROFILING_ENABLED {
-        let mut profiler = PROFILER.lock().unwrap();
+        let mut profiler = PROFILER.lock().expect("Profiler mutex poisoned");
         profiler.start_timer(section);
     }
 }
@@ -123,7 +123,7 @@ pub fn start_timer(section: &str) {
 /// Stop a timer for a section
 pub fn stop_timer(section: &str) {
     if PROFILING_ENABLED {
-        let mut profiler = PROFILER.lock().unwrap();
+        let mut profiler = PROFILER.lock().expect("Profiler mutex poisoned");
         profiler.stop_timer(section);
     }
 }
@@ -131,7 +131,7 @@ pub fn stop_timer(section: &str) {
 /// Get a report of all measurements
 pub fn get_report() -> String {
     if PROFILING_ENABLED {
-        let profiler = PROFILER.lock().unwrap();
+        let profiler = PROFILER.lock().expect("Profiler mutex poisoned");
         profiler.get_report()
     } else {
         "Profiling is disabled.".to_string()
@@ -141,7 +141,7 @@ pub fn get_report() -> String {
 /// Reset all measurements
 pub fn reset() {
     if PROFILING_ENABLED {
-        let mut profiler = PROFILER.lock().unwrap();
+        let mut profiler = PROFILER.lock().expect("Profiler mutex poisoned");
         profiler.reset();
     }
 }

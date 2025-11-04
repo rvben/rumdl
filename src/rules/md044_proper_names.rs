@@ -208,7 +208,7 @@ impl MD044ProperNames {
         let hash = fast_hash(content);
         {
             // Use a separate scope for borrowing to minimize lock time
-            let cache = self.content_cache.lock().unwrap();
+            let cache = self.content_cache.lock().expect("MD044 content cache mutex poisoned");
             if let Some(cached) = cache.get(&hash) {
                 return cached.clone();
             }
@@ -329,7 +329,10 @@ impl MD044ProperNames {
         }
 
         // Store in cache
-        self.content_cache.lock().unwrap().insert(hash, violations.clone());
+        self.content_cache
+            .lock()
+            .expect("MD044 content cache mutex poisoned")
+            .insert(hash, violations.clone());
         violations
     }
 

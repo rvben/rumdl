@@ -22,13 +22,17 @@ lazy_static! {
 
 // Reset the file existence cache (typically between rule runs)
 fn reset_file_existence_cache() {
-    let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
+    let mut cache = FILE_EXISTENCE_CACHE
+        .lock()
+        .expect("File existence cache mutex poisoned");
     cache.clear();
 }
 
 // Check if a file exists with caching
 fn file_exists_with_cache(path: &Path) -> bool {
-    let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
+    let mut cache = FILE_EXISTENCE_CACHE
+        .lock()
+        .expect("File existence cache mutex poisoned");
     *cache.entry(path.to_path_buf()).or_insert_with(|| path.exists())
 }
 
@@ -86,7 +90,7 @@ impl MD057ExistingRelativeLinks {
             Some(path.to_path_buf())
         };
 
-        *self.base_path.lock().unwrap() = dir_path;
+        *self.base_path.lock().expect("Base path mutex poisoned") = dir_path;
         self
     }
 
@@ -233,7 +237,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Cache base path lookup to avoid repeated mutex operations
         let base_path = {
-            let base_path_guard = self.base_path.lock().unwrap();
+            let base_path_guard = self.base_path.lock().expect("Base path mutex poisoned");
             if base_path_guard.is_some() {
                 base_path_guard.clone()
             } else {
