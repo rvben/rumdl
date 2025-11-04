@@ -108,6 +108,20 @@
             "mkdocs"
           ],
           "type": "string"
+        },
+        {
+          "description": "MDX flavor with JSX and ESM support (.mdx files)",
+          "enum": [
+            "mdx"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Quarto/RMarkdown flavor for scientific publishing (.qmd, .Rmd files)",
+          "enum": [
+            "quarto"
+          ],
+          "type": "string"
         }
       ]
     },
