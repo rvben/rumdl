@@ -554,16 +554,19 @@ fn test_md042_nested_links() {
     let rule = MD042NoEmptyLinks::new();
 
     // Test 10: Nested link-like structures
+    // Per CommonMark: brackets in URL destinations break link syntax
+    // So [](url [not a link]) is NOT detected as a link
     let content = "\
 [Link [with] brackets](url)
 [Link (with) parens](url)
 [[Double brackets]](url)
-[](url [not a link])";
+[](url)";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Last one has empty text
-    assert!(!result.is_empty(), "Should detect empty text in last link");
+    // Last link has empty text
+    assert_eq!(result.len(), 1, "Should detect empty text in last link");
+    assert!(result[0].message.contains("Empty link found:"));
 }
 
 #[test]

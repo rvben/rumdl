@@ -943,14 +943,19 @@ Fragment tests:
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag ambiguous paths + invalid fragment = 4 warnings
-    // 3 ambiguous paths (#section) + 1 missing fragment
+    // Should flag 2 ambiguous paths + 1 invalid fragment = 3 warnings
+    // Note: [Spaces no extension](my file#section) is NOT detected because pulldown-cmark
+    // correctly rejects URLs with unencoded spaces per CommonMark spec
+    // Detected links:
+    // - [Special chars no extension](file@name#section) → ambiguous, warns about #section
+    // - [Unicode no extension](文档#section) → ambiguous, warns about #section
+    // - [Invalid](#missing-heading) → invalid fragment
     // Note: #café--restaurant should NOT be flagged as it matches "Café & Restaurant" heading
     // (& becomes -- per GitHub spec)
     assert_eq!(
         result.len(),
-        4,
-        "Expected 4 warnings: 3 ambiguous paths + 1 invalid fragment"
+        3,
+        "Expected 3 warnings: 2 ambiguous paths + 1 invalid fragment"
     );
 
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
@@ -958,7 +963,7 @@ Fragment tests:
     let contains_missing = warning_messages.iter().any(|msg| msg.contains("missing-heading"));
     let contains_cafe = warning_messages.iter().any(|msg| msg.contains("café-restaurant"));
 
-    assert_eq!(contains_section, 3, "Should have 3 warnings about #section fragment");
+    assert_eq!(contains_section, 2, "Should have 2 warnings about #section fragment");
     assert!(contains_missing, "Should warn about #missing-heading fragment");
     assert!(
         !contains_cafe,
@@ -1072,17 +1077,24 @@ Fragment tests with normalization:
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag the invalid fragment variations (case-insensitive matching is correct)
-    assert_eq!(result.len(), 2, "Expected 2 warnings for invalid fragment variations");
+    // Should flag only the invalid symbol fragment
+    // Note: [Invalid spacing](#multiple   spaces) is NOT detected because pulldown-cmark
+    // correctly rejects URLs with unencoded spaces per CommonMark spec
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected 1 warning for invalid fragment with unencoded &"
+    );
 
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
     let contains_symbols = warning_messages
         .iter()
         .any(|msg| msg.contains("special-characters-&-symbols"));
-    let contains_spacing = warning_messages.iter().any(|msg| msg.contains("multiple   spaces"));
 
-    assert!(contains_symbols, "Should warn about symbol fragment");
-    assert!(contains_spacing, "Should warn about spacing fragment");
+    assert!(
+        contains_symbols,
+        "Should warn about & symbol in fragment (should be --)"
+    );
 }
 
 #[test]
