@@ -749,6 +749,11 @@ impl MD052ReferenceLinkImages {
                             let line_start_byte = ctx.line_offsets[line_num];
                             let byte_pos = line_start_byte + col;
 
+                            // Skip if inside Jinja template
+                            if ctx.is_in_jinja_range(byte_pos) {
+                                continue;
+                            }
+
                             // Skip if inside code block
                             if crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block(
                                 &ctx.code_blocks,
