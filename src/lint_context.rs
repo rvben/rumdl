@@ -967,8 +967,8 @@ impl<'a> LintContext<'a> {
         // - Reference resolution (dest_url is already resolved!)
         let parser = Parser::new(content).into_offset_iter();
 
-        let mut link_stack: Vec<(usize, String, LinkType, String)> = Vec::new();
-        let mut text_buffer = String::new();
+        let mut link_stack: Vec<(usize, usize, String, LinkType, String)> = Vec::new();
+        let mut text_chunks: Vec<(String, usize, usize)> = Vec::new(); // (text, start, end)
 
         for (event, range) in parser {
             match event {
@@ -979,24 +979,23 @@ impl<'a> LintContext<'a> {
                     ..
                 }) => {
                     // Link start - record position, URL, and reference ID
-                    link_stack.push((range.start, dest_url.to_string(), link_type, id.to_string()));
-                    text_buffer.clear();
+                    link_stack.push((range.start, range.end, dest_url.to_string(), link_type, id.to_string()));
+                    text_chunks.clear();
                 }
                 Event::Text(text) if !link_stack.is_empty() => {
-                    // Accumulate text content for the link
-                    text_buffer.push_str(&text);
+                    // Track text content with its byte range
+                    text_chunks.push((text.to_string(), range.start, range.end));
                 }
                 Event::Code(code) if !link_stack.is_empty() => {
                     // Include inline code in link text (with backticks)
-                    text_buffer.push('`');
-                    text_buffer.push_str(&code);
-                    text_buffer.push('`');
+                    let code_text = format!("`{code}`");
+                    text_chunks.push((code_text, range.start, range.end));
                 }
                 Event::End(TagEnd::Link) => {
-                    if let Some((start_pos, url, link_type, ref_id)) = link_stack.pop() {
+                    if let Some((start_pos, _link_start_end, url, link_type, ref_id)) = link_stack.pop() {
                         // Skip if in HTML comment
                         if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
-                            text_buffer.clear();
+                            text_chunks.clear();
                             continue;
                         }
 
@@ -1005,7 +1004,7 @@ impl<'a> LintContext<'a> {
 
                         // Skip if this link is on a MkDocs snippet line
                         if is_mkdocs_snippet_line(&lines[line_idx].content, flavor) {
-                            text_buffer.clear();
+                            text_chunks.clear();
                             continue;
                         }
 
@@ -1016,12 +1015,31 @@ impl<'a> LintContext<'a> {
                             LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
                         );
 
+                        // Always extract link text from source bytes to preserve exact whitespace
+                        // pulldown-cmark strips newlines from Text events, so we can't rely on them alone
+                        let link_text = if start_pos < content.len() {
+                            let link_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
+                            // Find first ] to get the link text
+                            if let Some(close_pos) = link_bytes.iter().position(|&b| b == b']') {
+                                if close_pos > 1 {
+                                    // Extract between [ and ]
+                                    std::str::from_utf8(&link_bytes[1..close_pos]).unwrap_or("").to_string()
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            }
+                        } else {
+                            String::new()
+                        };
+
                         // For reference links, use the actual reference ID from pulldown-cmark
                         let reference_id = if is_reference && !ref_id.is_empty() {
                             Some(ref_id.to_lowercase())
                         } else if is_reference {
                             // For collapsed/shortcut references without explicit ID, use the link text
-                            Some(text_buffer.to_lowercase())
+                            Some(link_text.to_lowercase())
                         } else {
                             None
                         };
@@ -1035,13 +1053,13 @@ impl<'a> LintContext<'a> {
                             end_col: col_end,
                             byte_offset: start_pos,
                             byte_end: range.end,
-                            text: text_buffer.clone(),
+                            text: link_text,
                             url,
                             is_reference,
                             reference_id,
                         });
 
-                        text_buffer.clear();
+                        text_chunks.clear();
                     }
                 }
                 _ => {}
@@ -1134,65 +1152,143 @@ impl<'a> LintContext<'a> {
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     ) -> Vec<ParsedImage> {
         use crate::utils::skip_context::is_in_html_comment_ranges;
+        use std::collections::HashSet;
 
         // Pre-size based on a heuristic: images are less common than links
-        let mut images = Vec::with_capacity(content.len() / 1000); // ~1 image per 1000 chars
+        let mut images = Vec::with_capacity(content.len() / 1000);
+        let mut found_positions = HashSet::new();
 
-        // Parse images across the entire content, not line by line
+        // Use pulldown-cmark for parsing - more accurate and faster
+        let parser = Parser::new(content).into_offset_iter();
+        let mut image_stack: Vec<(usize, String, LinkType, String)> = Vec::new();
+        let mut text_chunks: Vec<(String, usize, usize)> = Vec::new(); // (text, start, end)
+
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::Image {
+                    link_type,
+                    dest_url,
+                    id,
+                    ..
+                }) => {
+                    image_stack.push((range.start, dest_url.to_string(), link_type, id.to_string()));
+                    text_chunks.clear();
+                }
+                Event::Text(text) if !image_stack.is_empty() => {
+                    text_chunks.push((text.to_string(), range.start, range.end));
+                }
+                Event::Code(code) if !image_stack.is_empty() => {
+                    let code_text = format!("`{code}`");
+                    text_chunks.push((code_text, range.start, range.end));
+                }
+                Event::End(TagEnd::Image) => {
+                    if let Some((start_pos, url, link_type, ref_id)) = image_stack.pop() {
+                        // Skip if in code block
+                        if CodeBlockUtils::is_in_code_block(code_blocks, start_pos) {
+                            continue;
+                        }
+
+                        // Skip if in code span
+                        if Self::is_offset_in_code_span(code_spans, start_pos) {
+                            continue;
+                        }
+
+                        // Skip if in HTML comment
+                        if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
+                            continue;
+                        }
+
+                        // Find line and column using binary search
+                        let (_, line_num, col_start) = Self::find_line_for_offset(lines, start_pos);
+                        let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, range.end);
+
+                        let is_reference = matches!(
+                            link_type,
+                            LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
+                        );
+
+                        // Always extract alt text from source bytes to preserve exact whitespace
+                        // pulldown-cmark strips newlines from Text events, so we can't rely on them alone
+                        let alt_text = if start_pos < content.len() {
+                            let image_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
+                            // Find first ] to get the alt text (skip first 2 chars: '![')
+                            if image_bytes.len() > 2 {
+                                if let Some(close_pos) = image_bytes[2..].iter().position(|&b| b == b']') {
+                                    let alt_end = close_pos + 2;
+                                    if alt_end > 2 {
+                                        // Extract between ![ and ]
+                                        std::str::from_utf8(&image_bytes[2..alt_end]).unwrap_or("").to_string()
+                                    } else {
+                                        String::new()
+                                    }
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            }
+                        } else {
+                            String::new()
+                        };
+
+                        let reference_id = if is_reference && !ref_id.is_empty() {
+                            Some(ref_id.to_lowercase())
+                        } else if is_reference {
+                            Some(alt_text.to_lowercase()) // Collapsed/shortcut references
+                        } else {
+                            None
+                        };
+
+                        found_positions.insert(start_pos);
+                        images.push(ParsedImage {
+                            line: line_num,
+                            start_col: col_start,
+                            end_col: col_end,
+                            byte_offset: start_pos,
+                            byte_end: range.end,
+                            alt_text,
+                            url,
+                            is_reference,
+                            reference_id,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Regex fallback for undefined references that pulldown-cmark treats as plain text
         for cap in IMAGE_PATTERN.captures_iter(content) {
             let full_match = cap.get(0).unwrap();
             let match_start = full_match.start();
             let match_end = full_match.end();
 
-            // Skip if the ! is escaped (preceded by \)
+            // Skip if already found by pulldown-cmark
+            if found_positions.contains(&match_start) {
+                continue;
+            }
+
+            // Skip if the ! is escaped
             if match_start > 0 && content.as_bytes().get(match_start - 1) == Some(&b'\\') {
                 continue;
             }
 
-            // Skip if in code block
-            if CodeBlockUtils::is_in_code_block(code_blocks, match_start) {
+            // Skip if in code block, code span, or HTML comment
+            if CodeBlockUtils::is_in_code_block(code_blocks, match_start)
+                || Self::is_offset_in_code_span(code_spans, match_start)
+                || is_in_html_comment_ranges(html_comment_ranges, match_start)
+            {
                 continue;
             }
 
-            // Skip if in code span
-            if Self::is_offset_in_code_span(code_spans, match_start) {
-                continue;
-            }
-
-            // Skip if in HTML comment (using pre-computed ranges for efficiency)
-            if is_in_html_comment_ranges(html_comment_ranges, match_start) {
-                continue;
-            }
-
-            // Use binary search to find the line this image is on
-            let (_, line_num, col_start) = Self::find_line_for_offset(lines, match_start);
-
-            // Use binary search to find the end line
-            let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, match_end);
-
-            let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
-
-            // URL can be in group 2 (angle brackets) or group 3 (bare)
-            let inline_url = cap.get(2).or_else(|| cap.get(3));
-
-            if let Some(url_match) = inline_url {
-                // Inline image
-                images.push(ParsedImage {
-                    line: line_num,
-                    start_col: col_start,
-                    end_col: col_end,
-                    byte_offset: match_start,
-                    byte_end: match_end,
-                    alt_text,
-                    url: url_match.as_str().to_string(),
-                    is_reference: false,
-                    reference_id: None,
-                });
-            } else if let Some(ref_id) = cap.get(6) {
-                // Reference image
+            // Only process reference images (undefined references not found by pulldown-cmark)
+            if let Some(ref_id) = cap.get(6) {
+                let (_, line_num, col_start) = Self::find_line_for_offset(lines, match_start);
+                let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, match_end);
+                let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
                 let ref_id_str = ref_id.as_str();
                 let normalized_ref = if ref_id_str.is_empty() {
-                    alt_text.to_lowercase() // Implicit reference
+                    alt_text.to_lowercase()
                 } else {
                     ref_id_str.to_lowercase()
                 };
@@ -1204,7 +1300,7 @@ impl<'a> LintContext<'a> {
                     byte_offset: match_start,
                     byte_end: match_end,
                     alt_text,
-                    url: String::new(), // Will be resolved with reference_defs
+                    url: String::new(),
                     is_reference: true,
                     reference_id: Some(normalized_ref),
                 });

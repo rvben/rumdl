@@ -218,13 +218,20 @@ fn test_md039_whitespace_only_links() {
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 4, "Should detect whitespace-only links");
+    // CommonMark-compliant: [\n\n\n](url3) is NOT a valid link (blank lines break syntax)
+    // Valid links: [   ](url1), [\t\t\t](url2), [ \t\n ](url4)
+    assert_eq!(
+        result.len(),
+        3,
+        "Should detect 3 CommonMark-compliant whitespace-only links"
+    );
 
     // These should be trimmed to empty
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("[](url1)"));
     assert!(fixed.contains("[](url2)"));
-    assert!(fixed.contains("[](url3)"));
+    // [\n\n\n](url3) is not a link, so it remains unchanged
+    assert!(fixed.contains("[\n\n\n](url3)"));
     assert!(fixed.contains("[](url4)"));
 }
 
