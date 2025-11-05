@@ -356,6 +356,11 @@ impl MD052ReferenceLinkImages {
                 continue; // Skip inline links
             }
 
+            // Skip links inside Jinja templates
+            if ctx.is_in_jinja_range(link.byte_offset) {
+                continue;
+            }
+
             // Skip links inside code spans
             if Self::is_in_code_span(link.line, link.start_col, &code_spans) {
                 continue;
@@ -444,6 +449,11 @@ impl MD052ReferenceLinkImages {
         for image in &ctx.images {
             if !image.is_reference {
                 continue; // Skip inline images
+            }
+
+            // Skip images inside Jinja templates
+            if ctx.is_in_jinja_range(image.byte_offset) {
+                continue;
             }
 
             // Skip images inside code spans
