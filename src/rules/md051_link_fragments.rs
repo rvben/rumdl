@@ -608,6 +608,11 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Skip links inside Jinja templates
+            if ctx.is_in_jinja_range(link.byte_offset) {
+                continue;
+            }
+
             let url = &link.url;
 
             // Skip links without fragments or external URLs

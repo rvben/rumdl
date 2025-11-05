@@ -144,6 +144,11 @@ impl Rule for MD042NoEmptyLinks {
 
         // Use centralized link parsing from LintContext
         for link in &ctx.links {
+            // Skip links inside Jinja templates
+            if ctx.is_in_jinja_range(link.byte_offset) {
+                continue;
+            }
+
             // For reference links, resolve the URL
             let effective_url = if link.is_reference {
                 if let Some(ref_id) = &link.reference_id {
