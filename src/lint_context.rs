@@ -1,7 +1,7 @@
 use crate::config::MarkdownFlavor;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
-use pulldown_cmark::{Event, LinkType, Parser, Tag, TagEnd};
+use pulldown_cmark::{BrokenLink, Event, LinkType, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -129,6 +129,15 @@ pub struct ParsedLink {
     pub is_reference: bool,
     /// Reference ID for reference links
     pub reference_id: Option<String>,
+}
+
+/// Information about a broken link reported by pulldown-cmark
+#[derive(Debug, Clone)]
+pub struct BrokenLinkInfo {
+    /// The reference text that couldn't be resolved
+    pub reference: String,
+    /// Byte span in the source document
+    pub span: std::ops::Range<usize>,
 }
 
 /// Parsed image information
@@ -371,6 +380,7 @@ pub struct LintContext<'a> {
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     pub links: Vec<ParsedLink>,           // Pre-parsed links
     pub images: Vec<ParsedImage>,         // Pre-parsed images
+    pub broken_links: Vec<BrokenLinkInfo>, // Broken/undefined references
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
     code_spans_cache: Mutex<Option<Arc<Vec<CodeSpan>>>>, // Lazy-loaded inline code spans
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
@@ -516,7 +526,8 @@ impl<'a> LintContext<'a> {
 
         // Parse links, images, references, and list blocks
         let start = Instant::now();
-        let links = Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges);
+        let (links, broken_links) =
+            Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges);
         if profile {
             eprintln!("[PROFILE] Links: {:?}", start.elapsed());
         }
@@ -575,6 +586,7 @@ impl<'a> LintContext<'a> {
             lines,
             links,
             images,
+            broken_links,
             reference_defs,
             code_spans_cache: Mutex::new(Some(Arc::new(code_spans))),
             list_blocks,
@@ -950,22 +962,36 @@ impl<'a> LintContext<'a> {
         code_spans: &[CodeSpan],
         flavor: MarkdownFlavor,
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-    ) -> Vec<ParsedLink> {
+    ) -> (Vec<ParsedLink>, Vec<BrokenLinkInfo>) {
         use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
         use std::collections::HashSet;
 
         let mut links = Vec::with_capacity(content.len() / 500);
+        let mut broken_links = Vec::new();
 
         // Track byte positions of links found by pulldown-cmark
         let mut found_positions = HashSet::new();
 
-        // Use pulldown-cmark's streaming parser with byte offsets
+        // Use pulldown-cmark's streaming parser with BrokenLink callback
+        // The callback captures undefined references: [text][undefined], [shortcut], [text][]
         // This automatically handles:
         // - Escaped links (won't generate events)
         // - Links in code blocks/spans (won't generate Link events)
         // - Images (generates Tag::Image instead)
         // - Reference resolution (dest_url is already resolved!)
-        let parser = Parser::new(content).into_offset_iter();
+        // - Broken references (callback is invoked)
+        let parser = Parser::new_with_broken_link_callback(
+            content,
+            pulldown_cmark::Options::empty(),
+            Some(|link: BrokenLink<'_>| {
+                broken_links.push(BrokenLinkInfo {
+                    reference: link.reference.to_string(),
+                    span: link.span.clone(),
+                });
+                None
+            }),
+        )
+        .into_offset_iter();
 
         let mut link_stack: Vec<(usize, usize, String, LinkType, String)> = Vec::new();
         let mut text_chunks: Vec<(String, usize, usize)> = Vec::new(); // (text, start, end)
@@ -1015,18 +1041,43 @@ impl<'a> LintContext<'a> {
                             LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
                         );
 
-                        // Always extract link text from source bytes to preserve exact whitespace
-                        // pulldown-cmark strips newlines from Text events, so we can't rely on them alone
+                        // Extract link text directly from source bytes to preserve escaping
+                        // Text events from pulldown-cmark unescape \] → ], which breaks MD039
                         let link_text = if start_pos < content.len() {
                             let link_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
-                            // Find first ] to get the link text
-                            if let Some(close_pos) = link_bytes.iter().position(|&b| b == b']') {
-                                if close_pos > 1 {
-                                    // Extract between [ and ]
-                                    std::str::from_utf8(&link_bytes[1..close_pos]).unwrap_or("").to_string()
-                                } else {
-                                    String::new()
+
+                            // Find MATCHING ] by tracking bracket depth for nested brackets
+                            // An unescaped bracket is one NOT preceded by an odd number of backslashes
+                            let mut close_pos = None;
+                            let mut depth = 0;
+
+                            for (i, &byte) in link_bytes.iter().enumerate().skip(1) {
+                                // Count preceding backslashes
+                                let mut backslash_count = 0;
+                                let mut j = i;
+                                while j > 0 && link_bytes[j - 1] == b'\\' {
+                                    backslash_count += 1;
+                                    j -= 1;
                                 }
+                                let is_escaped = backslash_count % 2 != 0;
+
+                                if !is_escaped {
+                                    if byte == b'[' {
+                                        depth += 1;
+                                    } else if byte == b']' {
+                                        if depth == 0 {
+                                            // Found the matching closing bracket
+                                            close_pos = Some(i);
+                                            break;
+                                        } else {
+                                            depth -= 1;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if let Some(pos) = close_pos {
+                                std::str::from_utf8(&link_bytes[1..pos]).unwrap_or("").to_string()
                             } else {
                                 String::new()
                             }
@@ -1140,7 +1191,7 @@ impl<'a> LintContext<'a> {
             }
         }
 
-        links
+        (links, broken_links)
     }
 
     /// Parse all images in the content
@@ -1207,23 +1258,45 @@ impl<'a> LintContext<'a> {
                             LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
                         );
 
-                        // Always extract alt text from source bytes to preserve exact whitespace
-                        // pulldown-cmark strips newlines from Text events, so we can't rely on them alone
+                        // Extract alt text directly from source bytes to preserve escaping
+                        // Text events from pulldown-cmark unescape \] → ], which breaks rules that need escaping
                         let alt_text = if start_pos < content.len() {
                             let image_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
-                            // Find first ] to get the alt text (skip first 2 chars: '![')
+
+                            // Find MATCHING ] by tracking bracket depth for nested brackets
+                            // An unescaped bracket is one NOT preceded by an odd number of backslashes
+                            let mut close_pos = None;
+                            let mut depth = 0;
+
                             if image_bytes.len() > 2 {
-                                if let Some(close_pos) = image_bytes[2..].iter().position(|&b| b == b']') {
-                                    let alt_end = close_pos + 2;
-                                    if alt_end > 2 {
-                                        // Extract between ![ and ]
-                                        std::str::from_utf8(&image_bytes[2..alt_end]).unwrap_or("").to_string()
-                                    } else {
-                                        String::new()
+                                for (i, &byte) in image_bytes.iter().enumerate().skip(2) {
+                                    // Count preceding backslashes
+                                    let mut backslash_count = 0;
+                                    let mut j = i;
+                                    while j > 0 && image_bytes[j - 1] == b'\\' {
+                                        backslash_count += 1;
+                                        j -= 1;
                                     }
-                                } else {
-                                    String::new()
+                                    let is_escaped = backslash_count % 2 != 0;
+
+                                    if !is_escaped {
+                                        if byte == b'[' {
+                                            depth += 1;
+                                        } else if byte == b']' {
+                                            if depth == 0 {
+                                                // Found the matching closing bracket
+                                                close_pos = Some(i);
+                                                break;
+                                            } else {
+                                                depth -= 1;
+                                            }
+                                        }
+                                    }
                                 }
+                            }
+
+                            if let Some(pos) = close_pos {
+                                std::str::from_utf8(&image_bytes[2..pos]).unwrap_or("").to_string()
                             } else {
                                 String::new()
                             }
