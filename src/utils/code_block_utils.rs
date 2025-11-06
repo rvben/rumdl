@@ -118,14 +118,21 @@ impl CodeBlockUtils {
                     false
                 } else {
                     // Find delimiter position (. or ))
-                    let delimiter_pos = trimmed.chars().position(|c| c == '.' || c == ')');
-                    match delimiter_pos {
-                        Some(pos) if pos > 0 => {
-                            // All chars before delimiter must be digits
-                            let all_digits = trimmed[..pos].chars().all(|c| c.is_numeric());
-                            // Must be followed by space or tab
-                            let has_space = trimmed.chars().nth(pos + 1).is_some_and(|c| c == ' ' || c == '\t');
-                            all_digits && has_space
+                    let delimiter_char_pos = trimmed.chars().position(|c| c == '.' || c == ')');
+                    match delimiter_char_pos {
+                        Some(char_pos) if char_pos > 0 => {
+                            // Convert character position to byte position for slicing
+                            let byte_pos = trimmed.char_indices().nth(char_pos).map(|(i, _)| i);
+                            if let Some(byte_pos) = byte_pos {
+                                // All chars before delimiter must be digits
+                                let all_digits = trimmed[..byte_pos].chars().all(|c| c.is_numeric());
+                                // Must be followed by space or tab
+                                let has_space =
+                                    trimmed.chars().nth(char_pos + 1).is_some_and(|c| c == ' ' || c == '\t');
+                                all_digits && has_space
+                            } else {
+                                false
+                            }
                         }
                         _ => false,
                     }
