@@ -735,6 +735,7 @@ indent = 2
 line-length = 100
 code-blocks = false
 tables = false
+reflow = true  # Enable automatic line wrapping (required for --fix)
 
 [MD025]
 level = 1
