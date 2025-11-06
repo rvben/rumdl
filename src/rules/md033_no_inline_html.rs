@@ -158,45 +158,6 @@ impl MD033NoInlineHtml {
             || content.starts_with("mailto:")
     }
 
-    // Find all HTML comment ranges in the content
-    // Returns a vector of (start_byte, end_byte) tuples
-    fn find_html_comment_ranges(content: &str) -> Vec<(usize, usize)> {
-        let mut ranges = Vec::new();
-        let bytes = content.as_bytes();
-        let mut i = 0;
-
-        while i < bytes.len() {
-            // Look for "<!--"
-            if i + 4 <= bytes.len() && &bytes[i..i + 4] == b"<!--" {
-                let start = i;
-                i += 4;
-
-                // Look for closing "-->"
-                while i + 3 <= bytes.len() {
-                    if &bytes[i..i + 3] == b"-->" {
-                        let end = i + 3;
-                        ranges.push((start, end));
-                        i = end;
-                        break;
-                    }
-                    i += 1;
-                }
-            } else {
-                i += 1;
-            }
-        }
-
-        ranges
-    }
-
-    // Check if a byte position falls within any HTML comment range
-    #[inline]
-    fn is_in_html_comment(byte_pos: usize, comment_ranges: &[(usize, usize)]) -> bool {
-        comment_ranges
-            .iter()
-            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
-    }
-
     /// Calculate fix to remove HTML tags while keeping content
     ///
     /// For self-closing tags like `<br/>`, returns a single fix to remove the tag.
@@ -376,9 +337,6 @@ impl Rule for MD033NoInlineHtml {
             return Ok(Vec::new());
         }
 
-        // Find all HTML comment ranges to skip tags inside comments
-        let html_comment_ranges = Self::find_html_comment_ranges(content);
-
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
@@ -455,7 +413,7 @@ impl Rule for MD033NoInlineHtml {
                 let tag_byte_start = line_byte_offset + tag_match.start();
 
                 // Skip HTML tags inside HTML comments
-                if Self::is_in_html_comment(tag_byte_start, &html_comment_ranges) {
+                if ctx.is_in_html_comment(tag_byte_start) {
                     continue;
                 }
 
