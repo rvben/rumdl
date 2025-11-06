@@ -39,11 +39,11 @@ rumdl implements additional rules not found in markdownlint:
 
 These rule numbers are not implemented in markdownlint:
 
-- **MD002**: Deprecated and removed from markdownlint v0.13.0 (replaced by MD041); removed from rumdl for compatibility
-- **MD006**: Not implemented in DavidAnson/markdownlint (JavaScript version); removed from rumdl for compatibility
+- **MD002**: Deprecated and removed from markdownlint v0.13.0 (replaced by MD041); removed from rumdl v0.0.172 for compatibility
+- **MD006**: Not implemented in DavidAnson/markdownlint (JavaScript version); removed from rumdl v0.0.172 for compatibility
 - **MD008**: Originally planned for "Unordered list spacing" but never implemented
 - **MD015, MD016, MD017**: Never assigned in markdownlint
-- **MD057**: Not implemented in markdownlint; rumdl uses this number for "Existing relative links" validation
+- **MD057**: Reserved by rumdl for "Existing relative links" validation (not in markdownlint)
 
 ## Intentional Design Differences
 
@@ -145,38 +145,6 @@ rumdl vscode
 - Quick fixes for supported rules
 - Hover documentation for rules
 - Zero configuration required
-
-**markdownlint** requires separate packages (`markdownlint-cli2`, VS Code extension, etc.).
-
-### 6. Table Rule Differences
-
-rumdl includes enhanced table support with MD058 (blanks around tables) and MD060 (table column style):
-
-**MD058** - Tables should be surrounded by blank lines:
-
-```markdown
-<!-- Bad -->
-Some text
-| Header |
-|--------|
-| Cell   |
-More text
-
-<!-- Good -->
-Some text
-
-| Header |
-|--------|
-| Cell   |
-
-More text
-```
-
-**MD060** - Table column style (recently added):
-
-- Ensures consistent column formatting
-- Compatible with markdownlint's implementation
-- Supports alignment indicators (`:---`, `:---:`, `---:`)
 
 ## Configuration Compatibility
 
@@ -334,7 +302,7 @@ None currently known. If you encounter compatibility issues, please [file an iss
 | Feature | markdownlint | rumdl |
 |---------|-------------|-------|
 | **Core Functionality** |  |  |
-| Rule count | 60 | 53 (+2 unique) |
+| Rule count | 53 implemented | 53 (+1 unique: MD057) |
 | Auto-fix | ✅ | ✅ |
 | Configuration file | ✅ JSON/YAML | ✅ TOML/JSON/YAML |
 | Inline config | ✅ | ✅ (compatible) |

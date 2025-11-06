@@ -750,7 +750,10 @@ build-backend = "setuptools.build_meta"
                     Box::new(MD054LinkImageStyle::default()),
                     Box::new(MD055TablePipeStyle::default()),
                     Box::new(MD056TableColumnCount),
+                    Box::new(MD057ExistingRelativeLinks::default()),
                     Box::new(MD058BlanksAroundTables::default()),
+                    Box::new(MD059LinkText::default()),
+                    Box::new(MD060TableFormat::default()),
                 ];
                 if let Some(rule_query) = rule {
                     let rule_query = rule_query.to_ascii_uppercase();
@@ -1498,7 +1501,10 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD054LinkImageStyle::default()),
         Box::new(MD055TablePipeStyle::default()),
         Box::new(MD056TableColumnCount),
+        Box::new(MD057ExistingRelativeLinks::default()),
         Box::new(MD058BlanksAroundTables::default()),
+        Box::new(MD059LinkText::default()),
+        Box::new(MD060TableFormat::default()),
     ];
 
     // Find the rule

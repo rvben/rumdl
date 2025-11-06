@@ -41,7 +41,7 @@ Python linting, rumdl brings similar speed and developer experience improvements
 It offers:
 
 - ⚡️ **Built for speed** with Rust - significantly faster than alternatives
-- 🔍 **55 lint rules** covering common Markdown issues
+- 🔍 **54 lint rules** covering common Markdown issues
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
@@ -64,12 +64,14 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [A modern Markdown linter and formatter, built for speed with Rust](#a-modern-markdown-linter-and-formatter-built-for-speed-with-rust)
   - [Quick Start](#quick-start)
   - [Overview](#overview)
+    - [Performance](#performance)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
     - [Using Homebrew (macOS/Linux)](#using-homebrew-macoslinux)
     - [Using Cargo (Rust)](#using-cargo-rust)
     - [Using pip (Python)](#using-pip-python)
     - [Using uv](#using-uv)
+    - [Using Nix (macOS/Linux)](#using-nix-macoslinux)
     - [Download binary](#download-binary)
     - [VS Code Extension](#vs-code-extension)
   - [Usage](#usage)
@@ -353,7 +355,7 @@ This produces annotations that GitHub automatically displays in the PR's "Files 
 
 ## Rules
 
-rumdl implements 55 lint rules for Markdown files. Here are some key rule categories:
+rumdl implements 54 lint rules for Markdown files. Here are some key rule categories:
 
 | Category | Description | Example Rules |
 | -----------|-------------|--------------- |
