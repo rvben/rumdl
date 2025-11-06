@@ -149,6 +149,16 @@ impl Rule for MD042NoEmptyLinks {
                 continue;
             }
 
+            // Skip links inside HTML tags (e.g., <a href="...?p[images][0]=...">)
+            // Check if the link's byte position falls within any HTML tag range
+            let in_html_tag = ctx
+                .html_tags()
+                .iter()
+                .any(|html_tag| html_tag.byte_offset <= link.byte_offset && link.byte_offset < html_tag.byte_end);
+            if in_html_tag {
+                continue;
+            }
+
             // For reference links, resolve the URL
             let effective_url = if link.is_reference {
                 if let Some(ref_id) = &link.reference_id {

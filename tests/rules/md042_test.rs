@@ -471,3 +471,30 @@ Also email me at <user@example.com>.";
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Autolinks should not be flagged as empty links");
 }
+
+#[test]
+fn test_brackets_in_html_href_not_flagged() {
+    let rule = MD042NoEmptyLinks::new();
+    // Regression test for false positive: MD042 should not flag brackets in HTML href attributes
+    // Found in free-programming-books repository (334k stars)
+    let content = r#"Check this out:
+<a href="https://example.com?p[images][0]=test&title=Example">Share on Example</a>
+
+This is a real markdown link that should be flagged:
+[](https://example.com)"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the actual markdown empty link, not the brackets in HTML href
+    assert_eq!(
+        result.len(),
+        1,
+        "Should only flag the real markdown empty link, not brackets in HTML href attributes"
+    );
+
+    // Verify it's the markdown link that was flagged, not the HTML
+    assert!(
+        result[0].line > 3,
+        "Should flag the markdown link on line 5, not the HTML on line 2"
+    );
+}
