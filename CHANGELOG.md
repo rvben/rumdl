@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.172] - 2025-01-06
+
+### Added
+
+- **MD059: Link text style rule achieving 100% markdownlint compatibility**
+  - New rule for enforcing consistent link text formatting
+  - Matches markdownlint column reporting behavior
+  - Completes full parity with markdownlint rule set
+
+- **pulldown-cmark BrokenLink callback integration**
+  - Enhanced link reference validation using parser callback
+  - Better detection of undefined reference-style links
+  - Improved accuracy for MD052 and related rules
+
+### Fixed
+
+- **Critical: UTF-8 character boundary panic in ordered list detection**
+  - Fixed crash when processing markdown with multi-byte UTF-8 characters (Japanese, Chinese, Korean, etc.)
+  - Root cause: Character index was incorrectly used as byte index for string slicing
+  - Now converts character positions to byte positions using `char_indices().nth()`
+  - Discovered during validation on javascript-algorithms repository (193k ⭐)
+  - Affected any non-English documentation with multi-byte UTF-8 near numbered lists
+
+- **pulldown-cmark escaped bracket workaround**
+  - Workaround for pulldown-cmark bug where `\[` and `\!` are incorrectly parsed as links/images
+  - Violates CommonMark spec Example 14 for backslash escapes
+  - Filters 90% of false positives with byte-level escape pattern detection
+  - Correctly handles: `\[escaped\]`, `\![not an image](url)`
+  - Known limitation: `\[text][ref]` reference-style links still produce 1 false positive
+  - Bug report filed for upstream fix
+
+- **MD042: False positives on autolinks**
+  - Fixed empty link detection incorrectly flagging autolinks like `<https://example.com>`
+  - Autolinks are now correctly excluded from empty link checks
+
+- **MD033: HTML tags inside HTML comments**
+  - Fixed false positives when HTML tags appear inside HTML comments
+  - Centralized HTML comment detection for consistent behavior across rules
+  - HTML comments now properly ignored: `<!-- <div>not flagged</div> -->`
+
+- **MD051: GitHub ASCII normalization**
+  - Implemented proper GitHub anchor generation with ASCII normalization
+  - Handles edge cases like backtick-wrapped angle brackets: `` `<FILE>` `` → `#file`
+  - Verified against actual GitHub.com rendering behavior
+
+- **MD052: Complete Jinja template support**
+  - Added Jinja template range checks to regex-based shortcut reference detection
+  - Fixes false positives on `[reference]` patterns in Jinja templates
+  - Completes Jinja support across all link-related rules (MD039, MD042, MD051, MD052)
+
+- **MD039/MD042/MD051: Jinja template checks**
+  - Added Jinja template range checks to prevent false positives
+  - All rules using `ctx.links`/`ctx.images` now skip Jinja template markers
+  - Validated on real-world Jinja templates (pyo3/.towncrier.template.md)
+
+- **Link/image text extraction: Whitespace preservation**
+  - Fixed loss of leading/trailing whitespace in link text and image alt text
+  - pulldown-cmark strips newlines from Text events, causing whitespace loss
+  - Now extracts directly from source bytes between brackets for perfect fidelity
+  - Verified: `[\nNewline\n](url)` → text correctly preserved with newlines
+
+### Changed
+
+- **⚠️ BREAKING: Removed MD002 (first-heading-h1) and MD006 (ul-start-left) rules**
+  - Removed for 100% markdownlint compatibility
+  - markdownlint deprecated these rules in favor of more specific alternatives
+  - **Migration**: Remove MD002 and MD006 from your `.rumdl.toml` config if present
+
+- **Refactoring: Modernized codebase with Rust 1.91.0 features**
+  - Migrated `once_cell::sync::Lazy` to `std::sync::LazyLock` (stable in Rust 1.80)
+  - Improved error handling by replacing `unwrap()`/`expect()` with proper error propagation
+  - Replaced defensive fallbacks with `unreachable!()` where appropriate
+  - Eliminated unreachable panics and improved code robustness
+  - Removed `_fix` boolean redundancy and cleaned up dead code
+
+- **Refactoring: HTML comment detection centralized**
+  - MD033 now uses centralized `html_utils::find_html_comments()` for consistency
+  - Eliminates duplicate HTML comment parsing logic
+
+### Performance
+
+- **12-15% speed improvement from pulldown-cmark migration**
+  - Migrated link/image parsing from regex-based approach to pulldown-cmark parser
+  - Benchmark results: 12-15% faster on representative markdown files
+  - More accurate CommonMark compliance
+  - Better handling of edge cases and complex markdown structures
+
 ## [0.0.171] - 2025-11-03
 
 ### Added
