@@ -186,6 +186,14 @@ impl Rule for MD042NoEmptyLinks {
                 }
             }
 
+            // Skip autolinks (like <https://example.com>)
+            // Autolinks are valid CommonMark syntax: <URL> where text field is empty but URL is the display
+            // Detect by checking if source markdown is wrapped in < and >
+            let link_markdown = &ctx.content[link.byte_offset..link.byte_end];
+            if link_markdown.starts_with('<') && link_markdown.ends_with('>') {
+                continue;
+            }
+
             // Check for empty links
             if link.text.trim().is_empty() || effective_url.trim().is_empty() {
                 // In MkDocs mode, check if this is an attribute anchor: []() followed by { #anchor }

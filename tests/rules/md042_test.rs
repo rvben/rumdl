@@ -462,3 +462,12 @@ fn test_issue_104_regression() {
         "Should use the URL from text as the destination"
     );
 }
+#[test]
+fn test_autolinks_not_flagged() {
+    let rule = MD042NoEmptyLinks::new();
+    let content = "Visit <https://example.com> and <https://github.com/user/repo>.
+Also email me at <user@example.com>.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "Autolinks should not be flagged as empty links");
+}
