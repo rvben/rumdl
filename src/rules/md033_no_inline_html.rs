@@ -158,6 +158,45 @@ impl MD033NoInlineHtml {
             || content.starts_with("mailto:")
     }
 
+    // Find all HTML comment ranges in the content
+    // Returns a vector of (start_byte, end_byte) tuples
+    fn find_html_comment_ranges(content: &str) -> Vec<(usize, usize)> {
+        let mut ranges = Vec::new();
+        let bytes = content.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            // Look for "<!--"
+            if i + 4 <= bytes.len() && &bytes[i..i + 4] == b"<!--" {
+                let start = i;
+                i += 4;
+
+                // Look for closing "-->"
+                while i + 3 <= bytes.len() {
+                    if &bytes[i..i + 3] == b"-->" {
+                        let end = i + 3;
+                        ranges.push((start, end));
+                        i = end;
+                        break;
+                    }
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+        }
+
+        ranges
+    }
+
+    // Check if a byte position falls within any HTML comment range
+    #[inline]
+    fn is_in_html_comment(byte_pos: usize, comment_ranges: &[(usize, usize)]) -> bool {
+        comment_ranges
+            .iter()
+            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+    }
+
     /// Calculate fix to remove HTML tags while keeping content
     ///
     /// For self-closing tags like `<br/>`, returns a single fix to remove the tag.
@@ -337,6 +376,9 @@ impl Rule for MD033NoInlineHtml {
             return Ok(Vec::new());
         }
 
+        // Find all HTML comment ranges to skip tags inside comments
+        let html_comment_ranges = Self::find_html_comment_ranges(content);
+
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
@@ -404,7 +446,20 @@ impl Rule for MD033NoInlineHtml {
             for tag_match in HTML_OPENING_TAG_FINDER.find_iter(line) {
                 let tag = tag_match.as_str();
 
-                // Skip HTML comments
+                // Calculate byte offset for the tag in the entire content
+                let line_byte_offset: usize = content
+                    .lines()
+                    .take(line_num - 1)
+                    .map(|l| l.len() + 1) // +1 for newline
+                    .sum();
+                let tag_byte_start = line_byte_offset + tag_match.start();
+
+                // Skip HTML tags inside HTML comments
+                if Self::is_in_html_comment(tag_byte_start, &html_comment_ranges) {
+                    continue;
+                }
+
+                // Skip HTML comments themselves
                 if self.is_html_comment(tag) {
                     continue;
                 }
@@ -458,14 +513,6 @@ impl Rule for MD033NoInlineHtml {
                 // Report each HTML tag individually (true markdownlint compatibility)
                 let (start_line, start_col, end_line, end_col) =
                     calculate_html_tag_range(line_num, line, tag_match.start(), tag_match.len());
-
-                // Calculate byte offset for the tag in the entire content
-                let line_byte_offset: usize = content
-                    .lines()
-                    .take(line_num - 1)
-                    .map(|l| l.len() + 1) // +1 for newline
-                    .sum();
-                let tag_byte_start = line_byte_offset + tag_match.start();
 
                 // Calculate fix to remove HTML tags but keep content
                 let fix = self

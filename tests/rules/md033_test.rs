@@ -636,3 +636,49 @@ Back to regular: <em>flagged</em>"#;
     // Verify we have the expected number of warnings
     assert_eq!(warnings.len(), 4); // 4 opening tags
 }
+
+#[test]
+fn test_html_inside_html_comments_should_not_be_flagged() {
+    let rule = MD033NoInlineHtml::default();
+
+    // Test case from BACKERS.md - HTML inside HTML comment should NOT be flagged
+    let content = r#"# Backers
+
+<!--
+<table>
+  <tr>
+    <td align="center">
+      <a href="[PROFILE_URL]">
+        <img src="[PROFILE_IMG_SRC]" width="50" />
+      </a>
+    </td>
+  </tr>
+</table>
+-->
+
+This should be flagged: <div>real HTML</div>
+
+<!-- Another comment with <span>HTML</span> inside -->
+
+More real HTML: <p>flagged</p>"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag HTML outside comments (opening tags only)
+    assert_eq!(result.len(), 2); // Only <div> and <p>
+
+    let flagged_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+
+    // Should flag HTML outside comments
+    assert!(flagged_lines.contains(&15)); // <div>real HTML</div>
+    assert!(flagged_lines.contains(&19)); // <p>flagged</p>
+
+    // Should NOT flag HTML inside comments
+    assert!(!flagged_lines.contains(&4)); // <table> inside comment
+    assert!(!flagged_lines.contains(&5)); // <tr> inside comment
+    assert!(!flagged_lines.contains(&6)); // <td> inside comment
+    assert!(!flagged_lines.contains(&7)); // <a> inside comment
+    assert!(!flagged_lines.contains(&8)); // <img> inside comment
+    assert!(!flagged_lines.contains(&17)); // <span> inside comment
+}
