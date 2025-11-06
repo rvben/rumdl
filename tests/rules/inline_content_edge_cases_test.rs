@@ -753,12 +753,13 @@ Regular ![](outside.png) image.
     let result045 = md045.check(&ctx).unwrap();
     let result052 = md052.check(&ctx).unwrap();
 
-    // Should handle mixed content appropriately
-    // Note: Images inside HTML comments are correctly ignored (was 3, now 2)
+    // Per CommonMark: Markdown inside HTML blocks is NOT processed
+    // Only the image outside HTML (`outside.png`) should be detected
+    // Images inside `<div>`, `<p>`, and `<!-- -->` are all ignored
     assert_eq!(
         result045.len(),
-        2,
-        "Should detect Markdown images in HTML but ignore those in HTML comments"
+        1,
+        "Should only detect Markdown images outside HTML blocks (CommonMark compliance)"
     );
     assert_eq!(result052.len(), 0, "All references should be defined");
 }
@@ -816,7 +817,17 @@ text](multiline3.png)
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3, "Should handle multiline image syntax");
+    // Per CommonMark: Blank lines break inline syntax
+    // - ![<newline>](url) → valid (1 newline) → empty alt text → flagged
+    // - ![<newline><newline>](url) → INVALID (blank line) → not detected
+    // - ![Good<newline>alt<newline>text](url) → valid → has alt text → NOT flagged
+    // - ![    ](url) → valid → whitespace only alt text → flagged
+    // Result: 2 warnings (multiline1.png and spaces.png)
+    assert_eq!(
+        result.len(),
+        2,
+        "Should handle multiline image syntax per CommonMark spec"
+    );
 }
 
 #[test]
