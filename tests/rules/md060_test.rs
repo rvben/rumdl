@@ -680,9 +680,20 @@ fn test_md060_zero_width_characters() {
     let content = "| Name | Status |\n|---|---|\n| Test\u{200B}Word | Active\u{200C}User |\n| Word\u{2060}Join | OK |";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
 
-    let fixed = rule.fix(&ctx).unwrap();
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Tables with zero-width characters should be skipped (no warnings)"
+    );
 
-    // Zero-width characters should be preserved
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "Tables with zero-width characters should not be modified"
+    );
+
+    // Verify characters are preserved in original form
     assert!(
         fixed.contains("Test\u{200B}Word"),
         "Zero Width Space should be preserved"
@@ -692,12 +703,6 @@ fn test_md060_zero_width_characters() {
         "Zero Width Non-Joiner should be preserved"
     );
     assert!(fixed.contains("Word\u{2060}Join"), "Word Joiner should be preserved");
-
-    // All lines should have equal length
-    let lines: Vec<&str> = fixed.lines().collect();
-    assert_eq!(lines[0].len(), lines[1].len(), "Lines 0 and 1 should have equal length");
-    assert_eq!(lines[1].len(), lines[2].len(), "Lines 1 and 2 should have equal length");
-    assert_eq!(lines[2].len(), lines[3].len(), "Lines 2 and 3 should have equal length");
 }
 
 #[test]
@@ -823,13 +828,29 @@ fn test_md060_escaped_pipes_outside_code() {
 
     let fixed = rule.fix(&ctx).unwrap();
 
-    // Escaped pipes should be preserved (this may fail if not implemented)
-    // The backslash-escaped pipe should not be treated as column separator
+    // Escaped pipes should be preserved in the cell content
     assert!(fixed.contains("\\|"), "Escaped pipes should be preserved");
 
-    // Verify table structure is maintained
+    // Verify table structure is maintained - should have 4 lines
     let lines: Vec<&str> = fixed.lines().collect();
     assert_eq!(lines.len(), 4, "All rows should be present");
+
+    // Verify the escaped pipes are in the correct cells (not split into separate columns)
+    assert!(
+        lines[2].contains("a \\| b"),
+        "First escaped pipe example should be in single cell, got: {}",
+        lines[2]
+    );
+    assert!(
+        lines[3].contains("x \\| y \\| z"),
+        "Second escaped pipe example should be in single cell, got: {}",
+        lines[3]
+    );
+
+    // All lines should have equal length in aligned mode
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
 }
 
 #[test]

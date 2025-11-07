@@ -79,10 +79,16 @@ enum ColumnAlignment {
 ///
 /// ## Known Limitations
 ///
-/// **Complex Emoji Sequences**: Tables containing Zero-Width Joiner (ZWJ) emoji sequences
-/// (e.g., 👨‍👩‍👧‍👦, 👩‍💻) are automatically skipped. These complex emoji have inconsistent
-/// display widths across different terminals and fonts, making accurate alignment impossible.
-/// The rule will preserve these tables as-is rather than risk corrupting them.
+/// **Complex Unicode Sequences**: Tables containing certain Unicode characters are automatically
+/// skipped to prevent alignment corruption. These include:
+/// - Zero-Width Joiner (ZWJ) emoji: 👨‍👩‍👧‍👦, 👩‍💻
+/// - Zero-Width Space (ZWS): Invisible word break opportunities
+/// - Zero-Width Non-Joiner (ZWNJ): Ligature prevention marks
+/// - Word Joiner (WJ): Non-breaking invisible characters
+///
+/// These characters have inconsistent or zero display widths across terminals and fonts,
+/// making accurate alignment impossible. The rule preserves these tables as-is rather than
+/// risk corrupting them.
 ///
 /// This is an honest limitation of terminal display technology, similar to what other tools
 /// like markdownlint experience.
@@ -112,8 +118,21 @@ impl MD060TableFormat {
         Self { config }
     }
 
-    fn contains_zwj(text: &str) -> bool {
-        text.contains('\u{200D}')
+    /// Check if text contains characters that break Unicode width calculations
+    ///
+    /// Tables with these characters are skipped to avoid alignment corruption:
+    /// - Zero-Width Joiner (ZWJ, U+200D): Complex emoji like 👨‍👩‍👧‍👦
+    /// - Zero-Width Space (ZWS, U+200B): Invisible word break opportunity
+    /// - Zero-Width Non-Joiner (ZWNJ, U+200C): Prevents ligature formation
+    /// - Word Joiner (WJ, U+2060): Prevents line breaks without taking space
+    ///
+    /// These characters have inconsistent display widths across terminals,
+    /// making accurate alignment impossible.
+    fn contains_problematic_chars(text: &str) -> bool {
+        text.contains('\u{200D}')  // ZWJ
+            || text.contains('\u{200B}')  // ZWS
+            || text.contains('\u{200C}')  // ZWNJ
+            || text.contains('\u{2060}') // Word Joiner
     }
 
     fn calculate_cell_display_width(cell_content: &str) -> usize {
@@ -123,7 +142,7 @@ impl MD060TableFormat {
 
     fn parse_table_row(line: &str) -> Vec<String> {
         let trimmed = line.trim();
-        let masked = TableUtils::mask_pipes_in_inline_code(trimmed);
+        let masked = TableUtils::mask_pipes_for_table_parsing(trimmed);
 
         let has_leading = masked.starts_with('|');
         let has_trailing = masked.ends_with('|');
@@ -351,7 +370,7 @@ impl MD060TableFormat {
             .chain(table_block.content_lines.iter().map(|&idx| lines[idx]))
             .collect();
 
-        if table_lines.iter().any(|line| Self::contains_zwj(line)) {
+        if table_lines.iter().any(|line| Self::contains_problematic_chars(line)) {
             return table_lines.iter().map(|s| s.to_string()).collect();
         }
 

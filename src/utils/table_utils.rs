@@ -303,6 +303,44 @@ impl TableUtils {
         result
     }
 
+    /// Mask both inline code pipes AND escaped pipes for accurate table cell parsing
+    ///
+    /// This function combines two types of masking:
+    /// 1. Pipes inside inline code blocks (between backticks) → masked as '_'
+    /// 2. Escaped pipes `\|` → masked as `\_` (backslash + underscore)
+    ///
+    /// This allows `split('|')` to correctly identify cell boundaries without
+    /// accidentally splitting on:
+    /// - Literal pipes inside code: `| a | b |` → treated as single cell
+    /// - Escaped pipes: `a \| b` → treated as single cell containing literal pipe
+    ///
+    /// The original text is reconstructed from byte offsets, so these masks only
+    /// affect where we split, not the actual cell content.
+    pub fn mask_pipes_for_table_parsing(text: &str) -> String {
+        // First pass: mask inline code pipes
+        let after_code_masking = Self::mask_pipes_in_inline_code(text);
+
+        // Second pass: mask escaped pipes
+        let mut result = String::new();
+        let chars: Vec<char> = after_code_masking.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if i + 1 < chars.len() && chars[i] == '\\' && chars[i + 1] == '|' {
+                // Found escaped pipe: \|
+                // Replace with \_ to keep same byte length while preventing split
+                result.push('\\');
+                result.push('_'); // Mask the pipe
+                i += 2;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+
+        result
+    }
+
     /// Determine the pipe style of a table row
     pub fn determine_pipe_style(line: &str) -> Option<&'static str> {
         let trimmed = line.trim();
