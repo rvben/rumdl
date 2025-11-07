@@ -105,7 +105,7 @@ reflow = true
     // The bug was: "Keyword : Definition..." (joined with space before colon)
     assert!(
         !fixed_content.contains("Keyword : "),
-        "Should NOT join term with definition (bug from #136)"
+        "Should NOT join term with definition (bug from #136). Got: {fixed_content:?}"
     );
 
     // Should preserve the structure

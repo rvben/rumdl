@@ -1356,6 +1356,18 @@ impl MD013LineLength {
             // This must be done BEFORE the needs_reflow check for sentence-per-line mode
             let paragraph_text = paragraph_lines.join(" ");
 
+            // Skip reflowing if this paragraph contains definition list items
+            // Definition lists are multi-line structures that should not be joined
+            let contains_definition_list = paragraph_lines
+                .iter()
+                .any(|line| crate::utils::is_definition_list_item(line));
+
+            if contains_definition_list {
+                // Don't reflow definition lists - skip this paragraph
+                i = paragraph_start + paragraph_lines.len();
+                continue;
+            }
+
             // Check if this paragraph needs reflowing
             let needs_reflow = match config.reflow_mode {
                 ReflowMode::Normalize => {
