@@ -1727,4 +1727,119 @@ line_length = 50
             "Closer config (subdir) should override parent config"
         );
     }
+
+    /// Test for issue #131: LSP should skip pyproject.toml without [tool.rumdl] section
+    /// and fall back to user config, matching CLI behavior
+    #[tokio::test]
+    async fn test_issue_131_pyproject_without_rumdl_section() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let user_config_dir = tempdir().unwrap();
+
+        // Create user config with MD013 disabled
+        let user_rumdl_dir = user_config_dir.path().join("rumdl");
+        fs::create_dir_all(&user_rumdl_dir).unwrap();
+        fs::write(
+            user_rumdl_dir.join("rumdl.toml"),
+            r#"
+[global]
+disable = ["MD013", "MD041"]
+"#,
+        )
+        .unwrap();
+
+        // Create pyproject.toml WITHOUT [tool.rumdl] section
+        let pyproject_path = temp_dir.path().join("pyproject.toml");
+        fs::write(
+            &pyproject_path,
+            r#"
+[project]
+name = "test-project"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let test_file = temp_dir.path().join("test.md");
+        fs::write(&test_file, "# Test\n").unwrap();
+
+        let server = create_test_server();
+
+        // Set workspace root
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(temp_dir.path().to_path_buf());
+        }
+
+        // Load user config as fallback (load directly without auto-discovery to avoid picking up real system config)
+        let user_config_file = user_rumdl_dir.join("rumdl.toml");
+        let fallback_config = crate::config::SourcedConfig::load_with_discovery_impl(
+            Some(user_config_file.to_str().unwrap()),
+            None,
+            true, // skip_auto_discovery to prevent finding real system config
+            None,
+        )
+        .unwrap()
+        .into();
+        *server.rumdl_config.write().await = fallback_config;
+
+        // Resolve config for file (this will find pyproject.toml but should skip it)
+        let config = server.resolve_config_for_file(&test_file).await;
+
+        // CRITICAL: LSP must use user config because pyproject.toml has no [tool.rumdl]
+        assert!(
+            config.global.disable.contains(&"MD013".to_string()),
+            "Issue #131 regression: LSP should skip pyproject.toml without [tool.rumdl] and use user config"
+        );
+        assert!(
+            config.global.disable.contains(&"MD041".to_string()),
+            "Issue #131 regression: User config should be fully loaded"
+        );
+    }
+
+    /// Test for issue #131: LSP should detect pyproject.toml WITH [tool.rumdl] section
+    #[tokio::test]
+    async fn test_issue_131_pyproject_with_rumdl_section() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+
+        // Create pyproject.toml WITH [tool.rumdl] section
+        let pyproject_path = temp_dir.path().join("pyproject.toml");
+        fs::write(
+            &pyproject_path,
+            r#"
+[project]
+name = "test-project"
+
+[tool.rumdl.global]
+disable = ["MD033"]
+"#,
+        )
+        .unwrap();
+
+        let test_file = temp_dir.path().join("test.md");
+        fs::write(&test_file, "# Test\n").unwrap();
+
+        let server = create_test_server();
+
+        // Set workspace root
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(temp_dir.path().to_path_buf());
+        }
+
+        // Resolve config for file
+        let config = server.resolve_config_for_file(&test_file).await;
+
+        // LSP should find and use pyproject.toml when it contains [tool.rumdl]
+        // NOTE: Config merging with user config is a separate issue not covered by #131
+        assert!(
+            config.global.disable.contains(&"MD033".to_string()),
+            "LSP should load and use pyproject.toml when it has [tool.rumdl]"
+        );
+    }
 }
