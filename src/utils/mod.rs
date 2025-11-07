@@ -40,6 +40,21 @@ pub use line_ending::{
 pub use markdown_elements::{ElementQuality, ElementType, MarkdownElement, MarkdownElements};
 pub use range_utils::LineIndex;
 
+/// Check if a line is a definition list item (Extended Markdown)
+///
+/// Definition lists use the pattern:
+/// ```text
+/// Term
+/// : Definition
+/// ```
+///
+/// Supported by: PHP Markdown Extra, Kramdown, Pandoc, Hugo, and others
+pub fn is_definition_list_item(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with(": ")
+        || (trimmed.starts_with(':') && trimmed.len() > 1 && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace()))
+}
+
 /// Trait for string-related extensions
 pub trait StrExt {
     /// Replace trailing spaces with a specified replacement string

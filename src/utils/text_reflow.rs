@@ -3,6 +3,7 @@
 //! This module implements text wrapping/reflow functionality that preserves
 //! Markdown elements like links, emphasis, code spans, etc.
 
+use crate::utils::is_definition_list_item;
 use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
     INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX, REF_IMAGE_REGEX, REF_LINK_REGEX,
@@ -1017,6 +1018,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     || (next_trimmed.starts_with('+')
                         && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
                     || is_numbered_list_item(next_trimmed)
+                    || is_definition_list_item(next_trimmed)
                 {
                     break;
                 }
@@ -1086,6 +1088,13 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
 
         // Preserve reference definitions
         if trimmed.starts_with('[') && line.contains("]:") {
+            result.push(line.to_string());
+            i += 1;
+            continue;
+        }
+
+        // Preserve definition list items (extended markdown)
+        if is_definition_list_item(trimmed) {
             result.push(line.to_string());
             i += 1;
             continue;
@@ -1185,6 +1194,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     || (next_trimmed.starts_with('+')
                         && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
                     || is_numbered_list_item(next_trimmed)
+                    || is_definition_list_item(next_trimmed)
                 {
                     break;
                 }
@@ -1295,6 +1305,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
             && !is_horizontal_rule(trimmed)
             && (trimmed.len() == 1 || trimmed.chars().nth(1) == Some(' ')))
         || is_numbered_list_item(trimmed)
+        || is_definition_list_item(trimmed)
     {
         return None;
     }
@@ -1321,6 +1332,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
                 && !is_horizontal_rule(prev_trimmed)
                 && (prev_trimmed.len() == 1 || prev_trimmed.chars().nth(1) == Some(' ')))
             || is_numbered_list_item(prev_trimmed)
+            || is_definition_list_item(prev_trimmed)
         {
             break;
         }
@@ -1350,6 +1362,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
                 && !is_horizontal_rule(next_trimmed)
                 && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
             || is_numbered_list_item(next_trimmed)
+            || is_definition_list_item(next_trimmed)
         {
             break;
         }
@@ -1990,5 +2003,96 @@ mod tests {
             lines[1].contains("attribute."),
             "Second line should end with 'attribute.'"
         );
+    }
+
+    #[test]
+    fn test_definition_list_preservation() {
+        let options = ReflowOptions {
+            line_length: 80,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        let content = "Term\n: Definition text here.";
+        let result = reflow_markdown(content, &options);
+
+        // Should NOT join into "Term : Definition text here."
+        assert_eq!(result, "Term\n: Definition text here.");
+    }
+
+    #[test]
+    fn test_definition_list_multiline() {
+        let options = ReflowOptions {
+            line_length: 80,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        let content = "Term\n: First sentence of definition. Second sentence.";
+        let result = reflow_markdown(content, &options);
+
+        // Term line should stay separate
+        assert!(result.starts_with("Term\n"));
+        // Definition list item (line starting with ": ") should be preserved as-is
+        // We don't split sentences within definition list items
+        assert!(result.contains("\n: First sentence of definition. Second sentence."));
+    }
+
+    #[test]
+    fn test_definition_list_multiple() {
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let content = "Term 1\n: Definition 1\n: Another definition for term 1\n\nTerm 2\n: Definition 2";
+        let result = reflow_markdown(content, &options);
+
+        // All definition lines should preserve ": " at start
+        assert!(result.lines().filter(|l| l.trim_start().starts_with(": ")).count() >= 3);
+    }
+
+    #[test]
+    fn test_definition_list_with_paragraphs() {
+        let options = ReflowOptions {
+            line_length: 0, // No line length constraint
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: true,
+        };
+
+        let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";
+        let result = reflow_markdown(content, &options);
+
+        // Paragraph should be reflowed (sentences on separate lines)
+        assert!(result.contains("Regular paragraph."));
+        assert!(result.contains("\nWith multiple sentences."));
+        // Definition list should be preserved
+        assert!(result.contains("Term\n: Definition."));
+        // Another paragraph should be preserved (single sentence, stays as is)
+        assert!(result.contains("Another paragraph."));
+    }
+
+    #[test]
+    fn test_definition_list_edge_cases() {
+        let options = ReflowOptions::default();
+
+        // Indented definition
+        let content1 = "Term\n  : Indented definition";
+        let result1 = reflow_markdown(content1, &options);
+        assert!(result1.contains("\n  : Indented definition"));
+
+        // Multiple spaces after colon
+        let content2 = "Term\n:   Definition";
+        let result2 = reflow_markdown(content2, &options);
+        assert!(result2.contains("\n:   Definition"));
+
+        // Tab after colon
+        let content3 = "Term\n:\tDefinition";
+        let result3 = reflow_markdown(content3, &options);
+        assert!(result3.contains("\n:\tDefinition"));
     }
 }

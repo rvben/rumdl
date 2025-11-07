@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Definition list support in reflow mode (#136)**
+  - Definition lists (Extended Markdown syntax) are now correctly preserved during text reflow
+  - Prevents incorrect joining of terms with definitions (e.g., `Term\n: Definition` no longer becomes `Term : Definition`)
+  - Supports PHP Markdown Extra, Kramdown, Pandoc, Hugo, and other extended Markdown flavors
+  - Works with all reflow modes including sentence-per-line
+
 ## [0.0.172] - 2025-01-06
 
 ### Added

@@ -6,6 +6,8 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+use super::is_definition_list_item;
+
 /// Pattern for Kramdown span IAL: text{:.class #id key="value"}
 static SPAN_IAL_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{[:\.#][^}]*\}$").unwrap());
 
@@ -144,19 +146,6 @@ pub fn is_math_block_delimiter(line: &str) -> bool {
 /// Check if text contains inline math
 pub fn has_inline_math(text: &str) -> bool {
     MATH_INLINE_PATTERN.is_match(text)
-}
-
-/// Check if a line is a definition list item
-///
-/// Definition lists in Kramdown use the pattern:
-/// ```text
-/// Term
-/// : Definition
-/// ```
-pub fn is_definition_list_item(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    trimmed.starts_with(": ")
-        || (trimmed.starts_with(':') && trimmed.len() > 1 && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace()))
 }
 
 /// Check if a line contains any Kramdown-specific syntax
