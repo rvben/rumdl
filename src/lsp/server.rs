@@ -570,7 +570,22 @@ impl RumdlLanguageServer {
             for config_file_name in CONFIG_FILES {
                 let config_path = current_dir.join(config_file_name);
                 if config_path.exists() {
-                    log::debug!("Found config file: {}", config_path.display());
+                    // For pyproject.toml, verify it contains [tool.rumdl] section (same as CLI)
+                    if *config_file_name == "pyproject.toml" {
+                        if let Ok(content) = std::fs::read_to_string(&config_path) {
+                            if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") {
+                                log::debug!("Found config file: {} (with [tool.rumdl])", config_path.display());
+                            } else {
+                                log::debug!("Found pyproject.toml but no [tool.rumdl] section, skipping");
+                                continue;
+                            }
+                        } else {
+                            log::warn!("Failed to read pyproject.toml: {}", config_path.display());
+                            continue;
+                        }
+                    } else {
+                        log::debug!("Found config file: {}", config_path.display());
+                    }
 
                     // Load the config
                     if let Some(config_path_str) = config_path.to_str() {
