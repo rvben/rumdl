@@ -45,3 +45,4 @@ style = "leading_and_trailing"
 
 [MD060]
 enabled = true
+style = "aligned"

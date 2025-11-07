@@ -357,15 +357,15 @@ This produces annotations that GitHub automatically displays in the PR's "Files 
 
 rumdl implements 54 lint rules for Markdown files. Here are some key rule categories:
 
-| Category | Description | Example Rules |
-| -----------|-------------|--------------- |
-| **Headings** | Proper heading structure and formatting | MD001, MD002, MD003 |
-| **Lists** | Consistent list formatting and structure | MD004, MD005, MD007 |
-| **Whitespace** | Proper spacing and line length | MD009, MD010, MD012 |
-| **Code** | Code block formatting and language tags | MD040, MD046, MD048 |
-| **Links** | Proper link and reference formatting | MD034, MD039, MD042 |
-| **Images** | Image alt text and references | MD045, MD052 |
-| **Style** | Consistent style across document | MD031, MD032, MD035 |
+| Category       | Description                              | Example Rules       |
+| -------------- | ---------------------------------------- | ------------------- |
+| **Headings**   | Proper heading structure and formatting  | MD001, MD002, MD003 |
+| **Lists**      | Consistent list formatting and structure | MD004, MD005, MD007 |
+| **Whitespace** | Proper spacing and line length           | MD009, MD010, MD012 |
+| **Code**       | Code block formatting and language tags  | MD040, MD046, MD048 |
+| **Links**      | Proper link and reference formatting     | MD034, MD039, MD042 |
+| **Images**     | Image alt text and references            | MD045, MD052        |
+| **Style**      | Consistent style across document         | MD031, MD032, MD035 |
 
 For a complete list of rules and their descriptions, see our [documentation](https://github.com/rvben/rumdl/blob/main/docs/RULES.md) or run:
 

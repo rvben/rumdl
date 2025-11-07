@@ -9,16 +9,16 @@ Global settings are configured in the `[global]` section of your configuration f
 
 ## Quick Reference
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| [`enable`](#enable) | `string[]` | `[]` | Enable only specific rules |
-| [`disable`](#disable) | `string[]` | `[]` | Disable specific rules |
-| [`per-file-ignores`](#per-file-ignores) | `table` | `{}` | Disable specific rules for specific files |
-| [`exclude`](#exclude) | `string[]` | `[]` | Files/directories to exclude |
-| [`include`](#include) | `string[]` | `[]` | Files/directories to include |
-| [`respect_gitignore`](#respect_gitignore) | `boolean` | `true` | Respect .gitignore files |
-| [`line_length`](#line_length) | `integer` | `80` | Default line length for rules |
-| [`flavor`](#flavor) | `string` | `"standard"` | Markdown flavor to use |
+| Setting                                   | Type       | Default      | Description                               |
+| ----------------------------------------- | ---------- | ------------ | ----------------------------------------- |
+| [`enable`](#enable)                       | `string[]` | `[]`         | Enable only specific rules                |
+| [`disable`](#disable)                     | `string[]` | `[]`         | Disable specific rules                    |
+| [`per-file-ignores`](#per-file-ignores)   | `table`    | `{}`         | Disable specific rules for specific files |
+| [`exclude`](#exclude)                     | `string[]` | `[]`         | Files/directories to exclude              |
+| [`include`](#include)                     | `string[]` | `[]`         | Files/directories to include              |
+| [`respect_gitignore`](#respect_gitignore) | `boolean`  | `true`       | Respect .gitignore files                  |
+| [`line_length`](#line_length)             | `integer`  | `80`         | Default line length for rules             |
+| [`flavor`](#flavor)                       | `string`   | `"standard"` | Markdown flavor to use                    |
 
 ## Configuration Examples
 

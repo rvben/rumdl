@@ -174,12 +174,12 @@ allowed_elements = ["br", "img"]
 
 Most markdownlint options map directly to rumdl:
 
-| markdownlint | rumdl |
-|-------------|-------|
-| `default: true` | `[global]` section |
-| Rule by number (`MD013`) | Same (`[MD013]`) |
+| markdownlint                 | rumdl                  |
+| ---------------------------- | ---------------------- |
+| `default: true`              | `[global]` section     |
+| Rule by number (`MD013`)     | Same (`[MD013]`)       |
 | Rule by name (`line-length`) | Same (`[line-length]`) |
-| Disabling: `"MD013": false` | `disable = ["MD013"]` |
+| Disabling: `"MD013": false`  | `disable = ["MD013"]`  |
 
 ### Per-File Ignores
 
@@ -299,48 +299,48 @@ None currently known. If you encounter compatibility issues, please [file an iss
 
 ## Feature Comparison Table
 
-| Feature | markdownlint | rumdl |
-|---------|-------------|-------|
-| **Core Functionality** |  |  |
-| Rule count | 53 implemented | 53 (+1 unique: MD057) |
-| Auto-fix | ✅ | ✅ |
-| Configuration file | ✅ JSON/YAML | ✅ TOML/JSON/YAML |
-| Inline config | ✅ | ✅ (compatible) |
-| Custom rules | ✅ (JavaScript) | ❌ (planned) |
-| **Performance** |  |  |
-| Single file | Fast | Very Fast (10-30x) |
-| Large repos (100+ files) | Slow | Very Fast (30-100x) |
-| Incremental mode | ❌ | ✅ (caching) |
-| Parallel processing | Partial | ✅ Full |
-| **Developer Experience** |  |  |
-| Built-in LSP | ❌ | ✅ |
-| VS Code extension | ✅ (separate) | ✅ (built-in) |
-| Watch mode | Via external tools | ✅ `--watch` |
-| Stdin/stdout | ✅ | ✅ |
-| Diff preview | ❌ | ✅ `--diff` |
-| **Installation** |  |  |
-| Node.js required | ✅ | ❌ |
-| Python pip | ❌ | ✅ |
-| Rust cargo | ❌ | ✅ |
-| Single binary | ❌ | ✅ |
-| Homebrew | ✅ | ✅ |
-| **Output & Integration** |  |  |
-| Text format | ✅ | ✅ |
-| JSON format | ✅ | ✅ |
-| GitHub Actions | ✅ | ✅ Enhanced |
-| Statistics | ❌ | ✅ |
-| Profiling | ❌ | ✅ |
+| Feature                  | markdownlint       | rumdl                 |
+| ------------------------ | ------------------ | --------------------- |
+| **Core Functionality**   |                    |                       |
+| Rule count               | 53 implemented     | 53 (+1 unique: MD057) |
+| Auto-fix                 | ✅                 | ✅                    |
+| Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/YAML     |
+| Inline config            | ✅                 | ✅ (compatible)       |
+| Custom rules             | ✅ (JavaScript)    | ❌ (planned)          |
+| **Performance**          |                    |                       |
+| Single file              | Fast               | Very Fast (10-30x)    |
+| Large repos (100+ files) | Slow               | Very Fast (30-100x)   |
+| Incremental mode         | ❌                 | ✅ (caching)          |
+| Parallel processing      | Partial            | ✅ Full               |
+| **Developer Experience** |                    |                       |
+| Built-in LSP             | ❌                 | ✅                    |
+| VS Code extension        | ✅ (separate)      | ✅ (built-in)         |
+| Watch mode               | Via external tools | ✅ `--watch`          |
+| Stdin/stdout             | ✅                 | ✅                    |
+| Diff preview             | ❌                 | ✅ `--diff`           |
+| **Installation**         |                    |                       |
+| Node.js required         | ✅                 | ❌                    |
+| Python pip               | ❌                 | ✅                    |
+| Rust cargo               | ❌                 | ✅                    |
+| Single binary            | ❌                 | ✅                    |
+| Homebrew                 | ✅                 | ✅                    |
+| **Output & Integration** |                    |                       |
+| Text format              | ✅                 | ✅                    |
+| JSON format              | ✅                 | ✅                    |
+| GitHub Actions           | ✅                 | ✅ Enhanced           |
+| Statistics               | ❌                 | ✅                    |
+| Profiling                | ❌                 | ✅                    |
 
 ## CommonMark Compliance
 
 rumdl prioritizes **CommonMark specification compliance** to reduce false positives and align with modern Markdown standards:
 
-| Aspect | markdownlint | rumdl |
-|--------|-------------|-------|
-| List continuation indent | Custom logic | CommonMark spec |
-| Code blocks in lists | May misdetect | Spec-compliant (8 spaces) |
+| Aspect                    | markdownlint    | rumdl                                  |
+| ------------------------- | --------------- | -------------------------------------- |
+| List continuation indent  | Custom logic    | CommonMark spec                        |
+| Code blocks in lists      | May misdetect   | Spec-compliant (8 spaces)              |
 | Heading anchor generation | GitHub-flavored | Multiple styles (GitHub, GitLab, etc.) |
-| Reference definitions | Basic | Full spec support |
+| Reference definitions     | Basic           | Full spec support                      |
 
 ### Reporting Compatibility Issues
 
