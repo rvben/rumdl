@@ -557,10 +557,14 @@ impl<'a> LintContext<'a> {
             eprintln!("[PROFILE] Char frequency: {:?}", start.elapsed());
         }
 
-        // Pre-compute table blocks for rules that need them (MD013, MD055, MD056, MD058)
+        // Pre-compute table blocks for rules that need them (MD013, MD055, MD056, MD058, MD060)
         let start = Instant::now();
-        let table_blocks =
-            crate::utils::table_utils::TableUtils::find_table_blocks_with_code_info(content, &code_blocks, &code_spans);
+        let table_blocks = crate::utils::table_utils::TableUtils::find_table_blocks_with_code_info(
+            content,
+            &code_blocks,
+            &code_spans,
+            &html_comment_ranges,
+        );
         if profile {
             eprintln!("[PROFILE] Table blocks: {:?}", start.elapsed());
         }
@@ -608,6 +612,11 @@ impl<'a> LintContext<'a> {
         let mut cache = self.code_spans_cache.lock().expect("Code spans cache mutex poisoned");
 
         Arc::clone(cache.get_or_insert_with(|| Arc::new(Self::parse_code_spans(self.content, &self.lines))))
+    }
+
+    /// Get HTML comment ranges - pre-computed during LintContext construction
+    pub fn html_comment_ranges(&self) -> &[crate::utils::skip_context::ByteRange] {
+        &self.html_comment_ranges
     }
 
     /// Get HTML tags - computed lazily on first access

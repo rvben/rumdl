@@ -117,6 +117,7 @@ impl TableUtils {
         content: &str,
         code_blocks: &[(usize, usize)],
         code_spans: &[crate::lint_context::CodeSpan],
+        html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     ) -> Vec<TableBlock> {
         let lines: Vec<&str> = content.lines().collect();
         let mut tables = Vec::new();
@@ -131,14 +132,18 @@ impl TableUtils {
         }
 
         while i < lines.len() {
-            // Skip lines in code blocks using provided code blocks
+            // Skip lines in code blocks, code spans, or HTML comments
             let line_start = line_positions[i];
             let in_code =
                 crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block_or_span(code_blocks, line_start)
                     || code_spans
                         .iter()
                         .any(|span| line_start >= span.byte_offset && line_start < span.byte_end);
-            if in_code {
+            let in_html_comment = html_comment_ranges
+                .iter()
+                .any(|range| line_start >= range.start && line_start < range.end);
+
+            if in_code || in_html_comment {
                 i += 1;
                 continue;
             }
@@ -194,7 +199,7 @@ impl TableUtils {
     /// Find all table blocks in the content with optimized detection
     /// This is a backward-compatible wrapper that accepts LintContext
     pub fn find_table_blocks(content: &str, ctx: &crate::lint_context::LintContext) -> Vec<TableBlock> {
-        Self::find_table_blocks_with_code_info(content, &ctx.code_blocks, &ctx.code_spans())
+        Self::find_table_blocks_with_code_info(content, &ctx.code_blocks, &ctx.code_spans(), ctx.html_comment_ranges())
     }
 
     /// Count the number of cells in a table row

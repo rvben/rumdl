@@ -215,7 +215,8 @@ fn test_md060_preserve_alignment_indicators() {
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
 
     let fixed = rule.fix(&ctx).unwrap();
-    let expected = "| Left | Center | Right |\n| :--- | :----: | ----: |\n| A    | B      | C     |";
+    // Now with alignment support: A is left-aligned, B is center-aligned, C is right-aligned
+    let expected = "| Left | Center | Right |\n| :--- | :----: | ----: |\n| A    |   B    |     C |";
     assert_eq!(fixed, expected);
 
     // Verify all rows have equal length in aligned mode
@@ -463,4 +464,206 @@ fn test_md060_delimiter_width_does_not_affect_alignment() {
     assert_eq!(lines.len(), 3);
     assert_eq!(lines[0].len(), lines[1].len());
     assert_eq!(lines[1].len(), lines[2].len());
+}
+
+#[test]
+fn test_md060_content_alignment_left() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Left |\n|:-----|\n| A |\n| BB |\n| CCC |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All lines should have equal length
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
+    assert_eq!(lines[3].len(), lines[4].len());
+
+    // Content should be left-aligned (padding on right)
+    // Column width is 4 (from "Left"), so padding for each:
+    // A (1 char): padding=3 → "| A    |" (boundary + A + 3 spaces + boundary)
+    // BB (2 chars): padding=2 → "| BB   |"
+    // CCC (3 chars): padding=1 → "| CCC  |"
+    assert!(
+        lines[2].contains("| A    |"),
+        "Single char should be left-aligned with padding on right"
+    );
+    assert!(
+        lines[3].contains("| BB   |"),
+        "Two chars should be left-aligned with padding on right"
+    );
+    assert!(
+        lines[4].contains("| CCC  |"),
+        "Three chars should be left-aligned with padding on right"
+    );
+}
+
+#[test]
+fn test_md060_content_alignment_center() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Center |\n|:------:|\n| A |\n| BB |\n| CCC |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All lines should have equal length
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
+    assert_eq!(lines[3].len(), lines[4].len());
+
+    // Content should be center-aligned (padding split on both sides)
+    // Format: "| <boundary><left_pad><content><right_pad><boundary> |"
+    // For "A" in width 6: padding=5, left=2, right=3 → "| <1><2>A<3><1> |" = "|   A    |"
+    // For "BB" in width 6: padding=4, left=2, right=2 → "| <1><2>BB<2><1> |" = "|   BB   |"
+    // For "CCC" in width 6: padding=3, left=1, right=2 → "| <1><1>CCC<2><1> |" = "|  CCC   |"
+    assert!(
+        lines[2].contains("|   A    |"),
+        "Single char should be center-aligned, got: {}",
+        lines[2]
+    );
+    assert!(
+        lines[3].contains("|   BB   |"),
+        "Two chars should be center-aligned, got: {}",
+        lines[3]
+    );
+    assert!(
+        lines[4].contains("|  CCC   |"),
+        "Three chars should be center-aligned, got: {}",
+        lines[4]
+    );
+}
+
+#[test]
+fn test_md060_content_alignment_right() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Right |\n|------:|\n| A |\n| BB |\n| CCC |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All lines should have equal length
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
+    assert_eq!(lines[3].len(), lines[4].len());
+
+    // Content should be right-aligned (padding on left)
+    // Format: "| <boundary><padding><content><boundary> |" where boundary+padding creates visual right alignment
+    assert!(
+        lines[2].contains("|     A |"),
+        "Single char should be right-aligned with padding on left, got: {}",
+        lines[2]
+    );
+    assert!(
+        lines[3].contains("|    BB |"),
+        "Two chars should be right-aligned with padding on left, got: {}",
+        lines[3]
+    );
+    assert!(
+        lines[4].contains("|   CCC |"),
+        "Three chars should be right-aligned with padding on left, got: {}",
+        lines[4]
+    );
+}
+
+#[test]
+fn test_md060_mixed_column_alignments() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | B | C |\n| AA | BB | CC |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All lines should have equal length
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
+
+    // Parse the content rows to check alignment
+    let row1 = lines[2];
+    let row2 = lines[3];
+
+    // First column (left-aligned): padding on right
+    assert!(
+        row1.starts_with("| A "),
+        "First column should be left-aligned in row 1, got: {row1}",
+    );
+    assert!(
+        row2.starts_with("| AA"),
+        "First column should be left-aligned in row 2, got: {row2}",
+    );
+
+    // Third column (right-aligned): padding on left
+    // For "Right" column (width ~5) with content "C" (1 char), expect boundary + 4 padding + C + boundary
+    assert!(
+        row1.contains("|     C |"),
+        "Third column should be right-aligned in row 1, got: {row1}",
+    );
+    assert!(
+        row1.ends_with("|     C |"),
+        "Third column should be at end of row 1, got: {row1}",
+    );
+    // For content "CC" (2 chars), expect boundary + 3 padding + CC + boundary
+    assert!(
+        row2.contains("|    CC |"),
+        "Third column should be right-aligned in row 2, got: {row2}",
+    );
+    assert!(
+        row2.ends_with("|    CC |"),
+        "Third column should be at end of row 2, got: {row2}",
+    );
+}
+
+#[test]
+fn test_md060_tables_in_html_comments_should_not_be_formatted() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "# Normal table\n\n| A | B |\n|---|---|\n| C | D |\n\n<!-- Commented table\n| X | Y |\n|---|---|\n| Z | W |\n-->\n\n| E | F |\n|---|---|\n| G | H |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should only warn about the two tables outside comments (lines 3-5 and 13-15)
+    // That's 3 lines for first table + 3 lines for last table = 6 warnings
+    let non_comment_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| {
+            let line = w.line;
+            // Lines 3-5 are the first table, lines 13-15 are the last table
+            (3..=5).contains(&line) || (13..=15).contains(&line)
+        })
+        .collect();
+
+    assert_eq!(
+        non_comment_warnings.len(),
+        warnings.len(),
+        "Should only warn about tables outside HTML comments. Got {} warnings total, expected 6",
+        warnings.len()
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The commented table should remain unformatted
+    assert!(fixed.contains("| X | Y |"), "Commented table should not be modified");
+    assert!(fixed.contains("| Z | W |"), "Commented table should not be modified");
+
+    // The normal tables should be formatted
+    assert!(
+        fixed.contains("| A | B |") || fixed.contains("| A   | B   |"),
+        "Normal table should be formatted"
+    );
+    assert!(
+        fixed.contains("| E | F |") || fixed.contains("| E   | F   |"),
+        "Normal table should be formatted"
+    );
 }

@@ -6,6 +6,13 @@ use unicode_width::UnicodeWidthStr;
 mod md060_config;
 use md060_config::MD060Config;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ColumnAlignment {
+    Left,
+    Center,
+    Right,
+}
+
 /// Rule MD060: Table Column Alignment
 ///
 /// See [docs/md060.md](../../docs/md060.md) for full documentation, configuration, and examples.
@@ -165,6 +172,23 @@ impl MD060TableFormat {
         })
     }
 
+    fn parse_column_alignments(delimiter_row: &[String]) -> Vec<ColumnAlignment> {
+        delimiter_row
+            .iter()
+            .map(|cell| {
+                let trimmed = cell.trim();
+                let has_left_colon = trimmed.starts_with(':');
+                let has_right_colon = trimmed.ends_with(':');
+
+                match (has_left_colon, has_right_colon) {
+                    (true, true) => ColumnAlignment::Center,
+                    (false, true) => ColumnAlignment::Right,
+                    _ => ColumnAlignment::Left,
+                }
+            })
+            .collect()
+    }
+
     fn calculate_column_widths(table_lines: &[&str]) -> Vec<usize> {
         let mut column_widths = Vec::new();
         let mut delimiter_cells: Option<Vec<String>> = None;
@@ -212,7 +236,12 @@ impl MD060TableFormat {
         final_widths
     }
 
-    fn format_table_row(cells: &[String], column_widths: &[usize], is_delimiter: bool) -> String {
+    fn format_table_row(
+        cells: &[String],
+        column_widths: &[usize],
+        column_alignments: &[ColumnAlignment],
+        is_delimiter: bool,
+    ) -> String {
         let formatted_cells: Vec<String> = cells
             .iter()
             .enumerate()
@@ -250,7 +279,25 @@ impl MD060TableFormat {
                     let trimmed = cell.trim();
                     let current_width = Self::calculate_cell_display_width(cell);
                     let padding = target_width.saturating_sub(current_width);
-                    format!(" {trimmed}{} ", " ".repeat(padding))
+
+                    // Apply alignment based on column's alignment indicator
+                    let alignment = column_alignments.get(i).copied().unwrap_or(ColumnAlignment::Left);
+                    match alignment {
+                        ColumnAlignment::Left => {
+                            // Left: content on left, padding on right
+                            format!(" {trimmed}{} ", " ".repeat(padding))
+                        }
+                        ColumnAlignment::Center => {
+                            // Center: split padding on both sides
+                            let left_padding = padding / 2;
+                            let right_padding = padding - left_padding;
+                            format!(" {}{trimmed}{} ", " ".repeat(left_padding), " ".repeat(right_padding))
+                        }
+                        ColumnAlignment::Right => {
+                            // Right: padding on left, content on right
+                            format!(" {}{trimmed} ", " ".repeat(padding))
+                        }
+                    }
                 }
             })
             .collect();
@@ -318,6 +365,11 @@ impl MD060TableFormat {
                 }
 
                 let target_style = detected_style.unwrap();
+
+                // Parse column alignments from delimiter row (always at index 1)
+                let delimiter_cells = Self::parse_table_row(table_lines[1]);
+                let column_alignments = Self::parse_column_alignments(&delimiter_cells);
+
                 for line in &table_lines {
                     let cells = Self::parse_table_row(line);
                     match target_style.as_str() {
@@ -326,7 +378,12 @@ impl MD060TableFormat {
                         _ => {
                             let column_widths = Self::calculate_column_widths(&table_lines);
                             let is_delimiter = Self::is_delimiter_row(&cells);
-                            result.push(Self::format_table_row(&cells, &column_widths, is_delimiter));
+                            result.push(Self::format_table_row(
+                                &cells,
+                                &column_widths,
+                                &column_alignments,
+                                is_delimiter,
+                            ));
                         }
                     }
                 }
@@ -349,10 +406,19 @@ impl MD060TableFormat {
             "aligned" => {
                 let column_widths = Self::calculate_column_widths(&table_lines);
 
+                // Parse column alignments from delimiter row (always at index 1)
+                let delimiter_cells = Self::parse_table_row(table_lines[1]);
+                let column_alignments = Self::parse_column_alignments(&delimiter_cells);
+
                 for line in table_lines {
                     let cells = Self::parse_table_row(line);
                     let is_delimiter = Self::is_delimiter_row(&cells);
-                    result.push(Self::format_table_row(&cells, &column_widths, is_delimiter));
+                    result.push(Self::format_table_row(
+                        &cells,
+                        &column_widths,
+                        &column_alignments,
+                        is_delimiter,
+                    ));
                 }
             }
             _ => {
