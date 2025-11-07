@@ -667,3 +667,334 @@ fn test_md060_tables_in_html_comments_should_not_be_formatted() {
         "Normal table should be formatted"
     );
 }
+
+// ============================================================================
+// CRITICAL EDGE CASE TESTS (Top 10 from comprehensive analysis)
+// ============================================================================
+
+#[test]
+fn test_md060_zero_width_characters() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test Zero Width Space (U+200B), Zero Width Non-Joiner (U+200C), Word Joiner (U+2060)
+    let content = "| Name | Status |\n|---|---|\n| Test\u{200B}Word | Active\u{200C}User |\n| Word\u{2060}Join | OK |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Zero-width characters should be preserved
+    assert!(
+        fixed.contains("Test\u{200B}Word"),
+        "Zero Width Space should be preserved"
+    );
+    assert!(
+        fixed.contains("Active\u{200C}User"),
+        "Zero Width Non-Joiner should be preserved"
+    );
+    assert!(fixed.contains("Word\u{2060}Join"), "Word Joiner should be preserved");
+
+    // All lines should have equal length
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0].len(), lines[1].len(), "Lines 0 and 1 should have equal length");
+    assert_eq!(lines[1].len(), lines[2].len(), "Lines 1 and 2 should have equal length");
+    assert_eq!(lines[2].len(), lines[3].len(), "Lines 2 and 3 should have equal length");
+}
+
+#[test]
+fn test_md060_rtl_text_arabic() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test Arabic text (RTL)
+    let content = "| Name | City |\n|---|---|\n| أحمد | القاهرة |\n| محمد | دبي |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Arabic text should be preserved
+    assert!(fixed.contains("أحمد"), "Arabic name should be preserved");
+    assert!(fixed.contains("القاهرة"), "Arabic city should be preserved");
+    assert!(fixed.contains("محمد"), "Arabic name should be preserved");
+    assert!(fixed.contains("دبي"), "Arabic city should be preserved");
+
+    // All lines should have equal display width
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(
+        lines[0].width(),
+        lines[1].width(),
+        "Display widths should match for RTL text"
+    );
+    assert_eq!(
+        lines[1].width(),
+        lines[2].width(),
+        "Display widths should match for RTL text"
+    );
+    assert_eq!(
+        lines[2].width(),
+        lines[3].width(),
+        "Display widths should match for RTL text"
+    );
+}
+
+#[test]
+fn test_md060_rtl_text_hebrew() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test Hebrew text (RTL)
+    let content = "| שם | עיר |\n|---|---|\n| דוד | תל אביב |\n| שרה | ירושלים |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Hebrew text should be preserved
+    assert!(fixed.contains("דוד"), "Hebrew name should be preserved");
+    assert!(fixed.contains("תל אביב"), "Hebrew city should be preserved");
+    assert!(fixed.contains("שרה"), "Hebrew name should be preserved");
+    assert!(fixed.contains("ירושלים"), "Hebrew city should be preserved");
+
+    // All lines should have equal display width
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(
+        lines[0].width(),
+        lines[1].width(),
+        "Display widths should match for RTL text"
+    );
+    assert_eq!(
+        lines[1].width(),
+        lines[2].width(),
+        "Display widths should match for RTL text"
+    );
+    assert_eq!(
+        lines[2].width(),
+        lines[3].width(),
+        "Display widths should match for RTL text"
+    );
+}
+
+#[test]
+fn test_md060_mismatched_column_counts_more_in_header() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Header has 4 columns, delimiter has 3, content has 2
+    let content = "| A | B | C | D |\n|---|---|---|\n| X | Y |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // This should not panic or crash
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Should handle mismatched column counts gracefully");
+
+    let fixed = result.unwrap();
+    // The implementation should handle this gracefully, either by:
+    // 1. Not formatting the table at all (safest)
+    // 2. Formatting based on delimiter row column count
+    // 3. Formatting based on max column count
+    // We just verify it doesn't panic
+    assert!(
+        fixed.contains("A") || fixed.contains("X"),
+        "Content should be preserved"
+    );
+}
+
+#[test]
+fn test_md060_mismatched_column_counts_more_in_content() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Header has 2 columns, delimiter has 2, content has 4
+    let content = "| A | B |\n|---|---|\n| X | Y | Z | W |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // This should not panic or crash
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Should handle mismatched column counts gracefully");
+
+    let fixed = result.unwrap();
+    assert!(
+        fixed.contains("A") || fixed.contains("X"),
+        "Content should be preserved"
+    );
+}
+
+#[test]
+fn test_md060_escaped_pipes_outside_code() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test escaped pipes in regular text (not in inline code)
+    let content = "| Operator | Example |\n|---|---|\n| OR | a \\| b |\n| Pipe | x \\| y \\| z |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Escaped pipes should be preserved (this may fail if not implemented)
+    // The backslash-escaped pipe should not be treated as column separator
+    assert!(fixed.contains("\\|"), "Escaped pipes should be preserved");
+
+    // Verify table structure is maintained
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4, "All rows should be present");
+}
+
+#[test]
+fn test_md060_combining_characters_diacritics() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test combining diacritical marks (café, São Paulo, etc.)
+    let content = "| City | Country |\n|---|---|\n| café | français |\n| São Paulo | Brasil |\n| Zürich | Schweiz |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Combining characters should be preserved
+    assert!(fixed.contains("café"), "Café with combining acute should be preserved");
+    assert!(fixed.contains("São"), "São with combining tilde should be preserved");
+    assert!(
+        fixed.contains("Zürich"),
+        "Zürich with combining umlaut should be preserved"
+    );
+
+    // All lines should have proper display width
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(
+        lines[0].width(),
+        lines[1].width(),
+        "Display widths should match with diacritics"
+    );
+    assert_eq!(
+        lines[1].width(),
+        lines[2].width(),
+        "Display widths should match with diacritics"
+    );
+}
+
+#[test]
+fn test_md060_skin_tone_modifiers() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test emoji with skin tone modifiers (these are complex grapheme clusters)
+    let content = "| User | Avatar |\n|---|---|\n| Alice | 👍🏻 |\n| Bob | 👋🏿 |\n| Carol | 🤝🏽 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // This might be skipped like ZWJ emoji due to measurement complexity
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Skin tone modifiers should be preserved
+    assert!(fixed.contains("👍🏻"), "Emoji with light skin tone should be preserved");
+    assert!(fixed.contains("👋🏿"), "Emoji with dark skin tone should be preserved");
+    assert!(fixed.contains("🤝🏽"), "Emoji with medium skin tone should be preserved");
+}
+
+#[test]
+fn test_md060_flag_emojis() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test flag emojis (regional indicator symbols)
+    let content = "| Country | Flag |\n|---|---|\n| USA | 🇺🇸 |\n| Japan | 🇯🇵 |\n| France | 🇫🇷 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Flag emojis should be preserved
+    assert!(fixed.contains("🇺🇸"), "US flag should be preserved");
+    assert!(fixed.contains("🇯🇵"), "Japan flag should be preserved");
+    assert!(fixed.contains("🇫🇷"), "France flag should be preserved");
+}
+
+#[test]
+fn test_md060_tables_in_blockquotes() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test tables inside blockquotes
+    let content = "> | Name | Age |\n> |---|---|\n> | Alice | 30 |\n\nNormal text\n\n| X | Y |\n|---|---|\n| A | B |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Blockquote should be preserved
+    assert!(fixed.starts_with("> "), "Blockquote markers should be preserved");
+
+    // Both tables should be present
+    assert!(
+        fixed.contains("Alice") || fixed.contains("Name"),
+        "Table in blockquote should be present"
+    );
+    assert!(
+        fixed.contains("A") && fixed.contains("B"),
+        "Normal table should be present"
+    );
+}
+
+#[test]
+fn test_md060_adjacent_tables_without_blank_line() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test two tables directly adjacent (no blank line between)
+    // This is technically invalid Markdown but shouldn't crash
+    let content = "| A | B |\n|---|---|\n| 1 | 2 |\n| C | D |\n|---|---|\n| 3 | 4 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // Should not panic
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Adjacent tables should not cause crash");
+
+    let fixed = result.unwrap();
+    // Content should be preserved in some form
+    assert!(
+        fixed.contains("1") && fixed.contains("2"),
+        "First table content should be preserved"
+    );
+    assert!(
+        fixed.contains("3") && fixed.contains("4"),
+        "Second table content should be preserved"
+    );
+}
+
+#[test]
+fn test_md060_maximum_column_count_stress() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test with 100 columns to check performance and memory handling
+    let columns = 100;
+    let header_row = format!(
+        "| {} |",
+        (0..columns).map(|i| format!("C{i}")).collect::<Vec<_>>().join(" | ")
+    );
+    let delimiter_row = format!("| {} |", vec!["---"; columns].join(" | "));
+    let content_row = format!(
+        "| {} |",
+        (0..columns).map(|i| i.to_string()).collect::<Vec<_>>().join(" | ")
+    );
+
+    let content = format!("{header_row}\n{delimiter_row}\n{content_row}");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+
+    // This should complete in reasonable time and not crash
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Should handle 100 columns without crashing");
+
+    let fixed = result.unwrap();
+    // Verify some columns are present
+    assert!(fixed.contains("C0"), "First column should be present");
+    assert!(fixed.contains("C99"), "Last column should be present");
+}
+
+#[test]
+fn test_md060_fix_idempotency() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test that fix(fix(x)) == fix(x)
+    let content = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | NYC |\n| Bob | 25 | LA |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed_once = rule.fix(&ctx).unwrap();
+
+    // Apply fix again on the already-fixed content
+    let ctx2 = LintContext::new(&fixed_once, MarkdownFlavor::Standard);
+    let fixed_twice = rule.fix(&ctx2).unwrap();
+
+    assert_eq!(
+        fixed_once, fixed_twice,
+        "Applying fix twice should produce the same result as applying it once (idempotency)"
+    );
+
+    // Verify no warnings on already-formatted table
+    let warnings = rule.check(&ctx2).unwrap();
+    assert_eq!(warnings.len(), 0, "Already-formatted table should produce no warnings");
+}
