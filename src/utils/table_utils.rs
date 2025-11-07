@@ -211,8 +211,8 @@ impl TableUtils {
             return 0;
         }
 
-        // Users shouldn't have to escape pipes in regex patterns, etc.
-        let masked_row = Self::mask_pipes_in_inline_code(trimmed);
+        // Users shouldn't have to escape pipes in regex patterns, inline code, etc.
+        let masked_row = Self::mask_pipes_for_table_parsing(trimmed);
 
         // Handle case with leading/trailing pipes
         let mut cell_count = 0;

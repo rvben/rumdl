@@ -1019,3 +1019,457 @@ fn test_md060_fix_idempotency() {
     let warnings = rule.check(&ctx2).unwrap();
     assert_eq!(warnings.len(), 0, "Already-formatted table should produce no warnings");
 }
+
+// ============================================================================
+// ADDITIONAL CRITICAL/HIGH PRIORITY EDGE CASES
+// ============================================================================
+
+// STRUCTURE EDGE CASES
+
+#[test]
+fn test_md060_completely_empty_table() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Table with all empty cells
+    let content = "| | | |\n|---|---|---|\n| | | |\n| | | |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // Should not panic
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Empty table should not crash");
+
+    let fixed = result.unwrap();
+    // All lines should have equal length
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4);
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
+}
+
+#[test]
+fn test_md060_table_with_no_delimiter() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Invalid table: missing delimiter row
+    let content = "| Name | Age |\n| Alice | 30 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // Should not panic - this won't be detected as a table by the parser
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Missing delimiter should not crash");
+}
+
+#[test]
+fn test_md060_single_row_table_header_only() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Table with just header and delimiter, no content
+    let content = "| Column A | Column B | Column C |\n|---|---|---|";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Should format correctly even without content rows
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(
+        lines[0].len(),
+        lines[1].len(),
+        "Header and delimiter should have equal length"
+    );
+
+    assert!(fixed.contains("Column A"));
+    assert!(fixed.contains("Column B"));
+    assert!(fixed.contains("Column C"));
+}
+
+#[test]
+fn test_md060_varying_column_counts_per_row() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Each row has different number of columns (malformed table)
+    let content = "| A | B | C | D |\n|---|---|\n| X |\n| Y | Z | W | V | U |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // Should not panic
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Varying column counts should not crash");
+}
+
+#[test]
+fn test_md060_delimiter_with_no_dashes() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Invalid delimiter row with only colons (edge case)
+    let content = "| A | B |\n|:::|:::|\n| X | Y |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // Should handle gracefully (likely won't be detected as valid table)
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Invalid delimiter should not crash");
+}
+
+// UNICODE COMPLEXITY EDGE CASES
+
+#[test]
+fn test_md060_bidirectional_text_mixed_ltr_rtl() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Mix of LTR (English) and RTL (Arabic) in same table
+    let content = "| English | العربية |\n|---|---|\n| Hello | مرحبا |\n| World | عالم |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Content should be preserved
+    assert!(fixed.contains("English"));
+    assert!(fixed.contains("العربية"));
+    assert!(fixed.contains("Hello"));
+    assert!(fixed.contains("مرحبا"));
+
+    // All lines should have equal display width
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0].width(), lines[1].width());
+    assert_eq!(lines[1].width(), lines[2].width());
+    assert_eq!(lines[2].width(), lines[3].width());
+}
+
+#[test]
+fn test_md060_unicode_variation_selectors() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Variation selectors change glyph appearance (text vs emoji style)
+    // U+FE0E = text style, U+FE0F = emoji style
+    let content = "| Char | Style |\n|---|---|\n| ☺︎ | Text |\n| ☺️ | Emoji |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Content should be preserved
+    assert!(fixed.contains("Text"));
+    assert!(fixed.contains("Emoji"));
+
+    // Should handle variation selectors without crashing
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4);
+}
+
+#[test]
+fn test_md060_unicode_control_characters() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test with various control characters that might cause issues
+    // U+0000 = NULL, U+0001 = SOH, U+001F = Unit Separator
+    let content = "| Name | Value |\n|---|---|\n| Test\u{0001} | Data |\n| Item | Info\u{001F} |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // Should not panic
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Control characters should not crash formatting");
+}
+
+#[test]
+fn test_md060_unicode_normalization_issues() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Same visual character in different normalization forms (NFD vs NFC)
+    // é can be: U+00E9 (precomposed) or U+0065 U+0301 (e + combining acute)
+    let content = "| NFC | NFD |\n|---|---|\n| café | cafe\u{0301} |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Both forms should be preserved
+    assert!(fixed.contains("café"));
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 3);
+}
+
+#[test]
+fn test_md060_mixed_emoji_types() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Mix basic emoji, emoji with modifiers, and multi-codepoint emoji
+    let content = "| Type | Example |\n|---|---|\n| Basic | 😀 |\n| Gender | 👨 |\n| Number | #️⃣ |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // All emoji should be preserved
+    assert!(fixed.contains("😀"));
+    assert!(fixed.contains("👨"));
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 5);
+}
+
+// PERFORMANCE AND STRESS TESTS
+
+#[test]
+fn test_md060_extremely_wide_single_cell() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Single cell with 10000 characters
+    let long_text = "A".repeat(10000);
+    let content = format!("| Short | Long |\n|---|---|\n| X | {long_text} |");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+
+    // Should complete without timeout or excessive memory
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Extremely wide cell should not crash");
+
+    let fixed = result.unwrap();
+    assert!(fixed.contains(&long_text), "Long text should be preserved");
+}
+
+#[test]
+fn test_md060_many_rows_stress() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Table with 1000 rows
+    let mut lines = vec!["| ID | Name | Value |".to_string(), "|---|---|---|".to_string()];
+    for i in 0..1000 {
+        lines.push(format!("| {i} | Row{i} | Data{i} |"));
+    }
+    let content = lines.join("\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+
+    // Should complete in reasonable time
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "1000 rows should not crash");
+
+    let fixed = result.unwrap();
+    assert!(fixed.contains("Row0"));
+    assert!(fixed.contains("Row999"));
+}
+
+#[test]
+fn test_md060_deeply_nested_inline_code() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Multiple levels of inline code with pipes
+    let content =
+        "| Code | Description |\n|---|---|\n| `a|b` | Simple |\n| `x|y|z` | Multiple |\n| `{a|b}|{c|d}` | Complex |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // All inline code with pipes should be preserved
+    assert!(fixed.contains("`a|b`"));
+    assert!(fixed.contains("`x|y|z`"));
+    assert!(fixed.contains("`{a|b}|{c|d}`"));
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+}
+
+// MIXED CONTENT EDGE CASES
+
+#[test]
+fn test_md060_table_with_links() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Name | Link |\n|---|---|\n| GitHub | [Link](https://github.com) |\n| Google | [Search](https://google.com) |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Links should be preserved
+    assert!(fixed.contains("[Link](https://github.com)"));
+    assert!(fixed.contains("[Search](https://google.com)"));
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0].len(), lines[1].len());
+}
+
+#[test]
+fn test_md060_table_with_html_entities() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Symbol | HTML |\n|---|---|\n| Less than | &lt; |\n| Greater | &gt; |\n| Ampersand | &amp; |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // HTML entities should be preserved
+    assert!(fixed.contains("&lt;"));
+    assert!(fixed.contains("&gt;"));
+    assert!(fixed.contains("&amp;"));
+}
+
+#[test]
+fn test_md060_table_with_bold_and_italic() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content =
+        "| Text | Style |\n|---|---|\n| **Bold** | Strong |\n| *Italic* | Emphasis |\n| ***Both*** | Combined |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Markdown formatting should be preserved
+    assert!(fixed.contains("**Bold**"));
+    assert!(fixed.contains("*Italic*"));
+    assert!(fixed.contains("***Both***"));
+}
+
+#[test]
+fn test_md060_table_with_strikethrough() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Status | Item |\n|---|---|\n| Done | ~~Old~~ |\n| Active | Current |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Strikethrough should be preserved
+    assert!(fixed.contains("~~Old~~"));
+}
+
+// WHITESPACE EDGE CASES
+
+#[test]
+fn test_md060_cells_with_leading_trailing_spaces() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Cells with intentional spaces (though they'll be trimmed in output)
+    let content = "| Name | Value |\n|---|---|\n|   Spaced   |   Data   |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Content should be trimmed and padded correctly
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+}
+
+#[test]
+fn test_md060_cells_with_tabs() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Name | Value |\n|---|---|\n| Tab\there | Data |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Tabs should be preserved in cell content
+    assert!(fixed.contains("Tab\there"));
+}
+
+#[test]
+fn test_md060_cells_with_newline_escape() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Cells with literal \n (not actual newlines)
+    let content = "| Pattern | Example |\n|---|---|\n| Newline | Line\\nBreak |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Escaped newline should be preserved
+    assert!(fixed.contains("Line\\nBreak"));
+}
+
+// DELIMITER ROW VARIATIONS
+
+#[test]
+fn test_md060_delimiter_with_many_dashes() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Delimiter rows with varying dash counts
+    let content = "| A | B | C |\n|----------|---|---------------------------|\n| X | Y | Z |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Should normalize to consistent delimiter format
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+}
+
+#[test]
+fn test_md060_all_alignment_combinations() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test all possible alignment combinations in one table
+    let content =
+        "| Default | Left | Right | Center |\n|---|:---|---:|:---:|\n| A | B | C | D |\n| AA | BB | CC | DD |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Verify all alignment indicators are present (checking delimiter row specifically)
+    let delimiter_row = lines[1];
+    assert!(
+        delimiter_row.contains("---") || delimiter_row.contains("----"),
+        "Default alignment should have dashes"
+    );
+    assert!(
+        delimiter_row.contains(":---") || delimiter_row.contains(":----"),
+        "Left alignment should have colon-dashes"
+    );
+    assert!(
+        delimiter_row.contains("---:") || delimiter_row.contains("----:"),
+        "Right alignment should have dashes-colon"
+    );
+    // Center alignment can have various dash counts between colons
+    assert!(
+        delimiter_row.chars().filter(|&c| c == ':').count() >= 4,
+        "Should have at least 4 colons (2 for center, 1 for left, 1 for right)"
+    );
+
+    // All lines should have equal length
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
+}
+
+// EDGE CASE COMBINATIONS
+
+#[test]
+fn test_md060_unicode_in_aligned_columns() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Different Unicode widths with alignment indicators
+    let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | 中 | 1 |\n| AAA | 中中中 | 111 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All lines should have equal display width
+    assert_eq!(lines[0].width(), lines[1].width());
+    assert_eq!(lines[1].width(), lines[2].width());
+    assert_eq!(lines[2].width(), lines[3].width());
+
+    // Chinese characters should be preserved
+    assert!(fixed.contains("中"));
+    assert!(fixed.contains("中中中"));
+}
+
+#[test]
+fn test_md060_empty_and_whitespace_only_cells_mixed() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| A | B | C |\n|---|---|---|\n|  |   | X |\n| Y |  |  |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Should handle empty cells correctly
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
+
+    assert!(fixed.contains("X"));
+    assert!(fixed.contains("Y"));
+}

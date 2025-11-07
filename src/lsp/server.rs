@@ -1729,31 +1729,25 @@ line_length = 50
     }
 
     /// Test for issue #131: LSP should skip pyproject.toml without [tool.rumdl] section
-    /// and fall back to user config, matching CLI behavior
+    ///
+    /// This test verifies the fix in resolve_config_for_file() at lines 574-585 that checks
+    /// for [tool.rumdl] presence before loading pyproject.toml. The fix ensures LSP behavior
+    /// matches CLI behavior.
     #[tokio::test]
     async fn test_issue_131_pyproject_without_rumdl_section() {
         use std::fs;
         use tempfile::tempdir;
 
-        let temp_dir = tempdir().unwrap();
-        let user_config_dir = tempdir().unwrap();
+        // Create a parent temp dir that we control
+        let parent_dir = tempdir().unwrap();
 
-        // Create user config with MD013 disabled
-        let user_rumdl_dir = user_config_dir.path().join("rumdl");
-        fs::create_dir_all(&user_rumdl_dir).unwrap();
-        fs::write(
-            user_rumdl_dir.join("rumdl.toml"),
-            r#"
-[global]
-disable = ["MD013", "MD041"]
-"#,
-        )
-        .unwrap();
+        // Create a child subdirectory for the project
+        let project_dir = parent_dir.path().join("project");
+        fs::create_dir(&project_dir).unwrap();
 
-        // Create pyproject.toml WITHOUT [tool.rumdl] section
-        let pyproject_path = temp_dir.path().join("pyproject.toml");
+        // Create pyproject.toml WITHOUT [tool.rumdl] section in project dir
         fs::write(
-            &pyproject_path,
+            project_dir.join("pyproject.toml"),
             r#"
 [project]
 name = "test-project"
@@ -1762,61 +1756,163 @@ version = "0.1.0"
         )
         .unwrap();
 
-        let test_file = temp_dir.path().join("test.md");
+        // Create .rumdl.toml in PARENT that SHOULD be found
+        // because pyproject.toml without [tool.rumdl] should be skipped
+        fs::write(
+            parent_dir.path().join(".rumdl.toml"),
+            r#"
+[global]
+disable = ["MD013"]
+"#,
+        )
+        .unwrap();
+
+        let test_file = project_dir.join("test.md");
         fs::write(&test_file, "# Test\n").unwrap();
 
         let server = create_test_server();
 
-        // Set workspace root
+        // Set workspace root to parent so upward search doesn't stop at project_dir
         {
             let mut roots = server.workspace_roots.write().await;
-            roots.push(temp_dir.path().to_path_buf());
+            roots.push(parent_dir.path().to_path_buf());
         }
 
-        // Load user config as fallback (load directly without auto-discovery to avoid picking up real system config)
-        let user_config_file = user_rumdl_dir.join("rumdl.toml");
-        let fallback_config = crate::config::SourcedConfig::load_with_discovery_impl(
-            Some(user_config_file.to_str().unwrap()),
-            None,
-            true, // skip_auto_discovery to prevent finding real system config
-            None,
-        )
-        .unwrap()
-        .into();
-        *server.rumdl_config.write().await = fallback_config;
-
-        // Resolve config for file (this will find pyproject.toml but should skip it)
+        // Resolve config for file in project_dir
         let config = server.resolve_config_for_file(&test_file).await;
 
-        // CRITICAL: LSP must use user config because pyproject.toml has no [tool.rumdl]
+        // CRITICAL TEST: The pyproject.toml in project_dir should be SKIPPED because it lacks
+        // [tool.rumdl], and the search should continue upward to find parent .rumdl.toml
         assert!(
             config.global.disable.contains(&"MD013".to_string()),
-            "Issue #131 regression: LSP should skip pyproject.toml without [tool.rumdl] and use user config"
+            "Issue #131 regression: LSP must skip pyproject.toml without [tool.rumdl] \
+             and continue upward search. Expected MD013 from parent .rumdl.toml to be disabled."
+        );
+
+        // Verify the config came from the parent directory, not project_dir
+        // (we can check this by looking at the cache)
+        let cache = server.config_cache.read().await;
+        let cache_entry = cache.get(&project_dir).expect("Config should be cached");
+
+        assert!(
+            cache_entry.config_file.is_some(),
+            "Should have found a config file (parent .rumdl.toml)"
+        );
+
+        let found_config_path = cache_entry.config_file.as_ref().unwrap();
+        assert!(
+            found_config_path.ends_with(".rumdl.toml"),
+            "Should have loaded .rumdl.toml, not pyproject.toml. Found: {found_config_path:?}"
         );
         assert!(
-            config.global.disable.contains(&"MD041".to_string()),
-            "Issue #131 regression: User config should be fully loaded"
+            found_config_path.parent().unwrap() == parent_dir.path(),
+            "Should have loaded config from parent directory, not project_dir"
         );
     }
 
-    /// Test for issue #131: LSP should detect pyproject.toml WITH [tool.rumdl] section
+    /// Test for issue #131: LSP should detect and load pyproject.toml WITH [tool.rumdl] section
+    ///
+    /// This test verifies that when pyproject.toml contains [tool.rumdl], the fix at lines 574-585
+    /// correctly allows it through and loads the configuration.
     #[tokio::test]
     async fn test_issue_131_pyproject_with_rumdl_section() {
         use std::fs;
         use tempfile::tempdir;
 
-        let temp_dir = tempdir().unwrap();
+        // Create a parent temp dir that we control
+        let parent_dir = tempdir().unwrap();
 
-        // Create pyproject.toml WITH [tool.rumdl] section
-        let pyproject_path = temp_dir.path().join("pyproject.toml");
+        // Create a child subdirectory for the project
+        let project_dir = parent_dir.path().join("project");
+        fs::create_dir(&project_dir).unwrap();
+
+        // Create pyproject.toml WITH [tool.rumdl] section in project dir
         fs::write(
-            &pyproject_path,
+            project_dir.join("pyproject.toml"),
             r#"
 [project]
 name = "test-project"
 
 [tool.rumdl.global]
 disable = ["MD033"]
+"#,
+        )
+        .unwrap();
+
+        // Create a parent directory with different config that should NOT be used
+        fs::write(
+            parent_dir.path().join(".rumdl.toml"),
+            r#"
+[global]
+disable = ["MD041"]
+"#,
+        )
+        .unwrap();
+
+        let test_file = project_dir.join("test.md");
+        fs::write(&test_file, "# Test\n").unwrap();
+
+        let server = create_test_server();
+
+        // Set workspace root to parent
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(parent_dir.path().to_path_buf());
+        }
+
+        // Resolve config for file
+        let config = server.resolve_config_for_file(&test_file).await;
+
+        // CRITICAL TEST: The pyproject.toml should be LOADED (not skipped) because it has [tool.rumdl]
+        assert!(
+            config.global.disable.contains(&"MD033".to_string()),
+            "Issue #131 regression: LSP must load pyproject.toml when it has [tool.rumdl]. \
+             Expected MD033 from project_dir pyproject.toml to be disabled."
+        );
+
+        // Verify we did NOT get the parent config
+        assert!(
+            !config.global.disable.contains(&"MD041".to_string()),
+            "Should use project_dir pyproject.toml, not parent .rumdl.toml"
+        );
+
+        // Verify the config came from pyproject.toml specifically
+        let cache = server.config_cache.read().await;
+        let cache_entry = cache.get(&project_dir).expect("Config should be cached");
+
+        assert!(cache_entry.config_file.is_some(), "Should have found a config file");
+
+        let found_config_path = cache_entry.config_file.as_ref().unwrap();
+        assert!(
+            found_config_path.ends_with("pyproject.toml"),
+            "Should have loaded pyproject.toml. Found: {found_config_path:?}"
+        );
+        assert!(
+            found_config_path.parent().unwrap() == project_dir,
+            "Should have loaded pyproject.toml from project_dir, not parent"
+        );
+    }
+
+    /// Test for issue #131: Verify pyproject.toml with only "tool.rumdl" (no brackets) is detected
+    ///
+    /// The fix checks for both "[tool.rumdl]" and "tool.rumdl" (line 576), ensuring it catches
+    /// any valid TOML structure like [tool.rumdl.global] or [[tool.rumdl.something]].
+    #[tokio::test]
+    async fn test_issue_131_pyproject_with_tool_rumdl_subsection() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+
+        // Create pyproject.toml with [tool.rumdl.global] but not [tool.rumdl] directly
+        fs::write(
+            temp_dir.path().join("pyproject.toml"),
+            r#"
+[project]
+name = "test-project"
+
+[tool.rumdl.global]
+disable = ["MD022"]
 "#,
         )
         .unwrap();
@@ -1835,11 +1931,18 @@ disable = ["MD033"]
         // Resolve config for file
         let config = server.resolve_config_for_file(&test_file).await;
 
-        // LSP should find and use pyproject.toml when it contains [tool.rumdl]
-        // NOTE: Config merging with user config is a separate issue not covered by #131
+        // Should detect "tool.rumdl" substring and load the config
         assert!(
-            config.global.disable.contains(&"MD033".to_string()),
-            "LSP should load and use pyproject.toml when it has [tool.rumdl]"
+            config.global.disable.contains(&"MD022".to_string()),
+            "Should detect tool.rumdl substring in [tool.rumdl.global] and load config"
+        );
+
+        // Verify it loaded pyproject.toml
+        let cache = server.config_cache.read().await;
+        let cache_entry = cache.get(temp_dir.path()).expect("Config should be cached");
+        assert!(
+            cache_entry.config_file.as_ref().unwrap().ends_with("pyproject.toml"),
+            "Should have loaded pyproject.toml"
         );
     }
 }
