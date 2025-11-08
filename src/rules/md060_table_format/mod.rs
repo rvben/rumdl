@@ -4,6 +4,7 @@ use crate::utils::table_utils::TableUtils;
 use unicode_width::UnicodeWidthStr;
 
 mod md060_config;
+use crate::md013_line_length::MD013Config;
 use md060_config::MD060Config;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -11,6 +12,13 @@ enum ColumnAlignment {
     Left,
     Center,
     Right,
+}
+
+#[derive(Debug, Clone)]
+struct TableFormatResult {
+    lines: Vec<String>,
+    auto_compacted: bool,
+    aligned_width: Option<usize>,
 }
 
 /// Rule MD060: Table Column Alignment
@@ -32,23 +40,52 @@ enum ColumnAlignment {
 ///
 /// The rule supports the following configuration options:
 ///
-/// ```yaml
-/// MD060:
-///   enabled: false  # Default: opt-in for conservative adoption
-///   style: "aligned"  # Can be "aligned", "compact", or "none"
-///   max_width: 120  # Optional: auto-compact for wide tables
+/// ```toml
+/// [MD013]
+/// line-length = 100  # MD060 inherits this by default
+///
+/// [MD060]
+/// enabled = false      # Default: opt-in for conservative adoption
+/// style = "aligned"    # Can be "aligned", "compact", "tight", or "any"
+/// max-width = 0        # Default: inherit from MD013's line-length
 /// ```
 ///
 /// ### Style Options
 ///
 /// - **aligned**: Columns are padded with spaces for visual alignment (default)
-/// - **compact**: No padding, minimal spacing
-/// - **none**: Disable formatting checks
+/// - **compact**: Minimal spacing with single spaces
+/// - **tight**: No spacing, pipes directly adjacent to content
+/// - **any**: Preserve existing formatting style
 ///
-/// ### Max Width
+/// ### Max Width (auto-compact threshold)
 ///
-/// When `max_width` is set (default: 120), tables wider than this limit will automatically
-/// use compact formatting to prevent excessive line lengths.
+/// Controls when tables automatically switch from aligned to compact formatting:
+///
+/// - **`max-width = 0`** (default): Inherits from MD013's `line-length` setting (default 80)
+/// - **`max-width = N`**: Explicit threshold, independent of MD013
+///
+/// When a table's aligned width would exceed this limit, MD060 automatically
+/// uses compact formatting instead to prevent excessively long lines. This matches
+/// the behavior of Prettier's table formatting.
+///
+/// #### Examples
+///
+/// ```toml
+/// # Inherit from MD013 (recommended)
+/// [MD013]
+/// line-length = 100
+///
+/// [MD060]
+/// style = "aligned"
+/// max-width = 0  # Tables exceeding 100 chars will be compacted
+/// ```
+///
+/// ```toml
+/// # Explicit threshold
+/// [MD060]
+/// style = "aligned"
+/// max-width = 120  # Independent of MD013
+/// ```
 ///
 /// ## Examples
 ///
@@ -102,20 +139,50 @@ enum ColumnAlignment {
 /// - Respects alignment indicators in delimiter rows (`:---`, `:---:`, `---:`)
 /// - Automatically switches to compact mode for tables exceeding max_width
 /// - Skips tables with ZWJ emoji to prevent corruption
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct MD060TableFormat {
     config: MD060Config,
+    md013_line_length: usize,
+}
+
+impl Default for MD060TableFormat {
+    fn default() -> Self {
+        Self {
+            config: MD060Config::default(),
+            md013_line_length: 80,
+        }
+    }
 }
 
 impl MD060TableFormat {
     pub fn new(enabled: bool, style: String) -> Self {
         Self {
-            config: MD060Config { enabled, style },
+            config: MD060Config {
+                enabled,
+                style,
+                max_width: 0,
+            },
+            md013_line_length: 80, // Default MD013 line_length
         }
     }
 
-    pub fn from_config_struct(config: MD060Config) -> Self {
-        Self { config }
+    pub fn from_config_struct(config: MD060Config, md013_line_length: usize) -> Self {
+        Self {
+            config,
+            md013_line_length,
+        }
+    }
+
+    /// Get the effective max width for table formatting.
+    ///
+    /// - If `max_width` is 0, inherits from MD013's `line_length`
+    /// - Otherwise, uses the explicitly configured `max_width`
+    fn effective_max_width(&self) -> usize {
+        if self.config.max_width == 0 {
+            self.md013_line_length
+        } else {
+            self.config.max_width
+        }
     }
 
     /// Check if text contains characters that break Unicode width calculations
@@ -362,8 +429,14 @@ impl MD060TableFormat {
         }
     }
 
-    fn fix_table_block(&self, lines: &[&str], table_block: &crate::utils::table_utils::TableBlock) -> Vec<String> {
+    fn fix_table_block(
+        &self,
+        lines: &[&str],
+        table_block: &crate::utils::table_utils::TableBlock,
+    ) -> TableFormatResult {
         let mut result = Vec::new();
+        let mut auto_compacted = false;
+        let mut aligned_width = None;
 
         let table_lines: Vec<&str> = std::iter::once(lines[table_block.header_line])
             .chain(std::iter::once(lines[table_block.delimiter_line]))
@@ -371,7 +444,11 @@ impl MD060TableFormat {
             .collect();
 
         if table_lines.iter().any(|line| Self::contains_problematic_chars(line)) {
-            return table_lines.iter().map(|s| s.to_string()).collect();
+            return TableFormatResult {
+                lines: table_lines.iter().map(|s| s.to_string()).collect(),
+                auto_compacted: false,
+                aligned_width: None,
+            };
         }
 
         let style = self.config.style.as_str();
@@ -380,7 +457,11 @@ impl MD060TableFormat {
             "any" => {
                 let detected_style = Self::detect_table_style(&table_lines);
                 if detected_style.is_none() {
-                    return table_lines.iter().map(|s| s.to_string()).collect();
+                    return TableFormatResult {
+                        lines: table_lines.iter().map(|s| s.to_string()).collect(),
+                        auto_compacted: false,
+                        aligned_width: None,
+                    };
                 }
 
                 let target_style = detected_style.unwrap();
@@ -406,46 +487,65 @@ impl MD060TableFormat {
                         }
                     }
                 }
-                return result;
             }
             "compact" => {
                 for line in table_lines {
                     let cells = Self::parse_table_row(line);
                     result.push(Self::format_table_compact(&cells));
                 }
-                return result;
             }
             "tight" => {
                 for line in table_lines {
                     let cells = Self::parse_table_row(line);
                     result.push(Self::format_table_tight(&cells));
                 }
-                return result;
             }
             "aligned" => {
                 let column_widths = Self::calculate_column_widths(&table_lines);
 
-                // Parse column alignments from delimiter row (always at index 1)
-                let delimiter_cells = Self::parse_table_row(table_lines[1]);
-                let column_alignments = Self::parse_column_alignments(&delimiter_cells);
+                // Calculate aligned table width: 1 (leading pipe) + num_columns * 3 (| cell |) + sum(column_widths)
+                let num_columns = column_widths.len();
+                let calc_aligned_width = 1 + (num_columns * 3) + column_widths.iter().sum::<usize>();
+                aligned_width = Some(calc_aligned_width);
 
-                for line in table_lines {
-                    let cells = Self::parse_table_row(line);
-                    let is_delimiter = Self::is_delimiter_row(&cells);
-                    result.push(Self::format_table_row(
-                        &cells,
-                        &column_widths,
-                        &column_alignments,
-                        is_delimiter,
-                    ));
+                // Auto-compact: if aligned table exceeds max width, use compact formatting instead
+                if calc_aligned_width > self.effective_max_width() {
+                    auto_compacted = true;
+                    for line in table_lines {
+                        let cells = Self::parse_table_row(line);
+                        result.push(Self::format_table_compact(&cells));
+                    }
+                } else {
+                    // Parse column alignments from delimiter row (always at index 1)
+                    let delimiter_cells = Self::parse_table_row(table_lines[1]);
+                    let column_alignments = Self::parse_column_alignments(&delimiter_cells);
+
+                    for line in table_lines {
+                        let cells = Self::parse_table_row(line);
+                        let is_delimiter = Self::is_delimiter_row(&cells);
+                        result.push(Self::format_table_row(
+                            &cells,
+                            &column_widths,
+                            &column_alignments,
+                            is_delimiter,
+                        ));
+                    }
                 }
             }
             _ => {
-                return table_lines.iter().map(|s| s.to_string()).collect();
+                return TableFormatResult {
+                    lines: table_lines.iter().map(|s| s.to_string()).collect(),
+                    auto_compacted: false,
+                    aligned_width: None,
+                };
             }
         }
 
-        result
+        TableFormatResult {
+            lines: result,
+            auto_compacted,
+            aligned_width,
+        }
     }
 }
 
@@ -475,7 +575,7 @@ impl Rule for MD060TableFormat {
         let table_blocks = &ctx.table_blocks;
 
         for table_block in table_blocks {
-            let fixed_lines = self.fix_table_block(&lines, table_block);
+            let format_result = self.fix_table_block(&lines, table_block);
 
             let table_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
@@ -484,15 +584,29 @@ impl Rule for MD060TableFormat {
 
             for (i, &line_idx) in table_line_indices.iter().enumerate() {
                 let original = lines[line_idx];
-                let fixed = &fixed_lines[i];
+                let fixed = &format_result.lines[i];
 
                 if original != fixed {
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, original);
 
+                    let message = if format_result.auto_compacted {
+                        if let Some(width) = format_result.aligned_width {
+                            format!(
+                                "Table too wide for aligned formatting ({} chars > max-width: {})",
+                                width,
+                                self.effective_max_width()
+                            )
+                        } else {
+                            "Table too wide for aligned formatting".to_string()
+                        }
+                    } else {
+                        "Table should use aligned formatting".to_string()
+                    };
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         severity: Severity::Warning,
-                        message: "Table columns should be aligned".to_string(),
+                        message,
                         line: start_line,
                         column: start_col,
                         end_line,
@@ -525,7 +639,7 @@ impl Rule for MD060TableFormat {
         let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
         for table_block in table_blocks {
-            let fixed_lines = self.fix_table_block(&lines, table_block);
+            let format_result = self.fix_table_block(&lines, table_block);
 
             let table_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
@@ -533,7 +647,7 @@ impl Rule for MD060TableFormat {
                 .collect();
 
             for (i, &line_idx) in table_line_indices.iter().enumerate() {
-                result_lines[line_idx] = fixed_lines[i].clone();
+                result_lines[line_idx] = format_result.lines[i].clone();
             }
         }
 
@@ -561,7 +675,8 @@ impl Rule for MD060TableFormat {
         Self: Sized,
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD060Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
+        let md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
+        Box::new(Self::from_config_struct(rule_config, md013_config.line_length))
     }
 }
 
@@ -750,5 +865,274 @@ mod tests {
         // Verify minimum width is enforced
         assert!(fixed.contains("ID "), "Short content should be padded");
         assert!(fixed.contains("---"), "Delimiter should have at least 3 dashes");
+    }
+
+    #[test]
+    fn test_md060_auto_compact_exceeds_default_threshold() {
+        // Default max_width = 0, which inherits from default MD013 line_length = 80
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 0,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, 80);
+
+        // Table that would be 85 chars when aligned (exceeds 80)
+        // Formula: 1 + (3 * 3) + (20 + 20 + 30) = 1 + 9 + 70 = 80 chars
+        // But with actual content padding it will exceed
+        let content = "| Very Long Column Header | Another Long Header | Third Very Long Header Column |\n|---|---|---|\n| Short | Data | Here |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should use compact formatting (single spaces)
+        assert!(fixed.contains("| Very Long Column Header | Another Long Header | Third Very Long Header Column |"));
+        assert!(fixed.contains("| --- | --- | --- |"));
+        assert!(fixed.contains("| Short | Data | Here |"));
+
+        // Verify it's compact (no extra padding)
+        let lines: Vec<&str> = fixed.lines().collect();
+        // In compact mode, lines can have different lengths
+        assert!(lines[0].len() != lines[1].len() || lines[1].len() != lines[2].len());
+    }
+
+    #[test]
+    fn test_md060_auto_compact_exceeds_explicit_threshold() {
+        // Explicit max_width = 50
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 50,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, 80); // MD013 setting doesn't matter
+
+        // Table that would exceed 50 chars when aligned
+        // Column widths: 25 + 25 + 25 = 75 chars
+        // Formula: 1 + (3 * 3) + 75 = 85 chars (exceeds 50)
+        let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| Data | Data | Data |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should use compact formatting (single spaces, no extra padding)
+        assert!(
+            fixed.contains("| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |")
+        );
+        assert!(fixed.contains("| --- | --- | --- |"));
+        assert!(fixed.contains("| Data | Data | Data |"));
+
+        // Verify it's compact (lines have different lengths)
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert!(lines[0].len() != lines[2].len());
+    }
+
+    #[test]
+    fn test_md060_stays_aligned_under_threshold() {
+        // max_width = 100, table will be under this
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 100,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, 80);
+
+        // Small table that fits well under 100 chars
+        let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should use aligned formatting (all lines same length)
+        let expected = "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |";
+        assert_eq!(fixed, expected);
+
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(lines[0].len(), lines[1].len());
+        assert_eq!(lines[1].len(), lines[2].len());
+    }
+
+    #[test]
+    fn test_md060_width_calculation_formula() {
+        // Verify the width calculation formula: 1 + (num_columns * 3) + sum(column_widths)
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 0,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, 30);
+
+        // Create a table where we know exact column widths: 5 + 5 + 5 = 15
+        // Expected aligned width: 1 + (3 * 3) + 15 = 1 + 9 + 15 = 25 chars
+        // This is under 30, so should stay aligned
+        let content = "| AAAAA | BBBBB | CCCCC |\n|---|---|---|\n| AAAAA | BBBBB | CCCCC |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be aligned
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(lines[0].len(), lines[1].len());
+        assert_eq!(lines[1].len(), lines[2].len());
+        assert_eq!(lines[0].len(), 25); // Verify formula
+
+        // Now test with threshold = 24 (just under aligned width)
+        let config_tight = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 24,
+        };
+        let rule_tight = MD060TableFormat::from_config_struct(config_tight, 80);
+
+        let fixed_compact = rule_tight.fix(&ctx).unwrap();
+
+        // Should be compact now (25 > 24)
+        assert!(fixed_compact.contains("| AAAAA | BBBBB | CCCCC |"));
+        assert!(fixed_compact.contains("| --- | --- | --- |"));
+    }
+
+    #[test]
+    fn test_md060_very_wide_table_auto_compacts() {
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 0,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, 80);
+
+        // Very wide table with many columns
+        // 8 columns with widths of 12 chars each = 96 chars
+        // Formula: 1 + (8 * 3) + 96 = 121 chars (exceeds 80)
+        let content = "| Column One A | Column Two B | Column Three | Column Four D | Column Five E | Column Six FG | Column Seven | Column Eight |\n|---|---|---|---|---|---|---|---|\n| A | B | C | D | E | F | G | H |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be compact (table would be way over 80 chars aligned)
+        assert!(fixed.contains("| Column One A | Column Two B | Column Three | Column Four D | Column Five E | Column Six FG | Column Seven | Column Eight |"));
+        assert!(fixed.contains("| --- | --- | --- | --- | --- | --- | --- | --- |"));
+    }
+
+    #[test]
+    fn test_md060_inherit_from_md013_line_length() {
+        // max_width = 0 should inherit from MD013's line_length
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 0, // Inherit
+        };
+
+        // Test with different MD013 line_length values
+        let rule_80 = MD060TableFormat::from_config_struct(config.clone(), 80);
+        let rule_120 = MD060TableFormat::from_config_struct(config.clone(), 120);
+
+        // Medium-sized table
+        let content = "| Column Header A | Column Header B | Column Header C |\n|---|---|---|\n| Some Data | More Data | Even More |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        // With 80 char limit, likely compacts
+        let _fixed_80 = rule_80.fix(&ctx).unwrap();
+
+        // With 120 char limit, likely stays aligned
+        let fixed_120 = rule_120.fix(&ctx).unwrap();
+
+        // Verify 120 is aligned (all lines same length)
+        let lines_120: Vec<&str> = fixed_120.lines().collect();
+        assert_eq!(lines_120[0].len(), lines_120[1].len());
+        assert_eq!(lines_120[1].len(), lines_120[2].len());
+    }
+
+    #[test]
+    fn test_md060_edge_case_exactly_at_threshold() {
+        // Create table that's exactly at the threshold
+        // Formula: 1 + (num_columns * 3) + sum(column_widths) = max_width
+        // For 2 columns with widths 5 and 5: 1 + 6 + 10 = 17
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 17,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, 80);
+
+        let content = "| AAAAA | BBBBB |\n|---|---|\n| AAAAA | BBBBB |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // At threshold (17 <= 17), should stay aligned
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(lines[0].len(), 17);
+        assert_eq!(lines[0].len(), lines[1].len());
+        assert_eq!(lines[1].len(), lines[2].len());
+
+        // Now test with threshold = 16 (just under)
+        let config_under = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 16,
+        };
+        let rule_under = MD060TableFormat::from_config_struct(config_under, 80);
+
+        let fixed_compact = rule_under.fix(&ctx).unwrap();
+
+        // Should compact (17 > 16)
+        assert!(fixed_compact.contains("| AAAAA | BBBBB |"));
+        assert!(fixed_compact.contains("| --- | --- |"));
+    }
+
+    #[test]
+    fn test_md060_auto_compact_warning_message() {
+        // Verify that auto-compact generates an informative warning
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 50,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, 80);
+
+        // Table that will be auto-compacted (exceeds 50 chars when aligned)
+        let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| Data | Data | Data |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should generate warnings with auto-compact message
+        assert!(!warnings.is_empty(), "Should generate warnings");
+
+        let auto_compact_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("too wide for aligned formatting"))
+            .collect();
+
+        assert!(!auto_compact_warnings.is_empty(), "Should have auto-compact warning");
+
+        // Verify the warning message includes the width and threshold
+        let first_warning = auto_compact_warnings[0];
+        assert!(first_warning.message.contains("85 chars > max-width: 50"));
+        assert!(first_warning.message.contains("Table too wide for aligned formatting"));
+    }
+
+    #[test]
+    fn test_md060_regular_alignment_warning_message() {
+        // Verify that regular alignment (not auto-compact) generates normal warning
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: 100, // Large enough to not trigger auto-compact
+        };
+        let rule = MD060TableFormat::from_config_struct(config, 80);
+
+        // Small misaligned table
+        let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should generate warnings
+        assert!(!warnings.is_empty(), "Should generate warnings");
+
+        // Verify it's the standard alignment message, not auto-compact
+        assert!(warnings[0].message.contains("Table should use aligned formatting"));
+        assert!(!warnings[0].message.contains("too wide"));
+        assert!(!warnings[0].message.contains("max-width"));
     }
 }

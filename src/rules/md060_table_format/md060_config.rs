@@ -13,6 +13,34 @@ pub struct MD060Config {
         deserialize_with = "deserialize_style"
     )]
     pub style: String,
+
+    /// Maximum table width before auto-switching to compact mode.
+    ///
+    /// - `0` (default): Inherit from MD013's `line-length` setting
+    /// - Non-zero: Explicit max width threshold
+    ///
+    /// When a table's aligned width would exceed this limit, MD060 automatically
+    /// uses compact formatting instead (minimal padding) to prevent excessively
+    /// long lines. This matches the behavior of Prettier's table formatting.
+    ///
+    /// # Examples
+    ///
+    /// ```toml
+    /// [MD013]
+    /// line-length = 100
+    ///
+    /// [MD060]
+    /// style = "aligned"
+    /// max-width = 0  # Uses MD013's line-length (100)
+    /// ```
+    ///
+    /// ```toml
+    /// [MD060]
+    /// style = "aligned"
+    /// max-width = 120  # Explicit threshold, independent of MD013
+    /// ```
+    #[serde(default, rename = "max-width")]
+    pub max_width: usize,
 }
 
 impl Default for MD060Config {
@@ -20,6 +48,7 @@ impl Default for MD060Config {
         Self {
             enabled: default_enabled(),
             style: default_style(),
+            max_width: 0, // 0 = inherit from MD013
         }
     }
 }

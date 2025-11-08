@@ -13,7 +13,8 @@ use crate::utils::text_reflow::split_into_sentences;
 use toml;
 
 pub mod md013_config;
-use md013_config::{MD013Config, ReflowMode};
+pub use md013_config::MD013Config;
+use md013_config::ReflowMode;
 
 #[derive(Clone, Default)]
 pub struct MD013LineLength {
