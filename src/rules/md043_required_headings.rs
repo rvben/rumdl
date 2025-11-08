@@ -82,11 +82,6 @@ impl MD043RequiredHeadings {
         result
     }
 
-    /// Check if a pattern is a wildcard character
-    fn is_wildcard(pattern: &str) -> bool {
-        matches!(pattern, "*" | "+" | "?")
-    }
-
     /// Match headings against patterns with wildcard support
     ///
     /// Wildcards:
@@ -125,8 +120,12 @@ impl MD043RequiredHeadings {
                 }
                 act_idx += 1;
                 exp_idx += 1;
-                // Enable flexible matching for additional headings
+                // Enable flexible matching for remaining headings
                 match_any = true;
+                // If + is at the end, consume all remaining headings
+                if exp_idx >= expected_patterns.len() {
+                    return (true, exp_idx, actual_headings.len());
+                }
                 continue;
             } else if pattern == "?" {
                 // Exactly one unspecified heading
@@ -202,10 +201,11 @@ impl Rule for MD043RequiredHeadings {
             return Ok(warnings);
         }
 
-        // Check if all patterns are wildcards and we have no headings
-        let all_wildcards = self.config.headings.iter().all(|p| Self::is_wildcard(p));
-        if actual_headings.is_empty() && all_wildcards {
-            // Allow empty documents when only wildcards are specified
+        // Check if all patterns are only * wildcards (which allow zero headings)
+        let all_optional_wildcards = self.config.headings.iter().all(|p| p == "*");
+        if actual_headings.is_empty() && all_optional_wildcards {
+            // Allow empty documents when only * wildcards are specified
+            // (? and + require at least some headings)
             return Ok(warnings);
         }
 
@@ -315,6 +315,15 @@ impl Rule for MD043RequiredHeadings {
 
         // Check if any heading exists using cached information
         let has_heading = ctx.lines.iter().any(|line| line.heading.is_some());
+
+        // Don't skip if we have wildcard requirements that need headings (? or +)
+        // even when no headings exist, because we need to report the error
+        if !has_heading {
+            let has_required_wildcards = self.config.headings.iter().any(|p| p == "?" || p == "+");
+            if has_required_wildcards {
+                return false; // Don't skip - we need to check and report error
+            }
+        }
 
         !has_heading
     }
@@ -963,5 +972,339 @@ mod tests {
             fixed, content,
             "Fix should preserve non-matching content to prevent data loss"
         );
+    }
+
+    // Expert-level edge case tests
+
+    #[test]
+    fn test_consecutive_wildcards() {
+        // Multiple wildcards in a row
+        let config = MD043Config {
+            headings: vec![
+                "# Start".to_string(),
+                "*".to_string(),
+                "+".to_string(),
+                "# End".to_string(),
+            ],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should require at least one heading from +
+        let content = "# Start\n\n## Middle\n\n# End";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "Consecutive * and + should work together");
+
+        // Should fail without the + requirement
+        let content = "# Start\n\n# End";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should fail when + is not satisfied");
+    }
+
+    #[test]
+    fn test_question_mark_doesnt_consume_literal_match() {
+        // ? should match exactly one, not more
+        let config = MD043Config {
+            headings: vec!["?".to_string(), "## Description".to_string(), "## License".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should match with exactly one before Description
+        let content = "# Title\n\n## Description\n\n## License";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "? should consume exactly one heading");
+
+        // Should fail if Description comes first (? needs something to match)
+        let content = "## Description\n\n## License";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "? requires exactly one heading to match");
+    }
+
+    #[test]
+    fn test_asterisk_between_literals_complex() {
+        // Test * matching when sandwiched between specific headings
+        let config = MD043Config {
+            headings: vec![
+                "# Title".to_string(),
+                "## Section A".to_string(),
+                "*".to_string(),
+                "## Section B".to_string(),
+            ],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should work with zero headings between A and B
+        let content = "# Title\n\n## Section A\n\n## Section B";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "* should allow zero headings");
+
+        // Should work with many headings between A and B
+        let content = "# Title\n\n## Section A\n\n### Sub1\n\n### Sub2\n\n### Sub3\n\n## Section B";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "* should allow multiple headings");
+
+        // Should fail if Section B is missing
+        let content = "# Title\n\n## Section A\n\n### Sub1";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            !result.is_empty(),
+            "Should fail when required heading after * is missing"
+        );
+    }
+
+    #[test]
+    fn test_plus_requires_consumption() {
+        // + must consume at least one heading
+        let config = MD043Config {
+            headings: vec!["+".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should fail with no headings
+        let content = "No headings here";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "+ should fail with zero headings");
+
+        // Should pass with any heading
+        let content = "# Any heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "+ should pass with one heading");
+
+        // Should pass with multiple headings
+        let content = "# First\n\n## Second\n\n### Third";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "+ should pass with multiple headings");
+    }
+
+    #[test]
+    fn test_mixed_wildcard_and_literal_ordering() {
+        // Ensure wildcards don't break literal matching order
+        let config = MD043Config {
+            headings: vec![
+                "# A".to_string(),
+                "*".to_string(),
+                "# B".to_string(),
+                "*".to_string(),
+                "# C".to_string(),
+            ],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should pass in correct order
+        let content = "# A\n\n# B\n\n# C";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "Should match literals in correct order");
+
+        // Should fail in wrong order
+        let content = "# A\n\n# C\n\n# B";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should fail when literals are out of order");
+
+        // Should fail with missing required literal
+        let content = "# A\n\n# C";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should fail when required literal is missing");
+    }
+
+    #[test]
+    fn test_only_wildcards_with_headings() {
+        // Pattern with only wildcards and content
+        let config = MD043Config {
+            headings: vec!["?".to_string(), "+".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should require at least 2 headings (? = 1, + = 1+)
+        let content = "# First\n\n## Second";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "? followed by + should require at least 2 headings");
+
+        // Should fail with only one heading
+        let content = "# First";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            !result.is_empty(),
+            "Should fail with only 1 heading when ? + is required"
+        );
+    }
+
+    #[test]
+    fn test_asterisk_matching_algorithm_greedy_vs_lazy() {
+        // Test that * correctly finds the next literal match
+        let config = MD043Config {
+            headings: vec![
+                "# Start".to_string(),
+                "*".to_string(),
+                "## Target".to_string(),
+                "# End".to_string(),
+            ],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should correctly skip to first "Target" match
+        let content = "# Start\n\n## Other\n\n## Target\n\n# End";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "* should correctly skip to next literal match");
+
+        // Should handle case where there are extra headings after the match
+        // (First Target matches, second Target is extra - should fail)
+        let content = "# Start\n\n## Target\n\n## Target\n\n# End";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            !result.is_empty(),
+            "Should fail with extra headings that don't match pattern"
+        );
+    }
+
+    #[test]
+    fn test_wildcard_at_start() {
+        // Test wildcards at the beginning of pattern
+        let config = MD043Config {
+            headings: vec!["*".to_string(), "## End".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should allow any headings before End
+        let content = "# Random\n\n## Stuff\n\n## End";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "* at start should allow any preceding headings");
+
+        // Test + at start
+        let config = MD043Config {
+            headings: vec!["+".to_string(), "## End".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should require at least one heading before End
+        let content = "## End";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "+ at start should require at least one heading");
+
+        let content = "# First\n\n## End";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "+ at start should allow headings before End");
+    }
+
+    #[test]
+    fn test_wildcard_with_setext_headings() {
+        // Ensure wildcards work with setext headings too
+        let config = MD043Config {
+            headings: vec!["?".to_string(), "====== Section".to_string(), "*".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        let content = "Title\n=====\n\nSection\n======\n\nOptional\n--------";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "Wildcards should work with setext headings");
+    }
+
+    #[test]
+    fn test_empty_document_with_required_wildcards() {
+        // Empty document should fail when + or ? are required
+        let config = MD043Config {
+            headings: vec!["?".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        let content = "No headings";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Empty document should fail with ? requirement");
+
+        // Test with +
+        let config = MD043Config {
+            headings: vec!["+".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        let content = "No headings";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Empty document should fail with + requirement");
+    }
+
+    #[test]
+    fn test_trailing_headings_after_pattern_completion() {
+        // Extra headings after pattern is satisfied should fail
+        let config = MD043Config {
+            headings: vec!["# Title".to_string(), "## Section".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        // Should fail with extra headings
+        let content = "# Title\n\n## Section\n\n### Extra";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "Should fail with trailing headings beyond pattern");
+
+        // But * at end should allow them
+        let config = MD043Config {
+            headings: vec!["# Title".to_string(), "## Section".to_string(), "*".to_string()],
+            match_case: false,
+        };
+        let rule = MD043RequiredHeadings::from_config_struct(config);
+
+        let content = "# Title\n\n## Section\n\n### Extra";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "* at end should allow trailing headings");
     }
 }
