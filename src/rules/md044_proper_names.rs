@@ -86,6 +86,7 @@ impl MD044ProperNames {
         let config = MD044Config {
             names,
             code_blocks,
+            html_elements: true, // Default to checking HTML elements
             html_comments: true, // Default to checking HTML comments
         };
         let combined_pattern = Self::create_combined_pattern(&config);
@@ -236,6 +237,11 @@ impl MD044ProperNames {
 
             // Skip if in code block (when code_blocks = false)
             if !self.config.code_blocks && line_info.in_code_block {
+                continue;
+            }
+
+            // Skip if in HTML block (when html_elements = false)
+            if !self.config.html_elements && line_info.in_html_block {
                 continue;
             }
 
@@ -749,6 +755,7 @@ javascript in code block
         let config = MD044Config {
             names: vec!["GitHub".to_string(), "GitLab".to_string(), "DevOps".to_string()],
             code_blocks: true,
+            html_elements: true,
             html_comments: true,
         };
         let rule = MD044ProperNames::from_config_struct(config);
@@ -952,6 +959,7 @@ Third line with RUST and PYTHON."#;
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
             code_blocks: true,    // Check code blocks
+            html_elements: true,  // Check HTML elements
             html_comments: false, // Don't check HTML comments
         };
         let rule = MD044ProperNames::from_config_struct(config);
@@ -973,6 +981,7 @@ More javascript outside."#;
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
             code_blocks: true,   // Check code blocks
+            html_elements: true, // Check HTML elements
             html_comments: true, // Check HTML comments
         };
         let rule = MD044ProperNames::from_config_struct(config);
@@ -996,6 +1005,7 @@ More javascript outside."#;
         let config = MD044Config {
             names: vec!["Python".to_string(), "JavaScript".to_string()],
             code_blocks: true,    // Check code blocks
+            html_elements: true,  // Check HTML elements
             html_comments: false, // Don't check HTML comments
         };
         let rule = MD044ProperNames::from_config_struct(config);
@@ -1021,6 +1031,7 @@ More javascript outside."#;
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
             code_blocks: true,    // Check code blocks
+            html_elements: true,  // Check HTML elements
             html_comments: false, // Don't check HTML comments
         };
         let rule = MD044ProperNames::from_config_struct(config);

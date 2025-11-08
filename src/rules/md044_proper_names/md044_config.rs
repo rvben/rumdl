@@ -9,6 +9,9 @@ pub struct MD044Config {
     #[serde(default = "default_code_blocks", rename = "code-blocks", alias = "code_blocks")]
     pub code_blocks: bool,
 
+    #[serde(default = "default_html_elements", rename = "html-elements", alias = "html_elements")]
+    pub html_elements: bool,
+
     #[serde(default = "default_html_comments", rename = "html-comments", alias = "html_comments")]
     pub html_comments: bool,
 }
@@ -18,6 +21,7 @@ impl Default for MD044Config {
         Self {
             names: Vec::new(),
             code_blocks: default_code_blocks(),
+            html_elements: default_html_elements(),
             html_comments: default_html_comments(),
         }
     }
@@ -25,6 +29,10 @@ impl Default for MD044Config {
 
 fn default_code_blocks() -> bool {
     false
+}
+
+fn default_html_elements() -> bool {
+    true
 }
 
 fn default_html_comments() -> bool {
