@@ -72,16 +72,6 @@ fn get_documented_config_fields() -> Vec<ConfigField> {
         // MD010
         ConfigField {
             rule: "MD010",
-            field: "code-blocks",
-            required_in_docs: true,
-        },
-        ConfigField {
-            rule: "MD010",
-            field: "ignore-code-languages",
-            required_in_docs: true,
-        },
-        ConfigField {
-            rule: "MD010",
             field: "spaces-per-tab",
             required_in_docs: true,
         },
@@ -217,7 +207,7 @@ fn get_documented_config_fields() -> Vec<ConfigField> {
         // MD033
         ConfigField {
             rule: "MD033",
-            field: "allowed",
+            field: "allowed-elements",
             required_in_docs: true,
         },
         // MD035
@@ -251,7 +241,7 @@ fn get_documented_config_fields() -> Vec<ConfigField> {
         // MD045
         ConfigField {
             rule: "MD045",
-            field: "check-link-fragments",
+            field: "placeholder-text",
             required_in_docs: true,
         },
         // MD046
