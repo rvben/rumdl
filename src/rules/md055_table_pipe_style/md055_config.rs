@@ -36,20 +36,28 @@ where
 {
     let s = String::deserialize(deserializer)?;
 
-    // Validate the style
-    let valid_styles = [
-        "consistent",
-        "leading_and_trailing",
-        "no_leading_or_trailing",
-        "leading_only",
-        "trailing_only",
-    ];
+    // Normalize to kebab-case (canonical format)
+    let normalized = match s.as_str() {
+        // Kebab-case (canonical)
+        "consistent" => "consistent",
+        "leading-and-trailing" => "leading-and-trailing",
+        "no-leading-or-trailing" => "no-leading-or-trailing",
+        "leading-only" => "leading-only",
+        "trailing-only" => "trailing-only",
+        // Snake_case (backward compatibility)
+        "leading_and_trailing" => "leading-and-trailing",
+        "no_leading_or_trailing" => "no-leading-or-trailing",
+        "leading_only" => "leading-only",
+        "trailing_only" => "trailing-only",
+        _ => {
+            return Err(serde::de::Error::custom(format!(
+                "Invalid table pipe style: {s}. Valid options: consistent, leading-and-trailing, \
+                 no-leading-or-trailing, leading-only, trailing-only"
+            )));
+        }
+    };
 
-    if valid_styles.contains(&s.as_str()) {
-        Ok(s)
-    } else {
-        Err(serde::de::Error::custom(format!("Invalid table pipe style: {s}")))
-    }
+    Ok(normalized.to_string())
 }
 
 impl RuleConfig for MD055Config {
