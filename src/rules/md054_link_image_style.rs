@@ -249,7 +249,7 @@ impl Rule for MD054LinkImageStyle {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: format!("Link/image style '{}' is not consistent with document", m.style),
+                        message: format!("Link/image style '{}' is not allowed", m.style),
                         severity: Severity::Warning,
                         fix: None,
                     });

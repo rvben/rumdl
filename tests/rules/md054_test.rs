@@ -49,10 +49,7 @@ Here's an <https://example.com> autolink.
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
-    assert_eq!(
-        result[0].message,
-        "Link/image style 'autolink' is not consistent with document"
-    );
+    assert_eq!(result[0].message, "Link/image style 'autolink' is not allowed");
 }
 
 #[test]
@@ -99,10 +96,7 @@ This is a [https://example.com](https://example.com) URL-inline link.
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
-    assert_eq!(
-        result[0].message,
-        "Link/image style 'url_inline' is not consistent with document"
-    );
+    assert_eq!(result[0].message, "Link/image style 'url_inline' is not allowed");
 }
 
 #[test]
@@ -185,10 +179,7 @@ fn test_unicode_support() {
     let result = rule_restricted.check(&ctx_mixed).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
-    assert_eq!(
-        result[0].message,
-        "Link/image style 'autolink' is not consistent with document"
-    );
+    assert_eq!(result[0].message, "Link/image style 'autolink' is not allowed");
 
     // Test with long Unicode content that might cause byte indexing issues
     let content_long = r#"
@@ -324,10 +315,7 @@ This is an autolink: <https://example.com/汉字>
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Only autolink outside comment should be flagged");
     assert_eq!(result[0].line, 2);
-    assert_eq!(
-        result[0].message,
-        "Link/image style 'autolink' is not consistent with document"
-    );
+    assert_eq!(result[0].message, "Link/image style 'autolink' is not allowed");
 }
 
 #[test]
