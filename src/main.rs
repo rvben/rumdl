@@ -461,7 +461,10 @@ pub struct CheckArgs {
     no_cache: bool,
 
     /// Directory to store cache files
-    #[arg(long, help = "Directory to store cache files (default: .rumdl-cache)")]
+    #[arg(
+        long,
+        help = "Directory to store cache files (default: .rumdl-cache, or $RUMDL_CACHE_DIR)"
+    )]
     cache_dir: Option<String>,
 
     #[arg(skip)]
@@ -1420,6 +1423,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         .cache_dir
         .as_ref()
         .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var("RUMDL_CACHE_DIR").ok().map(std::path::PathBuf::from))
         .unwrap_or_else(|| std::path::PathBuf::from(".rumdl-cache"));
 
     let cache = if cache_enabled {
