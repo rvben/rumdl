@@ -409,3 +409,7 @@ benchmark-run:
 benchmark-chart:
 	@echo "Generating benchmark chart..."
 	@uv run --with matplotlib python3 scripts/generate_benchmark_chart.py
+
+# Documentation validation
+test-doc-completeness:
+	cargo test --test config_documentation_completeness -- --nocapture
