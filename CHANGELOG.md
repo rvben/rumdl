@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.173] - 2025-01-08
+
+### Added
+
+- **MD060: Table format rule with Prettier-style auto-compact**
+  - New rule enforcing consistent table column alignment (aligned/compact/tight styles)
+  - **Auto-compact threshold**: Tables exceeding max-width automatically use compact formatting
+  - Configurable via `max-width` setting (0 = inherit from MD013's line-length)
+  - Generates informative warnings showing actual width vs threshold
+  - Disabled by default (opt-in feature)
+  - Handles edge cases: zero-width characters, escaped pipes, HTML comments
+  - Respects column alignments (left/center/right) in aligned mode
+
+- **MD043: Wildcard pattern support for heading structures**
+  - New wildcard patterns for flexible heading structure validation
+  - Allows `*` placeholders in heading text for dynamic content
+  - Expert-level edge case handling for complex heading hierarchies
+
+- **MD044: HTML elements configuration option**
+  - New `html-elements` configuration to customize proper name handling
+  - Allows project-specific proper name enforcement
+
+- **RUMDL_CACHE_DIR environment variable**
+  - Override default cache directory location via environment variable
+  - Useful for CI/CD pipelines and custom cache management
+
 ### Fixed
 
 - **Definition list support in reflow mode (#136)**
@@ -14,6 +40,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents incorrect joining of terms with definitions (e.g., `Term\n: Definition` no longer becomes `Term : Definition`)
   - Supports PHP Markdown Extra, Kramdown, Pandoc, Hugo, and other extended Markdown flavors
   - Works with all reflow modes including sentence-per-line
+
+- **MD054: Error message alignment**
+  - Corrected error messages to match implementation behavior
+  - Documentation now accurately reflects link/image style validation
+
+- **MD041: Front matter title config schema**
+  - Added missing `front_matter_title` options to configuration schema
+  - Fixes config validation errors when using front matter title feature
+
+- **LSP: pyproject.toml validation**
+  - LSP now verifies `[tool.rumdl]` section exists before using pyproject.toml
+  - Prevents errors when pyproject.toml exists but doesn't contain rumdl config
+
+- **CLI: Rule registration**
+  - Fixed MD057, MD059, MD060 rules not being registered in CLI
+  - All rules now properly available for use
+
+### Changed
+
+- **Documentation: TOML format migration**
+  - Converted all configuration examples from YAML to TOML
+  - Reflects modern configuration best practices
+  - Improved clarity for MD013 reflow requirement in README
 
 ## [0.0.172] - 2025-01-06
 
