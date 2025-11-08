@@ -332,7 +332,7 @@ fn test_md060_warning_messages() {
     assert_eq!(warnings.len(), 3);
 
     for warning in &warnings {
-        assert_eq!(warning.message, "Table should use aligned formatting");
+        assert_eq!(warning.message, "Table columns should be aligned");
         assert_eq!(warning.rule_name, Some("MD060".to_string()));
         assert!(warning.fix.is_some(), "Each warning should have a fix");
     }

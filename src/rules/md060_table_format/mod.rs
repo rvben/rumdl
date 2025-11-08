@@ -600,7 +600,7 @@ impl Rule for MD060TableFormat {
                             "Table too wide for aligned formatting".to_string()
                         }
                     } else {
-                        "Table should use aligned formatting".to_string()
+                        "Table columns should be aligned".to_string()
                     };
 
                     warnings.push(LintWarning {
@@ -1131,7 +1131,7 @@ mod tests {
         assert!(!warnings.is_empty(), "Should generate warnings");
 
         // Verify it's the standard alignment message, not auto-compact
-        assert!(warnings[0].message.contains("Table should use aligned formatting"));
+        assert!(warnings[0].message.contains("Table columns should be aligned"));
         assert!(!warnings[0].message.contains("too wide"));
         assert!(!warnings[0].message.contains("max-width"));
     }
