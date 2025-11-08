@@ -222,8 +222,8 @@ impl Rule for MD041FirstLineHeading {
             "MD041".to_string(),
             toml::toml! {
                 level = 1
-                // Pattern for matching title in front matter (regex)
-                // front_matter_title_pattern = "^(title|header):"
+                front_matter_title = "title"
+                front_matter_title_pattern = ""
             }
             .into(),
         ))
