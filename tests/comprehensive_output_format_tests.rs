@@ -279,7 +279,7 @@ fn test_output_format_with_quiet_mode() {
 
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
     cmd.arg("check")
-        .arg("--quiet")
+        .arg("--silent")
         .arg("--output-format")
         .arg("text")
         .arg(&test_file);
@@ -287,6 +287,6 @@ fn test_output_format_with_quiet_mode() {
     let output = cmd.assert().failure().get_output().stdout.clone();
     let stdout = String::from_utf8_lossy(&output);
 
-    // In quiet mode, rumdl shows no output
+    // In silent mode, rumdl shows no output
     assert!(stdout.is_empty() || stdout == "Error\n");
 }

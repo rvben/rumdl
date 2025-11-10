@@ -96,10 +96,10 @@ fn test_statistics_with_quiet_mode() {
     fs::write(&test_file, "# Heading\nNo space").unwrap();
 
     let mut cmd = Command::cargo_bin("rumdl").unwrap();
-    cmd.arg("check").arg("--statistics").arg("--quiet").arg(&test_file);
+    cmd.arg("check").arg("--statistics").arg("--silent").arg(&test_file);
 
     cmd.assert()
         .failure()
-        // Statistics should not be shown in quiet mode
+        // Statistics should not be shown in silent mode
         .stdout(predicate::str::is_empty());
 }

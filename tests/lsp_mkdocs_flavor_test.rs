@@ -11,7 +11,7 @@ use rumdl_lib::lsp::server::RumdlLanguageServer;
 /// Test that LSP respects MkDocs flavor for linting
 #[tokio::test]
 async fn test_lsp_respects_mkdocs_flavor() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Initialize with a config that sets MkDocs flavor
     // Note: In real usage, this would be loaded from a .rumdl.toml file with:
@@ -92,7 +92,7 @@ Some text with a footnote[^1]
 /// Test that formatting respects the configured flavor
 #[tokio::test]
 async fn test_formatting_respects_flavor_config() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     let init_params = InitializeParams {
         process_id: None,
@@ -156,7 +156,7 @@ Regular paragraph with trailing spaces
 /// Test that code actions respect the configured flavor
 #[tokio::test]
 async fn test_code_actions_respect_flavor() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     let init_params = InitializeParams {
         process_id: None,

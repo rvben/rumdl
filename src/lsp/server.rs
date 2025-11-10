@@ -69,10 +69,16 @@ pub struct RumdlLanguageServer {
 }
 
 impl RumdlLanguageServer {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: Client, cli_config_path: Option<&str>) -> Self {
+        // Initialize with CLI config path if provided (for `rumdl server --config` convenience)
+        let mut initial_config = RumdlLspConfig::default();
+        if let Some(path) = cli_config_path {
+            initial_config.config_path = Some(path.to_string());
+        }
+
         Self {
             client,
-            config: Arc::new(RwLock::new(RumdlLspConfig::default())),
+            config: Arc::new(RwLock::new(initial_config)),
             rumdl_config: Arc::new(RwLock::new(Config::default())),
             documents: Arc::new(RwLock::new(HashMap::new())),
             workspace_roots: Arc::new(RwLock::new(Vec::new())),
@@ -1072,7 +1078,7 @@ mod tests {
     use tower_lsp::LspService;
 
     fn create_test_server() -> RumdlLanguageServer {
-        let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+        let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
         service.inner().clone()
     }
 

@@ -13,8 +13,8 @@ use std::str::FromStr;
 pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &rumdl_config::Config) {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
 
-    // If silent mode is enabled, also enable quiet mode
-    let quiet = args.quiet || args.silent;
+    let quiet = args.quiet;
+    let silent = args.silent;
 
     // In check mode, diagnostics go to stderr by default
     // In fix/format modes, fixed content goes to stdout, so diagnostics go to stdout unless --stderr is specified
@@ -24,7 +24,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
         true
     };
     // Create output writer for linting results
-    let output_writer = OutputWriter::new(use_stderr, quiet, args.silent);
+    let output_writer = OutputWriter::new(use_stderr, quiet, silent);
 
     // Determine output format
     let output_format_str = args
@@ -104,8 +104,14 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     if args.fix_mode != crate::FixMode::Check {
         if has_issues {
             let mut fixed_content = content.clone();
-            let warnings_fixed =
-                file_processor::apply_fixes_coordinated(rules, &all_warnings, &mut fixed_content, quiet, config);
+            let warnings_fixed = file_processor::apply_fixes_coordinated(
+                rules,
+                &all_warnings,
+                &mut fixed_content,
+                quiet,
+                silent,
+                config,
+            );
 
             // Denormalize back to original line ending before output (I/O boundary)
             let output_content = rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending);
@@ -122,8 +128,8 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                 }
             }
 
-            // Only show diagnostics to stderr if not in quiet mode
-            if !quiet && !remaining_warnings.is_empty() {
+            // Only show diagnostics to stderr unless silent
+            if !silent && !remaining_warnings.is_empty() {
                 let formatter = output_format.create_formatter();
                 let formatted = formatter.format_warnings(&remaining_warnings, display_filename);
                 eprintln!("{formatted}");
