@@ -326,7 +326,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD032 - Blanks around lists
     c.bench_function("MD032 fix", |b| {
-        let rule = MD032BlanksAroundLists::default();
+        let rule = MD032BlanksAroundLists;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 

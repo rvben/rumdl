@@ -214,7 +214,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD028" => Some(Box::new(MD028NoBlanksBlockquote)),
         "MD030" => Some(Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1))),
         "MD031" => Some(Box::new(MD031BlanksAroundFences::default())),
-        "MD032" => Some(Box::new(MD032BlanksAroundLists::default())),
+        "MD032" => Some(Box::new(MD032BlanksAroundLists)),
         "MD033" => Some(Box::new(MD033NoInlineHtml::new())),
         "MD034" => Some(Box::new(MD034NoBareUrls)),
         "MD035" => Some(Box::new(MD035HRStyle::new("consistent".to_string()))),

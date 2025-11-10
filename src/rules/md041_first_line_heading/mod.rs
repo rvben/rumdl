@@ -1,3 +1,7 @@
+mod md041_config;
+
+pub use md041_config::MD041Config;
+
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::range_utils::calculate_line_range;
@@ -201,19 +205,15 @@ impl Rule for MD041FirstLineHeading {
     where
         Self: Sized,
     {
-        let level = crate::config::get_rule_config_value::<u32>(config, "MD041", "level").unwrap_or(1);
-        let front_matter_title = crate::config::get_rule_config_value::<String>(config, "MD041", "front_matter_title")
-            .unwrap_or_else(|| "title".to_string());
-        let front_matter_title_pattern =
-            crate::config::get_rule_config_value::<String>(config, "MD041", "front_matter_title_pattern");
+        // Load config using serde with kebab-case support
+        let md041_config = crate::rule_config_serde::load_rule_config::<MD041Config>(config);
 
-        let level_usize = level as usize;
-        let use_front_matter = !front_matter_title.is_empty();
+        let use_front_matter = !md041_config.front_matter_title.is_empty();
 
         Box::new(MD041FirstLineHeading::with_pattern(
-            level_usize,
+            md041_config.level,
             use_front_matter,
-            front_matter_title_pattern,
+            md041_config.front_matter_title_pattern,
         ))
     }
 
@@ -222,8 +222,8 @@ impl Rule for MD041FirstLineHeading {
             "MD041".to_string(),
             toml::toml! {
                 level = 1
-                front_matter_title = "title"
-                front_matter_title_pattern = ""
+                front-matter-title = "title"
+                front-matter-title-pattern = ""
             }
             .into(),
         ))

@@ -19,7 +19,7 @@ fn test_large_repository_simulation() {
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::default()),
         Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD032BlanksAroundLists::default()),
+        Box::new(MD032BlanksAroundLists),
     ];
 
     for (filename, content) in &test_files {

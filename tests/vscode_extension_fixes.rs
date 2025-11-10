@@ -123,7 +123,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             "Text\n```\ncode\n```\nText",
             Box::new(MD031BlanksAroundFences::default()),
         )),
-        "MD032" => Some(("Text\n* List item\nText", Box::new(MD032BlanksAroundLists::default()))),
+        "MD032" => Some(("Text\n* List item\nText", Box::new(MD032BlanksAroundLists))),
         "MD033" => Some(("Text with <div>HTML</div>", Box::new(MD033NoInlineHtml::default()))),
         "MD034" => Some(("Visit https://example.com", Box::new(MD034NoBareUrls))),
         "MD035" => Some(("Text\n***\nText", Box::new(MD035HRStyle::default()))),
@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn test_md032_vscode_fix_no_duplication() {
-        let rule = MD032BlanksAroundLists::default();
+        let rule = MD032BlanksAroundLists;
         let content = "Text\n* List item\nMore text";
 
         let result = simulate_vscode_fix(content, &rule);

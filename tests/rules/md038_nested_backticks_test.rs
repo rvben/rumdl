@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD038NoSpaceInCode;
 fn test_md038_nested_backticks_not_flagged() {
     // When code spans contain nested backticks, they should not be flagged
     // to avoid breaking the nested structure
-    let rule = MD038NoSpaceInCode::strict(); // Even in strict mode
+    let rule = MD038NoSpaceInCode::new(); // Even in strict mode
 
     let test_cases = vec![
         "Code with ` nested `code` example ` should not be flagged",
@@ -27,7 +27,7 @@ fn test_md038_nested_backticks_not_flagged() {
 
 #[test]
 fn test_md038_still_detects_regular_spaces() {
-    let rule = MD038NoSpaceInCode::strict();
+    let rule = MD038NoSpaceInCode::new();
 
     // These should still be detected as having spaces (no nested backticks)
     let cases_with_warnings = vec![

@@ -158,7 +158,7 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
         Box::new(MD029OrderedListPrefix::default()),
         Box::new(MD030ListMarkerSpace::default()),
         Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD032BlanksAroundLists::default()),
+        Box::new(MD032BlanksAroundLists),
         Box::new(MD033NoInlineHtml::default()),
         Box::new(MD034NoBareUrls {}),
         Box::new(MD035HRStyle::default()),

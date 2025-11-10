@@ -76,31 +76,15 @@ static ORDERED_LIST_NON_ONE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"
 /// - Efficient list item detection
 /// - Pre-computation of code block lines to avoid redundant processing
 #[derive(Debug, Clone, Default)]
-pub struct MD032BlanksAroundLists {
-    /// Allow lists to follow headings without blank lines
-    pub allow_after_headings: bool,
-    /// Allow lists to follow content ending with colons without blank lines
-    pub allow_after_colons: bool,
-}
+pub struct MD032BlanksAroundLists;
 
 impl MD032BlanksAroundLists {
-    pub fn strict() -> Self {
-        Self {
-            allow_after_headings: false,
-            allow_after_colons: false,
-        }
-    }
-
     /// Check if a blank line should be required before a list based on the previous line context
     fn should_require_blank_line_before(
-        &self,
-        prev_line: &str,
         ctx: &crate::lint_context::LintContext,
         prev_line_num: usize,
         current_line_num: usize,
     ) -> bool {
-        let trimmed_prev = prev_line.trim();
-
         // Always require blank lines after code blocks, front matter, etc.
         if ctx
             .line_info(prev_line_num)
@@ -110,36 +94,16 @@ impl MD032BlanksAroundLists {
         }
 
         // Always allow nested lists (lists indented within other list items)
-        if self.is_nested_list(ctx, prev_line_num, current_line_num) {
+        if Self::is_nested_list(ctx, prev_line_num, current_line_num) {
             return false;
         }
 
-        // Allow lists after headings if configured (now false by default)
-        if self.allow_after_headings && self.is_heading_line_from_context(ctx, prev_line_num - 1) {
-            return false;
-        }
-
-        // Allow lists after content ending with colons if configured (now false by default)
-        if self.allow_after_colons && trimmed_prev.ends_with(':') {
-            return false;
-        }
-
-        // Default: require blank line (matching markdownlint's stricter behavior)
+        // Default: require blank line (matching markdownlint's behavior)
         true
-    }
-
-    /// Check if a line is a heading using cached LintContext info
-    fn is_heading_line_from_context(&self, ctx: &crate::lint_context::LintContext, line_idx: usize) -> bool {
-        if line_idx < ctx.lines.len() {
-            ctx.lines[line_idx].heading.is_some()
-        } else {
-            false
-        }
     }
 
     /// Check if the current list is nested within another list item
     fn is_nested_list(
-        &self,
         ctx: &crate::lint_context::LintContext,
         prev_line_num: usize,    // 1-indexed
         current_line_num: usize, // 1-indexed
@@ -373,8 +337,7 @@ impl MD032BlanksAroundLists {
 
                 // Only require blank lines for content in the same context (same blockquote level)
                 // and when the context actually requires it
-                let should_require =
-                    self.should_require_blank_line_before(prev_line_str, ctx, prev_line_actual_idx_1, start_line);
+                let should_require = Self::should_require_blank_line_before(ctx, prev_line_actual_idx_1, start_line);
                 if !is_prev_excluded && !prev_is_blank && prefixes_match && should_require {
                     // Calculate precise character range for the entire list line that needs a blank line before it
                     let (start_line, start_col, end_line, end_col) =
@@ -487,33 +450,11 @@ impl Rule for MD032BlanksAroundLists {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "allow_after_headings".to_string(),
-            toml::Value::Boolean(self.allow_after_headings),
-        );
-        map.insert(
-            "allow_after_colons".to_string(),
-            toml::Value::Boolean(self.allow_after_colons),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let allow_after_headings =
-            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_headings").unwrap_or(false); // Match markdownlint's stricter behavior
-
-        let allow_after_colons =
-            crate::config::get_rule_config_value::<bool>(config, "MD032", "allow_after_colons").unwrap_or(false); // Match markdownlint's stricter behavior
-
-        Box::new(MD032BlanksAroundLists {
-            allow_after_headings,
-            allow_after_colons,
-        })
+        Box::new(MD032BlanksAroundLists)
     }
 }
 
@@ -546,12 +487,7 @@ impl MD032BlanksAroundLists {
                     .find(lines[prev_line_actual_idx_0])
                     .map_or(String::new(), |m| m.as_str().to_string());
 
-                let should_require = self.should_require_blank_line_before(
-                    lines[prev_line_actual_idx_0],
-                    ctx,
-                    prev_line_actual_idx_1,
-                    start_line,
-                );
+                let should_require = Self::should_require_blank_line_before(ctx, prev_line_actual_idx_1, start_line);
                 if !is_prev_excluded
                     && !is_blank_in_context(lines[prev_line_actual_idx_0])
                     && prev_prefix == *prefix
@@ -630,13 +566,13 @@ mod tests {
     use crate::rule::Rule;
 
     fn lint(content: &str) -> Vec<LintWarning> {
-        let rule = MD032BlanksAroundLists::default();
+        let rule = MD032BlanksAroundLists;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         rule.check(&ctx).expect("Lint check failed")
     }
 
     fn fix(content: &str) -> String {
-        let rule = MD032BlanksAroundLists::default();
+        let rule = MD032BlanksAroundLists;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         rule.fix(&ctx).expect("Lint fix failed")
     }

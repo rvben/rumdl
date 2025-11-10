@@ -157,7 +157,7 @@ fn test_md023_md009_heading_indentation_and_trailing_spaces() {
 #[test]
 fn test_md031_md032_fence_and_list_blank_lines() {
     let md031 = MD031BlanksAroundFences::default();
-    let md032 = MD032BlanksAroundLists::default();
+    let md032 = MD032BlanksAroundLists;
 
     // List with code fence
     let content = "* Item 1\n```\ncode\n```\n* Item 2\n\n* Item 3";
