@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.174] - 2025-01-10
+
+### Fixed
+
+- **MD046: False positives with multi-paragraph footnotes (#142)**
+  - Fixed incorrect flagging of indented continuation paragraphs in footnote definitions
+  - Added comprehensive footnote detection following CommonMark footnote extension spec
+  - Implements proper block continuation context tracking for footnotes
+  - Prevents confusion between actual indented code blocks and footnote continuations
+  - Example that now works correctly:
+    ```markdown
+    [^1]: First paragraph of footnote.
+
+        Second paragraph (indented, but not a code block).
+    ```
+  - Added 11 specification-based tests ensuring robust footnote handling
+
+- **CLI: Differentiate `--quiet` and `--silent` flags (#141)**
+  - `--quiet`: Shows diagnostics but suppresses progress/summary (matches Ruff behavior)
+  - `--silent`: Suppresses all output including diagnostics (exit code still reflects violations)
+  - Previously both flags behaved identically, hiding all output
+  - Updated help text to clarify the distinction
+
+- **LSP: Server now respects `--config` argument (#140)**
+  - Added proper support for `--config` flag in `rumdl server` command
+  - Config file path validation with clear error messages for missing files
+  - Config path properly passed through entire LSP initialization stack
+  - Enables custom configuration files for LSP/editor integrations
+
 ## [0.0.173] - 2025-01-08
 
 ### Added
