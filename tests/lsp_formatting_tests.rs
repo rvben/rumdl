@@ -13,7 +13,7 @@ use rumdl_lib::lsp::server::RumdlLanguageServer;
 /// Test that the server advertises document formatting capability
 #[tokio::test]
 async fn test_server_advertises_formatting_capability() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     let init_params = InitializeParams {
         process_id: None,
@@ -56,7 +56,7 @@ async fn test_server_advertises_formatting_capability() {
 /// Test the complete formatting request/response flow
 #[tokio::test]
 async fn test_formatting_request_flow() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Initialize first
     let init_params = InitializeParams {
@@ -130,7 +130,7 @@ async fn test_formatting_request_flow() {
 /// Test formatting with no fixable issues
 #[tokio::test]
 async fn test_formatting_no_issues() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Initialize
     let init_params = InitializeParams {
@@ -191,7 +191,7 @@ async fn test_formatting_no_issues() {
 /// Test formatting with multiple issues
 #[tokio::test]
 async fn test_formatting_multiple_issues() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Initialize
     let init_params = InitializeParams {
@@ -264,7 +264,7 @@ async fn test_formatting_multiple_issues() {
 /// Test formatting respects rumdl config disabled rules
 #[tokio::test]
 async fn test_formatting_respects_config_disabled_rules() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Initialize with a config path that would have disabled rules
     // Note: In a real scenario, the rumdl config would be loaded from a file
@@ -344,7 +344,7 @@ async fn test_formatting_respects_config_disabled_rules() {
 /// Test formatting for empty document
 #[tokio::test]
 async fn test_formatting_empty_document() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Initialize
     let init_params = InitializeParams {
@@ -405,7 +405,7 @@ async fn test_formatting_empty_document() {
 /// Test that formatting preserves document structure
 #[tokio::test]
 async fn test_formatting_preserves_structure() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Initialize
     let init_params = InitializeParams {

@@ -10,7 +10,7 @@ use tower_lsp::{LanguageServer, LspService};
 #[tokio::test]
 async fn test_formatting_without_did_open() {
     // Create LSP service
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Initialize the server
     let init_params = InitializeParams {
@@ -88,7 +88,7 @@ async fn test_formatting_without_did_open() {
 async fn test_formatting_with_did_open_still_works() {
     // This test ensures our fix doesn't break the existing functionality
 
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     let init_params = InitializeParams {
         capabilities: ClientCapabilities::default(),
@@ -155,7 +155,7 @@ async fn test_formatting_with_did_open_still_works() {
 async fn test_formatting_nonexistent_file() {
     // Test that formatting a non-existent file returns empty array, not error
 
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     let init_params = InitializeParams {
         capabilities: ClientCapabilities::default(),

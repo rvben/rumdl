@@ -484,6 +484,7 @@ pub fn process_file_with_formatter(
     diff: bool,
     verbose: bool,
     quiet: bool,
+    silent: bool,
     output_format: &rumdl_lib::output::OutputFormat,
     output_writer: &rumdl_lib::output::OutputWriter,
     config: &rumdl_config::Config,
@@ -493,14 +494,14 @@ pub fn process_file_with_formatter(
 
     // Call the original process_file_inner to get warnings and original line ending
     let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending) =
-        process_file_inner(file_path, rules, verbose, quiet, config, cache);
+        process_file_inner(file_path, rules, verbose, quiet, silent, config, cache);
 
     if total_warnings == 0 {
         return (false, 0, 0, 0, Vec::new());
     }
 
-    // Format and output warnings
-    if !quiet && fix_mode == crate::FixMode::Check {
+    // Format and output warnings (show diagnostics unless silent)
+    if !silent && fix_mode == crate::FixMode::Check {
         if diff {
             // In diff mode, only show warnings for unfixable issues
             let unfixable_warnings: Vec<_> = all_warnings.iter().filter(|w| w.fix.is_none()).cloned().collect();
@@ -529,7 +530,7 @@ pub fn process_file_with_formatter(
     if diff {
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
-        warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, true, config);
+        warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, true, true, config);
 
         if warnings_fixed > 0 {
             let diff_output = formatter::generate_diff(&original_content, &content, file_path);
@@ -542,7 +543,7 @@ pub fn process_file_with_formatter(
         return (total_warnings > 0, total_warnings, 0, fixable_warnings, all_warnings);
     } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
-        warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, config);
+        warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, silent, config);
 
         // Write fixed content back to file
         if warnings_fixed > 0 {
@@ -550,7 +551,7 @@ pub fn process_file_with_formatter(
             let content_to_write = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending);
 
             if let Err(err) = std::fs::write(file_path, &content_to_write)
-                && !quiet
+                && !silent
             {
                 eprintln!(
                     "{} Failed to write fixed content to file {}: {}",
@@ -562,7 +563,7 @@ pub fn process_file_with_formatter(
         }
 
         // In fix mode, show warnings with [fixed] for issues that were fixed
-        if !quiet {
+        if !silent {
             // Re-lint the fixed content to see which warnings remain
             let fixed_ctx = LintContext::new(&content, config.markdown_flavor());
             let mut remaining_warnings = Vec::new();
@@ -631,6 +632,7 @@ pub fn process_file_inner(
     rules: &[Box<dyn Rule>],
     verbose: bool,
     quiet: bool,
+    silent: bool,
     config: &rumdl_config::Config,
     cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
 ) -> (
@@ -651,7 +653,7 @@ pub fn process_file_inner(
     let mut content = match crate::read_file_efficiently(Path::new(file_path)) {
         Ok(content) => content,
         Err(e) => {
-            if !quiet {
+            if !silent {
                 eprintln!("Error reading file {file_path}: {e}");
             }
             return (Vec::new(), String::new(), 0, 0, rumdl_lib::utils::LineEnding::Lf);
@@ -796,7 +798,8 @@ pub fn apply_fixes_coordinated(
     rules: &[Box<dyn Rule>],
     all_warnings: &[rumdl_lib::rule::LintWarning],
     content: &mut String,
-    quiet: bool,
+    _quiet: bool,
+    silent: bool,
     config: &rumdl_config::Config,
 ) -> usize {
     use rumdl_lib::fix_coordinator::FixCoordinator;
@@ -820,7 +823,7 @@ pub fn apply_fixes_coordinated(
             }
 
             // Warn if convergence failed (Ruff-style)
-            if !converged && !quiet {
+            if !converged && !silent {
                 eprintln!("Warning: Failed to converge after {iterations} iterations.");
                 eprintln!("This likely indicates a bug in rumdl.");
                 if !fixed_rule_names.is_empty() {
@@ -842,7 +845,7 @@ pub fn apply_fixes_coordinated(
                 .count()
         }
         Err(e) => {
-            if !quiet {
+            if !silent {
                 eprintln!("Warning: Fix coordinator failed: {e}");
             }
             0
@@ -854,11 +857,12 @@ pub fn process_file_collect_warnings(
     rules: &[Box<dyn Rule>],
     verbose: bool,
     quiet: bool,
+    silent: bool,
     config: &rumdl_config::Config,
     cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     // Simply use process_file_inner and extract warnings
     // This unifies all linting logic and cache handling in one place
-    let (warnings, _, _, _, _) = process_file_inner(file_path, rules, verbose, quiet, config, cache);
+    let (warnings, _, _, _, _) = process_file_inner(file_path, rules, verbose, quiet, silent, config, cache);
     warnings
 }

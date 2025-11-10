@@ -297,6 +297,9 @@ enum Commands {
         /// Enable verbose logging
         #[arg(short, long)]
         verbose: bool,
+        /// Path to rumdl configuration file
+        #[arg(short, long)]
+        config: Option<String>,
     },
     /// Generate or check JSON schema for rumdl.toml
     Schema {
@@ -416,8 +419,8 @@ pub struct CheckArgs {
     #[arg(long)]
     statistics: bool,
 
-    /// Quiet mode
-    #[arg(short, long)]
+    /// Print diagnostics, but nothing else
+    #[arg(short, long, help = "Print diagnostics, but nothing else")]
     quiet: bool,
 
     /// Output format: text (default) or json
@@ -441,8 +444,12 @@ pub struct CheckArgs {
     #[arg(long, help = "Output diagnostics to stderr instead of stdout")]
     stderr: bool,
 
-    /// Disable all output except linting results (implies --quiet)
-    #[arg(short, long, help = "Disable all output except diagnostics")]
+    /// Disable all logging (but still exit with status code upon detecting diagnostics)
+    #[arg(
+        short,
+        long,
+        help = "Disable all logging (but still exit with status code upon detecting diagnostics)"
+    )]
     silent: bool,
 
     /// Run in watch mode by re-running whenever files change
@@ -1055,7 +1062,12 @@ build-backend = "setuptools.build_meta"
             Commands::Schema { action } => {
                 handle_schema_command(action);
             }
-            Commands::Server { port, stdio, verbose } => {
+            Commands::Server {
+                port,
+                stdio,
+                verbose,
+                config,
+            } => {
                 // Setup logging for the LSP server
                 if verbose {
                     env_logger::Builder::from_default_env()
@@ -1067,6 +1079,18 @@ build-backend = "setuptools.build_meta"
                         .init();
                 }
 
+                // Validate config file exists if provided
+                if let Some(config_path) = &config
+                    && !std::path::Path::new(config_path).exists()
+                {
+                    eprintln!(
+                        "{}: Configuration file not found: {}",
+                        "Error".red().bold(),
+                        config_path
+                    );
+                    exit::tool_error();
+                }
+
                 // Start the LSP server
                 let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
                     eprintln!("{}: Failed to create Tokio runtime: {}", "Error".red().bold(), e);
@@ -1076,7 +1100,7 @@ build-backend = "setuptools.build_meta"
                 runtime.block_on(async {
                     if let Some(port) = port {
                         // TCP mode for debugging
-                        if let Err(e) = rumdl_lib::lsp::start_tcp_server(port).await {
+                        if let Err(e) = rumdl_lib::lsp::start_tcp_server(port, config.as_deref()).await {
                             eprintln!("Failed to start LSP server on port {port}: {e}");
                             exit::tool_error();
                         }
@@ -1084,7 +1108,7 @@ build-backend = "setuptools.build_meta"
                         // Standard LSP mode over stdio (default behavior)
                         // Note: stdio flag is for explicit documentation, behavior is the same
                         let _ = stdio; // Suppress unused variable warning
-                        if let Err(e) = rumdl_lib::lsp::start_server().await {
+                        if let Err(e) = rumdl_lib::lsp::start_server(config.as_deref()).await {
                             eprintln!("Failed to start LSP server: {e}");
                             exit::tool_error();
                         }
@@ -1359,8 +1383,8 @@ build-backend = "setuptools.build_meta"
 }
 
 fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool) {
-    // If silent mode is enabled, also enable quiet mode
-    let quiet = args.quiet || args.silent;
+    let quiet = args.quiet;
+    let silent = args.silent;
 
     // Validate mutually exclusive options
     if args.diff && args.fix {
@@ -1431,7 +1455,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
 
         // Initialize cache directory structure
         if let Err(e) = cache_instance.init() {
-            if !quiet {
+            if !silent {
                 eprintln!("Warning: Failed to initialize cache: {e}");
             }
             // Continue without cache

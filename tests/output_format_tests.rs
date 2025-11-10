@@ -591,24 +591,24 @@ fn test_quiet_mode_output() {
     let test_file = temp_dir.path().join("single_file.md");
     let test_file_path = test_file.to_str().unwrap();
 
-    // Run with --quiet flag
+    // Run with --silent flag
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args(["check", test_file_path, "--quiet"])
+        .args(["check", test_file_path, "--silent"])
         .output()
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("Quiet mode output:\n{stdout}");
+    println!("Silent mode output:\n{stdout}");
 
     // Verify output is suppressed
     assert!(
         stdout.is_empty(),
-        "Quiet mode should suppress standard output, got: {stdout}"
+        "Silent mode should suppress standard output, got: {stdout}"
     );
 
-    // Run with --quiet and --fix to ensure it still fixes issues but doesn't output
+    // Run with --silent and --fix to ensure it still fixes issues but doesn't output
     let fix_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args(["check", test_file_path, "--quiet", "--fix"])
+        .args(["check", test_file_path, "--silent", "--fix"])
         .output()
         .expect("Failed to execute command");
 

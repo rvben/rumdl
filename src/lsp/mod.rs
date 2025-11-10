@@ -18,11 +18,11 @@ use tower_lsp::{LspService, Server};
 
 /// Start the Language Server Protocol server
 /// This is the main entry point for `rumdl server`
-pub async fn start_server() -> Result<()> {
+pub async fn start_server(config_path: Option<&str>) -> Result<()> {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, socket) = LspService::new(|client| RumdlLanguageServer::new(client, config_path));
 
     log::info!("Starting rumdl Language Server Protocol server");
 
@@ -32,13 +32,18 @@ pub async fn start_server() -> Result<()> {
 }
 
 /// Start the LSP server over TCP (useful for debugging)
-pub async fn start_tcp_server(port: u16) -> Result<()> {
+pub async fn start_tcp_server(port: u16, config_path: Option<&str>) -> Result<()> {
     let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     log::info!("rumdl LSP server listening on 127.0.0.1:{port}");
 
+    // Clone config_path to owned String so we can move it into the spawned task
+    let config_path_owned = config_path.map(|s| s.to_string());
+
     loop {
         let (stream, _) = listener.accept().await?;
-        let (service, socket) = LspService::new(RumdlLanguageServer::new);
+        let config_path_clone = config_path_owned.clone();
+        let (service, socket) =
+            LspService::new(move |client| RumdlLanguageServer::new(client, config_path_clone.as_deref()));
 
         tokio::spawn(async move {
             let (read, write) = tokio::io::split(stream);
@@ -80,7 +85,7 @@ mod tests {
         // Start the server in a background task
         let server_handle = tokio::spawn(async move {
             // Server should start without panicking
-            match tokio::time::timeout(std::time::Duration::from_millis(100), start_tcp_server(port)).await {
+            match tokio::time::timeout(std::time::Duration::from_millis(100), start_tcp_server(port, None)).await {
                 Ok(Ok(())) => {} // Server started and stopped normally
                 Ok(Err(_)) => {} // Server had an error (expected in test)
                 Err(_) => {}     // Timeout (expected - server runs forever)
@@ -113,7 +118,7 @@ mod tests {
     async fn test_tcp_server_invalid_port() {
         // Port 0 is technically valid (OS assigns), but let's test a privileged port
         // that we likely can't bind to without root
-        let result = tokio::time::timeout(std::time::Duration::from_millis(100), start_tcp_server(80)).await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), start_tcp_server(80, None)).await;
 
         match result {
             Ok(Err(_)) => {
@@ -132,7 +137,7 @@ mod tests {
     #[test]
     fn test_service_creation() {
         // Test that we can create the LSP service
-        let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+        let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
         // Service should be created successfully
         // We can't easily test more without a full LSP client
@@ -150,7 +155,7 @@ mod tests {
 
         // Start the server
         let server_handle = tokio::spawn(async move {
-            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), start_tcp_server(port)).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), start_tcp_server(port, None)).await;
         });
 
         // Give server time to start

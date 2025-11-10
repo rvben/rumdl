@@ -149,6 +149,7 @@ pub fn perform_check_run(
                 &enabled_rules,
                 args.verbose && !args.silent,
                 quiet,
+                args.silent,
                 config,
                 cache.as_ref().map(Arc::clone),
             );
@@ -210,6 +211,7 @@ pub fn perform_check_run(
                         args.diff,
                         args.verbose && !args.silent,
                         quiet,
+                        args.silent,
                         &output_format,
                         &output_writer,
                         config,
@@ -267,6 +269,7 @@ pub fn perform_check_run(
                         args.diff,
                         args.verbose && !args.silent,
                         quiet,
+                        args.silent,
                         &output_format,
                         &output_writer,
                         config,
@@ -301,8 +304,8 @@ pub fn perform_check_run(
     let duration = start_time.elapsed();
     let duration_ms = duration.as_secs() * 1000 + duration.subsec_millis() as u64;
 
-    // Print results summary if not in quiet mode
-    if !quiet {
+    // Print results summary if not in quiet or silent mode
+    if !quiet && !args.silent {
         formatter::print_results_from_checkargs(formatter::PrintResultsArgs {
             args,
             has_issues,
@@ -315,13 +318,13 @@ pub fn perform_check_run(
         });
     }
 
-    // Print statistics if enabled and not in quiet mode
-    if args.statistics && !quiet && !all_warnings_for_stats.is_empty() {
+    // Print statistics if enabled and not in quiet or silent mode
+    if args.statistics && !quiet && !args.silent && !all_warnings_for_stats.is_empty() {
         formatter::print_statistics(&all_warnings_for_stats);
     }
 
-    // Print profiling information if enabled and not in quiet mode
-    if args.profile && !quiet {
+    // Print profiling information if enabled and not in quiet or silent mode
+    if args.profile && !quiet && !args.silent {
         match std::panic::catch_unwind(rumdl_lib::profiling::get_report) {
             Ok(report) => {
                 output_writer.writeln(&format!("\n{report}")).ok();

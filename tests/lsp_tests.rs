@@ -166,7 +166,7 @@ fn test_warning_to_code_action_without_fix() {
 /// Test LSP server initialization
 #[tokio::test]
 async fn test_lsp_server_initialization() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     let init_params = InitializeParams {
         process_id: None,
@@ -205,7 +205,7 @@ async fn test_lsp_server_initialization() {
 /// Test LSP server initialization with custom config
 #[tokio::test]
 async fn test_lsp_server_initialization_with_config() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     let custom_config = RumdlLspConfig {
         config_path: Some("/custom/path/.rumdl.toml".to_string()),
@@ -234,7 +234,7 @@ async fn test_lsp_server_initialization_with_config() {
 /// Test document lifecycle (open, change, save, close)
 #[tokio::test]
 async fn test_document_lifecycle() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
     let server = service.inner();
 
     // Initialize server first
@@ -301,7 +301,7 @@ async fn test_document_lifecycle() {
 /// Test code action request
 #[tokio::test]
 async fn test_code_action_request() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
     let server = service.inner();
 
     // Initialize server
@@ -363,7 +363,7 @@ async fn test_code_action_request() {
 /// Test diagnostic request
 #[tokio::test]
 async fn test_diagnostic_request() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
     let server = service.inner();
 
     // Initialize server
@@ -421,7 +421,7 @@ async fn test_diagnostic_request() {
 /// Integration test that simulates real LSP workflow
 #[tokio::test]
 async fn test_real_workflow_integration() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
     let server = service.inner();
 
     // 1. Initialize
@@ -576,7 +576,7 @@ mod edge_cases {
     /// Test empty document handling
     #[tokio::test]
     async fn test_empty_document_handling() {
-        let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+        let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
         let server = service.inner();
 
         // Initialize
@@ -626,7 +626,7 @@ mod edge_cases {
     /// instead of using the global/user config passed via initialization_options
     #[tokio::test]
     async fn test_global_config_fallback_when_no_project_config() {
-        let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+        let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
         let server = service.inner();
 
         // Use non-existent path - we're testing config fallback, not file I/O

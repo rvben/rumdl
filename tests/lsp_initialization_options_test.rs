@@ -12,7 +12,7 @@ use rumdl_lib::lsp::server::RumdlLanguageServer;
 /// Test that initialization options are properly handled
 #[tokio::test]
 async fn test_lsp_initialization_options() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Create initialization options that would come from VSCode
     let lsp_config = RumdlLspConfig {
@@ -45,7 +45,7 @@ async fn test_lsp_initialization_options() {
 /// Test that enable_rules properly filters rules
 #[tokio::test]
 async fn test_enable_rules_filtering() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Only enable MD001 and MD018
     let lsp_config = RumdlLspConfig {
@@ -130,7 +130,7 @@ This line is way too long and should trigger MD013 but it's not in enable_rules 
 /// Test that disable_rules properly filters out rules
 #[tokio::test]
 async fn test_disable_rules_filtering() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Ignore MD013 (line length) and MD018 (no space after hash)
     let lsp_config = RumdlLspConfig {
@@ -213,7 +213,7 @@ This line is way too long and would normally trigger MD013 but it should be igno
 /// Test that both enable_rules and disable_rules work together
 #[tokio::test]
 async fn test_select_and_disable_rules_together() {
-    let (service, _socket) = LspService::new(RumdlLanguageServer::new);
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 
     // Select MD001, MD013, MD018 but ignore MD013
     // Result: only MD001 and MD018 should be active
