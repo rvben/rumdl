@@ -25,6 +25,7 @@ pub use rules::*;
 pub use crate::lint_context::{LineInfo, LintContext, ListItemInfo};
 use crate::rule::{LintResult, Rule, RuleCategory};
 use std::time::Instant;
+use rayon::prelude::*;
 
 /// Content characteristics for efficient rule filtering
 #[derive(Debug, Default)]
@@ -154,15 +155,15 @@ pub fn lint(
 
     let profile_rules = std::env::var("RUMDL_PROFILE_RULES").is_ok();
 
-    for rule in applicable_rules {
+    let rules_warnings = applicable_rules.par_iter().map(|rule| -> Result<_, _> {
         let _rule_start = Instant::now();
 
         let result = rule.check(&lint_ctx);
 
-        match result {
+        let ret_val = match result {
             Ok(rule_warnings) => {
                 // Filter out warnings for rules disabled via inline comments
-                let filtered_warnings: Vec<_> = rule_warnings
+                rule_warnings
                     .into_iter()
                     .filter(|warning| {
                         // Use the warning's rule_name if available, otherwise use the rule's name
@@ -180,8 +181,7 @@ pub fn lint(
                             warning.line, // Already 1-indexed
                         )
                     })
-                    .collect();
-                warnings.extend(filtered_warnings);
+                    .collect::<Vec<_>>()
             }
             Err(e) => {
                 log::error!("Error checking rule {}: {}", rule.name(), e);
@@ -198,6 +198,12 @@ pub fn lint(
         if _verbose && rule_duration.as_millis() > 500 {
             log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
         }
+
+        Ok(ret_val)
+    }).collect::<Vec<_>>();
+
+    for rule_warnings in rules_warnings {
+        warnings.extend(rule_warnings?);
     }
 
     #[cfg(not(test))]
