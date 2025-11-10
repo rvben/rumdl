@@ -127,7 +127,6 @@ Choose the installation method that works best for you:
 ### Using Homebrew (macOS/Linux)
 
 ```bash
-brew tap rvben/rumdl
 brew install rumdl
 ```
 
