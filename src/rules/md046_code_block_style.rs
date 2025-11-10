@@ -41,59 +41,168 @@ impl MD046CodeBlockStyle {
                 && (trimmed.contains(". ") || trimmed.contains(") ")))
     }
 
-    /// Pre-compute which lines are in list context with a single forward pass
-    /// This replaces the O(n²) backward scanning in is_part_of_list_structure
-    fn precompute_list_context(&self, lines: &[&str]) -> Vec<bool> {
-        let mut in_list_context = vec![false; lines.len()];
+    /// Check if a line is a footnote definition according to CommonMark footnote extension spec
+    ///
+    /// # Specification Compliance
+    /// Based on commonmark-hs footnote extension and GitHub's implementation:
+    /// - Format: `[^label]: content`
+    /// - Labels cannot be empty or whitespace-only
+    /// - Labels cannot contain line breaks (unlike regular link references)
+    /// - Labels typically contain alphanumerics, hyphens, underscores (though some parsers are more permissive)
+    ///
+    /// # Examples
+    /// Valid:
+    /// - `[^1]: Footnote text`
+    /// - `[^foo-bar]: Content`
+    /// - `[^test_123]: More content`
+    ///
+    /// Invalid:
+    /// - `[^]: No label`
+    /// - `[^ ]: Whitespace only`
+    /// - `[^]]: Extra bracket`
+    fn is_footnote_definition(&self, line: &str) -> bool {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("[^") || trimmed.len() < 5 {
+            return false;
+        }
+
+        if let Some(close_bracket_pos) = trimmed.find("]:")
+            && close_bracket_pos > 2
+        {
+            let label = &trimmed[2..close_bracket_pos];
+
+            if label.trim().is_empty() {
+                return false;
+            }
+
+            // Per spec: labels cannot contain line breaks (check for \r since \n can't appear in a single line)
+            if label.contains('\r') {
+                return false;
+            }
+
+            // Validate characters per GitHub's behavior: alphanumeric, hyphens, underscores only
+            if label.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Pre-compute which lines are in block continuation context (lists, footnotes) with a single forward pass
+    ///
+    /// # Specification-Based Context Tracking
+    /// This function implements CommonMark-style block continuation semantics:
+    ///
+    /// ## List Items
+    /// - List items can contain multiple paragraphs and blocks
+    /// - Content continues if indented appropriately
+    /// - Context ends at structural boundaries (headings, horizontal rules) or column-0 paragraphs
+    ///
+    /// ## Footnotes
+    /// Per commonmark-hs footnote extension and GitHub's implementation:
+    /// - Footnote content continues as long as it's indented
+    /// - Blank lines within footnotes don't terminate them (if next content is indented)
+    /// - Non-indented content terminates the footnote
+    /// - Similar to list items but can span more content
+    ///
+    /// # Performance
+    /// O(n) single forward pass, replacing O(n²) backward scanning
+    ///
+    /// # Returns
+    /// Boolean vector where `true` indicates the line is part of a list/footnote continuation
+    fn precompute_block_continuation_context(&self, lines: &[&str]) -> Vec<bool> {
+        let mut in_continuation_context = vec![false; lines.len()];
         let mut last_list_item_line: Option<usize> = None;
+        let mut last_footnote_line: Option<usize> = None;
+        let mut blank_line_count = 0;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
+            let indent_len = line.len() - trimmed.len();
 
             // Check if this is a list item
             if self.is_list_item(line) {
                 last_list_item_line = Some(i);
-                in_list_context[i] = true;
+                last_footnote_line = None; // List item ends any footnote context
+                blank_line_count = 0;
+                in_continuation_context[i] = true;
                 continue;
             }
 
-            // Skip empty lines - they don't break list context
+            // Check if this is a footnote definition
+            if self.is_footnote_definition(line) {
+                last_footnote_line = Some(i);
+                last_list_item_line = None; // Footnote ends any list context
+                blank_line_count = 0;
+                in_continuation_context[i] = true;
+                continue;
+            }
+
+            // Handle empty lines
             if line.trim().is_empty() {
-                if last_list_item_line.is_some() {
-                    in_list_context[i] = true;
+                // Blank lines within continuations are allowed
+                if last_list_item_line.is_some() || last_footnote_line.is_some() {
+                    blank_line_count += 1;
+                    in_continuation_context[i] = true;
+
+                    // Per spec: multiple consecutive blank lines might terminate context
+                    // GitHub allows multiple blank lines within footnotes if next content is indented
+                    // We'll check on the next non-blank line
                 }
                 continue;
             }
 
-            // Check for structural breaks at column 0
-            let indent_len = line.len() - trimmed.len();
+            // Non-empty line - check for structural breaks or continuation
             if indent_len == 0 && !trimmed.is_empty() {
-                // Headings definitely end list context
+                // Content at column 0 (not indented)
+
+                // Headings definitely end all contexts
                 if trimmed.starts_with('#') {
                     last_list_item_line = None;
+                    last_footnote_line = None;
+                    blank_line_count = 0;
                     continue;
                 }
-                // Horizontal rules end list context
+
+                // Horizontal rules end all contexts
                 if trimmed.starts_with("---") || trimmed.starts_with("***") {
                     last_list_item_line = None;
+                    last_footnote_line = None;
+                    blank_line_count = 0;
                     continue;
                 }
-                // Paragraph at column 0 - be conservative like original logic
+
+                // Non-indented paragraph/content terminates contexts
+                // But be conservative: allow some distance for lists
                 if let Some(list_line) = last_list_item_line
-                    && i - list_line > 5
+                    && (i - list_line > 5 || blank_line_count > 1)
                 {
                     last_list_item_line = None;
-                    continue;
                 }
+
+                // For footnotes, non-indented content always terminates
+                if last_footnote_line.is_some() {
+                    last_footnote_line = None;
+                }
+
+                blank_line_count = 0;
+
+                // If no active context, this is a regular line
+                if last_list_item_line.is_none() && last_footnote_line.is_some() {
+                    last_footnote_line = None;
+                }
+                continue;
             }
 
-            // If we have a recent list item and haven't hit a break, we're in list context
-            if last_list_item_line.is_some() {
-                in_list_context[i] = true;
+            // Indented content - part of continuation if we have active context
+            if indent_len > 0 && (last_list_item_line.is_some() || last_footnote_line.is_some()) {
+                in_continuation_context[i] = true;
+                blank_line_count = 0;
             }
         }
 
-        in_list_context
+        in_continuation_context
     }
 
     /// Check if a line is an indented code block using pre-computed context arrays
@@ -454,7 +563,7 @@ impl MD046CodeBlockStyle {
         let mut indented_line = usize::MAX;
 
         // Pre-compute list and tab contexts for efficiency
-        let in_list_context = self.precompute_list_context(&lines);
+        let in_list_context = self.precompute_block_continuation_context(&lines);
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(&lines)
         } else {
@@ -530,7 +639,7 @@ impl Rule for MD046CodeBlockStyle {
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
         // Pre-compute list and tab contexts once for all checks
-        let in_list_context = self.precompute_list_context(&lines);
+        let in_list_context = self.precompute_block_continuation_context(&lines);
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(&lines)
         } else {
@@ -690,7 +799,7 @@ impl Rule for MD046CodeBlockStyle {
         };
 
         // Pre-compute list and tab contexts for efficiency
-        let in_list_context = self.precompute_list_context(&lines);
+        let in_list_context = self.precompute_block_continuation_context(&lines);
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(&lines)
         } else {
@@ -1168,5 +1277,346 @@ Regular text
 
         // Nested tabs should not be flagged
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_footnote_indented_paragraphs_not_flagged() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Test Document with Footnotes
+
+This is some text with a footnote[^1].
+
+Here's some code:
+
+```bash
+echo "fenced code block"
+```
+
+More text with another footnote[^2].
+
+[^1]: Really interesting footnote text.
+
+    Even more interesting second paragraph.
+
+[^2]: Another footnote.
+
+    With a second paragraph too.
+
+    And even a third paragraph!"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Indented paragraphs in footnotes should not be flagged as code blocks
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_footnote_definition_detection() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        // Valid footnote definitions (per CommonMark footnote extension spec)
+        // Reference: https://github.com/jgm/commonmark-hs/blob/master/commonmark-extensions/test/footnotes.md
+        assert!(rule.is_footnote_definition("[^1]: Footnote text"));
+        assert!(rule.is_footnote_definition("[^foo]: Footnote text"));
+        assert!(rule.is_footnote_definition("[^long-name]: Footnote text"));
+        assert!(rule.is_footnote_definition("[^test_123]: Mixed chars"));
+        assert!(rule.is_footnote_definition("    [^1]: Indented footnote"));
+        assert!(rule.is_footnote_definition("[^a]: Minimal valid footnote"));
+        assert!(rule.is_footnote_definition("[^123]: Numeric label"));
+        assert!(rule.is_footnote_definition("[^_]: Single underscore"));
+        assert!(rule.is_footnote_definition("[^-]: Single hyphen"));
+
+        // Invalid: empty or whitespace-only labels (spec violation)
+        assert!(!rule.is_footnote_definition("[^]: No label"));
+        assert!(!rule.is_footnote_definition("[^ ]: Whitespace only"));
+        assert!(!rule.is_footnote_definition("[^  ]: Multiple spaces"));
+        assert!(!rule.is_footnote_definition("[^\t]: Tab only"));
+
+        // Invalid: malformed syntax
+        assert!(!rule.is_footnote_definition("[^]]: Extra bracket"));
+        assert!(!rule.is_footnote_definition("Regular text [^1]:"));
+        assert!(!rule.is_footnote_definition("[1]: Not a footnote"));
+        assert!(!rule.is_footnote_definition("[^")); // Too short
+        assert!(!rule.is_footnote_definition("[^1:")); // Missing closing bracket
+        assert!(!rule.is_footnote_definition("^1]: Missing opening bracket"));
+
+        // Invalid: disallowed characters in label
+        assert!(!rule.is_footnote_definition("[^test.name]: Period"));
+        assert!(!rule.is_footnote_definition("[^test name]: Space in label"));
+        assert!(!rule.is_footnote_definition("[^test@name]: Special char"));
+        assert!(!rule.is_footnote_definition("[^test/name]: Slash"));
+        assert!(!rule.is_footnote_definition("[^test\\name]: Backslash"));
+
+        // Edge case: line breaks not allowed in labels
+        // (This is a string test, actual multiline would need different testing)
+        assert!(!rule.is_footnote_definition("[^test\r]: Carriage return"));
+    }
+
+    #[test]
+    fn test_footnote_with_blank_lines() {
+        // Spec requirement: blank lines within footnotes don't terminate them
+        // if next content is indented (matches GitHub's implementation)
+        // Reference: commonmark-hs footnote extension behavior
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+Text with footnote[^1].
+
+[^1]: First paragraph.
+
+    Second paragraph after blank line.
+
+    Third paragraph after another blank line.
+
+Regular text at column 0 ends the footnote."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // The indented paragraphs in the footnote should not be flagged as code blocks
+        assert_eq!(
+            result.len(),
+            0,
+            "Indented content within footnotes should not trigger MD046"
+        );
+    }
+
+    #[test]
+    fn test_footnote_multiple_consecutive_blank_lines() {
+        // Edge case: multiple consecutive blank lines within a footnote
+        // Should still work if next content is indented
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"Text[^1].
+
+[^1]: First paragraph.
+
+
+
+    Content after three blank lines (still part of footnote).
+
+Not indented, so footnote ends here."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // The indented content should not be flagged
+        assert_eq!(
+            result.len(),
+            0,
+            "Multiple blank lines shouldn't break footnote continuation"
+        );
+    }
+
+    #[test]
+    fn test_footnote_terminated_by_non_indented_content() {
+        // Spec requirement: non-indented content always terminates the footnote
+        // Reference: commonmark-hs footnote extension
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"[^1]: Footnote content.
+
+    More indented content in footnote.
+
+This paragraph is not indented, so footnote ends.
+
+    This should be flagged as indented code block."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // The last indented block should be flagged (it's after the footnote ended)
+        assert_eq!(
+            result.len(),
+            1,
+            "Indented code after footnote termination should be flagged"
+        );
+        assert!(
+            result[0].message.contains("Use fenced code blocks"),
+            "Expected MD046 warning for indented code block"
+        );
+        assert!(result[0].line >= 7, "Warning should be on the indented code block line");
+    }
+
+    #[test]
+    fn test_footnote_terminated_by_structural_elements() {
+        // Spec requirement: headings and horizontal rules terminate footnotes
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"[^1]: Footnote content.
+
+    More content.
+
+## Heading terminates footnote
+
+    This indented content should be flagged.
+
+---
+
+    This should also be flagged (after horizontal rule)."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Both indented blocks after structural elements should be flagged
+        assert_eq!(
+            result.len(),
+            2,
+            "Both indented blocks after termination should be flagged"
+        );
+    }
+
+    #[test]
+    fn test_footnote_with_code_block_inside() {
+        // Spec behavior: footnotes can contain fenced code blocks
+        // The fenced code must be properly indented within the footnote
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"Text[^1].
+
+[^1]: Footnote with code:
+
+    ```python
+    def hello():
+        print("world")
+    ```
+
+    More footnote text after code."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have no warnings - the fenced code block is valid
+        assert_eq!(result.len(), 0, "Fenced code blocks within footnotes should be allowed");
+    }
+
+    #[test]
+    fn test_footnote_with_8_space_indented_code() {
+        // Edge case: code blocks within footnotes need 8 spaces (4 for footnote + 4 for code)
+        // This should NOT be flagged as it's properly nested indented code
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"Text[^1].
+
+[^1]: Footnote with nested code.
+
+        code block
+        more code"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // The 8-space indented code is valid within footnote
+        assert_eq!(
+            result.len(),
+            0,
+            "8-space indented code within footnotes represents nested code blocks"
+        );
+    }
+
+    #[test]
+    fn test_multiple_footnotes() {
+        // Spec behavior: each footnote definition starts a new block context
+        // Previous footnote ends when new footnote begins
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"Text[^1] and more[^2].
+
+[^1]: First footnote.
+
+    Continuation of first.
+
+[^2]: Second footnote starts here, ending the first.
+
+    Continuation of second."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // All indented content is part of footnotes
+        assert_eq!(
+            result.len(),
+            0,
+            "Multiple footnotes should each maintain their continuation context"
+        );
+    }
+
+    #[test]
+    fn test_list_item_ends_footnote_context() {
+        // Spec behavior: list items and footnotes are mutually exclusive contexts
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"[^1]: Footnote.
+
+    Content in footnote.
+
+- List item starts here (ends footnote context).
+
+    This indented content is part of the list, not the footnote."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // List continuation should not be flagged
+        assert_eq!(
+            result.len(),
+            0,
+            "List items should end footnote context and start their own"
+        );
+    }
+
+    #[test]
+    fn test_footnote_vs_actual_indented_code() {
+        // Critical test: verify we can still detect actual indented code blocks outside footnotes
+        // This ensures the fix doesn't cause false negatives
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Heading
+
+Text with footnote[^1].
+
+[^1]: Footnote content.
+
+    Part of footnote (should not be flagged).
+
+Regular paragraph ends footnote context.
+
+    This is actual indented code (MUST be flagged)
+    Should be detected as code block"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag the indented code after the regular paragraph
+        assert_eq!(
+            result.len(),
+            1,
+            "Must still detect indented code blocks outside footnotes"
+        );
+        assert!(
+            result[0].message.contains("Use fenced code blocks"),
+            "Expected MD046 warning for indented code"
+        );
+        assert!(
+            result[0].line >= 11,
+            "Warning should be on the actual indented code line"
+        );
+    }
+
+    #[test]
+    fn test_spec_compliant_label_characters() {
+        // Spec requirement: labels must contain only alphanumerics, hyphens, underscores
+        // Reference: commonmark-hs footnote extension
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        // Valid according to spec
+        assert!(rule.is_footnote_definition("[^test]: text"));
+        assert!(rule.is_footnote_definition("[^TEST]: text"));
+        assert!(rule.is_footnote_definition("[^test-name]: text"));
+        assert!(rule.is_footnote_definition("[^test_name]: text"));
+        assert!(rule.is_footnote_definition("[^test123]: text"));
+        assert!(rule.is_footnote_definition("[^123]: text"));
+        assert!(rule.is_footnote_definition("[^a1b2c3]: text"));
+
+        // Invalid characters (spec violations)
+        assert!(!rule.is_footnote_definition("[^test.name]: text")); // Period
+        assert!(!rule.is_footnote_definition("[^test name]: text")); // Space
+        assert!(!rule.is_footnote_definition("[^test@name]: text")); // At sign
+        assert!(!rule.is_footnote_definition("[^test#name]: text")); // Hash
+        assert!(!rule.is_footnote_definition("[^test$name]: text")); // Dollar
+        assert!(!rule.is_footnote_definition("[^test%name]: text")); // Percent
     }
 }
