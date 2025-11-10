@@ -54,8 +54,10 @@ use toml;
 
 mod md004_config;
 use md004_config::MD004Config;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum UnorderedListStyle {
     Asterisk, // "*"
     Plus,     // "+"
@@ -74,7 +76,7 @@ pub struct MD004UnorderedListStyle {
 impl MD004UnorderedListStyle {
     pub fn new(style: UnorderedListStyle) -> Self {
         Self {
-            config: MD004Config { style, after_marker: 1 },
+            config: MD004Config { style },
         }
     }
 
