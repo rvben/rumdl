@@ -6,6 +6,7 @@ use std::collections::HashMap;
 /// This module provides comprehensive performance testing capabilities to measure
 /// rule execution times, memory usage, and overall linting performance.
 use std::time::{Duration, Instant};
+use memory_stats::memory_stats as get_mem_stats;
 
 /// Memory usage statistics
 #[derive(Debug, Clone)]
@@ -238,30 +239,8 @@ impl PerformanceBenchmark {
     /// Get current memory usage in MB (platform-specific)
     /// Returns None if memory measurement is not available on the platform
     fn get_memory_usage_mb() -> Option<f64> {
-        #[cfg(target_os = "linux")]
-        {
-            // Try to read from /proc/self/status
-            if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
-                for line in status.lines() {
-                    if line.starts_with("VmRSS:")
-                        && let Some(kb_str) = line.split_whitespace().nth(1)
-                        && let Ok(kb) = kb_str.parse::<f64>()
-                    {
-                        return Some(kb / 1024.0); // Convert KB to MB
-                    }
-                }
-            }
-        }
-
-        // For other platforms, return None for now
-        // This can be enhanced with platform-specific implementations in the future
-        #[cfg(not(target_os = "linux"))]
-        {
-            // Memory measurement not implemented for this platform yet
-            // Could add support for macOS (using libc), Windows (using winapi), etc.
-        }
-
-        None
+        const BYTES_IN_MB: f64 = 1048576.0;
+        return get_mem_stats().map(|stats| stats.virtual_mem as f64 / BYTES_IN_MB);
     }
 
     /// Benchmark a single rule with given content

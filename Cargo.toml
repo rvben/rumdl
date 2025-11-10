@@ -58,6 +58,7 @@ unicode-normalization = "0.1"
 memmap2 = "0.9"
 schemars = "0.8"
 unicode-width = "0.2"
+memory-stats = "1.2.0"
 
 # LSP dependencies
 tower-lsp = "0.20"
