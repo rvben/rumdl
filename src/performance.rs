@@ -1,12 +1,12 @@
 use crate::lint_context::LintContext;
 use crate::rule::Rule;
+use memory_stats::memory_stats as get_mem_stats;
 use std::collections::HashMap;
 /// Performance benchmarking framework for rumdl
 ///
 /// This module provides comprehensive performance testing capabilities to measure
 /// rule execution times, memory usage, and overall linting performance.
 use std::time::{Duration, Instant};
-use memory_stats::memory_stats as get_mem_stats;
 
 /// Memory usage statistics
 #[derive(Debug, Clone)]
@@ -238,9 +238,13 @@ impl PerformanceBenchmark {
 
     /// Get current memory usage in MB (platform-specific)
     /// Returns None if memory measurement is not available on the platform
+    ///
+    /// Uses physical memory (RSS on Linux/macOS, Working Set on Windows) rather than
+    /// virtual memory for more accurate performance benchmarking, as it represents
+    /// actual RAM usage rather than address space allocation.
     fn get_memory_usage_mb() -> Option<f64> {
         const BYTES_IN_MB: f64 = 1048576.0;
-        return get_mem_stats().map(|stats| stats.virtual_mem as f64 / BYTES_IN_MB);
+        get_mem_stats().map(|stats| stats.physical_mem as f64 / BYTES_IN_MB)
     }
 
     /// Benchmark a single rule with given content
@@ -458,24 +462,16 @@ mod tests {
 
     #[test]
     fn test_memory_measurement() {
-        // Test that memory measurement doesn't panic
+        // Test that memory measurement works on all platforms
         let memory = PerformanceBenchmark::get_memory_usage_mb();
 
-        #[cfg(target_os = "linux")]
-        {
-            // On Linux, we should get a value if /proc/self/status exists
-            if std::path::Path::new("/proc/self/status").exists() {
-                assert!(memory.is_some(), "Memory measurement should work on Linux");
-                if let Some(mb) = memory {
-                    assert!(mb > 0.0, "Memory usage should be positive");
-                }
-            }
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        {
-            // On other platforms, we currently return None
-            assert!(memory.is_none(), "Memory measurement not implemented for this platform");
+        // Memory measurement should work on Linux, macOS, and Windows via memory-stats crate
+        assert!(
+            memory.is_some(),
+            "Memory measurement should work on all supported platforms"
+        );
+        if let Some(mb) = memory {
+            assert!(mb > 0.0, "Memory usage should be positive");
         }
     }
 
@@ -497,12 +493,15 @@ mod tests {
             assert_eq!(result.content_size_bytes, content.len());
             assert_eq!(result.lines_processed, 3);
 
-            // Memory stats might be None on unsupported platforms
-            #[cfg(target_os = "linux")]
-            {
-                if std::path::Path::new("/proc/self/status").exists() {
-                    assert!(result.memory_stats.is_some(), "Should have memory stats on Linux");
-                }
+            // Memory stats should be available on all platforms (Linux, macOS, Windows)
+            assert!(
+                result.memory_stats.is_some(),
+                "Should have memory stats on all platforms"
+            );
+            if let Some(stats) = result.memory_stats {
+                assert!(stats.peak_memory_mb > 0.0, "Peak memory should be positive");
+                assert!(stats.average_memory_mb > 0.0, "Average memory should be positive");
+                assert!(!stats.memory_samples.is_empty(), "Should have memory samples");
             }
         }
     }
