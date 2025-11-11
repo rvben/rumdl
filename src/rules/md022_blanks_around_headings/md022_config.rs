@@ -1,4 +1,5 @@
 use crate::rule_config_serde::RuleConfig;
+use crate::types::PositiveUsize;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD022 (Headings should be surrounded by blank lines)
@@ -7,23 +8,23 @@ use serde::{Deserialize, Serialize};
 pub struct MD022Config {
     /// Number of blank lines required above headings (default: 1)
     #[serde(default = "default_lines_above", alias = "lines_above")]
-    pub lines_above: usize,
+    pub lines_above: PositiveUsize,
 
     /// Number of blank lines required below headings (default: 1)
     #[serde(default = "default_lines_below", alias = "lines_below")]
-    pub lines_below: usize,
+    pub lines_below: PositiveUsize,
 
     /// Whether the first heading can be at the start of the document (default: true)
     #[serde(default = "default_allowed_at_start", alias = "allowed_at_start")]
     pub allowed_at_start: bool,
 }
 
-fn default_lines_above() -> usize {
-    1
+fn default_lines_above() -> PositiveUsize {
+    PositiveUsize::from_const(1)
 }
 
-fn default_lines_below() -> usize {
-    1
+fn default_lines_below() -> PositiveUsize {
+    PositiveUsize::from_const(1)
 }
 
 fn default_allowed_at_start() -> bool {
@@ -56,8 +57,8 @@ mod tests {
             allowed_at_start = false
         "#;
         let config: MD022Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.lines_above, 2);
-        assert_eq!(config.lines_below, 3);
+        assert_eq!(config.lines_above.get(), 2);
+        assert_eq!(config.lines_below.get(), 3);
         assert!(!config.allowed_at_start);
     }
 
@@ -69,8 +70,8 @@ mod tests {
             allowed-at-start = false
         "#;
         let config: MD022Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.lines_above, 2);
-        assert_eq!(config.lines_below, 3);
+        assert_eq!(config.lines_above.get(), 2);
+        assert_eq!(config.lines_below.get(), 3);
         assert!(!config.allowed_at_start);
     }
 }

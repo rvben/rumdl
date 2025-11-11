@@ -156,11 +156,12 @@ impl Default for MD060TableFormat {
 
 impl MD060TableFormat {
     pub fn new(enabled: bool, style: String) -> Self {
+        use crate::types::LineLength;
         Self {
             config: MD060Config {
                 enabled,
                 style,
-                max_width: 0,
+                max_width: LineLength::from_const(0),
             },
             md013_line_length: 80, // Default MD013 line_length
         }
@@ -178,10 +179,10 @@ impl MD060TableFormat {
     /// - If `max_width` is 0, inherits from MD013's `line_length`
     /// - Otherwise, uses the explicitly configured `max_width`
     fn effective_max_width(&self) -> usize {
-        if self.config.max_width == 0 {
+        if self.config.max_width.is_unlimited() {
             self.md013_line_length
         } else {
-            self.config.max_width
+            self.config.max_width.get()
         }
     }
 
@@ -684,6 +685,7 @@ impl Rule for MD060TableFormat {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+    use crate::types::LineLength;
 
     #[test]
     fn test_md060_disabled_by_default() {
@@ -873,7 +875,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 0,
+            max_width: LineLength::from_const(0),
         };
         let rule = MD060TableFormat::from_config_struct(config, 80);
 
@@ -902,7 +904,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 50,
+            max_width: LineLength::from_const(50),
         };
         let rule = MD060TableFormat::from_config_struct(config, 80); // MD013 setting doesn't matter
 
@@ -932,7 +934,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 100,
+            max_width: LineLength::from_const(100),
         };
         let rule = MD060TableFormat::from_config_struct(config, 80);
 
@@ -957,7 +959,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 0,
+            max_width: LineLength::from_const(0),
         };
         let rule = MD060TableFormat::from_config_struct(config, 30);
 
@@ -979,7 +981,7 @@ mod tests {
         let config_tight = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 24,
+            max_width: LineLength::from_const(24),
         };
         let rule_tight = MD060TableFormat::from_config_struct(config_tight, 80);
 
@@ -995,7 +997,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 0,
+            max_width: LineLength::from_const(0),
         };
         let rule = MD060TableFormat::from_config_struct(config, 80);
 
@@ -1018,7 +1020,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 0, // Inherit
+            max_width: LineLength::from_const(0), // Inherit
         };
 
         // Test with different MD013 line_length values
@@ -1049,7 +1051,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 17,
+            max_width: LineLength::from_const(17),
         };
         let rule = MD060TableFormat::from_config_struct(config, 80);
 
@@ -1068,7 +1070,7 @@ mod tests {
         let config_under = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 16,
+            max_width: LineLength::from_const(16),
         };
         let rule_under = MD060TableFormat::from_config_struct(config_under, 80);
 
@@ -1085,7 +1087,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 50,
+            max_width: LineLength::from_const(50),
         };
         let rule = MD060TableFormat::from_config_struct(config, 80);
 
@@ -1117,7 +1119,7 @@ mod tests {
         let config = MD060Config {
             enabled: true,
             style: "aligned".to_string(),
-            max_width: 100, // Large enough to not trigger auto-compact
+            max_width: LineLength::from_const(100), // Large enough to not trigger auto-compact
         };
         let rule = MD060TableFormat::from_config_struct(config, 80);
 

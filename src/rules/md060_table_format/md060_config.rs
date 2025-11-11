@@ -1,4 +1,5 @@
 use crate::rule_config_serde::RuleConfig;
+use crate::types::LineLength;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
@@ -39,8 +40,8 @@ pub struct MD060Config {
     /// style = "aligned"
     /// max-width = 120  # Explicit threshold, independent of MD013
     /// ```
-    #[serde(default, rename = "max-width")]
-    pub max_width: usize,
+    #[serde(default = "default_max_width", rename = "max-width")]
+    pub max_width: LineLength,
 }
 
 impl Default for MD060Config {
@@ -48,7 +49,7 @@ impl Default for MD060Config {
         Self {
             enabled: default_enabled(),
             style: default_style(),
-            max_width: 0, // 0 = inherit from MD013
+            max_width: default_max_width(),
         }
     }
 }
@@ -59,6 +60,10 @@ fn default_enabled() -> bool {
 
 fn default_style() -> String {
     "any".to_string()
+}
+
+fn default_max_width() -> LineLength {
+    LineLength::from_const(0) // 0 = inherit from MD013
 }
 
 fn serialize_style<S>(style: &str, serializer: S) -> Result<S::Ok, S::Error>

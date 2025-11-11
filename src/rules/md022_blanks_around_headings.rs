@@ -96,10 +96,11 @@ impl MD022BlanksAroundHeadings {
 
     /// Create with custom numbers of blank lines
     pub fn with_values(lines_above: usize, lines_below: usize) -> Self {
+        use crate::types::PositiveUsize;
         Self {
             config: MD022Config {
-                lines_above,
-                lines_below,
+                lines_above: PositiveUsize::new(lines_above).unwrap_or(PositiveUsize::from_const(1)),
+                lines_below: PositiveUsize::new(lines_below).unwrap_or(PositiveUsize::from_const(1)),
                 allowed_at_start: true,
             },
         }
@@ -160,7 +161,7 @@ impl MD022BlanksAroundHeadings {
                 let needed_blanks_above = if is_first_heading && self.config.allowed_at_start {
                     0
                 } else {
-                    self.config.lines_above
+                    self.config.lines_above.get()
                 };
 
                 // Add missing blank lines above if needed
@@ -213,7 +214,11 @@ impl MD022BlanksAroundHeadings {
                     };
 
                     // Add missing blank lines below if needed
-                    let needed_blanks_below = if next_is_special { 0 } else { self.config.lines_below };
+                    let needed_blanks_below = if next_is_special {
+                        0
+                    } else {
+                        self.config.lines_below.get()
+                    };
                     if blank_lines_below < needed_blanks_below {
                         for _ in 0..(needed_blanks_below - blank_lines_below) {
                             result.push(String::new());
@@ -250,7 +255,11 @@ impl MD022BlanksAroundHeadings {
                     };
 
                     // Add missing blank lines below if needed
-                    let needed_blanks_below = if next_is_special { 0 } else { self.config.lines_below };
+                    let needed_blanks_below = if next_is_special {
+                        0
+                    } else {
+                        self.config.lines_below.get()
+                    };
                     if blank_lines_below < needed_blanks_below {
                         for _ in 0..(needed_blanks_below - blank_lines_below) {
                             result.push(String::new());
@@ -352,15 +361,15 @@ impl Rule for MD022BlanksAroundHeadings {
                 }
                 count
             } else {
-                self.config.lines_above // Consider it as having enough blanks if it's the first heading
+                self.config.lines_above.get() // Consider it as having enough blanks if it's the first heading
             };
 
             // Check if we need blank lines above
             if line_num > 0
-                && blank_lines_above < self.config.lines_above
+                && blank_lines_above < self.config.lines_above.get()
                 && (!is_first_heading || !self.config.allowed_at_start)
             {
-                let needed_blanks = self.config.lines_above - blank_lines_above;
+                let needed_blanks = self.config.lines_above.get() - blank_lines_above;
                 heading_violations.push((line_num, "above", needed_blanks));
             }
 
@@ -407,8 +416,8 @@ impl Rule for MD022BlanksAroundHeadings {
                     // Count blank lines below
                     let blank_lines_below = next_non_blank_idx - effective_last_line - 1;
 
-                    if blank_lines_below < self.config.lines_below {
-                        let needed_blanks = self.config.lines_below - blank_lines_below;
+                    if blank_lines_below < self.config.lines_below.get() {
+                        let needed_blanks = self.config.lines_below.get() - blank_lines_below;
                         heading_violations.push((line_num, "below", needed_blanks));
                     }
                 }
@@ -428,8 +437,12 @@ impl Rule for MD022BlanksAroundHeadings {
                 "above" => (
                     format!(
                         "Expected {} blank {} above heading",
-                        self.config.lines_above,
-                        if self.config.lines_above == 1 { "line" } else { "lines" }
+                        self.config.lines_above.get(),
+                        if self.config.lines_above.get() == 1 {
+                            "line"
+                        } else {
+                            "lines"
+                        }
                     ),
                     heading_line, // Insert before the heading line
                 ),
@@ -449,8 +462,12 @@ impl Rule for MD022BlanksAroundHeadings {
                     (
                         format!(
                             "Expected {} blank {} below heading",
-                            self.config.lines_below,
-                            if self.config.lines_below == 1 { "line" } else { "lines" }
+                            self.config.lines_below.get(),
+                            if self.config.lines_below.get() == 1 {
+                                "line"
+                            } else {
+                                "lines"
+                            }
                         ),
                         insert_after,
                     )

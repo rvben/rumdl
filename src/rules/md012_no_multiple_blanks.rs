@@ -19,9 +19,12 @@ pub struct MD012NoMultipleBlanks {
 }
 
 impl MD012NoMultipleBlanks {
-    pub const fn new(maximum: usize) -> Self {
+    pub fn new(maximum: usize) -> Self {
+        use crate::types::PositiveUsize;
         Self {
-            config: MD012Config { maximum },
+            config: MD012Config {
+                maximum: PositiveUsize::new(maximum).unwrap_or(PositiveUsize::from_const(1)),
+            },
         }
     }
 
@@ -84,13 +87,13 @@ impl Rule for MD012NoMultipleBlanks {
             // Check for code block boundaries
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 // Check for excess blanks before entering/exiting code block
-                if blank_count > self.config.maximum {
+                if blank_count > self.config.maximum.get() {
                     let location = if blank_start == 0 {
                         "at start of file"
                     } else {
                         "between content"
                     };
-                    for i in self.config.maximum..blank_count {
+                    for i in self.config.maximum.get()..blank_count {
                         let excess_line_num = blank_start + i;
                         if lines_to_check.contains(&excess_line_num) {
                             let excess_line = excess_line_num + 1;
@@ -145,13 +148,13 @@ impl Rule for MD012NoMultipleBlanks {
             let is_indented_code = line.len() >= 4 && line.starts_with("    ") && !line.trim().is_empty();
             if is_indented_code {
                 // Check for excess blanks before indented code block
-                if blank_count > self.config.maximum {
+                if blank_count > self.config.maximum.get() {
                     let location = if blank_start == 0 {
                         "at start of file"
                     } else {
                         "between content"
                     };
-                    for i in self.config.maximum..blank_count {
+                    for i in self.config.maximum.get()..blank_count {
                         let excess_line_num = blank_start + i;
                         if lines_to_check.contains(&excess_line_num) {
                             let excess_line = excess_line_num + 1;
@@ -191,11 +194,11 @@ impl Rule for MD012NoMultipleBlanks {
                 }
                 blank_count += 1;
                 // Store line numbers that exceed the limit
-                if blank_count > self.config.maximum {
+                if blank_count > self.config.maximum.get() {
                     lines_to_check.insert(line_num);
                 }
             } else {
-                if blank_count > self.config.maximum {
+                if blank_count > self.config.maximum.get() {
                     // Generate warnings for each excess blank line
                     let location = if blank_start == 0 {
                         "at start of file"
@@ -204,7 +207,7 @@ impl Rule for MD012NoMultipleBlanks {
                     };
 
                     // Report warnings starting from the (maximum+1)th blank line
-                    for i in self.config.maximum..blank_count {
+                    for i in self.config.maximum.get()..blank_count {
                         let excess_line_num = blank_start + i;
                         if lines_to_check.contains(&excess_line_num) {
                             let excess_line = excess_line_num + 1; // +1 for 1-indexed lines
@@ -328,7 +331,7 @@ impl Rule for MD012NoMultipleBlanks {
             if filtered_line.line_info.in_front_matter {
                 if !in_front_matter {
                     // Entering front-matter: flush any accumulated blanks
-                    let allowed_blanks = blank_count.min(self.config.maximum);
+                    let allowed_blanks = blank_count.min(self.config.maximum.get());
                     if allowed_blanks > 0 {
                         result.extend(vec![""; allowed_blanks]);
                     }
@@ -346,7 +349,7 @@ impl Rule for MD012NoMultipleBlanks {
             if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
                 // Handle accumulated blank lines before code block
                 if !in_code_block {
-                    let allowed_blanks = blank_count.min(self.config.maximum);
+                    let allowed_blanks = blank_count.min(self.config.maximum.get());
                     if allowed_blanks > 0 {
                         result.extend(vec![""; allowed_blanks]);
                     }
@@ -371,7 +374,7 @@ impl Rule for MD012NoMultipleBlanks {
                 blank_count += 1;
             } else {
                 // Add allowed blank lines before content
-                let allowed_blanks = blank_count.min(self.config.maximum);
+                let allowed_blanks = blank_count.min(self.config.maximum.get());
                 if allowed_blanks > 0 {
                     result.extend(vec![""; allowed_blanks]);
                 }
@@ -383,7 +386,7 @@ impl Rule for MD012NoMultipleBlanks {
         // Handle trailing blank lines
         // After the loop, blank_count contains the number of trailing blank lines
         // Add up to maximum allowed trailing blank lines
-        let allowed_trailing_blanks = blank_count.min(self.config.maximum);
+        let allowed_trailing_blanks = blank_count.min(self.config.maximum.get());
         if allowed_trailing_blanks > 0 {
             result.extend(vec![""; allowed_trailing_blanks]);
         }
