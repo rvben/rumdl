@@ -158,6 +158,11 @@ impl Rule for MD013LineLength {
         let mut candidate_lines = Vec::new();
         if !skip_length_checks {
             for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+                // Skip front matter - it should never be linted
+                if line_info.in_front_matter {
+                    continue;
+                }
+
                 // Quick length check first
                 if line_info.content.len() > effective_config.line_length.get() {
                     candidate_lines.push(line_idx);
