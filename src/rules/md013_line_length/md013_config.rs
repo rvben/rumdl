@@ -1,4 +1,5 @@
 use crate::rule_config_serde::RuleConfig;
+use crate::types::LineLength;
 use serde::{Deserialize, Serialize};
 
 /// Reflow mode for MD013
@@ -19,9 +20,9 @@ pub enum ReflowMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD013Config {
-    /// Maximum line length (default: 80)
+    /// Maximum line length (default: 80, 0 means no limit)
     #[serde(default = "default_line_length", alias = "line_length")]
-    pub line_length: usize,
+    pub line_length: LineLength,
 
     /// Check code blocks for line length (default: true)
     #[serde(default = "default_code_blocks", alias = "code_blocks")]
@@ -54,8 +55,8 @@ pub struct MD013Config {
     pub reflow_mode: ReflowMode,
 }
 
-fn default_line_length() -> usize {
-    80
+fn default_line_length() -> LineLength {
+    LineLength::from_const(80)
 }
 
 fn default_code_blocks() -> bool {
@@ -141,7 +142,7 @@ mod tests {
             reflow_mode = "sentence_per_line"
         "#;
         let config: MD013Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.line_length, 100);
+        assert_eq!(config.line_length.get(), 100);
         assert!(!config.code_blocks);
         assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
 
@@ -152,7 +153,7 @@ mod tests {
             reflow-mode = "normalize"
         "#;
         let config: MD013Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.line_length, 100);
+        assert_eq!(config.line_length.get(), 100);
         assert!(!config.code_blocks);
         assert_eq!(config.reflow_mode, ReflowMode::Normalize);
     }
@@ -161,7 +162,7 @@ mod tests {
     fn test_reflow_mode_serialization() {
         // Test that serialization always uses kebab-case (primary format)
         let config = MD013Config {
-            line_length: 80,
+            line_length: LineLength::from_const(80),
             code_blocks: true,
             tables: true,
             headings: true,
@@ -198,7 +199,7 @@ mod tests {
             reflow-mode = "sentence-per-line"
         "#;
         let config: MD013Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.line_length, 100);
+        assert_eq!(config.line_length.get(), 100);
         assert!(!config.code_blocks);
         assert!(!config.tables);
         assert!(config.headings);
@@ -237,7 +238,7 @@ mod tests {
             reflow-mode = "sentence-per-line"
         "#;
         let config: MD013Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.line_length, 80);
+        assert_eq!(config.line_length.get(), 80);
         assert!(config.code_blocks, "code-blocks should be true");
         assert!(config.tables, "tables should be true");
         assert!(!config.headings, "headings should be false");

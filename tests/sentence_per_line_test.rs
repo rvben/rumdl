@@ -2,10 +2,11 @@ use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD013LineLength;
 use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+use rumdl_lib::types::LineLength;
 
 fn create_sentence_per_line_rule() -> MD013LineLength {
     MD013LineLength::from_config_struct(MD013Config {
-        line_length: 80,
+        line_length: LineLength::from_const(80),
         code_blocks: false,
         tables: false,
         headings: false,
@@ -154,7 +155,7 @@ fn test_single_sentence_with_no_line_length_constraint() {
     // Should be joined into one line since there's no line-length limitation
     // Reported in issue #124
     let rule = MD013LineLength::from_config_struct(MD013Config {
-        line_length: 0, // No line-length constraint
+        line_length: LineLength::from_const(0), // No line-length constraint
         code_blocks: false,
         tables: false,
         headings: false,

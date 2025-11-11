@@ -1,6 +1,7 @@
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD013LineLength;
+use rumdl_lib::types::LineLength;
 
 #[test]
 fn test_valid_line_length() {
@@ -442,10 +443,11 @@ fn test_no_fix_without_reflow() {
 #[test]
 fn test_heading_line_length_config() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::types::LineLength;
 
     // Create a config with standard settings (no longer supporting separate heading limits)
     let config = MD013Config {
-        line_length: 50,
+        line_length: LineLength::from_const(50),
         code_blocks: false, // false = skip code blocks
         tables: false,      // false = skip tables
         headings: false,    // false = skip headings (don't check them)
@@ -471,7 +473,7 @@ fn test_code_block_line_length_config() {
 
     // Create a config with standard settings (no longer supporting separate code block limits)
     let config = MD013Config {
-        line_length: 50,
+        line_length: LineLength::from_const(50),
         code_blocks: false, // false = skip code blocks (don't check them)
         tables: true,       // true = check tables
         headings: true,     // true = check headings
@@ -497,7 +499,7 @@ fn test_stern_mode() {
 
     // Create a config with strict mode (stern mode no longer exists)
     let config = MD013Config {
-        line_length: 50,
+        line_length: LineLength::from_const(50),
         code_blocks: false, // Don't skip code blocks
         tables: false,      // Don't skip tables
         headings: false,    // Don't skip headings
@@ -522,7 +524,7 @@ fn test_combined_heading_and_code_block_limits() {
 
     // Simplified configuration - using single line length for all content
     let config = MD013Config {
-        line_length: 40,
+        line_length: LineLength::from_const(40),
         code_blocks: false, // false = skip code blocks
         tables: true,       // true = check tables
         headings: false,    // false = skip headings
@@ -637,7 +639,7 @@ fn test_reflow_simple_paragraph() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 40,
+        line_length: LineLength::from_const(40),
         reflow: true,
         ..Default::default()
     };
@@ -664,7 +666,7 @@ fn test_reflow_preserves_markdown_elements() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 30,
+        line_length: LineLength::from_const(30),
         reflow: true,
         ..Default::default()
     };
@@ -692,7 +694,7 @@ fn test_reflow_multiple_paragraphs() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 50,
+        line_length: LineLength::from_const(50),
         reflow: true,
         ..Default::default()
     };
@@ -724,7 +726,7 @@ fn test_reflow_list_items() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 40,
+        line_length: LineLength::from_const(40),
         reflow: true,
         ..Default::default()
     };
@@ -757,7 +759,7 @@ fn test_reflow_numbered_lists() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 35,
+        line_length: LineLength::from_const(35),
         reflow: true,
         ..Default::default()
     };
@@ -800,7 +802,7 @@ fn test_reflow_blockquotes() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 40,
+        line_length: LineLength::from_const(40),
         reflow: true,
         ..Default::default()
     };
@@ -832,7 +834,7 @@ fn test_reflow_preserves_code_blocks() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 30,
+        line_length: LineLength::from_const(30),
         reflow: true,
         ..Default::default()
     };
@@ -875,7 +877,7 @@ fn test_reflow_preserves_headings() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 30,
+        line_length: LineLength::from_const(30),
         reflow: true,
         ..Default::default()
     };
@@ -910,7 +912,7 @@ fn test_reflow_preserves_tables() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 30,
+        line_length: LineLength::from_const(30),
         reflow: true,
         ..Default::default()
     };
@@ -946,7 +948,7 @@ fn test_reflow_edge_cases() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 20,
+        line_length: LineLength::from_const(20),
         reflow: true,
         ..Default::default()
     };
@@ -987,7 +989,7 @@ fn test_reflow_complex_document() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 50,
+        line_length: LineLength::from_const(50),
         reflow: true,
         ..Default::default()
     };
@@ -1061,7 +1063,7 @@ fn test_reflow_with_hard_line_breaks() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 40,
+        line_length: LineLength::from_const(40),
         reflow: true,
         ..Default::default()
     };
@@ -1088,7 +1090,7 @@ fn test_reflow_unicode_handling() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let config = MD013Config {
-        line_length: 30,
+        line_length: LineLength::from_const(30),
         reflow: true,
         ..Default::default()
     };

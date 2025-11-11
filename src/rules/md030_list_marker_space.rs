@@ -21,10 +21,14 @@ impl MD030ListMarkerSpace {
     pub fn new(ul_single: usize, ul_multi: usize, ol_single: usize, ol_multi: usize) -> Self {
         Self {
             config: MD030Config {
-                ul_single,
-                ul_multi,
-                ol_single,
-                ol_multi,
+                ul_single: crate::types::PositiveUsize::new(ul_single)
+                    .unwrap_or(crate::types::PositiveUsize::from_const(1)),
+                ul_multi: crate::types::PositiveUsize::new(ul_multi)
+                    .unwrap_or(crate::types::PositiveUsize::from_const(1)),
+                ol_single: crate::types::PositiveUsize::new(ol_single)
+                    .unwrap_or(crate::types::PositiveUsize::from_const(1)),
+                ol_multi: crate::types::PositiveUsize::new(ol_multi)
+                    .unwrap_or(crate::types::PositiveUsize::from_const(1)),
             },
         }
     }
@@ -35,10 +39,10 @@ impl MD030ListMarkerSpace {
 
     pub fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
         match (list_type, is_multi) {
-            (ListType::Unordered, false) => self.config.ul_single,
-            (ListType::Unordered, true) => self.config.ul_multi,
-            (ListType::Ordered, false) => self.config.ol_single,
-            (ListType::Ordered, true) => self.config.ol_multi,
+            (ListType::Unordered, false) => self.config.ul_single.get(),
+            (ListType::Unordered, true) => self.config.ul_multi.get(),
+            (ListType::Ordered, false) => self.config.ol_single.get(),
+            (ListType::Ordered, true) => self.config.ol_multi.get(),
         }
     }
 }
@@ -333,9 +337,9 @@ impl MD030ListMarkerSpace {
                     if !content.is_empty() {
                         // Use appropriate configuration based on whether it's multi-line
                         let spaces = if is_multi_line {
-                            " ".repeat(self.config.ul_multi)
+                            " ".repeat(self.config.ul_multi.get())
                         } else {
-                            " ".repeat(self.config.ul_single)
+                            " ".repeat(self.config.ul_single.get())
                         };
                         return Some(format!("{indent}{marker}{spaces}{content}"));
                     }
@@ -358,9 +362,9 @@ impl MD030ListMarkerSpace {
                     if !content.is_empty() {
                         // Use appropriate configuration based on whether it's multi-line
                         let spaces = if is_multi_line {
-                            " ".repeat(self.config.ol_multi)
+                            " ".repeat(self.config.ol_multi.get())
                         } else {
-                            " ".repeat(self.config.ol_single)
+                            " ".repeat(self.config.ol_single.get())
                         };
                         return Some(format!("{indent}{before_dot}.{spaces}{content}"));
                     }

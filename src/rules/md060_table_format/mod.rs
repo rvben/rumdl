@@ -676,7 +676,7 @@ impl Rule for MD060TableFormat {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD060Config>(config);
         let md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
-        Box::new(Self::from_config_struct(rule_config, md013_config.line_length))
+        Box::new(Self::from_config_struct(rule_config, md013_config.line_length.get()))
     }
 }
 

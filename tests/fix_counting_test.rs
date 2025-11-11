@@ -4,6 +4,7 @@
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{MD009TrailingSpaces, MD013LineLength};
+use rumdl_lib::types::LineLength;
 
 #[test]
 fn test_md013_fix_counting_with_tables() {
@@ -25,9 +26,10 @@ Another very very very very very very very very very very very very very very ve
     // Note: We create with tables=false to ensure table warnings are detected
     // Then we'll create one with reflow for testing the fix
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+    use rumdl_lib::types::LineLength;
 
     let config = MD013Config {
-        line_length: 80,
+        line_length: LineLength::from_const(80),
         code_blocks: true,
         tables: true, // Check tables for line length
         headings: true,
@@ -92,7 +94,7 @@ fn test_mixed_rules_fix_counting() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
     let md013_config = MD013Config {
-        line_length: 80,
+        line_length: LineLength::from_const(80),
         code_blocks: true,
         tables: true, // Check tables for line length
         headings: true,

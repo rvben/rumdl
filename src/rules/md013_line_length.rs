@@ -25,7 +25,7 @@ impl MD013LineLength {
     pub fn new(line_length: usize, code_blocks: bool, tables: bool, headings: bool, strict: bool) -> Self {
         Self {
             config: MD013Config {
-                line_length,
+                line_length: crate::types::LineLength::new(line_length),
                 code_blocks,
                 tables,
                 headings,
@@ -117,7 +117,7 @@ impl Rule for MD013LineLength {
             if let Some(obj) = json_config.as_object() {
                 let mut config = self.config.clone();
                 if let Some(line_length) = obj.get("line_length").and_then(|v| v.as_u64()) {
-                    config.line_length = line_length as usize;
+                    config.line_length = crate::types::LineLength::new(line_length as usize);
                 }
                 if let Some(code_blocks) = obj.get("code_blocks").and_then(|v| v.as_bool()) {
                     config.code_blocks = code_blocks;
@@ -152,14 +152,14 @@ impl Rule for MD013LineLength {
 
         // Special handling: line_length = 0 means "no line length limit"
         // Skip all line length checks, but still allow reflow if enabled
-        let skip_length_checks = effective_config.line_length == 0;
+        let skip_length_checks = effective_config.line_length.is_unlimited();
 
         // Pre-filter lines that could be problematic to avoid processing all lines
         let mut candidate_lines = Vec::new();
         if !skip_length_checks {
             for (line_idx, line_info) in ctx.lines.iter().enumerate() {
                 // Quick length check first
-                if line_info.content.len() > effective_config.line_length {
+                if line_info.content.len() > effective_config.line_length.get() {
                     candidate_lines.push(line_idx);
                 }
             }
@@ -212,7 +212,7 @@ impl Rule for MD013LineLength {
             let effective_length = self.calculate_effective_length(line);
 
             // Use single line length limit for all content
-            let line_limit = effective_config.line_length;
+            let line_limit = effective_config.line_length.get();
 
             // Skip short lines immediately (double-check after effective length calculation)
             if effective_length <= line_limit {
@@ -369,14 +369,14 @@ impl Rule for MD013LineLength {
         }
 
         // Quick check: if total content is shorter than line limit, definitely skip
-        if ctx.content.len() <= self.config.line_length {
+        if ctx.content.len() <= self.config.line_length.get() {
             return true;
         }
 
         // Use more efficient check - any() with early termination instead of all()
         !ctx.lines
             .iter()
-            .any(|line| line.content.len() > self.config.line_length)
+            .any(|line| line.content.len() > self.config.line_length.get())
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -407,9 +407,9 @@ impl Rule for MD013LineLength {
     {
         let mut rule_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
         // Special handling for line_length from global config
-        if rule_config.line_length == 80 {
+        if rule_config.line_length.get() == 80 {
             // default value
-            rule_config.line_length = config.global.line_length as usize;
+            rule_config.line_length = crate::types::LineLength::new(config.global.line_length as usize);
         }
         Box::new(Self::from_config_struct(rule_config))
     }
@@ -992,7 +992,7 @@ impl MD013LineLength {
                         // 1. The combined line would exceed the limit, OR
                         // 2. The list item should be normalized (has multi-line plain text)
                         let combined_length = self.calculate_effective_length(&full_line);
-                        if combined_length > config.line_length {
+                        if combined_length > config.line_length.get() {
                             true
                         } else {
                             should_normalize()
@@ -1005,7 +1005,7 @@ impl MD013LineLength {
                     }
                     ReflowMode::Default => {
                         // In default mode, only reflow if lines exceed limit
-                        self.calculate_effective_length(&full_line) > config.line_length
+                        self.calculate_effective_length(&full_line) > config.line_length.get()
                     }
                 };
 
@@ -1021,10 +1021,10 @@ impl MD013LineLength {
 
                     // Reflow each block (paragraphs only, preserve code blocks)
                     // When line_length = 0 (no limit), use a very large value for reflow
-                    let reflow_line_length = if config.line_length == 0 {
+                    let reflow_line_length = if config.line_length.is_unlimited() {
                         usize::MAX
                     } else {
-                        config.line_length.saturating_sub(indent_size).max(1)
+                        config.line_length.get().saturating_sub(indent_size).max(1)
                     };
                     let reflow_options = crate::utils::text_reflow::ReflowOptions {
                         line_length: reflow_line_length,
@@ -1277,10 +1277,11 @@ impl MD013LineLength {
                             }
                             ReflowMode::Normalize => {
                                 let combined_length = self.calculate_effective_length(&full_line);
-                                if combined_length > config.line_length {
+                                if combined_length > config.line_length.get() {
                                     format!(
                                         "Line length {} exceeds {} characters",
-                                        combined_length, config.line_length
+                                        combined_length,
+                                        config.line_length.get()
                                     )
                                 } else {
                                     "Multi-line content can be normalized".to_string()
@@ -1290,7 +1291,8 @@ impl MD013LineLength {
                                 let combined_length = self.calculate_effective_length(&full_line);
                                 format!(
                                     "Line length {} exceeds {} characters",
-                                    combined_length, config.line_length
+                                    combined_length,
+                                    config.line_length.get()
                                 )
                             }
                         };
@@ -1386,13 +1388,13 @@ impl MD013LineLength {
                     } else if paragraph_lines.len() > 1 {
                         // For single-sentence paragraphs spanning multiple lines:
                         // Reflow if they COULD fit on one line (respecting line-length constraint)
-                        if config.line_length == 0 {
+                        if config.line_length.is_unlimited() {
                             // No line-length constraint - always join single sentences
                             true
                         } else {
                             // Only join if it fits within line-length
                             let effective_length = self.calculate_effective_length(&paragraph_text);
-                            effective_length <= config.line_length
+                            effective_length <= config.line_length.get()
                         }
                     } else {
                         false
@@ -1402,7 +1404,7 @@ impl MD013LineLength {
                     // In default mode, only reflow if lines exceed limit
                     paragraph_lines
                         .iter()
-                        .any(|line| self.calculate_effective_length(line) > config.line_length)
+                        .any(|line| self.calculate_effective_length(line) > config.line_length.get())
                 }
             };
 
@@ -1437,10 +1439,10 @@ impl MD013LineLength {
 
                 // Reflow the paragraph
                 // When line_length = 0 (no limit), use a very large value for reflow
-                let reflow_line_length = if config.line_length == 0 {
+                let reflow_line_length = if config.line_length.is_unlimited() {
                     usize::MAX
                 } else {
-                    config.line_length
+                    config.line_length.get()
                 };
                 let reflow_options = crate::utils::text_reflow::ReflowOptions {
                     line_length: reflow_line_length,
@@ -1489,7 +1491,7 @@ impl MD013LineLength {
                             // Find the first line that exceeds the limit
                             let mut violating_line = paragraph_start;
                             for (idx, line) in paragraph_lines.iter().enumerate() {
-                                if self.calculate_effective_length(line) > config.line_length {
+                                if self.calculate_effective_length(line) > config.line_length.get() {
                                     violating_line = paragraph_start + idx;
                                     break;
                                 }
@@ -1503,7 +1505,7 @@ impl MD013LineLength {
                         message: match config.reflow_mode {
                             ReflowMode::Normalize => format!(
                                 "Paragraph could be normalized to use line length of {} characters",
-                                config.line_length
+                                config.line_length.get()
                             ),
                             ReflowMode::SentencePerLine => {
                                 let num_sentences = split_into_sentences(&paragraph_text).len();
@@ -1516,7 +1518,7 @@ impl MD013LineLength {
                                     format!("Paragraph should have one sentence per line (found {num_sentences} sentences across {num_lines} lines)")
                                 }
                             },
-                            ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length),
+                            ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length.get()),
                         },
                         line: warning_line,
                         column: 1,
@@ -1798,7 +1800,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let rule = MD013LineLength::default();
-        assert_eq!(rule.config.line_length, 80);
+        assert_eq!(rule.config.line_length.get(), 80);
         assert!(rule.config.code_blocks); // Default is true
         assert!(!rule.config.tables); // Default is false (changed to prevent conflicts with MD060)
         assert!(rule.config.headings); // Default is true
@@ -1808,7 +1810,7 @@ mod tests {
     #[test]
     fn test_custom_config() {
         let rule = MD013LineLength::new(100, true, true, false, true);
-        assert_eq!(rule.config.line_length, 100);
+        assert_eq!(rule.config.line_length.get(), 100);
         assert!(rule.config.code_blocks);
         assert!(rule.config.tables);
         assert!(!rule.config.headings);
@@ -2232,7 +2234,7 @@ Another long line that should trigger a warning."#;
     #[test]
     fn test_text_reflow_simple() {
         let config = MD013Config {
-            line_length: 30,
+            line_length: crate::types::LineLength::from_const(30),
             reflow: true,
             ..Default::default()
         };
@@ -2262,7 +2264,7 @@ Another long line that should trigger a warning."#;
     #[test]
     fn test_text_reflow_preserves_markdown_elements() {
         let config = MD013Config {
-            line_length: 40,
+            line_length: crate::types::LineLength::from_const(40),
             reflow: true,
             ..Default::default()
         };
@@ -2290,7 +2292,7 @@ Another long line that should trigger a warning."#;
     #[test]
     fn test_text_reflow_preserves_code_blocks() {
         let config = MD013Config {
-            line_length: 30,
+            line_length: crate::types::LineLength::from_const(30),
             reflow: true,
             ..Default::default()
         };
@@ -2317,7 +2319,7 @@ More text after code block."#;
     #[test]
     fn test_text_reflow_preserves_lists() {
         let config = MD013Config {
-            line_length: 30,
+            line_length: crate::types::LineLength::from_const(30),
             reflow: true,
             ..Default::default()
         };
@@ -2374,7 +2376,7 @@ And a bullet list:
     fn test_issue_83_numbered_list_with_backticks() {
         // Test for issue #83: enable_reflow was incorrectly handling numbered lists
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             ..Default::default()
         };
@@ -2414,7 +2416,7 @@ And a bullet list:
     fn test_reflow_with_hard_line_breaks() {
         // Test that lines with exactly 2 trailing spaces are preserved as hard breaks
         let config = MD013Config {
-            line_length: 40,
+            line_length: crate::types::LineLength::from_const(40),
             reflow: true,
             ..Default::default()
         };
@@ -2435,7 +2437,7 @@ And a bullet list:
     #[test]
     fn test_reflow_preserves_reference_links() {
         let config = MD013Config {
-            line_length: 40,
+            line_length: crate::types::LineLength::from_const(40),
             reflow: true,
             ..Default::default()
         };
@@ -2456,7 +2458,7 @@ And a bullet list:
     #[test]
     fn test_reflow_with_nested_markdown_elements() {
         let config = MD013Config {
-            line_length: 35,
+            line_length: crate::types::LineLength::from_const(35),
             reflow: true,
             ..Default::default()
         };
@@ -2474,7 +2476,7 @@ And a bullet list:
     fn test_reflow_with_unbalanced_markdown() {
         // Test edge case with unbalanced markdown
         let config = MD013Config {
-            line_length: 30,
+            line_length: crate::types::LineLength::from_const(30),
             reflow: true,
             ..Default::default()
         };
@@ -2498,7 +2500,7 @@ And a bullet list:
     fn test_reflow_fix_indicator() {
         // Test that reflow provides fix indicators
         let config = MD013Config {
-            line_length: 30,
+            line_length: crate::types::LineLength::from_const(30),
             reflow: true,
             ..Default::default()
         };
@@ -2520,7 +2522,7 @@ And a bullet list:
     fn test_no_fix_indicator_without_reflow() {
         // Test that without reflow, no fix is provided
         let config = MD013Config {
-            line_length: 30,
+            line_length: crate::types::LineLength::from_const(30),
             reflow: false,
             ..Default::default()
         };
@@ -2538,7 +2540,7 @@ And a bullet list:
     #[test]
     fn test_reflow_preserves_all_reference_link_types() {
         let config = MD013Config {
-            line_length: 40,
+            line_length: crate::types::LineLength::from_const(40),
             reflow: true,
             ..Default::default()
         };
@@ -2562,7 +2564,7 @@ And a bullet list:
     #[test]
     fn test_reflow_handles_images_correctly() {
         let config = MD013Config {
-            line_length: 40,
+            line_length: crate::types::LineLength::from_const(40),
             reflow: true,
             ..Default::default()
         };
@@ -2579,7 +2581,7 @@ And a bullet list:
     #[test]
     fn test_normalize_mode_flags_short_lines() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2599,7 +2601,7 @@ And a bullet list:
     #[test]
     fn test_normalize_mode_combines_short_lines() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2621,7 +2623,7 @@ And a bullet list:
     #[test]
     fn test_normalize_mode_preserves_paragraph_breaks() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2642,7 +2644,7 @@ And a bullet list:
     #[test]
     fn test_default_mode_only_fixes_violations() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Default, // Default mode
             ..Default::default()
@@ -2665,7 +2667,7 @@ And a bullet list:
     #[test]
     fn test_normalize_mode_with_lists() {
         let config = MD013Config {
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2691,7 +2693,7 @@ short lines.
     #[test]
     fn test_normalize_mode_with_code_blocks() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2722,7 +2724,7 @@ short lines."#;
     fn test_issue_76_use_case() {
         // This tests the exact use case from issue #76
         let config = MD013Config {
-            line_length: 999999, // Set absurdly high
+            line_length: crate::types::LineLength::from_const(999999), // Set absurdly high
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2749,7 +2751,7 @@ short lines."#;
     fn test_normalize_mode_single_line_unchanged() {
         // Single lines should not be flagged or changed
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2769,7 +2771,7 @@ short lines."#;
     #[test]
     fn test_normalize_mode_with_inline_code() {
         let config = MD013Config {
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2791,7 +2793,7 @@ short lines."#;
     #[test]
     fn test_normalize_mode_with_emphasis() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2810,7 +2812,7 @@ short lines."#;
     #[test]
     fn test_normalize_mode_respects_hard_breaks() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2834,7 +2836,7 @@ short lines."#;
     #[test]
     fn test_normalize_mode_with_links() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2856,7 +2858,7 @@ short lines."#;
     #[test]
     fn test_normalize_mode_empty_lines_between_paragraphs() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2879,7 +2881,7 @@ short lines."#;
     #[test]
     fn test_normalize_mode_mixed_list_types() {
         let config = MD013Config {
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2922,7 +2924,7 @@ with multiple lines."#;
     #[test]
     fn test_normalize_mode_with_horizontal_rules() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2947,7 +2949,7 @@ with multiple lines."#;
     #[test]
     fn test_normalize_mode_with_indented_code() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2976,7 +2978,7 @@ with multiple lines."#;
     fn test_normalize_mode_disabled_without_reflow() {
         // Normalize mode should have no effect if reflow is disabled
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: false, // Disabled
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -2998,7 +3000,7 @@ with multiple lines."#;
         // Default mode should fix paragraphs that contain lines exceeding limit
         // The paragraph-based approach treats consecutive lines as a unit
         let config = MD013Config {
-            line_length: 50,
+            line_length: crate::types::LineLength::from_const(50),
             reflow: true,
             reflow_mode: ReflowMode::Default,
             ..Default::default()
@@ -3032,7 +3034,7 @@ with multiple lines."#;
 
         // Test default mode
         let default_config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Default,
             ..Default::default()
@@ -3043,7 +3045,7 @@ with multiple lines."#;
 
         // Test normalize mode
         let normalize_config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -3077,7 +3079,7 @@ with multiple lines."#;
     #[test]
     fn test_normalize_mode_with_reference_definitions() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -3103,7 +3105,7 @@ with multiple lines."#;
     #[test]
     fn test_normalize_mode_with_html_comments() {
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -3132,7 +3134,7 @@ with multiple lines."#;
     fn test_normalize_mode_line_starting_with_number() {
         // Regression test for the bug we fixed where "80 characters" was treated as a list
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -3154,7 +3156,7 @@ with multiple lines."#;
     fn test_default_mode_preserves_list_structure() {
         // In default mode, list continuation lines should be preserved
         let config = MD013Config {
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             reflow: true,
             reflow_mode: ReflowMode::Default,
             ..Default::default()
@@ -3192,7 +3194,7 @@ with multiple lines."#;
     fn test_normalize_mode_multi_line_list_items_no_extra_spaces() {
         // Test that multi-line list items don't get extra spaces when normalized
         let config = MD013Config {
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -3236,7 +3238,7 @@ with multiple lines."#;
     fn test_normalize_mode_actual_numbered_list() {
         // Ensure actual numbered lists are still detected correctly
         let config = MD013Config {
-            line_length: 100,
+            line_length: crate::types::LineLength::from_const(100),
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
             ..Default::default()
@@ -3385,7 +3387,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 999999,
+            line_length: crate::types::LineLength::from_const(999999),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3410,7 +3412,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 999999,
+            line_length: crate::types::LineLength::from_const(999999),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3444,7 +3446,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 999999,
+            line_length: crate::types::LineLength::from_const(999999),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3468,7 +3470,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3500,7 +3502,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3535,7 +3537,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 999999,
+            line_length: crate::types::LineLength::from_const(999999),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3565,7 +3567,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 999999,
+            line_length: crate::types::LineLength::from_const(999999),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3596,7 +3598,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3633,7 +3635,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3670,7 +3672,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 999999,
+            line_length: crate::types::LineLength::from_const(999999),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3695,7 +3697,7 @@ with multiple lines."#;
         let config = MD013Config {
             reflow: true,
             reflow_mode: ReflowMode::Normalize,
-            line_length: 999999,
+            line_length: crate::types::LineLength::from_const(999999),
             ..Default::default()
         };
         let rule = MD013LineLength::from_config_struct(config);
@@ -3730,7 +3732,7 @@ with multiple lines."#;
     fn test_paragraphs_false_skips_regular_text() {
         // Test that paragraphs=false skips checking regular text
         let config = MD013Config {
-            line_length: 50,
+            line_length: crate::types::LineLength::from_const(50),
             paragraphs: false, // Don't check paragraphs
             code_blocks: true,
             tables: true,
@@ -3758,7 +3760,7 @@ with multiple lines."#;
     fn test_paragraphs_false_still_checks_code_blocks() {
         // Test that paragraphs=false still checks code blocks
         let config = MD013Config {
-            line_length: 50,
+            line_length: crate::types::LineLength::from_const(50),
             paragraphs: false, // Don't check paragraphs
             code_blocks: true, // But DO check code blocks
             tables: true,
@@ -3787,7 +3789,7 @@ This is a very long line in a code block that exceeds fifty characters.
     fn test_paragraphs_false_still_checks_headings() {
         // Test that paragraphs=false still checks headings
         let config = MD013Config {
-            line_length: 50,
+            line_length: crate::types::LineLength::from_const(50),
             paragraphs: false, // Don't check paragraphs
             code_blocks: true,
             tables: true,
@@ -3814,7 +3816,7 @@ This is a very long line in a code block that exceeds fifty characters.
     fn test_paragraphs_false_with_reflow_sentence_per_line() {
         // Test issue #121 use case: paragraphs=false with sentence-per-line reflow
         let config = MD013Config {
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             paragraphs: false,
             code_blocks: true,
             tables: true,
@@ -3841,7 +3843,7 @@ This is a very long line in a code block that exceeds fifty characters.
     fn test_paragraphs_true_checks_regular_text() {
         // Test that paragraphs=true (default) checks regular text
         let config = MD013Config {
-            line_length: 50,
+            line_length: crate::types::LineLength::from_const(50),
             paragraphs: true, // Default: DO check paragraphs
             code_blocks: true,
             tables: true,
@@ -3868,7 +3870,7 @@ This is a very long line in a code block that exceeds fifty characters.
     fn test_line_length_zero_disables_all_checks() {
         // Test that line_length = 0 disables all line length checks
         let config = MD013Config {
-            line_length: 0, // 0 = no limit
+            line_length: crate::types::LineLength::from_const(0), // 0 = no limit
             paragraphs: true,
             code_blocks: true,
             tables: true,
@@ -3895,7 +3897,7 @@ This is a very long line in a code block that exceeds fifty characters.
     fn test_line_length_zero_with_headings() {
         // Test that line_length = 0 disables checks even for headings
         let config = MD013Config {
-            line_length: 0, // 0 = no limit
+            line_length: crate::types::LineLength::from_const(0), // 0 = no limit
             paragraphs: true,
             code_blocks: true,
             tables: true,
@@ -3922,7 +3924,7 @@ This is a very long line in a code block that exceeds fifty characters.
     fn test_line_length_zero_with_code_blocks() {
         // Test that line_length = 0 disables checks even for code blocks
         let config = MD013Config {
-            line_length: 0, // 0 = no limit
+            line_length: crate::types::LineLength::from_const(0), // 0 = no limit
             paragraphs: true,
             code_blocks: true, // Even with code_blocks enabled
             tables: true,
@@ -3949,7 +3951,7 @@ This is a very long line in a code block that exceeds fifty characters.
     fn test_line_length_zero_with_sentence_per_line_reflow() {
         // Test issue #121 use case: line_length = 0 with sentence-per-line reflow
         let config = MD013Config {
-            line_length: 0, // 0 = no limit
+            line_length: crate::types::LineLength::from_const(0), // 0 = no limit
             paragraphs: true,
             code_blocks: true,
             tables: true,
@@ -3979,7 +3981,8 @@ This is a very long line in a code block that exceeds fifty characters.
             reflow-mode = "sentence-per-line"
         "#;
         let config: MD013Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.line_length, 0, "Should parse line_length = 0");
+        assert_eq!(config.line_length.get(), 0, "Should parse line_length = 0");
+        assert!(config.line_length.is_unlimited(), "Should be unlimited");
         assert!(config.paragraphs);
         assert!(config.reflow);
         assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
@@ -4003,7 +4006,7 @@ Final paragraph.
 
         let ctx = LintContext::new(content, MarkdownFlavor::Standard);
         let config = MD013Config {
-            line_length: 80,
+            line_length: crate::types::LineLength::from_const(80),
             code_blocks: true,
             tables: true,
             headings: true,
