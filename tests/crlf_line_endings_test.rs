@@ -4,7 +4,7 @@
 /// and MD011 used `.map(|l| l.len() + 1)` to calculate byte positions, which
 /// assumes Unix line endings (\n = 1 byte). This caused text corruption on
 /// Windows files with CRLF line endings (\r\n = 2 bytes).
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::TempDir;
 
@@ -18,7 +18,7 @@ fn test_md034_crlf_line_endings() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (may have exit code 1 due to unfixable issues like MD041)
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -47,7 +47,7 @@ fn test_md034_multiline_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (may have exit code 1 due to unfixable issues like MD041)
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -73,7 +73,7 @@ fn test_md034_url_and_email_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (may have exit code 1 due to unfixable issues like MD041)
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -102,7 +102,7 @@ fn test_mixed_line_endings() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (may have exit code 1 due to unfixable issues like MD041)
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -128,7 +128,7 @@ fn test_md037_emphasis_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -150,12 +150,7 @@ fn test_md049_emphasis_style_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl check (MD049 detects inconsistent styles)
-    let output = Command::cargo_bin("rumdl")
-        .unwrap()
-        .arg("check")
-        .arg(&test_file)
-        .output()
-        .unwrap();
+    let output = cargo_bin_cmd!("rumdl").arg("check").arg(&test_file).output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -176,7 +171,7 @@ fn test_md011_reversed_links_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -198,12 +193,7 @@ fn test_md050_strong_style_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl check (MD050 detects inconsistent styles)
-    let output = Command::cargo_bin("rumdl")
-        .unwrap()
-        .arg("check")
-        .arg(&test_file)
-        .output()
-        .unwrap();
+    let output = cargo_bin_cmd!("rumdl").arg("check").arg(&test_file).output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -224,7 +214,7 @@ fn test_md010_hard_tabs_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -248,7 +238,7 @@ fn test_md026_trailing_punctuation_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -275,7 +265,7 @@ fn test_code_span_detection_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (should wrap the bare URL but not touch inline code)
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -299,7 +289,7 @@ fn test_md047_crlf_trailing_newline() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt to fix
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -329,7 +319,7 @@ fn test_md047_lf_trailing_newline() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt to fix
-    Command::cargo_bin("rumdl").unwrap().arg("fmt").arg(&test_file).assert();
+    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();

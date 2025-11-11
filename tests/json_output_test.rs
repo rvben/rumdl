@@ -1,4 +1,4 @@
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::Value;
 use std::fs;
 
@@ -11,8 +11,7 @@ fn test_cli_output_json_is_valid() {
     fs::write(&md_path, md_content).unwrap();
 
     // Run rumdl with --output json
-    let output = Command::cargo_bin("rumdl")
-        .unwrap()
+    let output = cargo_bin_cmd!("rumdl")
         .args(["check", md_path.to_str().unwrap(), "--output", "json"])
         .output()
         .unwrap();

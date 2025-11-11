@@ -1,9 +1,9 @@
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn test_explain_command_with_valid_rule() {
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain").arg("MD045");
 
     cmd.assert()
@@ -17,7 +17,7 @@ fn test_explain_command_with_valid_rule() {
 
 #[test]
 fn test_explain_command_with_lowercase_rule() {
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain").arg("md045");
 
     cmd.assert()
@@ -27,7 +27,7 @@ fn test_explain_command_with_lowercase_rule() {
 
 #[test]
 fn test_explain_command_without_md_prefix() {
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain").arg("045");
 
     cmd.assert()
@@ -37,7 +37,7 @@ fn test_explain_command_without_md_prefix() {
 
 #[test]
 fn test_explain_command_with_invalid_rule() {
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain").arg("MD999");
 
     cmd.assert()
@@ -48,7 +48,7 @@ fn test_explain_command_with_invalid_rule() {
 
 #[test]
 fn test_explain_command_without_argument() {
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain");
 
     cmd.assert()
@@ -58,7 +58,7 @@ fn test_explain_command_without_argument() {
 
 #[test]
 fn test_explain_command_shows_configuration() {
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain").arg("MD013");
 
     cmd.assert()
@@ -70,7 +70,7 @@ fn test_explain_command_shows_configuration() {
 
 #[test]
 fn test_explain_command_rule_with_no_config() {
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain").arg("MD001");
 
     cmd.assert().success().stdout(predicate::str::contains(
@@ -80,7 +80,7 @@ fn test_explain_command_rule_with_no_config() {
 
 #[test]
 fn test_explain_command_shows_examples() {
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain").arg("MD032");
 
     cmd.assert()
@@ -96,7 +96,7 @@ fn test_explain_command_different_rules() {
     let rules = vec!["MD001", "MD013", "MD022", "MD045", "MD058"];
 
     for rule in rules {
-        let mut cmd = Command::cargo_bin("rumdl").unwrap();
+        let mut cmd = cargo_bin_cmd!("rumdl");
         cmd.arg("explain").arg(rule);
 
         cmd.assert().success().stdout(predicate::str::contains(rule));

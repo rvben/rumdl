@@ -1,4 +1,4 @@
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -39,8 +39,7 @@ fn validate_commonmark_compliance(content: &str, filename: &str, dir_path: &std:
     fs::write(&file_path, content).unwrap();
 
     // Run rumdl with --fix to apply all rules
-    let output = Command::cargo_bin("rumdl")
-        .unwrap()
+    let output = cargo_bin_cmd!("rumdl")
         .arg("check")
         .arg(file_path.to_str().unwrap())
         .arg("--fix")
@@ -198,8 +197,7 @@ Final paragraph with a footnote[^1] and a horizontal rule:
     fs::write(&complex_markdown_path, complex_markdown).unwrap();
 
     // Run rumdl with --fix to apply all rules
-    let output = Command::cargo_bin("rumdl")
-        .unwrap()
+    let output = cargo_bin_cmd!("rumdl")
         .arg("check")
         .arg(complex_markdown_path.to_str().unwrap())
         .arg("--fix")

@@ -1,10 +1,9 @@
 #[cfg(test)]
 mod init_command_tests {
-    use assert_cmd::prelude::*;
+    use assert_cmd::cargo::cargo_bin_cmd;
 
     use rumdl_lib::config;
     use std::fs;
-    use std::process::Command;
     use tempfile::tempdir;
 
     #[test]
@@ -23,7 +22,7 @@ mod init_command_tests {
         }
 
         // Run the init command
-        let mut cmd = Command::cargo_bin("rumdl").expect("Failed to find binary");
+        let mut cmd = cargo_bin_cmd!("rumdl");
         let assert = cmd.arg("init").assert();
 
         // Check that the command succeeded
@@ -84,7 +83,7 @@ mod init_command_tests {
         let config_path = temp_path.join(".rumdl.toml");
 
         // Run the init command in the temp directory
-        let mut cmd = Command::cargo_bin("rumdl").expect("Failed to find binary");
+        let mut cmd = cargo_bin_cmd!("rumdl");
         cmd.current_dir(temp_path).arg("init").assert().success();
 
         // Read the generated config file
@@ -111,7 +110,7 @@ mod init_command_tests {
         let temp_path = temp_dir.path();
 
         // Run the init command
-        let mut cmd = Command::cargo_bin("rumdl").expect("Failed to find binary");
+        let mut cmd = cargo_bin_cmd!("rumdl");
         cmd.current_dir(temp_path).arg("init").assert().success();
 
         // Create a simple test markdown file
@@ -119,7 +118,7 @@ mod init_command_tests {
         fs::write(&test_md, "# Hello\n\nThis is a test.\n").expect("Failed to write test file");
 
         // Run rumdl check with the generated config
-        let mut cmd = Command::cargo_bin("rumdl").expect("Failed to find binary");
+        let mut cmd = cargo_bin_cmd!("rumdl");
         cmd.current_dir(temp_path)
             .arg("check")
             .arg("test.md")

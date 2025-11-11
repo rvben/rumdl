@@ -1,4 +1,4 @@
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::tempdir;
@@ -18,7 +18,7 @@ Content with trailing space{}
 
     fs::write(&test_file, content).unwrap();
 
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check")
         .arg("--output-format")
         .arg("grouped")
@@ -45,7 +45,7 @@ Content with trailing space{}
 
     fs::write(&test_file, content).unwrap();
 
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check")
         .arg("--output-format")
         .arg("pylint")
@@ -71,7 +71,7 @@ Content with trailing space{}
 
     fs::write(&test_file, content).unwrap();
 
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check")
         .arg("--output-format")
         .arg("azure")
@@ -104,7 +104,7 @@ Content with trailing space{}
 //     fs::write(&test_file, md_content).unwrap();
 //     fs::write(&config_file, config_content).unwrap();
 //
-//     let mut cmd = Command::cargo_bin("rumdl").unwrap();
+//     let mut cmd = cargo_bin_cmd!("rumdl");
 //     cmd.current_dir(&temp_dir)
 //         .arg("check")
 //         .arg("test.md");
@@ -132,7 +132,7 @@ Content with trailing space{}
 //     fs::write(&test_file, md_content).unwrap();
 //     fs::write(&config_file, config_content).unwrap();
 //
-//     let mut cmd = Command::cargo_bin("rumdl").unwrap();
+//     let mut cmd = cargo_bin_cmd!("rumdl");
 //     cmd.current_dir(&temp_dir)
 //         .arg("check")
 //         .arg("--output-format")

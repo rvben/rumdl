@@ -1,4 +1,4 @@
-use assert_cmd::prelude::*;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
 use std::path::Path;
@@ -808,7 +808,7 @@ fn test_default_discovery_includes_only_markdown() -> Result<(), Box<dyn std::er
     // Create a non-markdown file
     fs::write(dir_path.join("test.txt"), "This is a text file.")?;
 
-    let mut cmd = Command::cargo_bin("rumdl")?;
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check")
         .arg(".")
         .arg("--verbose") // Need verbose to see "Processing file:" messages
@@ -833,7 +833,7 @@ fn test_markdown_extension_handling() -> Result<(), Box<dyn std::error::Error>> 
     fs::write(dir_path.join("other.txt"), "Text file")?;
 
     // Test 1: Default discovery should find both .md and .markdown
-    let mut cmd1 = Command::cargo_bin("rumdl")?;
+    let mut cmd1 = cargo_bin_cmd!("rumdl");
     cmd1.arg("check").arg(".").arg("--verbose").current_dir(dir_path);
     cmd1.assert()
         .success()
@@ -842,7 +842,7 @@ fn test_markdown_extension_handling() -> Result<(), Box<dyn std::error::Error>> 
         .stdout(predicates::str::contains("Processing file: other.txt").not());
 
     // Test 2: Explicit include for .markdown should only find that file
-    let mut cmd2 = Command::cargo_bin("rumdl")?;
+    let mut cmd2 = cargo_bin_cmd!("rumdl");
     cmd2.arg("check")
         .arg(".")
         .arg("--include")
@@ -867,7 +867,7 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(dir_path.join("test.txt"), "Text file")?;
 
     // Test 1: --include allows checking non-markdown files (e.g., .txt)
-    let mut cmd1 = Command::cargo_bin("rumdl")?;
+    let mut cmd1 = cargo_bin_cmd!("rumdl");
     cmd1.arg("check")
         .arg(".")
         .arg("--include")
@@ -881,7 +881,7 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .stdout(predicates::str::contains("MD047")); // Should end with newline
 
     // Test 2: Excluding all .md files when only .md files exist
-    let mut cmd2 = Command::cargo_bin("rumdl")?;
+    let mut cmd2 = cargo_bin_cmd!("rumdl");
     cmd2.arg("check")
         .arg(".")
         .arg("--exclude")
@@ -895,7 +895,7 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 3: Excluding both markdown types
     fs::write(dir_path.join("test.markdown"), "# MARKDOWN File\n")?;
-    let mut cmd3 = Command::cargo_bin("rumdl")?;
+    let mut cmd3 = cargo_bin_cmd!("rumdl");
     cmd3.arg("check")
         .arg(".")
         .arg("--exclude")
@@ -1628,7 +1628,7 @@ fn test_include_nonstandard_extensions() -> Result<(), Box<dyn std::error::Error
     fs::write(dir_path.join("config.yml.j2"), "# Not markdown\n\nThis is YAML.\n")?;
 
     // Test 1: Default behavior should only find regular.md
-    let mut cmd = Command::cargo_bin("rumdl")?;
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check").arg(".").arg("--verbose").current_dir(dir_path);
 
     cmd.assert()
@@ -1638,7 +1638,7 @@ fn test_include_nonstandard_extensions() -> Result<(), Box<dyn std::error::Error
         .stdout(predicates::str::contains("config.yml.j2").not());
 
     // Test 2: --include with *.md.jinja should find template.md.jinja
-    let mut cmd = Command::cargo_bin("rumdl")?;
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check")
         .arg(".")
         .arg("--include")
@@ -1651,7 +1651,7 @@ fn test_include_nonstandard_extensions() -> Result<(), Box<dyn std::error::Error
         .stdout(predicates::str::contains("Processing file: template.md.jinja"));
 
     // Test 3: --include should still respect patterns (not find yml.j2)
-    let mut cmd = Command::cargo_bin("rumdl")?;
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check")
         .arg(".")
         .arg("--include")
@@ -1677,7 +1677,7 @@ fn test_explicit_path_nonstandard_extensions() -> Result<(), Box<dyn std::error:
     fs::write(&jinja_file, "# Jinja Template\n\nThis should be checked.\n")?;
 
     // Test: Explicitly providing the file path should work
-    let mut cmd = Command::cargo_bin("rumdl")?;
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check").arg(&jinja_file).arg("--verbose");
 
     cmd.assert()
@@ -1701,7 +1701,7 @@ fn test_include_multiple_nonstandard_extensions() -> Result<(), Box<dyn std::err
     fs::write(dir_path.join("regular.md"), "# Regular\n")?;
 
     // Test: Include multiple non-standard extensions
-    let mut cmd = Command::cargo_bin("rumdl")?;
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check")
         .arg(".")
         .arg("--include")

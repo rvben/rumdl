@@ -1,4 +1,4 @@
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::TempDir;
 
@@ -20,7 +20,7 @@ fn test_unfixable_rules_not_fixed() {
     fs::write(&config_file, "[global]\nunfixable = [\"MD018\", \"MD009\"]\n").expect("Failed to write config file");
 
     // Run rumdl with --fix
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.current_dir(&temp_dir)
         .args(["check", "--fix", "--config", "rumdl.toml", "test.md"]);
 
@@ -66,7 +66,7 @@ fn test_only_fixable_rules_are_fixed() {
     fs::write(&config_file, "[global]\nfixable = [\"MD030\", \"MD047\"]\n").expect("Failed to write config file");
 
     // Run rumdl with --fix
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.current_dir(&temp_dir)
         .args(["check", "--fix", "--config", "rumdl.toml", "test.md"]);
 
@@ -122,7 +122,7 @@ fn test_unfixable_takes_precedence_over_fixable() {
     .expect("Failed to write config file");
 
     // Run rumdl with --fix
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.current_dir(&temp_dir)
         .args(["check", "--fix", "--config", "rumdl.toml", "test.md"]);
 
@@ -162,7 +162,7 @@ fn test_pyproject_toml_fixable_unfixable() {
     fs::write(&config_file, "[global]\nunfixable = [\"MD018\"]\n").expect("Failed to write config file");
 
     // Run rumdl with --fix
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.current_dir(&temp_dir).args(["check", "--fix", "test.md"]);
 
     let _output = cmd.output().expect("Failed to execute command");
@@ -199,7 +199,7 @@ fn test_default_behavior_fixes_all_rules() {
     // No config file - should use defaults
 
     // Run rumdl with --fix
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.current_dir(&temp_dir).args(["check", "--fix", "test.md"]);
 
     let _output = cmd.output().expect("Failed to execute command");
