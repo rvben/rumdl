@@ -136,15 +136,10 @@ pub struct RuleConfig {
 }
 
 /// Generate a JSON schema for arbitrary configuration values
-fn arbitrary_value_schema(_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-    use schemars::schema::*;
-    Schema::Object(SchemaObject {
-        instance_type: Some(InstanceType::Object.into()),
-        object: Some(Box::new(ObjectValidation {
-            additional_properties: Some(Box::new(Schema::Bool(true))),
-            ..Default::default()
-        })),
-        ..Default::default()
+fn arbitrary_value_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "additionalProperties": true
     })
 }
 

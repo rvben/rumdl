@@ -56,7 +56,7 @@ dyn-clone = "1"
 url = { version = "2", features = ["serde"] }
 unicode-normalization = "0.1"
 memmap2 = "0.9"
-schemars = "0.8"
+schemars = "1.1"
 unicode-width = "0.2"
 memory-stats = "1.2.0"
 
