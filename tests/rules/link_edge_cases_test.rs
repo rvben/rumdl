@@ -554,8 +554,9 @@ fn test_md042_nested_links() {
     let rule = MD042NoEmptyLinks::new();
 
     // Test 10: Nested link-like structures
-    // Per CommonMark: brackets in URL destinations break link syntax
-    // So [](url [not a link]) is NOT detected as a link
+    // With ENABLE_WIKILINKS: [[text]] is parsed as a wiki-link
+    // [[Double brackets]](url) becomes a wiki-link with empty text pointing to "Double brackets"
+    // The trailing (url) is just plain text, not part of the link
     let content = "\
 [Link [with] brackets](url)
 [Link (with) parens](url)
@@ -564,9 +565,17 @@ fn test_md042_nested_links() {
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Last link has empty text
-    assert_eq!(result.len(), 1, "Should detect empty text in last link");
-    assert!(result[0].message.contains("Empty link found:"));
+
+    // With wiki-links enabled, we get 2 empty links:
+    // 1. [[Double brackets]] - wiki-link with empty text
+    // 2. [](url) - explicit empty link
+    assert_eq!(
+        result.len(),
+        2,
+        "Should detect empty text in wiki-link and regular empty link"
+    );
+    assert!(result.iter().any(|w| w.message.contains("[[Double brackets")));
+    assert!(result.iter().any(|w| w.message.contains("[](url)")));
 }
 
 #[test]

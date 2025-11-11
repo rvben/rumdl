@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
+use pulldown_cmark::LinkType;
 
 /// Rule MD042: No empty links
 ///
@@ -201,6 +202,16 @@ impl Rule for MD042NoEmptyLinks {
             // Detect by checking if source markdown is wrapped in < and >
             let link_markdown = &ctx.content[link.byte_offset..link.byte_end];
             if link_markdown.starts_with('<') && link_markdown.ends_with('>') {
+                continue;
+            }
+
+            // Skip Obsidian block references (wiki-links with #^ pattern)
+            // Examples: [[#^block-id]] or [[Note#^block-id]]
+            // These are valid Obsidian syntax where the display text is auto-generated from the referenced block
+            if matches!(link.link_type, LinkType::WikiLink { .. })
+                && link.text.trim().is_empty()
+                && link.url.contains("#^")
+            {
                 continue;
             }
 

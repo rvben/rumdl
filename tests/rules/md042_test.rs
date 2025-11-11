@@ -498,3 +498,47 @@ This is a real markdown link that should be flagged:
         "Should flag the markdown link on line 5, not the HTML on line 2"
     );
 }
+
+#[test]
+fn test_obsidian_block_references() {
+    let rule = MD042NoEmptyLinks::new();
+
+    // Test block reference in current file: [[#^block-id]]
+    let content = "This paragraph has a block reference. ^my-block\n\nLink to it: [[#^my-block]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag Obsidian block references in current file. Got: {result:?}"
+    );
+
+    // Test block reference in other file: [[Note#^block-id]]
+    let content = "Reference block in another file: [[OtherNote#^block-id]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag Obsidian block references in other files. Got: {result:?}"
+    );
+
+    // Test with nested path: [[folder/Note#^block-id]]
+    let content = "Reference with path: [[docs/guide#^important-note]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag block references with file paths. Got: {result:?}"
+    );
+
+    // Note: [[]] (empty wiki-link) is NOT parsed as a link by pulldown-cmark, so we skip this test case
+
+    // Test wiki-link with heading but not block reference (regular anchor)
+    let content = "Regular anchor: [[Note#heading]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag wiki-links with regular headings (no ^) as empty if text is empty"
+    );
+}

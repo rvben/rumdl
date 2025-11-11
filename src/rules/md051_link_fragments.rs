@@ -1,6 +1,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::utils::regex_cache::get_cached_regex;
+use pulldown_cmark::LinkType;
 use regex::Regex;
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -605,6 +606,11 @@ impl Rule for MD051LinkFragments {
 
         for link in &ctx.links {
             if link.is_reference {
+                continue;
+            }
+
+            // Skip wiki-links - they reference other files and may have their own fragment validation
+            if matches!(link.link_type, LinkType::WikiLink { .. }) {
                 continue;
             }
 

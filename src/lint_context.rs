@@ -1,7 +1,7 @@
 use crate::config::MarkdownFlavor;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
-use pulldown_cmark::{BrokenLink, Event, LinkType, Parser, Tag, TagEnd};
+use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -129,6 +129,8 @@ pub struct ParsedLink {
     pub is_reference: bool,
     /// Reference ID for reference links
     pub reference_id: Option<String>,
+    /// Link type from pulldown-cmark
+    pub link_type: LinkType,
 }
 
 /// Information about a broken link reported by pulldown-cmark
@@ -161,6 +163,8 @@ pub struct ParsedImage {
     pub is_reference: bool,
     /// Reference ID for reference images
     pub reference_id: Option<String>,
+    /// Link type from pulldown-cmark
+    pub link_type: LinkType,
 }
 
 /// Reference definition [ref]: url "title"
@@ -989,9 +993,13 @@ impl<'a> LintContext<'a> {
         // - Images (generates Tag::Image instead)
         // - Reference resolution (dest_url is already resolved!)
         // - Broken references (callback is invoked)
+        // - Wiki-links (enabled via ENABLE_WIKILINKS)
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_WIKILINKS);
+
         let parser = Parser::new_with_broken_link_callback(
             content,
-            pulldown_cmark::Options::empty(),
+            options,
             Some(|link: BrokenLink<'_>| {
                 broken_links.push(BrokenLinkInfo {
                     reference: link.reference.to_string(),
@@ -1134,6 +1142,7 @@ impl<'a> LintContext<'a> {
                             url,
                             is_reference,
                             reference_id,
+                            link_type,
                         });
 
                         text_chunks.clear();
@@ -1213,6 +1222,7 @@ impl<'a> LintContext<'a> {
                     url: String::new(), // Empty URL indicates undefined reference
                     is_reference: true,
                     reference_id: Some(normalized_ref),
+                    link_type: LinkType::Reference, // Undefined references are reference-style
                 });
             }
         }
@@ -1349,6 +1359,7 @@ impl<'a> LintContext<'a> {
                             url,
                             is_reference,
                             reference_id,
+                            link_type,
                         });
                     }
                 }
@@ -1402,6 +1413,7 @@ impl<'a> LintContext<'a> {
                     url: String::new(),
                     is_reference: true,
                     reference_id: Some(normalized_ref),
+                    link_type: LinkType::Reference, // Undefined references are reference-style
                 });
             }
         }

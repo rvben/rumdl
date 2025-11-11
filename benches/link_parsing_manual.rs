@@ -1,4 +1,4 @@
-use pulldown_cmark::{Event, LinkType, Parser, Tag};
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag};
 use regex::Regex;
 use std::sync::LazyLock;
 use std::time::Instant;
@@ -62,7 +62,9 @@ fn parse_links_regex(content: &str) -> Vec<LinkInfo> {
 
 fn parse_links_pulldown_cmark(content: &str) -> Vec<LinkInfo> {
     let mut links = Vec::new();
-    let parser = Parser::new(content).into_offset_iter();
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_WIKILINKS);
+    let parser = Parser::new_ext(content, options).into_offset_iter();
 
     let mut link_stack: Vec<(usize, String, LinkType)> = Vec::new();
     let mut text_buffer = String::new();
