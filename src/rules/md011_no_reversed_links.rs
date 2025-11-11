@@ -120,6 +120,13 @@ impl MD011NoReversedLinks {
                     continue;
                 }
 
+                // Skip footnote references: [^footnote]
+                // This prevents false positives like [link](url)[^footnote]
+                if bracket_content.starts_with('^') {
+                    last_end += match_obj.end();
+                    continue;
+                }
+
                 // Check if the brackets at the end are escaped
                 if bracket_content.ends_with('\\') {
                     last_end += match_obj.end();
@@ -195,6 +202,13 @@ impl Rule for MD011NoReversedLinks {
                 // Skip wiki-link patterns: if bracket content starts with [ or ends with ]
                 // This handles cases like (url)[[wiki-link]] being misdetected
                 if bracket_content.starts_with('[') || bracket_content.ends_with(']') {
+                    last_end += match_obj.end();
+                    continue;
+                }
+
+                // Skip footnote references: [^footnote]
+                // This prevents false positives like [link](url)[^footnote]
+                if bracket_content.starts_with('^') {
                     last_end += match_obj.end();
                     continue;
                 }
