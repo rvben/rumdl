@@ -211,7 +211,7 @@ impl Rule for MD041FirstLineHeading {
         let use_front_matter = !md041_config.front_matter_title.is_empty();
 
         Box::new(MD041FirstLineHeading::with_pattern(
-            md041_config.level,
+            md041_config.level.as_usize(),
             use_front_matter,
             md041_config.front_matter_title_pattern,
         ))

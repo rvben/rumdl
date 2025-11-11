@@ -17,6 +17,7 @@ pub mod rule_config;
 #[macro_use]
 pub mod rule_config_serde;
 pub mod rules;
+pub mod types;
 pub mod utils;
 
 pub use rules::heading_utils::{Heading, HeadingStyle};

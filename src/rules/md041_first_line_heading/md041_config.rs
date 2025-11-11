@@ -1,4 +1,5 @@
 use crate::rule_config_serde::RuleConfig;
+use crate::types::HeadingLevel;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD041 (First line heading)
@@ -6,8 +7,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub struct MD041Config {
     /// The required heading level (default: 1)
-    #[serde(default = "default_level")]
-    pub level: usize,
+    #[serde(default)]
+    pub level: HeadingLevel,
 
     /// Front matter title field to check (default: "title")
     /// Set to empty string to disable front matter title checking
@@ -20,10 +21,6 @@ pub struct MD041Config {
     pub front_matter_title_pattern: Option<String>,
 }
 
-fn default_level() -> usize {
-    1
-}
-
 fn default_front_matter_title() -> String {
     "title".to_string()
 }
@@ -31,7 +28,7 @@ fn default_front_matter_title() -> String {
 impl Default for MD041Config {
     fn default() -> Self {
         Self {
-            level: default_level(),
+            level: HeadingLevel::default(),
             front_matter_title: default_front_matter_title(),
             front_matter_title_pattern: None,
         }
@@ -49,7 +46,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = MD041Config::default();
-        assert_eq!(config.level, 1);
+        assert_eq!(config.level.get(), 1);
         assert_eq!(config.front_matter_title, "title");
         assert!(config.front_matter_title_pattern.is_none());
     }
@@ -62,7 +59,7 @@ mod tests {
             front-matter-title-pattern = "^(title|header):"
         "#;
         let config: MD041Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.level, 2);
+        assert_eq!(config.level.get(), 2);
         assert_eq!(config.front_matter_title, "heading");
         assert_eq!(config.front_matter_title_pattern, Some("^(title|header):".to_string()));
     }
@@ -75,14 +72,14 @@ mod tests {
             front_matter_title = "mytitle"
         "#;
         let config: MD041Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.level, 3);
+        assert_eq!(config.level.get(), 3);
         assert_eq!(config.front_matter_title, "mytitle");
     }
 
     #[test]
     fn test_config_serialization() {
         let config = MD041Config {
-            level: 2,
+            level: HeadingLevel::new(2).unwrap(),
             front_matter_title: "header".to_string(),
             front_matter_title_pattern: Some("^heading:".to_string()),
         };

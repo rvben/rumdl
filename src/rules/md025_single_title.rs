@@ -2,6 +2,7 @@
 ///
 /// See [docs/md025.md](../../docs/md025.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::types::HeadingLevel;
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use crate::utils::regex_cache::{
     HR_ASTERISK, HR_DASH, HR_SPACED_ASTERISK, HR_SPACED_DASH, HR_SPACED_UNDERSCORE, HR_UNDERSCORE,
@@ -20,7 +21,7 @@ impl MD025SingleTitle {
     pub fn new(level: usize, front_matter_title: &str) -> Self {
         Self {
             config: MD025Config {
-                level,
+                level: HeadingLevel::new(level as u8).expect("Level must be 1-6"),
                 front_matter_title: front_matter_title.to_string(),
                 allow_document_sections: true,
                 allow_with_separators: true,
@@ -31,7 +32,7 @@ impl MD025SingleTitle {
     pub fn strict() -> Self {
         Self {
             config: MD025Config {
-                level: 1,
+                level: HeadingLevel::new(1).unwrap(),
                 front_matter_title: "title".to_string(),
                 allow_document_sections: false,
                 allow_with_separators: false,
@@ -212,7 +213,7 @@ impl Rule for MD025SingleTitle {
         let mut target_level_headings = Vec::new();
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading
-                && heading.level as usize == self.config.level
+                && heading.level as usize == self.config.level.as_usize()
             {
                 // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
                 if line_info.indent >= 4 || line_info.in_code_block {
@@ -266,7 +267,7 @@ impl Rule for MD025SingleTitle {
                         rule_name: Some(self.name().to_string()),
                         message: format!(
                             "Multiple top-level headings (level {}) in the same document",
-                            self.config.level
+                            self.config.level.as_usize()
                         ),
                         line: start_line,
                         column: start_col,
@@ -279,9 +280,14 @@ impl Rule for MD025SingleTitle {
                                 let leading_spaces = line_content.len() - line_content.trim_start().len();
                                 let indentation = " ".repeat(leading_spaces);
                                 if heading_text.is_empty() {
-                                    format!("{}{}", indentation, "#".repeat(self.config.level + 1))
+                                    format!("{}{}", indentation, "#".repeat(self.config.level.as_usize() + 1))
                                 } else {
-                                    format!("{}{} {}", indentation, "#".repeat(self.config.level + 1), heading_text)
+                                    format!(
+                                        "{}{} {}",
+                                        indentation,
+                                        "#".repeat(self.config.level.as_usize() + 1),
+                                        heading_text
+                                    )
                                 }
                             },
                         }),
@@ -305,7 +311,7 @@ impl Rule for MD025SingleTitle {
             }
 
             if let Some(heading) = &line_info.heading {
-                if heading.level as usize == self.config.level && !line_info.in_code_block {
+                if heading.level as usize == self.config.level.as_usize() && !line_info.in_code_block {
                     if !found_first {
                         found_first = true;
                         // Keep the first heading as-is
@@ -350,7 +356,7 @@ impl Rule for MD025SingleTitle {
                                 }
                                 crate::lint_context::HeadingStyle::Setext1 => {
                                     // When demoting from level 1 to 2, use Setext2
-                                    if self.config.level == 1 {
+                                    if self.config.level.as_usize() == 1 {
                                         crate::rules::heading_utils::HeadingStyle::Setext2
                                     } else {
                                         // For higher levels, use ATX
@@ -368,27 +374,27 @@ impl Rule for MD025SingleTitle {
                                 match style {
                                     crate::rules::heading_utils::HeadingStyle::Atx
                                     | crate::rules::heading_utils::HeadingStyle::SetextWithAtx => {
-                                        "#".repeat(self.config.level + 1)
+                                        "#".repeat(self.config.level.as_usize() + 1)
                                     }
                                     crate::rules::heading_utils::HeadingStyle::AtxClosed
                                     | crate::rules::heading_utils::HeadingStyle::SetextWithAtxClosed => {
                                         format!(
                                             "{} {}",
-                                            "#".repeat(self.config.level + 1),
-                                            "#".repeat(self.config.level + 1)
+                                            "#".repeat(self.config.level.as_usize() + 1),
+                                            "#".repeat(self.config.level.as_usize() + 1)
                                         )
                                     }
                                     crate::rules::heading_utils::HeadingStyle::Setext1
                                     | crate::rules::heading_utils::HeadingStyle::Setext2
                                     | crate::rules::heading_utils::HeadingStyle::Consistent => {
                                         // For empty Setext or Consistent, use ATX style
-                                        "#".repeat(self.config.level + 1)
+                                        "#".repeat(self.config.level.as_usize() + 1)
                                     }
                                 }
                             } else {
                                 crate::rules::heading_utils::HeadingUtils::convert_heading_style(
                                     &heading.text,
-                                    (self.config.level + 1) as u32,
+                                    (self.config.level.as_usize() + 1) as u32,
                                     style,
                                 )
                             };
@@ -456,7 +462,7 @@ impl Rule for MD025SingleTitle {
         let mut target_level_count = 0;
         for line_info in &ctx.lines {
             if let Some(heading) = &line_info.heading
-                && heading.level as usize == self.config.level
+                && heading.level as usize == self.config.level.as_usize()
             {
                 // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
                 if line_info.indent >= 4 || line_info.in_code_block {
@@ -578,7 +584,7 @@ mod tests {
     #[test]
     fn test_bounds_checking_bug() {
         // Test case that could trigger bounds error in fix generation
-        // When col + self.config.level exceeds line_content.len()
+        // When col + self.config.level.as_usize() exceeds line_content.len()
         let rule = MD025SingleTitle::default();
 
         // Create content with very short second heading
@@ -597,11 +603,11 @@ mod tests {
     #[test]
     fn test_bounds_checking_edge_case() {
         // Test case that specifically targets the bounds checking fix
-        // Create a heading where col + self.config.level would exceed line length
+        // Create a heading where col + self.config.level.as_usize() would exceed line length
         let rule = MD025SingleTitle::default();
 
         // Create content where the second heading is just "#" (length 1)
-        // col will be 0, self.config.level is 1, so col + self.config.level = 1
+        // col will be 0, self.config.level.as_usize() is 1, so col + self.config.level.as_usize() = 1
         // This should not exceed bounds for "#" but tests the edge case
         let content = "# First Title\n#";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
