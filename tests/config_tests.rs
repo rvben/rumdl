@@ -597,7 +597,7 @@ invalid_key =
             "Error should mention TOML parsing: {error_msg}"
         );
         assert!(
-            error_msg.contains("invalid string"),
+            error_msg.contains("string values must be quoted") || error_msg.contains("invalid string"),
             "Error should describe the specific issue: {error_msg}"
         );
     }

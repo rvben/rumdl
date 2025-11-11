@@ -24,10 +24,9 @@ fn validate_toml_config(toml_str: &str) -> Result<(), String> {
 
     let compiled = jsonschema::validator_for(&schema).expect("Failed to compile schema");
 
-    compiled.validate(&instance).map_err(|err_iter| {
-        let errors: Vec<String> = err_iter.map(|e| format!("{} at {}", e, e.instance_path)).collect();
-        errors.join("; ")
-    })
+    compiled
+        .validate(&instance)
+        .map_err(|err| format!("{} at {}", err, err.instance_path))
 }
 
 #[test]
