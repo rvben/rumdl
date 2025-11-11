@@ -1857,6 +1857,31 @@ mod tests {
     }
 
     #[test]
+    fn test_no_lint_front_matter() {
+        let rule = MD013LineLength::new(80, false, false, false, false);
+
+        // YAML front matter with long lines should NOT be flagged
+        let content = "---\ntitle: This is a very long title that exceeds eighty characters and should not trigger MD013\nauthor: Another very long line in YAML front matter that exceeds the eighty character limit\n---\n\n# Heading\n\nThis is a very long line in actual content that exceeds eighty characters and SHOULD trigger MD013.\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag the content line, not front matter lines
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 8); // The actual content line
+
+        // Also test with TOML front matter
+        let content_toml = "+++\ntitle = \"This is a very long title in TOML that exceeds eighty characters and should not trigger MD013\"\nauthor = \"Another very long line in TOML front matter that exceeds the eighty character limit\"\n+++\n\n# Heading\n\nThis is a very long line in actual content that exceeds eighty characters and SHOULD trigger MD013.\n";
+
+        let ctx_toml = LintContext::new(content_toml, crate::config::MarkdownFlavor::Standard);
+        let result_toml = rule.check(&ctx_toml).unwrap();
+
+        // Should only flag the content line, not TOML front matter lines
+        assert_eq!(result_toml.len(), 1);
+        assert_eq!(result_toml[0].line, 8); // The actual content line
+    }
+
+    #[test]
     fn test_code_blocks_exemption() {
         // With code_blocks = false, code blocks should be skipped
         let rule = MD013LineLength::new(30, false, false, false, false);

@@ -420,4 +420,30 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].column, 19);
     }
+
+    #[test]
+    fn test_md011_no_false_positive_with_footnote() {
+        let rule = MD011NoReversedLinks;
+
+        // Should not detect [link](url)[^footnote] as reversed - this is valid markdown
+        // The [^footnote] is a footnote reference, not part of a reversed link
+        let content = "Some text with [a link](https://example.com/)[^ft].\n\n[^ft]: Note.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0);
+
+        // Also test with multiple footnotes
+        let content = "[link1](url1)[^1] and [link2](url2)[^2]\n\n[^1]: First\n[^2]: Second\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0);
+
+        // But should still detect actual reversed links
+        let content = "(url)[text] and [link](url)[^footnote]\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 1);
+        assert_eq!(warnings[0].column, 1);
+    }
 }
