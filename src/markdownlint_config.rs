@@ -104,6 +104,72 @@ fn normalize_toml_table_keys(val: toml::Value) -> toml::Value {
     }
 }
 
+/// Map markdownlint-specific option names to rumdl option names for a given rule.
+/// This handles incompatibilities between markdownlint and rumdl config schemas.
+/// Returns a new table with mapped options, or None if the entire config should be dropped.
+fn map_markdownlint_options_to_rumdl(
+    rule_key: &str,
+    table: toml::map::Map<String, toml::Value>,
+) -> Option<toml::map::Map<String, toml::Value>> {
+    let mut mapped = toml::map::Map::new();
+
+    match rule_key {
+        "MD013" => {
+            // MD013 (line-length) has different option names in markdownlint vs rumdl
+            for (k, v) in table {
+                match k.as_str() {
+                    // Markdownlint uses separate line length limits for different content types
+                    // rumdl uses boolean flags to enable/disable checking for content types
+                    "code-block-line-length" | "code_block_line_length" => {
+                        // Ignore: rumdl doesn't support per-content-type line length limits
+                        // Instead, users should use code-blocks = false to disable entirely
+                        log::warn!(
+                            "Ignoring markdownlint option 'code_block_line_length' for MD013. Use 'code-blocks = false' in rumdl to disable line length checking in code blocks."
+                        );
+                    }
+                    "heading-line-length" | "heading_line_length" => {
+                        // Ignore: rumdl doesn't support per-content-type line length limits
+                        log::warn!(
+                            "Ignoring markdownlint option 'heading_line_length' for MD013. Use 'headings = false' in rumdl to disable line length checking in headings."
+                        );
+                    }
+                    "stern" => {
+                        // Markdownlint uses "stern", rumdl uses "strict"
+                        mapped.insert("strict".to_string(), v);
+                    }
+                    // Pass through all other options
+                    _ => {
+                        mapped.insert(k, v);
+                    }
+                }
+            }
+            Some(mapped)
+        }
+        "MD054" => {
+            // MD054 (link-image-style) has fundamentally different config models
+            // Markdownlint uses style/styles strings, rumdl uses individual boolean flags
+            for (k, v) in table {
+                match k.as_str() {
+                    "style" | "styles" => {
+                        // Ignore: rumdl uses individual boolean flags (autolink, inline, full, etc.)
+                        // Cannot automatically map string style names to boolean flags
+                        log::warn!(
+                            "Ignoring markdownlint option '{k}' for MD054. rumdl uses individual boolean flags (autolink, inline, full, collapsed, shortcut, url-inline) instead. Please configure these directly."
+                        );
+                    }
+                    // Pass through all other options (autolink, inline, full, collapsed, shortcut, url-inline)
+                    _ => {
+                        mapped.insert(k, v);
+                    }
+                }
+            }
+            Some(mapped)
+        }
+        // All other rules: pass through unchanged
+        _ => Some(table),
+    }
+}
+
 /// Map a MarkdownlintConfig to rumdl's internal Config format
 impl MarkdownlintConfig {
     /// Map to a SourcedConfig, tracking provenance as Markdownlint for all values.
@@ -119,6 +185,12 @@ impl MarkdownlintConfig {
                 let rule_config = sourced_config.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
                     if let toml::Value::Table(mut table) = tv {
+                        // Apply markdownlint-to-rumdl option mapping
+                        table = match map_markdownlint_options_to_rumdl(&norm_rule_key, table) {
+                            Some(mapped) => mapped,
+                            None => continue, // Skip this rule entirely if mapping returns None
+                        };
+
                         // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
                         if norm_rule_key == "MD007" && !table.contains_key("style") {
                             table.insert("style".to_string(), toml::Value::String("fixed".to_string()));
@@ -248,6 +320,12 @@ impl MarkdownlintConfig {
                     };
 
                     if let toml::Value::Table(mut table) = tv {
+                        // Apply markdownlint-to-rumdl option mapping
+                        table = match map_markdownlint_options_to_rumdl(&norm_rule_key, table) {
+                            Some(mapped) => mapped,
+                            None => continue, // Skip this rule entirely if mapping returns None
+                        };
+
                         // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
                         if norm_rule_key == "MD007" && !table.contains_key("style") {
                             table.insert("style".to_string(), toml::Value::String("fixed".to_string()));
