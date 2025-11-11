@@ -346,15 +346,6 @@ fn test_md009_unicode_content() {
 }
 
 #[test]
-fn test_md009_zero_br_spaces() {
-    let rule = MD009TrailingSpaces::new(0, false);
-    let content = "Line one \nLine two  \nLine three   \n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3); // All lines should be flagged
-}
-
-#[test]
 fn test_md009_nested_blockquotes() {
     let rule = MD009TrailingSpaces::default();
     let content = "> Level 1  \n> > Level 2   \n> > > Level 3  \n";

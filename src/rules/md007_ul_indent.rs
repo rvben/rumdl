@@ -17,9 +17,9 @@ impl MD007ULIndent {
     pub fn new(indent: usize) -> Self {
         Self {
             config: MD007Config {
-                indent,
+                indent: crate::types::IndentSize::from_const(indent as u8),
                 start_indented: false,
-                start_indent: 2,
+                start_indent: crate::types::IndentSize::from_const(2),
                 style: md007_config::IndentStyle::TextAligned,
             },
         }
@@ -156,12 +156,12 @@ impl Rule for MD007ULIndent {
 
                     // Calculate expected indent first to determine expected content position
                     let expected_indent = if self.config.start_indented {
-                        self.config.start_indent + (nesting_level * self.config.indent)
+                        self.config.start_indent.get() as usize + (nesting_level * self.config.indent.get() as usize)
                     } else {
                         match self.config.style {
                             md007_config::IndentStyle::Fixed => {
                                 // Fixed style: simple multiples of indent
-                                nesting_level * self.config.indent
+                                nesting_level * self.config.indent.get() as usize
                             }
                             md007_config::IndentStyle::TextAligned => {
                                 // Text-aligned style: child's marker aligns with parent's text content
@@ -346,7 +346,7 @@ impl Rule for MD007ULIndent {
             let has_explicit_indent = rule_cfg.values.contains_key("indent");
             let has_explicit_style = rule_cfg.values.contains_key("style");
 
-            if has_explicit_indent && !has_explicit_style && rule_config.indent != 2 {
+            if has_explicit_indent && !has_explicit_style && rule_config.indent.get() != 2 {
                 // User set indent explicitly but not style, and it's not the default value
                 // Use fixed style for markdownlint compatibility
                 rule_config.style = md007_config::IndentStyle::Fixed;
@@ -743,8 +743,8 @@ tags:
     fn test_start_indented_config() {
         let config = MD007Config {
             start_indented: true,
-            start_indent: 4,
-            indent: 2,
+            start_indent: crate::types::IndentSize::from_const(4),
+            indent: crate::types::IndentSize::from_const(2),
             style: md007_config::IndentStyle::TextAligned,
         };
         let rule = MD007ULIndent::from_config_struct(config);

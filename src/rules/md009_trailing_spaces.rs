@@ -14,10 +14,10 @@ pub struct MD009TrailingSpaces {
 }
 
 impl MD009TrailingSpaces {
-    pub const fn new(br_spaces: usize, strict: bool) -> Self {
+    pub fn new(br_spaces: usize, strict: bool) -> Self {
         Self {
             config: MD009Config {
-                br_spaces,
+                br_spaces: crate::types::BrSpaces::from_const(br_spaces),
                 strict,
                 list_item_empty_lines: false,
             },
@@ -117,7 +117,7 @@ impl Rule for MD009TrailingSpaces {
             // Special handling: if the content ends with a newline, the last line from .lines()
             // is not really the "last line" in terms of trailing spaces rules
             let is_truly_last_line = line_num == lines.len() - 1 && !content.ends_with('\n');
-            if !self.config.strict && !is_truly_last_line && trailing_spaces == self.config.br_spaces {
+            if !self.config.strict && !is_truly_last_line && trailing_spaces == self.config.br_spaces.get() {
                 continue;
             }
 
@@ -155,9 +155,9 @@ impl Rule for MD009TrailingSpaces {
                     ),
                     replacement: if !self.config.strict
                         && !is_truly_last_line
-                        && trailing_spaces == self.config.br_spaces
+                        && trailing_spaces == self.config.br_spaces.get()
                     {
-                        " ".repeat(self.config.br_spaces)
+                        " ".repeat(self.config.br_spaces.get())
                     } else {
                         String::new()
                     },
@@ -243,12 +243,12 @@ impl Rule for MD009TrailingSpaces {
             // BUT: Never preserve trailing spaces in headings or empty blockquotes as they serve no purpose
             if !self.config.strict
                 && !is_truly_last_line
-                && trailing_spaces == self.config.br_spaces
+                && trailing_spaces == self.config.br_spaces.get()
                 && !is_heading
                 && !is_empty_blockquote
             {
                 // Preserve the exact number of spaces for hard line breaks
-                match self.config.br_spaces {
+                match self.config.br_spaces.get() {
                     0 => {}
                     1 => result.push(' '),
                     2 => result.push_str("  "),
@@ -656,29 +656,5 @@ mod tests {
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Line with two spaces  \nNext line");
-    }
-
-    #[test]
-    fn test_different_br_spaces_values() {
-        // Test with br_spaces=0 (no trailing spaces allowed)
-        let rule = MD009TrailingSpaces::new(0, false);
-        let content = "Line with one space \nLine with two spaces  ";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2); // Both lines should be flagged
-
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "Line with one space\nLine with two spaces");
-
-        // Test with br_spaces=1 (exactly 1 trailing space for line breaks)
-        let rule = MD009TrailingSpaces::new(1, false);
-        let content = "Line with one space \nLine with two spaces  ";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1); // Only line 2 should be flagged
-        assert_eq!(result[0].line, 2);
-
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "Line with one space \nLine with two spaces");
     }
 }

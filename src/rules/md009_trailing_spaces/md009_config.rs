@@ -1,13 +1,14 @@
 use crate::rule_config_serde::RuleConfig;
+use crate::types::BrSpaces;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD009 (Trailing spaces)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD009Config {
     /// Number of spaces for line breaks (default: 2)
-    #[serde(default = "default_br_spaces", alias = "br_spaces")]
-    pub br_spaces: usize,
+    #[serde(default, alias = "br_spaces")]
+    pub br_spaces: BrSpaces,
 
     /// Strict mode - remove all trailing spaces (default: false)
     #[serde(default)]
@@ -16,20 +17,6 @@ pub struct MD009Config {
     /// Allow trailing spaces in empty list item lines (default: false)
     #[serde(default, alias = "list_item_empty_lines")]
     pub list_item_empty_lines: bool,
-}
-
-fn default_br_spaces() -> usize {
-    2
-}
-
-impl Default for MD009Config {
-    fn default() -> Self {
-        Self {
-            br_spaces: default_br_spaces(),
-            strict: false,
-            list_item_empty_lines: false,
-        }
-    }
 }
 
 impl RuleConfig for MD009Config {
@@ -47,7 +34,7 @@ mod tests {
             list_item_empty_lines = true
         "#;
         let config: MD009Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.br_spaces, 3);
+        assert_eq!(config.br_spaces.get(), 3);
         assert!(config.list_item_empty_lines);
     }
 
@@ -58,7 +45,26 @@ mod tests {
             list-item-empty-lines = true
         "#;
         let config: MD009Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.br_spaces, 3);
+        assert_eq!(config.br_spaces.get(), 3);
         assert!(config.list_item_empty_lines);
+    }
+
+    #[test]
+    fn test_br_spaces_validation() {
+        // Test that invalid values are rejected
+        let toml_str = r#"
+            br-spaces = 1
+        "#;
+        let result: Result<MD009Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("must be at least 2") || err.contains("got 1"));
+
+        // Test zero
+        let toml_str = r#"
+            br-spaces = 0
+        "#;
+        let result: Result<MD009Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
     }
 }

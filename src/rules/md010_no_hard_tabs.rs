@@ -18,9 +18,11 @@ pub struct MD010NoHardTabs {
 }
 
 impl MD010NoHardTabs {
-    pub const fn new(spaces_per_tab: usize) -> Self {
+    pub fn new(spaces_per_tab: usize) -> Self {
         Self {
-            config: MD010Config { spaces_per_tab },
+            config: MD010Config {
+                spaces_per_tab: crate::types::PositiveUsize::from_const(spaces_per_tab),
+            },
         }
     }
 
@@ -163,12 +165,15 @@ impl Rule for MD010NoHardTabs {
                     }
                 } else if is_leading {
                     if tab_count == 1 {
-                        format!("Found leading tab, use {} spaces instead", self.config.spaces_per_tab)
+                        format!(
+                            "Found leading tab, use {} spaces instead",
+                            self.config.spaces_per_tab.get()
+                        )
                     } else {
                         format!(
                             "Found {} leading tabs, use {} spaces instead",
                             tab_count,
-                            tab_count * self.config.spaces_per_tab
+                            tab_count * self.config.spaces_per_tab.get()
                         )
                     }
                 } else if tab_count == 1 {
@@ -187,7 +192,7 @@ impl Rule for MD010NoHardTabs {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: _line_index.line_col_to_byte_range_with_length(line_num + 1, start_pos + 1, tab_count),
-                        replacement: " ".repeat(tab_count * self.config.spaces_per_tab),
+                        replacement: " ".repeat(tab_count * self.config.spaces_per_tab.get()),
                     }),
                 });
             }
@@ -221,7 +226,7 @@ impl Rule for MD010NoHardTabs {
                 result.push_str(line);
             } else {
                 // Replace tabs with spaces
-                result.push_str(&line.replace('\t', &" ".repeat(self.config.spaces_per_tab)));
+                result.push_str(&line.replace('\t', &" ".repeat(self.config.spaces_per_tab.get())));
             }
 
             // Add newline if not the last line without a newline

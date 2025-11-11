@@ -1,4 +1,5 @@
 use crate::rule_config_serde::RuleConfig;
+use crate::types::IndentSize;
 use serde::{Deserialize, Serialize};
 
 /// Indentation style for unordered lists
@@ -20,7 +21,7 @@ pub enum IndentStyle {
 pub struct MD007Config {
     /// Indentation size for nested unordered lists (default: 2)
     #[serde(default = "default_indent")]
-    pub indent: usize,
+    pub indent: IndentSize,
 
     /// Allow first level lists to start indented (default: false)
     #[serde(default, alias = "start_indented")]
@@ -28,19 +29,19 @@ pub struct MD007Config {
 
     /// Number of spaces for first level indent when start_indented is true (default: 2)
     #[serde(default = "default_start_indent", alias = "start_indent")]
-    pub start_indent: usize,
+    pub start_indent: IndentSize,
 
     /// Indentation style: text-aligned (default) or fixed (markdownlint compatible)
     #[serde(default)]
     pub style: IndentStyle,
 }
 
-fn default_indent() -> usize {
-    2
+fn default_indent() -> IndentSize {
+    IndentSize::from_const(2)
 }
 
-fn default_start_indent() -> usize {
-    2
+fn default_start_indent() -> IndentSize {
+    IndentSize::from_const(2)
 }
 
 impl Default for MD007Config {
@@ -71,7 +72,7 @@ mod tests {
         "#;
         let config: MD007Config = toml::from_str(toml_str).unwrap();
         assert!(config.start_indented);
-        assert_eq!(config.start_indent, 4);
+        assert_eq!(config.start_indent.get(), 4);
     }
 
     #[test]
@@ -83,6 +84,27 @@ mod tests {
         "#;
         let config: MD007Config = toml::from_str(toml_str).unwrap();
         assert!(config.start_indented);
-        assert_eq!(config.start_indent, 4);
+        assert_eq!(config.start_indent.get(), 4);
+    }
+
+    #[test]
+    fn test_indent_validation() {
+        // Test that invalid indent values are rejected
+        let toml_str = r#"
+            indent = 0
+        "#;
+        let result: Result<MD007Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("must be between 1 and 8") || err.contains("got 0"));
+
+        // Test that indent value above 8 is rejected
+        let toml_str = r#"
+            indent = 9
+        "#;
+        let result: Result<MD007Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("must be between 1 and 8") || err.contains("got 9"));
     }
 }
