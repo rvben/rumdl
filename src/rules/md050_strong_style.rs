@@ -113,8 +113,8 @@ impl MD050StrongStyle {
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let content = ctx.content;
 
-        // Find the first occurrence of either style that's not in a code block, link, HTML tag, or front matter
-        let mut first_asterisk = None;
+        // Count how many times each marker appears (prevalence-based approach)
+        let mut asterisk_count = 0;
         for m in BOLD_ASTERISK_REGEX.find_iter(content) {
             // Skip matches in front matter
             let (line_num, _) = ctx.offset_to_line_col(m.start());
@@ -129,12 +129,11 @@ impl MD050StrongStyle {
                 && !self.is_in_html_tag(ctx, m.start())
                 && !self.is_in_html_code_content(ctx, m.start())
             {
-                first_asterisk = Some(m);
-                break;
+                asterisk_count += 1;
             }
         }
 
-        let mut first_underscore = None;
+        let mut underscore_count = 0;
         for m in BOLD_UNDERSCORE_REGEX.find_iter(content) {
             // Skip matches in front matter
             let (line_num, _) = ctx.offset_to_line_col(m.start());
@@ -149,23 +148,23 @@ impl MD050StrongStyle {
                 && !self.is_in_html_tag(ctx, m.start())
                 && !self.is_in_html_code_content(ctx, m.start())
             {
-                first_underscore = Some(m);
-                break;
+                underscore_count += 1;
             }
         }
 
-        match (first_asterisk, first_underscore) {
-            (Some(a), Some(u)) => {
-                // Whichever pattern appears first determines the style
-                if a.start() < u.start() {
+        match (asterisk_count, underscore_count) {
+            (0, 0) => None,
+            (_, 0) => Some(StrongStyle::Asterisk),
+            (0, _) => Some(StrongStyle::Underscore),
+            (a, u) => {
+                // Use the most prevalent marker as the target style
+                // In case of a tie, prefer asterisk (matches CommonMark recommendation)
+                if a >= u {
                     Some(StrongStyle::Asterisk)
                 } else {
                     Some(StrongStyle::Underscore)
                 }
             }
-            (Some(_), None) => Some(StrongStyle::Asterisk),
-            (None, Some(_)) => Some(StrongStyle::Underscore),
-            (None, None) => None,
         }
     }
 
@@ -459,18 +458,19 @@ mod tests {
     }
 
     #[test]
-    fn test_consistent_style_first_underscore() {
+    fn test_consistent_style_tie_prefers_asterisk() {
         let rule = MD050StrongStyle::new(StrongStyle::Consistent);
         let content = "First __strong__ then **also strong**.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // First strong is __, so ** should be flagged
+        // Equal counts (1 vs 1), so prefer asterisks per CommonMark recommendation
+        // The __ should be flagged to change to **
         assert_eq!(result.len(), 1);
         assert!(
             result[0]
                 .message
-                .contains("Strong emphasis should use __ instead of **")
+                .contains("Strong emphasis should use ** instead of __")
         );
     }
 

@@ -160,3 +160,136 @@ fn test_skip_non_content_lines() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "HTML comments should not be skipped");
 }
+
+#[test]
+fn test_mdbook_include_only_file() {
+    let rule = MD041FirstLineHeading::new(1, false);
+
+    // Single include directive - should be skipped (pure composition file)
+    let content = "{{#include ../../CHANGELOG.md}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "File with only {{#include}} directive should be skipped (it's a routing file, not content)"
+    );
+
+    // Include with whitespace - should still be skipped
+    let content = "  {{#include ../../README.md}}  ";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Include directive with whitespace should be skipped");
+
+    // Multiple includes - should be skipped
+    let content = "{{#include header.md}}\n{{#include content.md}}\n{{#include footer.md}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "File with multiple include directives should be skipped"
+    );
+}
+
+#[test]
+fn test_mdbook_directives_with_comments() {
+    let rule = MD041FirstLineHeading::new(1, false);
+
+    // Include with HTML comment - should be skipped
+    let content = "<!-- This file aggregates documentation -->\n{{#include ../../Contributing.md}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Include directive with HTML comment should be skipped"
+    );
+
+    // Multiple comments and includes - should be skipped
+    let content = "<!-- Header -->\n{{#include header.md}}\n<!-- Content -->\n{{#include content.md}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Directives with multiple comments should be skipped");
+}
+
+#[test]
+fn test_mdbook_various_directive_types() {
+    let rule = MD041FirstLineHeading::new(1, false);
+
+    // Playground directive
+    let content = "{{#playground example.rs}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Playground directive should be skipped");
+
+    // Rustdoc_include directive
+    let content = "{{#rustdoc_include ../lib.rs}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Rustdoc_include directive should be skipped");
+
+    // Mix of different directives
+    let content = "{{#include intro.md}}\n{{#playground main.rs}}\n{{#rustdoc_include lib.rs}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Mix of different directives should be skipped");
+}
+
+#[test]
+fn test_mdbook_directive_with_content_needs_heading() {
+    let rule = MD041FirstLineHeading::new(1, false);
+
+    // Directive with actual content - should FAIL (needs heading)
+    let content = "Some introduction text\n{{#include details.md}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "File with content AND directive should require heading"
+    );
+
+    // Content after directive - should FAIL
+    let content = "{{#include header.md}}\nSome additional text";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "File with directive AND content should require heading"
+    );
+
+    // Heading satisfies requirement
+    let content = "# Title\nIntro text\n{{#include details.md}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "File with heading, content, and directive should pass"
+    );
+}
+
+#[test]
+fn test_mdbook_edge_cases() {
+    let rule = MD041FirstLineHeading::new(1, false);
+
+    // Empty lines around directive - still skipped
+    let content = "\n\n{{#include file.md}}\n\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Include with empty lines should be skipped");
+
+    // Directive that looks similar but isn't - should FAIL
+    let content = "{{include file.md}}";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Non-directive syntax (missing #) should require heading"
+    );
+
+    // Unclosed directive - should FAIL
+    let content = "{{#include file.md";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Unclosed directive should require heading");
+}

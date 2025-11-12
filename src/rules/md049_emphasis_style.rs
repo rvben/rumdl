@@ -133,11 +133,16 @@ impl Rule for MD049EmphasisStyle {
                     return Ok(warnings);
                 }
 
-                // Use the first emphasis marker found as the target style
-                let target_marker = emphasis_info[0].3;
+                // Count how many times each marker appears (prevalence-based approach)
+                let asterisk_count = emphasis_info.iter().filter(|(_, _, _, m, _)| *m == '*').count();
+                let underscore_count = emphasis_info.iter().filter(|(_, _, _, m, _)| *m == '_').count();
 
-                // Check all subsequent emphasis nodes for consistency
-                for (line_num, col, abs_pos, marker, content) in emphasis_info.iter().skip(1) {
+                // Use the most prevalent marker as the target style
+                // In case of a tie, prefer asterisk (matches CommonMark recommendation)
+                let target_marker = if asterisk_count >= underscore_count { '*' } else { '_' };
+
+                // Check all emphasis nodes for consistency with the prevalent style
+                for (line_num, col, abs_pos, marker, content) in &emphasis_info {
                     if *marker != target_marker {
                         // Calculate emphasis length (marker + content + marker)
                         let emphasis_len = 1 + content.len() + 1;

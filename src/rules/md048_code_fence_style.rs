@@ -26,7 +26,10 @@ impl MD048CodeFenceStyle {
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<CodeFenceStyle> {
-        // Find the first code fence by looking for opening fences
+        // Count occurrences of each fence style (prevalence-based approach)
+        let mut backtick_count = 0;
+        let mut tilde_count = 0;
+        let mut in_code_block = false;
 
         for line in ctx.content.lines() {
             let trimmed = line.trim_start();
@@ -35,15 +38,30 @@ impl MD048CodeFenceStyle {
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
 
-                // This is an opening fence - return its style immediately
-                if fence_char == '`' {
-                    return Some(CodeFenceStyle::Backtick);
+                if !in_code_block {
+                    // Opening fence - count it
+                    if fence_char == '`' {
+                        backtick_count += 1;
+                    } else {
+                        tilde_count += 1;
+                    }
+                    in_code_block = true;
                 } else {
-                    return Some(CodeFenceStyle::Tilde);
+                    // Potential closing fence - exit code block
+                    in_code_block = false;
                 }
             }
         }
-        None
+
+        // Use the most prevalent style
+        // In case of a tie, prefer backticks (more common, widely supported)
+        if backtick_count >= tilde_count && backtick_count > 0 {
+            Some(CodeFenceStyle::Backtick)
+        } else if tilde_count > 0 {
+            Some(CodeFenceStyle::Tilde)
+        } else {
+            None
+        }
     }
 }
 
@@ -354,26 +372,28 @@ mod tests {
     }
 
     #[test]
-    fn test_consistent_style_first_backtick() {
+    fn test_consistent_style_tie_prefers_backtick() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+        // One backtick fence and one tilde fence - tie should prefer backticks
         let content = "```\ncode\n```\n\n~~~\nmore code\n~~~";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // First fence is backtick, so tildes should be flagged
+        // Backticks win due to tie-breaker, so tildes should be flagged
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 5);
         assert_eq!(result[1].line, 7);
     }
 
     #[test]
-    fn test_consistent_style_first_tilde() {
+    fn test_consistent_style_tilde_most_prevalent() {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
-        let content = "~~~\ncode\n~~~\n\n```\nmore code\n```";
+        // Two tilde fences and one backtick fence - tildes are most prevalent
+        let content = "~~~\ncode\n~~~\n\n```\nmore code\n```\n\n~~~\neven more\n~~~";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // First fence is tilde, so backticks should be flagged
+        // Tildes are most prevalent, so backticks should be flagged
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 5);
         assert_eq!(result[1].line, 7);

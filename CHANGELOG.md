@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MD041: mdBook preprocessor directive false positives**
+  - MD041 now skips files containing only mdBook preprocessor directives (e.g., `{{#include file.md}}`)
+  - These composition/routing files are not standalone content and don't require headings
+  - Eliminates false positives on mdBook include-only files
+  - Supports all mdBook directives: `{{#include}}`, `{{#playground}}`, `{{#rustdoc_include}}`, etc.
+  - Handles files with directives mixed with HTML comments
+  - Added comprehensive test coverage for mdBook directive patterns
+
+- **MD042: Inline code in link text false positives**
+  - Fixed incorrect flagging of code spans within link text
+  - MD042 now correctly handles patterns like `[code with \`backticks\`](url)`
+  - Prevents false positives when links contain inline code
+  - Added regression test covering this case
+
 - **Config import: markdownlint option mapping (#137)**
   - `rumdl import` now correctly maps markdownlint-specific option names to rumdl equivalents
   - MD013: Maps `stern` → `strict`, warns about incompatible options (code_block_line_length, heading_line_length)
@@ -66,6 +80,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed Homebrew installation docs (removed unnecessary `brew tap`)
 
 ### Changed
+
+- **Consistency checking: Prevalence-based style detection**
+  - Converted MD003, MD004, MD046, MD048, MD049, MD050, MD055 from "first-found" to "prevalence-based" logic
+  - Rules now count ALL occurrences and enforce the most commonly used style
+  - Tie-breakers prefer industry standards (GitHub, CommonMark recommendations)
+  - More accurate representation of document's actual style intent
+  - Better user experience: rules adapt to what you mostly use, not just the first instance
+  - Affected rules:
+    - MD003 (heading-style): ATX vs Setext vs Closed ATX
+    - MD004 (ul-style): dash, asterisk, plus, or consistent
+    - MD046 (code-block-style): fenced vs indented
+    - MD048 (code-fence-style): backticks vs tildes
+    - MD049 (emphasis-style): asterisk vs underscore
+    - MD050 (strong-style): asterisk vs underscore
+    - MD055 (table-pipe-style): leading/trailing pipe consistency
+  - Updated documentation to reflect prevalence-based behavior
 
 - **Dependencies**
   - Upgraded schemars from 0.8 to 1.1

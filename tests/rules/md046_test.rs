@@ -82,16 +82,20 @@ fn test_consistent_style_fenced_first() {
 #[test]
 fn test_consistent_style_indented_first() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    // One indented and one fenced block - tie prefers fenced
     let content = "# Mixed blocks\n\n    indented block\n\n```\nfenced block\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty(), "Should detect inconsistent code blocks");
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
-    assert!(fixed.contains("    indented block"), "Should preserve indented blocks");
     assert!(
-        fixed.contains("    fenced block") && !fixed.contains("```\nfenced block\n```"),
-        "Should convert fenced blocks to indented"
+        fixed.contains("```\nfenced block\n```"),
+        "Should preserve fenced blocks"
+    );
+    assert!(
+        fixed.contains("```\nindented block\n```") && !fixed.contains("    indented block"),
+        "Should convert indented blocks to fenced"
     );
 }
 

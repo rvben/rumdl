@@ -112,12 +112,10 @@ impl Rule for MD041FirstLineHeading {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let mut warnings = Vec::new();
-        if content.trim().is_empty() {
-            return Ok(warnings);
-        }
-        if self.has_front_matter_title(content) {
+
+        // Check if we should skip this file
+        if self.should_skip(ctx) {
             return Ok(warnings);
         }
 
@@ -192,9 +190,22 @@ impl Rule for MD041FirstLineHeading {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip files that are purely preprocessor directives (e.g., mdBook includes).
+        // These files are composition/routing metadata, not standalone content.
+        // Example: A file containing only "{{#include ../../README.md}}" is a
+        // pointer to content, not content itself, and shouldn't need a heading.
+        let only_directives = !ctx.content.is_empty()
+            && ctx.content.lines().filter(|l| !l.trim().is_empty()).all(|l| {
+                let t = l.trim();
+                // mdBook directives: {{#include}}, {{#playground}}, {{#rustdoc_include}}, etc.
+                (t.starts_with("{{#") && t.ends_with("}}"))
+                        // HTML comments often accompany directives
+                        || (t.starts_with("<!--") && t.ends_with("-->"))
+            });
+
         ctx.content.is_empty()
-            || !ctx.likely_has_headings()
             || (self.front_matter_title && self.has_front_matter_title(ctx.content))
+            || only_directives
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

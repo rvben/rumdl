@@ -37,7 +37,7 @@ use crate::LintContext;
 /// ## Behavior
 ///
 /// - Checks each unordered list item for its marker character.
-/// - In "consistent" mode, the first marker sets the style for the document.
+/// - In "consistent" mode, the most prevalent marker sets the style for the document (in case of tie, prefers dash).
 /// - Skips code blocks and front matter.
 /// - Reports a warning if a list item uses a different marker than the configured or detected style.
 ///
@@ -106,7 +106,41 @@ impl Rule for MD004UnorderedListStyle {
         }
 
         let mut warnings = Vec::new();
-        let mut first_marker: Option<char> = None;
+
+        // For consistent mode, count occurrences of each marker (prevalence-based approach)
+        let target_marker_for_consistent = if self.config.style == UnorderedListStyle::Consistent {
+            let mut asterisk_count = 0;
+            let mut dash_count = 0;
+            let mut plus_count = 0;
+
+            for list_block in &ctx.list_blocks {
+                for &item_line in &list_block.item_lines {
+                    if let Some(line_info) = ctx.line_info(item_line)
+                        && let Some(list_item) = &line_info.list_item
+                        && !list_item.is_ordered
+                    {
+                        match list_item.marker.chars().next().unwrap() {
+                            '*' => asterisk_count += 1,
+                            '-' => dash_count += 1,
+                            '+' => plus_count += 1,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            // Use the most prevalent marker as the target style
+            // In case of a tie, prefer dash (most common, GitHub default)
+            if dash_count >= asterisk_count && dash_count >= plus_count {
+                Some('-')
+            } else if asterisk_count >= plus_count {
+                Some('*')
+            } else {
+                Some('+')
+            }
+        } else {
+            None
+        };
 
         // Use centralized list blocks for better performance and accuracy
         for list_block in &ctx.list_blocks {
@@ -129,30 +163,24 @@ impl Rule for MD004UnorderedListStyle {
 
                     match self.config.style {
                         UnorderedListStyle::Consistent => {
-                            // For consistent mode, we check consistency across the entire document
-                            if let Some(first) = first_marker {
-                                // Check if current marker matches the first marker found
-                                if marker != first {
-                                    let (line, col) = ctx.offset_to_line_col(offset);
-                                    warnings.push(LintWarning {
-                                        line,
-                                        column: col,
-                                        end_line: line,
-                                        end_column: col + 1,
-                                        message: format!(
-                                            "List marker '{marker}' does not match expected style '{first}'"
-                                        ),
-                                        severity: Severity::Warning,
-                                        rule_name: Some(self.name().to_string()),
-                                        fix: Some(Fix {
-                                            range: offset..offset + 1,
-                                            replacement: first.to_string(),
-                                        }),
-                                    });
-                                }
-                            } else {
-                                // This is the first marker we've found - set the style
-                                first_marker = Some(marker);
+                            // For consistent mode, check against the most prevalent marker
+                            if let Some(target) = target_marker_for_consistent
+                                && marker != target
+                            {
+                                let (line, col) = ctx.offset_to_line_col(offset);
+                                warnings.push(LintWarning {
+                                    line,
+                                    column: col,
+                                    end_line: line,
+                                    end_column: col + 1,
+                                    message: format!("List marker '{marker}' does not match expected style '{target}'"),
+                                    severity: Severity::Warning,
+                                    rule_name: Some(self.name().to_string()),
+                                    fix: Some(Fix {
+                                        range: offset..offset + 1,
+                                        replacement: target.to_string(),
+                                    }),
+                                });
                             }
                         }
                         UnorderedListStyle::Sublist => {
@@ -229,7 +257,41 @@ impl Rule for MD004UnorderedListStyle {
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
         let mut lines: Vec<String> = ctx.content.lines().map(String::from).collect();
-        let mut first_marker: Option<char> = None;
+
+        // For consistent mode, count occurrences of each marker (prevalence-based approach)
+        let target_marker_for_consistent = if self.config.style == UnorderedListStyle::Consistent {
+            let mut asterisk_count = 0;
+            let mut dash_count = 0;
+            let mut plus_count = 0;
+
+            for list_block in &ctx.list_blocks {
+                for &item_line in &list_block.item_lines {
+                    if let Some(line_info) = ctx.line_info(item_line)
+                        && let Some(list_item) = &line_info.list_item
+                        && !list_item.is_ordered
+                    {
+                        match list_item.marker.chars().next().unwrap() {
+                            '*' => asterisk_count += 1,
+                            '-' => dash_count += 1,
+                            '+' => plus_count += 1,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            // Use the most prevalent marker as the target style
+            // In case of a tie, prefer dash (most common, GitHub default)
+            if dash_count >= asterisk_count && dash_count >= plus_count {
+                Some('-')
+            } else if asterisk_count >= plus_count {
+                Some('*')
+            } else {
+                Some('+')
+            }
+        } else {
+            None
+        };
 
         // Use centralized list blocks
         for list_block in &ctx.list_blocks {
@@ -254,14 +316,7 @@ impl Rule for MD004UnorderedListStyle {
 
                     // Determine the target marker
                     let target_marker = match self.config.style {
-                        UnorderedListStyle::Consistent => {
-                            if let Some(first) = first_marker {
-                                first
-                            } else {
-                                first_marker = Some(marker);
-                                marker
-                            }
-                        }
+                        UnorderedListStyle::Consistent => target_marker_for_consistent.unwrap_or(marker),
                         UnorderedListStyle::Sublist => {
                             // Calculate expected marker based on indentation level
                             // Each 2 spaces of indentation represents a nesting level
@@ -384,13 +439,15 @@ mod tests {
     }
 
     #[test]
-    fn test_inconsistent_style() {
+    fn test_inconsistent_style_tie_prefers_dash() {
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        // All markers appear once - tie should prefer dash
         let content = "* Item 1\n- Item 2\n+ Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].line, 2);
+        // Both asterisk and plus are flagged as wrong (dash is preferred on tie)
+        assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 3);
     }
 
@@ -428,12 +485,13 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_consistent_style() {
+    fn test_fix_consistent_style_tie_prefers_dash() {
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        // All markers appear once - tie should prefer dash
         let content = "* Item 1\n- Item 2\n+ Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "* Item 1\n* Item 2\n* Item 3");
+        assert_eq!(fixed, "- Item 1\n- Item 2\n- Item 3");
     }
 
     #[test]
@@ -476,12 +534,14 @@ mod tests {
     #[test]
     fn test_fix_nested_lists() {
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        // * appears 2 times, - appears 2 times, + appears 1 time
+        // Tie between * and - should prefer dash
         let content = "* Item 1\n  - Nested 1\n    + Double nested\n  - Nested 2\n* Item 2";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(
             fixed,
-            "* Item 1\n  * Nested 1\n    * Double nested\n  * Nested 2\n* Item 2"
+            "- Item 1\n  - Nested 1\n    - Double nested\n  - Nested 2\n- Item 2"
         );
     }
 
@@ -566,23 +626,25 @@ mod tests {
     #[test]
     fn test_multiple_spaces_after_marker() {
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        // All markers appear once - tie should prefer dash
         let content = "*   Item 1\n-   Item 2\n+   Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "*   Item 1\n*   Item 2\n*   Item 3");
+        assert_eq!(fixed, "-   Item 1\n-   Item 2\n-   Item 3");
     }
 
     #[test]
     fn test_tab_after_marker() {
         let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        // Both markers appear once - tie should prefer dash
         let content = "*\tItem 1\n-\tItem 2";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "*\tItem 1\n*\tItem 2");
+        assert_eq!(fixed, "-\tItem 1\n-\tItem 2");
     }
 
     #[test]

@@ -65,6 +65,7 @@ fn test_consistent_style_first_backtick() {
 #[test]
 fn test_consistent_style_first_tilde() {
     let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+    // One tilde and one backtick fence - tie prefers backticks
     let content = "# Mixed blocks\n\n~~~\ntilde block\n~~~\n\n```\nbacktick block\n```";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -72,7 +73,7 @@ fn test_consistent_style_first_tilde() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(
         fixed,
-        "# Mixed blocks\n\n~~~\ntilde block\n~~~\n\n~~~\nbacktick block\n~~~"
+        "# Mixed blocks\n\n```\ntilde block\n```\n\n```\nbacktick block\n```"
     );
 }
 
@@ -158,16 +159,16 @@ fn test_fence_inside_indented_code_block() {
 
 #[test]
 fn test_fence_with_language_and_attributes() {
-    // Test detection with various fence formats
+    // Test detection with various fence formats - tie prefers backticks
     let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
     let content = "~~~typescript {.numberLines startFrom=\"100\"}\ncode\n~~~\n\n```rust\nmore code\n```";
 
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // First fence is tilde, so backtick fence should be flagged
+    // Tie (1 tilde, 1 backtick) prefers backticks, so tilde fence should be flagged
     assert_eq!(result.len(), 2, "Should flag inconsistent style");
-    assert!(result[0].message.contains("use ~~~ instead of ```"));
+    assert!(result[0].message.contains("use ``` instead of ~~~"));
 }
 
 #[test]

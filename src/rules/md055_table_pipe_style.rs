@@ -216,17 +216,53 @@ impl Rule for MD055TablePipeStyle {
             let mut table_style = None;
 
             // First pass: determine the table's style for "consistent" mode
+            // Count all rows to determine most prevalent style (prevalence-based approach)
             if configured_style == "consistent" {
-                // Check header row first
+                let mut leading_and_trailing_count = 0;
+                let mut no_leading_or_trailing_count = 0;
+                let mut leading_only_count = 0;
+                let mut trailing_only_count = 0;
+
+                // Count style of header row
                 if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
-                    table_style = Some(style);
-                } else {
-                    // Check content rows if header doesn't have a clear style
-                    for &line_idx in &table_block.content_lines {
-                        if let Some(style) = TableUtils::determine_pipe_style(lines[line_idx]) {
-                            table_style = Some(style);
-                            break;
+                    match style {
+                        "leading_and_trailing" => leading_and_trailing_count += 1,
+                        "no_leading_or_trailing" => no_leading_or_trailing_count += 1,
+                        "leading_only" => leading_only_count += 1,
+                        "trailing_only" => trailing_only_count += 1,
+                        _ => {}
+                    }
+                }
+
+                // Count style of content rows
+                for &line_idx in &table_block.content_lines {
+                    if let Some(style) = TableUtils::determine_pipe_style(lines[line_idx]) {
+                        match style {
+                            "leading_and_trailing" => leading_and_trailing_count += 1,
+                            "no_leading_or_trailing" => no_leading_or_trailing_count += 1,
+                            "leading_only" => leading_only_count += 1,
+                            "trailing_only" => trailing_only_count += 1,
+                            _ => {}
                         }
+                    }
+                }
+
+                // Determine most prevalent style
+                // In case of tie, prefer leading_and_trailing (most common, widely supported)
+                let max_count = leading_and_trailing_count
+                    .max(no_leading_or_trailing_count)
+                    .max(leading_only_count)
+                    .max(trailing_only_count);
+
+                if max_count > 0 {
+                    if leading_and_trailing_count == max_count {
+                        table_style = Some("leading_and_trailing");
+                    } else if no_leading_or_trailing_count == max_count {
+                        table_style = Some("no_leading_or_trailing");
+                    } else if leading_only_count == max_count {
+                        table_style = Some("leading_only");
+                    } else if trailing_only_count == max_count {
+                        table_style = Some("trailing_only");
                     }
                 }
             }
@@ -315,17 +351,53 @@ impl Rule for MD055TablePipeStyle {
             let mut table_style = None;
 
             // First pass: determine the table's style for "consistent" mode
+            // Count all rows to determine most prevalent style (prevalence-based approach)
             if configured_style == "consistent" {
-                // Check header row first
+                let mut leading_and_trailing_count = 0;
+                let mut no_leading_or_trailing_count = 0;
+                let mut leading_only_count = 0;
+                let mut trailing_only_count = 0;
+
+                // Count style of header row
                 if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
-                    table_style = Some(style);
-                } else {
-                    // Check content rows if header doesn't have a clear style
-                    for &line_idx in &table_block.content_lines {
-                        if let Some(style) = TableUtils::determine_pipe_style(lines[line_idx]) {
-                            table_style = Some(style);
-                            break;
+                    match style {
+                        "leading_and_trailing" => leading_and_trailing_count += 1,
+                        "no_leading_or_trailing" => no_leading_or_trailing_count += 1,
+                        "leading_only" => leading_only_count += 1,
+                        "trailing_only" => trailing_only_count += 1,
+                        _ => {}
+                    }
+                }
+
+                // Count style of content rows
+                for &line_idx in &table_block.content_lines {
+                    if let Some(style) = TableUtils::determine_pipe_style(lines[line_idx]) {
+                        match style {
+                            "leading_and_trailing" => leading_and_trailing_count += 1,
+                            "no_leading_or_trailing" => no_leading_or_trailing_count += 1,
+                            "leading_only" => leading_only_count += 1,
+                            "trailing_only" => trailing_only_count += 1,
+                            _ => {}
                         }
+                    }
+                }
+
+                // Determine most prevalent style
+                // In case of tie, prefer leading_and_trailing (most common, widely supported)
+                let max_count = leading_and_trailing_count
+                    .max(no_leading_or_trailing_count)
+                    .max(leading_only_count)
+                    .max(trailing_only_count);
+
+                if max_count > 0 {
+                    if leading_and_trailing_count == max_count {
+                        table_style = Some("leading_and_trailing");
+                    } else if no_leading_or_trailing_count == max_count {
+                        table_style = Some("no_leading_or_trailing");
+                    } else if leading_only_count == max_count {
+                        table_style = Some("leading_only");
+                    } else if trailing_only_count == max_count {
+                        table_style = Some("trailing_only");
                     }
                 }
             }

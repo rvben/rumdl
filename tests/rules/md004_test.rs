@@ -39,12 +39,13 @@ fn test_check_specific_style_invalid() {
 }
 
 #[test]
-fn test_fix_consistent() {
+fn test_fix_consistent_tie_prefers_dash() {
+    // All markers appear once - tie should prefer dash
     let content = "* Item 1\n- Item 2\n+ Item 3";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "* Item 1\n* Item 2\n* Item 3");
+    assert_eq!(fixed, "- Item 1\n- Item 2\n- Item 3");
 }
 
 #[test]
@@ -113,39 +114,43 @@ fn test_check_mixed_indentation() {
 }
 
 #[test]
-fn test_check_consistent_first_marker_plus() {
+fn test_check_consistent_tie_all_markers() {
+    // All markers appear once - tie should prefer dash
     let content = "+ Item 1\n* Item 2\n- Item 3";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings.len(), 2); // Plus and asterisk are flagged
 }
 
 #[test]
-fn test_check_consistent_first_marker_dash() {
-    let content = "- Item 1\n* Item 2\n+ Item 3";
+fn test_check_consistent_dash_most_prevalent() {
+    // Dash is most prevalent (2 vs 1 each for others)
+    let content = "- Item 1\n* Item 2\n- Item 3\n+ Item 4";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings.len(), 2); // Asterisk and plus are flagged
 }
 
 #[test]
-fn test_fix_consistent_first_marker_plus() {
+fn test_fix_consistent_tie_all_markers() {
+    // All markers appear once - tie should prefer dash
     let content = "+ Item 1\n* Item 2\n- Item 3";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
-    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "+ Item 1\n+ Item 2\n+ Item 3");
-}
-
-#[test]
-fn test_fix_consistent_first_marker_dash() {
-    let content = "- Item 1\n* Item 2\n+ Item 3";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "- Item 1\n- Item 2\n- Item 3");
+}
+
+#[test]
+fn test_fix_consistent_dash_most_prevalent() {
+    // Dash is most prevalent
+    let content = "- Item 1\n* Item 2\n- Item 3\n+ Item 4";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "- Item 1\n- Item 2\n- Item 3\n- Item 4");
 }
 
 #[test]
@@ -354,13 +359,15 @@ fn test_lists_in_code_blocks() {
 #[test]
 fn test_nested_list_complexity() {
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+    // * appears 2 times, - appears 2 times, + appears 1 time
+    // Tie between * and - should prefer dash
     let content = "* Item 1\n  - Item 2\n    + Item 3\n  - Item 5\n* Item 6\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Flags mixed markers (- and + don't match the first marker *)
-    assert_eq!(result.len(), 3); // - on line 2, + on line 3, - on line 4
+    // Dash wins due to tie-breaker, so asterisks and plus are flagged
+    assert_eq!(result.len(), 3); // * on line 1, + on line 3, * on line 5
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3\n  * Item 5\n* Item 6\n");
+    assert_eq!(fixed, "- Item 1\n  - Item 2\n    - Item 3\n  - Item 5\n- Item 6\n");
 }
 
 #[test]
@@ -526,21 +533,23 @@ fn test_deeply_nested_sublist_style_matching() {
 #[test]
 fn test_lists_after_paragraphs() {
     // Test lists that appear after other content
+    // * appears 2 times, - appears 1 time, + appears 1 time → asterisk wins
     let content = "This is a paragraph.\n\n* Item 1\n- Item 2\n\nAnother paragraph.\n\n+ Item 3\n* Item 4";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 2); // - and + don't match first marker *
+    assert_eq!(warnings.len(), 2); // - and + don't match most prevalent marker *
 }
 
 #[test]
 fn test_lists_after_headings() {
     // Test lists that appear after headings
+    // - appears 2 times, * appears 1 time, + appears 1 time → dash wins
     let content = "# Heading 1\n\n- Item 1\n- Item 2\n\n## Heading 2\n\n* Item 3\n+ Item 4";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 2); // * and + don't match first marker -
+    assert_eq!(warnings.len(), 2); // * and + don't match most prevalent marker -
 }
 
 #[test]
@@ -559,11 +568,12 @@ fn test_fix_preserves_list_content() {
 #[test]
 fn test_multiple_lists_in_blockquotes() {
     // Test multiple lists inside blockquotes
+    // * appears 2 times, - appears 1 time, + appears 1 time → asterisk wins
     let content = "> * Quoted item 1\n> - Quoted item 2\n>\n> + New list item 1\n> * New list item 2";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 2); // - and + don't match first marker *
+    assert_eq!(warnings.len(), 2); // - and + don't match most prevalent marker *
 
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(

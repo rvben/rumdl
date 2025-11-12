@@ -62,14 +62,15 @@ fn test_consistent_style_first_asterisk() {
 #[test]
 fn test_consistent_style_first_underscore() {
     let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
+    // One underscore and one asterisk - tie prefers asterisk
     let content = "# Mixed emphasis\n\nThis is _underscore_ and this is *asterisk*";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
     let fixed = rule.fix(&ctx).unwrap();
-    // Use contains for more flexible assertion
-    assert!(fixed.contains("This is _underscore_ and this is _asterisk_"));
+    // Tie-breaker prefers asterisk (matches CommonMark recommendation)
+    assert!(fixed.contains("This is *underscore* and this is *asterisk*"));
 }
 
 #[test]

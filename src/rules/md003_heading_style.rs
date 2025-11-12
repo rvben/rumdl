@@ -41,26 +41,47 @@ impl MD003HeadingStyle {
             return self.config.style;
         }
 
-        // Find the first heading from cached info
+        // Count all heading styles to determine most prevalent (prevalence-based approach)
+        let mut atx_count = 0;
+        let mut atx_closed_count = 0;
+        let mut setext1_count = 0;
+        let mut setext2_count = 0;
+
         for line_info in &ctx.lines {
             if let Some(heading) = &line_info.heading {
-                // Map from LintContext heading style to rules heading style
-                return match heading.style {
+                // Map from LintContext heading style to rules heading style and count
+                match heading.style {
                     crate::lint_context::HeadingStyle::ATX => {
                         if heading.has_closing_sequence {
-                            HeadingStyle::AtxClosed
+                            atx_closed_count += 1;
                         } else {
-                            HeadingStyle::Atx
+                            atx_count += 1;
                         }
                     }
-                    crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
-                    crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
-                };
+                    crate::lint_context::HeadingStyle::Setext1 => setext1_count += 1,
+                    crate::lint_context::HeadingStyle::Setext2 => setext2_count += 1,
+                }
             }
         }
 
-        // Default to ATX if no headings found
-        HeadingStyle::Atx
+        // Determine most prevalent style
+        // In case of tie, prefer ATX (most common, widely supported)
+        let max_count = atx_count.max(atx_closed_count).max(setext1_count).max(setext2_count);
+
+        if max_count == 0 {
+            // No headings found, default to ATX
+            return HeadingStyle::Atx;
+        }
+
+        if atx_count == max_count {
+            HeadingStyle::Atx
+        } else if atx_closed_count == max_count {
+            HeadingStyle::AtxClosed
+        } else if setext1_count == max_count {
+            HeadingStyle::Setext1
+        } else {
+            HeadingStyle::Setext2
+        }
     }
 }
 

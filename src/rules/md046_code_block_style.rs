@@ -557,10 +557,8 @@ impl MD046CodeBlockStyle {
         }
 
         let lines: Vec<&str> = content.lines().collect();
-        let mut fenced_found = false;
-        let mut indented_found = false;
-        let mut fenced_line = usize::MAX;
-        let mut indented_line = usize::MAX;
+        let mut fenced_count = 0;
+        let mut indented_count = 0;
 
         // Pre-compute list and tab contexts for efficiency
         let in_list_context = self.precompute_block_continuation_context(&lines);
@@ -570,33 +568,49 @@ impl MD046CodeBlockStyle {
             vec![false; lines.len()]
         };
 
-        // Scan through all lines to find code blocks
+        // Count all code block occurrences (prevalence-based approach)
+        let mut in_fenced = false;
+        let mut prev_was_indented = false;
+
         for (i, line) in lines.iter().enumerate() {
             if self.is_fenced_code_block_start(line) {
-                fenced_found = true;
-                fenced_line = fenced_line.min(i);
-            } else if self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &in_list_context, &in_tab_context)
+                if !in_fenced {
+                    // Opening fence
+                    fenced_count += 1;
+                    in_fenced = true;
+                } else {
+                    // Closing fence
+                    in_fenced = false;
+                }
+            } else if !in_fenced
+                && self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &in_list_context, &in_tab_context)
             {
-                indented_found = true;
-                indented_line = indented_line.min(i);
+                // Count each continuous indented block once
+                if !prev_was_indented {
+                    indented_count += 1;
+                }
+                prev_was_indented = true;
+            } else {
+                prev_was_indented = false;
             }
         }
 
-        if !fenced_found && !indented_found {
+        if fenced_count == 0 && indented_count == 0 {
             // No code blocks found
             None
-        } else if fenced_found && !indented_found {
+        } else if fenced_count > 0 && indented_count == 0 {
             // Only fenced blocks found
             Some(CodeBlockStyle::Fenced)
-        } else if !fenced_found && indented_found {
+        } else if fenced_count == 0 && indented_count > 0 {
             // Only indented blocks found
             Some(CodeBlockStyle::Indented)
         } else {
-            // Both types found - use the first one encountered
-            if indented_line < fenced_line {
-                Some(CodeBlockStyle::Indented)
-            } else {
+            // Both types found - use most prevalent
+            // In case of tie, prefer fenced (more common, widely supported)
+            if fenced_count >= indented_count {
                 Some(CodeBlockStyle::Fenced)
+            } else {
+                Some(CodeBlockStyle::Indented)
             }
         }
     }
