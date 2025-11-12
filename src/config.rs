@@ -1369,6 +1369,62 @@ disable = ["MD001"]
         assert!(schema_json.contains("\"global\""));
         assert!(schema_json.contains("\"per-file-ignores\""));
     }
+
+    #[test]
+    fn test_user_config_loaded_with_explicit_project_config() {
+        // Regression test for issue #131: User config should always be loaded as base layer,
+        // even when an explicit project config path is provided
+        let temp_dir = tempdir().unwrap();
+
+        // Create a fake user config directory
+        let user_config_dir = temp_dir.path().join("user_config");
+        fs::create_dir_all(&user_config_dir).unwrap();
+        let user_config_path = user_config_dir.join("rumdl.toml");
+
+        // User config disables MD013 and MD041
+        let user_config_content = r#"
+[global]
+disable = ["MD013", "MD041"]
+line-length = 100
+"#;
+        fs::write(&user_config_path, user_config_content).unwrap();
+
+        // Create a project config that enables MD001
+        let project_config_path = temp_dir.path().join("project").join("pyproject.toml");
+        fs::create_dir_all(project_config_path.parent().unwrap()).unwrap();
+        let project_config_content = r#"
+[tool.rumdl]
+enable = ["MD001"]
+"#;
+        fs::write(&project_config_path, project_config_content).unwrap();
+
+        // Load config with explicit project path, passing user_config_dir
+        let sourced = SourcedConfig::load_with_discovery_impl(
+            Some(project_config_path.to_str().unwrap()),
+            None,
+            false,
+            Some(&user_config_dir),
+        )
+        .unwrap();
+
+        let config: Config = sourced.into();
+
+        // User config settings should be preserved
+        assert!(
+            config.global.disable.contains(&"MD013".to_string()),
+            "User config disabled rules should be preserved"
+        );
+        assert!(
+            config.global.disable.contains(&"MD041".to_string()),
+            "User config disabled rules should be preserved"
+        );
+
+        // Project config settings should also be applied (merged on top)
+        assert!(
+            config.global.enable.contains(&"MD001".to_string()),
+            "Project config enabled rules should be applied"
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1828,7 +1884,45 @@ impl SourcedConfig {
         }
         let mut sourced_config = SourcedConfig::default();
 
-        // 1. Load explicit config path if provided
+        // 1. Always load user configuration first (unless auto-discovery is disabled)
+        // User config serves as the base layer that project configs build upon
+        if !skip_auto_discovery {
+            let user_config_path = if let Some(dir) = user_config_dir {
+                Self::user_configuration_path_impl(dir)
+            } else {
+                Self::user_configuration_path()
+            };
+
+            if let Some(user_config_path) = user_config_path {
+                let path_str = user_config_path.display().to_string();
+                let filename = user_config_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+                log::debug!("[rumdl-config] Loading user configuration file: {path_str}");
+
+                if filename == "pyproject.toml" {
+                    let content = std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
+                        source: e,
+                        path: path_str.clone(),
+                    })?;
+                    if let Some(fragment) = parse_pyproject_toml(&content, &path_str)? {
+                        sourced_config.merge(fragment);
+                        sourced_config.loaded_files.push(path_str);
+                    }
+                } else {
+                    let content = std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
+                        source: e,
+                        path: path_str.clone(),
+                    })?;
+                    let fragment = parse_rumdl_toml(&content, &path_str)?;
+                    sourced_config.merge(fragment);
+                    sourced_config.loaded_files.push(path_str);
+                }
+            } else {
+                log::debug!("[rumdl-config] No user configuration file found");
+            }
+        }
+
+        // 2. Load explicit config path if provided (overrides user config)
         if let Some(path) = config_path {
             let path_obj = Path::new(path);
             let filename = path_obj.file_name().and_then(|name| name.to_str()).unwrap_or("");
@@ -1876,44 +1970,9 @@ impl SourcedConfig {
             }
         }
 
-        // Only perform auto-discovery if not skipped AND no explicit config path provided
+        // 3. Perform auto-discovery for project config if not skipped AND no explicit config path
         if !skip_auto_discovery && config_path.is_none() {
-            // Step 1: Load user configuration first (as a base)
-            let user_config_path = if let Some(dir) = user_config_dir {
-                Self::user_configuration_path_impl(dir)
-            } else {
-                Self::user_configuration_path()
-            };
-
-            if let Some(user_config_path) = user_config_path {
-                let path_str = user_config_path.display().to_string();
-                let filename = user_config_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                log::debug!("[rumdl-config] Loading user configuration file: {path_str}");
-
-                if filename == "pyproject.toml" {
-                    let content = std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
-                        source: e,
-                        path: path_str.clone(),
-                    })?;
-                    if let Some(fragment) = parse_pyproject_toml(&content, &path_str)? {
-                        sourced_config.merge(fragment);
-                        sourced_config.loaded_files.push(path_str);
-                    }
-                } else {
-                    let content = std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
-                        source: e,
-                        path: path_str.clone(),
-                    })?;
-                    let fragment = parse_rumdl_toml(&content, &path_str)?;
-                    sourced_config.merge(fragment);
-                    sourced_config.loaded_files.push(path_str);
-                }
-            } else {
-                log::debug!("[rumdl-config] No user configuration file found");
-            }
-
-            // Step 2: Look for project configuration files (override user config)
+            // Look for project configuration files (override user config)
             if let Some(config_file) = Self::discover_config_upward() {
                 let path_str = config_file.display().to_string();
                 let filename = config_file.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -1941,7 +2000,7 @@ impl SourcedConfig {
             } else {
                 log::debug!("[rumdl-config] No configuration file found via upward traversal");
 
-                // Step 3: If no project config found, fallback to markdownlint config in current directory
+                // If no project config found, fallback to markdownlint config in current directory
                 let mut found_markdownlint = false;
                 for filename in MARKDOWNLINT_CONFIG_FILES {
                     if std::path::Path::new(filename).exists() {
@@ -1965,7 +2024,7 @@ impl SourcedConfig {
             }
         }
 
-        // 5. Apply CLI overrides (highest precedence)
+        // 4. Apply CLI overrides (highest precedence)
         if let Some(cli) = cli_overrides {
             sourced_config
                 .global
