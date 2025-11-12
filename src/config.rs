@@ -1377,9 +1377,11 @@ disable = ["MD001"]
         let temp_dir = tempdir().unwrap();
 
         // Create a fake user config directory
+        // Note: user_configuration_path_impl adds /rumdl to the config dir
         let user_config_dir = temp_dir.path().join("user_config");
-        fs::create_dir_all(&user_config_dir).unwrap();
-        let user_config_path = user_config_dir.join("rumdl.toml");
+        let rumdl_config_dir = user_config_dir.join("rumdl");
+        fs::create_dir_all(&rumdl_config_dir).unwrap();
+        let user_config_path = rumdl_config_dir.join("rumdl.toml");
 
         // User config disables MD013 and MD041
         let user_config_content = r#"
