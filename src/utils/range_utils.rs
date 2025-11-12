@@ -4,14 +4,14 @@ use std::collections::HashSet;
 use std::ops::Range;
 
 #[derive(Debug)]
-pub struct LineIndex {
+pub struct LineIndex<'a> {
     line_starts: Vec<usize>,
-    content: String,
+    content: &'a str,
     code_block_lines: Option<HashSet<usize>>,
 }
 
-impl LineIndex {
-    pub fn new(content: String) -> Self {
+impl<'a> LineIndex<'a> {
+    pub fn new(content: &'a str) -> Self {
         let mut line_starts = vec![0];
         let mut pos = 0;
 
@@ -135,7 +135,7 @@ impl LineIndex {
 
     /// Get a reference to the content
     pub fn get_content(&self) -> &str {
-        &self.content
+        self.content
     }
 
     /// Pre-compute which lines are within code blocks for faster lookup
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_whole_line_range() {
-        let content = "Line 1\nLine 2\nLine 3".to_string();
+        let content = "Line 1\nLine 2\nLine 3";
         let line_index = LineIndex::new(content);
 
         // Test first line (includes newline)
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_line_content_range() {
-        let content = "Line 1\nLine 2\nLine 3".to_string();
+        let content = "Line 1\nLine 2\nLine 3";
         let line_index = LineIndex::new(content);
 
         // Test first line content (excludes newline)
@@ -444,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_line_text_range() {
-        let content = "Hello world\nAnother line".to_string();
+        let content = "Hello world\nAnother line";
         let line_index = LineIndex::new(content);
 
         // Test partial text in first line

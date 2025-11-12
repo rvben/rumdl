@@ -285,7 +285,7 @@ fn test_indented_headings() {
 fn test_code_block_detection() {
     let _rule = MD022BlanksAroundHeadings::default();
     let content = "# Real Heading\n\nSome content.\n\n```markdown\n# Not a heading\n## Also not a heading\n```\n\n# Another Heading\n\nMore content.";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Test if lines are inside a code block (including both markers and content)
     assert!(!index.is_code_block(0)); // # Real Heading
@@ -300,7 +300,7 @@ fn test_code_block_detection() {
 #[test]
 fn test_line_index() {
     let content = "# Heading 1\n\nSome text\n\n## Heading 2\n";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Test line_col_to_byte_range
     assert_eq!(index.line_col_to_byte_range(1, 1), 0..0);

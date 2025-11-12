@@ -69,7 +69,7 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
         let mut prev_level: Option<usize> = None;
 

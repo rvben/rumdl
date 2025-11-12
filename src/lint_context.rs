@@ -402,7 +402,7 @@ pub struct LintContext<'a> {
     bare_urls_cache: Mutex<Option<Arc<Vec<BareUrl>>>>, // Lazy-loaded bare URLs
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
-    pub line_index: crate::utils::range_utils::LineIndex, // Pre-computed line index for byte position calculations
+    pub line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed line index for byte position calculations
     jinja_ranges: Vec<(usize, usize)>,    // Pre-computed Jinja template ranges ({{ }}, {% %})
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
 }
@@ -582,7 +582,7 @@ impl<'a> LintContext<'a> {
 
         // Pre-compute LineIndex once for all rules (eliminates 46x content cloning)
         let start = Instant::now();
-        let line_index = crate::utils::range_utils::LineIndex::new(content.to_string());
+        let line_index = crate::utils::range_utils::LineIndex::new(content);
         if profile {
             eprintln!("[PROFILE] Line index: {:?}", start.elapsed());
         }

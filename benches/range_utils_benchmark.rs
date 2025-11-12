@@ -48,7 +48,7 @@ fn bench_range_utils(c: &mut Criterion) {
     let content = generate_test_content(line_count);
 
     // New cached implementation
-    let line_index = LineIndex::new(content.clone());
+    let line_index = LineIndex::new(&content);
     c.bench_function("cached_line_col_to_byte_range", |b| {
         b.iter(|| {
             for line in [1, 100, 1000, 5000, 9999].iter() {

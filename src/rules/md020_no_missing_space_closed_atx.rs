@@ -103,7 +103,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     // This will detect both properly closed headings with missing space
                     // and malformed attempts at closed headings like "# Heading#"
                     if self.is_closed_atx_heading_without_space(line) {
-                        let line_index = LineIndex::new(ctx.content.to_string());
+                        let line_index = LineIndex::new(ctx.content);
                         let line_range = line_index.line_content_range(line_num + 1);
 
                         let mut start_col = 1;

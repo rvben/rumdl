@@ -106,7 +106,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: {
-                                    let line_index = LineIndex::new(ctx.content.to_string());
+                                    let line_index = LineIndex::new(ctx.content);
                                     let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
                                     let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
                                     start_byte..end_byte
@@ -133,7 +133,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         severity: Severity::Warning,
                         fix: Some(Fix {
                             range: {
-                                let line_index = LineIndex::new(ctx.content.to_string());
+                                let line_index = LineIndex::new(ctx.content);
                                 line_index.line_col_to_byte_range(line_num, 1)
                             },
                             replacement: fixed_line,

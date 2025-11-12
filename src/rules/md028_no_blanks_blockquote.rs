@@ -186,7 +186,7 @@ impl Rule for MD028NoBlanksBlockquote {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
 
         // Get all lines

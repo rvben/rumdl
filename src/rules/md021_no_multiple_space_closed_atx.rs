@@ -80,7 +80,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
 
         // Check all closed ATX headings from cached info

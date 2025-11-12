@@ -199,28 +199,28 @@ pub enum CodeBlockState {
 
 /// Structure to hold pre-computed code block information
 #[derive(Debug)]
-pub struct CodeBlockInfo {
+pub struct CodeBlockInfo<'a> {
     /// Whether each line is in a code block, and which type
     pub block_states: Vec<CodeBlockState>,
     /// Positions of code spans in the text (start, end)
     pub code_spans: Vec<(usize, usize)>,
     /// The original content used to create this info
-    content: String,
+    content: &'a str,
     /// LineIndex for correct byte position calculations across all line ending types
-    line_index: LineIndex,
+    line_index: LineIndex<'a>,
 }
 
-impl CodeBlockInfo {
+impl<'a> CodeBlockInfo<'a> {
     /// Create a new CodeBlockInfo by analyzing the content
-    pub fn new(content: &str) -> Self {
+    pub fn new(content: &'a str) -> Self {
         let block_states = compute_code_blocks(content);
         let code_spans = compute_code_spans(content);
-        let line_index = LineIndex::new(content.to_string());
+        let line_index = LineIndex::new(content);
 
         CodeBlockInfo {
             block_states,
             code_spans,
-            content: content.to_string(),
+            content,
             line_index,
         }
     }

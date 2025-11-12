@@ -22,7 +22,7 @@ impl Rule for MD023HeadingStartLeft {
             return Ok(vec![]);
         }
 
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
 
         // Process all headings using cached heading information

@@ -637,7 +637,7 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // First, always check for unclosed code blocks
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
         let unclosed_warnings = self.check_unclosed_code_blocks(ctx, &line_index)?;
 
         // If we found unclosed blocks, return those warnings first
@@ -669,7 +669,7 @@ impl Rule for MD046CodeBlockStyle {
         };
 
         // Process each line to find style inconsistencies
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
 
         // Pre-compute which lines are inside FENCED code blocks (not indented)
         // Use pre-computed code blocks from context
@@ -780,7 +780,7 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // First check if we have nested fence issues that need special handling
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
         let unclosed_warnings = self.check_unclosed_code_blocks(ctx, &line_index)?;
 
         // If we have nested fence warnings, apply those fixes first

@@ -74,7 +74,7 @@ fn test_line_index() {
     let content = r#"1. First item
 2. Second item
 3. Third item"#;
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // The byte range should be calculated based on the actual content
     // Line 2, Column 1 corresponds to the beginning of "2. Second item" which is at index 14

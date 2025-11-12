@@ -101,7 +101,7 @@ impl Rule for MD003HeadingStyle {
         let target_style = self.get_target_style(ctx);
 
         // Create LineIndex once outside the loop
-        let line_index = crate::utils::range_utils::LineIndex::new(ctx.content.to_string());
+        let line_index = crate::utils::range_utils::LineIndex::new(ctx.content);
 
         // Process headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {

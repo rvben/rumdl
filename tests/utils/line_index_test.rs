@@ -3,7 +3,7 @@ use rumdl_lib::utils::range_utils::LineIndex;
 #[test]
 fn test_backtick_code_fence_detection() {
     let content = "# Heading\n\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n\nText after.";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Not in code block
     assert!(!index.is_code_block(0)); // # Heading
@@ -24,7 +24,7 @@ fn test_backtick_code_fence_detection() {
 #[test]
 fn test_tilde_code_fence_detection() {
     let content = "# Heading\n\n~~~\nSome code\nMore code\n~~~\n\nText after.";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Not in code block
     assert!(!index.is_code_block(0)); // # Heading
@@ -44,7 +44,7 @@ fn test_tilde_code_fence_detection() {
 #[test]
 fn test_indented_code_block_detection() {
     let content = "# Heading\n\n    This is an indented code block\n    More indented code\n\nText after.";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Not in code block
     assert!(!index.is_code_block(0)); // # Heading
@@ -62,7 +62,7 @@ fn test_indented_code_block_detection() {
 #[test]
 fn test_tab_indented_code_block_detection() {
     let content = "# Heading\n\n\tThis is a tab-indented code block\n\tMore tab-indented code\n\nText after.";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Not in code block
     assert!(!index.is_code_block(0)); // # Heading
@@ -89,7 +89,7 @@ fn test_nested_code_blocks() {
         println!("Line {i}: '{line}'");
     });
 
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Debug information
     println!("\nContent lines with is_code_block status:");
@@ -123,7 +123,7 @@ fn test_nested_code_blocks() {
 #[test]
 fn test_mixed_code_blocks() {
     let content = "# Heading\n\n```\nBacktick code\n```\n\n~~~\nTilde code\n~~~\n\n    Indented code\n\nText after.";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Backtick block
     assert!(index.is_code_block(2)); // ```
@@ -151,16 +151,16 @@ fn test_mixed_code_blocks() {
 fn test_edge_cases() {
     // Test for empty content
     let empty = "";
-    let _empty_index = LineIndex::new(empty.to_string());
+    let _empty_index = LineIndex::new(empty);
 
     // Test for single line content
     let single_line = "Just one line";
-    let single_line_index = LineIndex::new(single_line.to_string());
+    let single_line_index = LineIndex::new(single_line);
     assert!(!single_line_index.is_code_block(0));
 
     // Test for code block at start of document
     let start_code = "```\nCode at start\n```\nText after";
-    let start_code_index = LineIndex::new(start_code.to_string());
+    let start_code_index = LineIndex::new(start_code);
     assert!(start_code_index.is_code_block(0));
     assert!(start_code_index.is_code_block(1));
     assert!(start_code_index.is_code_block(2));
@@ -168,7 +168,7 @@ fn test_edge_cases() {
 
     // Test for code block at end of document
     let end_code = "Text before\n```\nCode at end\n```";
-    let end_code_index = LineIndex::new(end_code.to_string());
+    let end_code_index = LineIndex::new(end_code);
     assert!(!end_code_index.is_code_block(0));
     assert!(end_code_index.is_code_block(1));
     assert!(end_code_index.is_code_block(2));
@@ -176,7 +176,7 @@ fn test_edge_cases() {
 
     // Test for unclosed code block
     let unclosed = "```\nUnclosed code block";
-    let unclosed_index = LineIndex::new(unclosed.to_string());
+    let unclosed_index = LineIndex::new(unclosed);
     assert!(unclosed_index.is_code_block(0));
     assert!(unclosed_index.is_code_block(1));
 }
@@ -184,7 +184,7 @@ fn test_edge_cases() {
 #[test]
 fn test_is_code_fence() {
     let content = "# Heading\n\n```rust\nCode\n```\n\n~~~\nMore code\n~~~";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Test backtick fence
     assert!(index.is_code_fence(2)); // ```rust
@@ -203,7 +203,7 @@ fn test_is_code_fence() {
 #[test]
 fn test_is_tilde_code_block() {
     let content = "# Heading\n\n```rust\nCode\n```\n\n~~~\nMore code\n~~~";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     // Test tilde fence
     assert!(index.is_tilde_code_block(6)); // ~~~
@@ -218,7 +218,7 @@ fn test_is_tilde_code_block() {
 #[test]
 fn test_get_content() {
     let content = "# Test content";
-    let index = LineIndex::new(content.to_string());
+    let index = LineIndex::new(content);
 
     assert_eq!(index.get_content(), content);
 }

@@ -184,7 +184,7 @@ impl Rule for MD025SingleTitle {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
 
         // Check for front matter title if configured

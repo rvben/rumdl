@@ -429,7 +429,7 @@ impl MD013LineLength {
         lines: &[&str],
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
 
         let mut i = 0;
         while i < lines.len() {

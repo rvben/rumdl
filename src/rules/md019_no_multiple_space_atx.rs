@@ -38,7 +38,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
         let mut warnings = Vec::new();
 
         // Create LineIndex once outside the loop
-        let line_index = LineIndex::new(ctx.content.to_string());
+        let line_index = LineIndex::new(ctx.content);
 
         // Check all ATX headings from cached info
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
