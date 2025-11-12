@@ -88,6 +88,7 @@ pretty_assertions = "1.4"
 unicode-segmentation = "1.12"
 serial_test = "3.2"
 jsonschema = "0.33"
+ureq = "2.12"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
