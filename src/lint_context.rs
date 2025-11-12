@@ -1065,8 +1065,10 @@ impl<'a> LintContext<'a> {
 
                             // Find MATCHING ] by tracking bracket depth for nested brackets
                             // An unescaped bracket is one NOT preceded by an odd number of backslashes
+                            // Brackets inside code spans (between backticks) should be ignored
                             let mut close_pos = None;
                             let mut depth = 0;
+                            let mut in_code_span = false;
 
                             for (i, &byte) in link_bytes.iter().enumerate().skip(1) {
                                 // Count preceding backslashes
@@ -1078,7 +1080,13 @@ impl<'a> LintContext<'a> {
                                 }
                                 let is_escaped = backslash_count % 2 != 0;
 
-                                if !is_escaped {
+                                // Track code spans - backticks toggle in/out of code
+                                if byte == b'`' && !is_escaped {
+                                    in_code_span = !in_code_span;
+                                }
+
+                                // Only count brackets when NOT in a code span
+                                if !is_escaped && !in_code_span {
                                     if byte == b'[' {
                                         depth += 1;
                                     } else if byte == b']' {

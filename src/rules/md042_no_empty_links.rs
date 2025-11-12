@@ -725,6 +725,21 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
     }
 
     #[test]
+    fn test_link_with_inline_code_in_text() {
+        // Links with inline code in the text should NOT be flagged as empty
+        let ctx = LintContext::new(
+            "[`#[derive(Serialize, Deserialize)`](https://serde.rs/derive.html)",
+            crate::config::MarkdownFlavor::Standard,
+        );
+        let rule = MD042NoEmptyLinks::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Links with inline code should not be flagged as empty. Got: {result:?}"
+        );
+    }
+
+    #[test]
     fn test_mkdocs_backtick_wrapped_references() {
         // Test for issue #97 - backtick-wrapped references should be recognized as MkDocs auto-references
         let rule = MD042NoEmptyLinks::new();
