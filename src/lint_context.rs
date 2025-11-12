@@ -54,10 +54,10 @@ static BLOCKQUOTE_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"
 /// Pre-computed information about a line
 #[derive(Debug, Clone)]
 pub struct LineInfo {
-    /// The actual line content (without newline)
-    pub content: String,
     /// Byte offset where this line starts in the document
     pub byte_offset: usize,
+    /// Length of the line in bytes (without newline)
+    pub byte_len: usize,
     /// Number of leading spaces/tabs
     pub indent: usize,
     /// Whether the line is blank (empty or only whitespace)
@@ -80,6 +80,13 @@ pub struct LineInfo {
     pub in_mkdocstrings: bool,
     /// Whether this line is part of an ESM import/export block (MDX only)
     pub in_esm_block: bool,
+}
+
+impl LineInfo {
+    /// Get the line content as a string slice from the source document
+    pub fn content<'a>(&self, source: &'a str) -> &'a str {
+        &source[self.byte_offset..self.byte_offset + self.byte_len]
+    }
 }
 
 /// Information about a list item
@@ -502,14 +509,14 @@ impl<'a> LintContext<'a> {
 
         // Detect HTML blocks BEFORE heading detection
         let start = Instant::now();
-        Self::detect_html_blocks(&mut lines);
+        Self::detect_html_blocks(content, &mut lines);
         if profile {
             eprintln!("[PROFILE] HTML blocks: {:?}", start.elapsed());
         }
 
         // Detect ESM import/export blocks in MDX files BEFORE heading detection
         let start = Instant::now();
-        Self::detect_esm_blocks(&mut lines, flavor);
+        Self::detect_esm_blocks(content, &mut lines, flavor);
         if profile {
             eprintln!("[PROFILE] ESM blocks: {:?}", start.elapsed());
         }
@@ -549,7 +556,7 @@ impl<'a> LintContext<'a> {
         }
 
         let start = Instant::now();
-        let list_blocks = Self::parse_list_blocks(&lines);
+        let list_blocks = Self::parse_list_blocks(content, &lines);
         if profile {
             eprintln!("[PROFILE] List blocks: {:?}", start.elapsed());
         }
@@ -655,7 +662,7 @@ impl<'a> LintContext<'a> {
     pub fn table_rows(&self) -> Arc<Vec<TableRow>> {
         let mut cache = self.table_rows_cache.lock().expect("Table rows cache mutex poisoned");
 
-        Arc::clone(cache.get_or_insert_with(|| Arc::new(Self::parse_table_rows(&self.lines))))
+        Arc::clone(cache.get_or_insert_with(|| Arc::new(Self::parse_table_rows(self.content, &self.lines))))
     }
 
     /// Get bare URLs - computed lazily on first access
@@ -933,7 +940,7 @@ impl<'a> LintContext<'a> {
         let idx = match lines.binary_search_by(|line| {
             if byte_offset < line.byte_offset {
                 std::cmp::Ordering::Greater
-            } else if byte_offset > line.byte_offset + line.content.len() {
+            } else if byte_offset > line.byte_offset + line.byte_len {
                 std::cmp::Ordering::Less
             } else {
                 std::cmp::Ordering::Equal
@@ -1046,7 +1053,7 @@ impl<'a> LintContext<'a> {
                         let (line_idx, line_num, col_start) = Self::find_line_for_offset(lines, start_pos);
 
                         // Skip if this link is on a MkDocs snippet line
-                        if is_mkdocs_snippet_line(&lines[line_idx].content, flavor) {
+                        if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
                             text_chunks.clear();
                             continue;
                         }
@@ -1202,7 +1209,7 @@ impl<'a> LintContext<'a> {
             let (line_idx, line_num, col_start) = Self::find_line_for_offset(lines, match_start);
 
             // Skip if this link is on a MkDocs snippet line
-            if is_mkdocs_snippet_line(&lines[line_idx].content, flavor) {
+            if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
                 continue;
             }
 
@@ -1430,7 +1437,7 @@ impl<'a> LintContext<'a> {
     }
 
     /// Parse reference definitions
-    fn parse_reference_defs(_content: &str, lines: &[LineInfo]) -> Vec<ReferenceDef> {
+    fn parse_reference_defs(content: &str, lines: &[LineInfo]) -> Vec<ReferenceDef> {
         // Pre-size based on lines count as reference definitions are line-based
         let mut refs = Vec::with_capacity(lines.len() / 20); // ~1 ref per 20 lines
 
@@ -1440,7 +1447,7 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            let line = &line_info.content;
+            let line = line_info.content(content);
             let line_num = line_idx + 1;
 
             if let Some(cap) = REF_DEF_PATTERN.captures(line) {
@@ -1730,8 +1737,8 @@ impl<'a> LintContext<'a> {
             };
 
             lines.push(LineInfo {
-                content: line.to_string(),
                 byte_offset,
+                byte_len: line.len(),
                 indent,
                 is_blank,
                 in_code_block,
@@ -2006,7 +2013,7 @@ impl<'a> LintContext<'a> {
     }
 
     /// Detect HTML blocks in the content
-    fn detect_html_blocks(lines: &mut [LineInfo]) {
+    fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
         // HTML block elements that trigger block context
         const BLOCK_ELEMENTS: &[&str] = &[
             "address",
@@ -2059,7 +2066,7 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            let trimmed = lines[i].content.trim_start();
+            let trimmed = lines[i].content(content).trim_start();
 
             // Check if line starts with an HTML tag
             if trimmed.starts_with('<') && trimmed.len() > 1 {
@@ -2097,7 +2104,7 @@ impl<'a> LintContext<'a> {
                             lines[j].in_html_block = true;
 
                             // Check if this line contains the closing tag
-                            if lines[j].content.contains(&closing_tag) {
+                            if lines[j].content(content).contains(&closing_tag) {
                                 break;
                             }
                             j += 1;
@@ -2112,7 +2119,7 @@ impl<'a> LintContext<'a> {
 
     /// Detect ESM import/export blocks in MDX files
     /// ESM blocks consist of contiguous import/export statements at the top of the file
-    fn detect_esm_blocks(lines: &mut [LineInfo], flavor: MarkdownFlavor) {
+    fn detect_esm_blocks(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) {
         // Only process MDX files
         if !flavor.supports_esm_blocks() {
             return;
@@ -2125,7 +2132,7 @@ impl<'a> LintContext<'a> {
             }
 
             // Check if line starts with import or export
-            let trimmed = line.content.trim_start();
+            let trimmed = line.content(content).trim_start();
             if trimmed.starts_with("import ") || trimmed.starts_with("export ") {
                 line.in_esm_block = true;
             } else {
@@ -2198,7 +2205,7 @@ impl<'a> LintContext<'a> {
     }
 
     /// Parse all list blocks in the content (legacy line-by-line approach)
-    fn parse_list_blocks(lines: &[LineInfo]) -> Vec<ListBlock> {
+    fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBlock> {
         // Pre-size based on lines that could be list items
         let mut list_blocks = Vec::with_capacity(lines.len() / 10); // Estimate ~10% of lines might start list blocks
         let mut current_block: Option<ListBlock> = None;
@@ -2213,7 +2220,8 @@ impl<'a> LintContext<'a> {
             if line_info.in_code_block {
                 if let Some(ref mut block) = current_block {
                     // Calculate minimum indentation for list continuation
-                    let min_continuation_indent = CodeBlockUtils::calculate_min_continuation_indent(lines, line_idx);
+                    let min_continuation_indent =
+                        CodeBlockUtils::calculate_min_continuation_indent(content, lines, line_idx);
 
                     // Analyze code block context using the three-tier classification
                     let context = CodeBlockUtils::analyze_code_block_context(lines, line_idx, min_continuation_indent);
@@ -2243,7 +2251,7 @@ impl<'a> LintContext<'a> {
             }
 
             // Extract blockquote prefix if any
-            let blockquote_prefix = if let Some(caps) = BLOCKQUOTE_PREFIX_REGEX.captures(&line_info.content) {
+            let blockquote_prefix = if let Some(caps) = BLOCKQUOTE_PREFIX_REGEX.captures(line_info.content(content)) {
                 caps.get(0).unwrap().as_str().to_string()
             } else {
                 String::new()
@@ -2278,7 +2286,8 @@ impl<'a> LintContext<'a> {
                         // Debug: Special check for problematic line
                         if block_last_item_line > 0 && block_last_item_line <= lines.len() {
                             let last_line = &lines[block_last_item_line - 1];
-                            if last_line.content.contains(r"`sqlalchemy`") && last_line.content.contains(r"\`") {
+                            let last_line_content = last_line.content(content);
+                            if last_line_content.contains(r"`sqlalchemy`") && last_line_content.contains(r"\`") {
                                 log::debug!(
                                     "After problematic line {}: checking lines {} to {} for non-list content",
                                     block_last_item_line,
@@ -2329,7 +2338,7 @@ impl<'a> LintContext<'a> {
                                     matches!(context, CodeBlockContext::Standalone)
                                 } else if !check_info.is_blank && check_info.list_item.is_none() {
                                     // Check for structural separators that should break lists (from issue #42)
-                                    let line_content = check_info.content.trim();
+                                    let line_content = check_info.content(content).trim();
 
                                     // Any of these structural separators break lists
                                     if check_info.heading.is_some()
@@ -2401,14 +2410,14 @@ impl<'a> LintContext<'a> {
                         if block.item_lines.last().is_some_and(|&last_line| {
                             last_line > 0
                                 && last_line <= lines.len()
-                                && lines[last_line - 1].content.contains(r"`sqlalchemy`")
-                                && lines[last_line - 1].content.contains(r"\`")
+                                && lines[last_line - 1].content(content).contains(r"`sqlalchemy`")
+                                && lines[last_line - 1].content(content).contains(r"\`")
                         }) {
                             log::debug!(
                                 "List continuation check after problematic line at line {line_num}: same_type={same_type}, same_context={same_context}, reasonable_distance={reasonable_distance}, marker_compatible={marker_compatible}, has_non_list_content={has_non_list_content}, continues={result}"
                             );
                             if line_num > 0 && line_num <= lines.len() {
-                                log::debug!("Current line content: {:?}", lines[line_num - 1].content);
+                                log::debug!("Current line content: {:?}", lines[line_num - 1].content(content));
                             }
                         }
 
@@ -2505,7 +2514,7 @@ impl<'a> LintContext<'a> {
                 // Check if the last line in the list block ended with a backslash (hard line break)
                 // This handles cases where list items use backslash for hard line breaks
                 let prev_line_ends_with_backslash = if block.end_line > 0 && block.end_line - 1 < lines.len() {
-                    lines[block.end_line - 1].content.trim_end().ends_with('\\')
+                    lines[block.end_line - 1].content(content).trim_end().ends_with('\\')
                 } else {
                     false
                 };
@@ -2545,7 +2554,7 @@ impl<'a> LintContext<'a> {
                             && let Some(item) = &next_line.list_item
                         {
                             let next_blockquote_prefix = BLOCKQUOTE_PREFIX_REGEX
-                                .find(&next_line.content)
+                                .find(next_line.content(content))
                                 .map_or(String::new(), |m| m.as_str().to_string());
                             if item.marker_column == current_indent_level
                                 && item.is_ordered == block.is_ordered
@@ -2555,14 +2564,14 @@ impl<'a> LintContext<'a> {
                                 // This variable is kept for potential future use but is currently replaced by has_structural_separators
                                 let _has_meaningful_content = (line_idx + 1..check_idx).any(|idx| {
                                     if let Some(between_line) = lines.get(idx) {
-                                        let trimmed = between_line.content.trim();
+                                        let between_content = between_line.content(content);
+                                        let trimmed = between_content.trim();
                                         // Skip empty lines
                                         if trimmed.is_empty() {
                                             return false;
                                         }
                                         // Check for meaningful content
-                                        let line_indent =
-                                            between_line.content.len() - between_line.content.trim_start().len();
+                                        let line_indent = between_content.len() - between_content.trim_start().len();
 
                                         // Structural separators (code fences, headings, etc.) are meaningful and should BREAK lists
                                         if trimmed.starts_with("```")
@@ -2589,7 +2598,7 @@ impl<'a> LintContext<'a> {
                                     // Check if there are structural separators between the list items
                                     let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
                                         if let Some(between_line) = lines.get(idx) {
-                                            let trimmed = between_line.content.trim();
+                                            let trimmed = between_line.content(content).trim();
                                             if trimmed.is_empty() {
                                                 return false;
                                             }
@@ -2611,7 +2620,7 @@ impl<'a> LintContext<'a> {
                                     // For unordered lists: also check for structural separators
                                     let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
                                         if let Some(between_line) = lines.get(idx) {
-                                            let trimmed = between_line.content.trim();
+                                            let trimmed = between_line.content(content).trim();
                                             if trimmed.is_empty() {
                                                 return false;
                                             }
@@ -2655,7 +2664,7 @@ impl<'a> LintContext<'a> {
                     // 1. Have no indentation (true lazy continuation)
                     // 2. Have sufficient indentation for the list type
                     // BUT structural separators (headings, code blocks, etc.) should never be lazy continuations
-                    let line_content = line_info.content.trim();
+                    let line_content = line_info.content(content).trim();
                     let is_structural_separator = line_info.heading.is_some()
                         || line_content.starts_with("```")
                         || line_content.starts_with("~~~")
@@ -2682,12 +2691,12 @@ impl<'a> LintContext<'a> {
                         let content_to_check = if !blockquote_prefix.is_empty() {
                             // Strip blockquote prefix to check the actual content
                             line_info
-                                .content
+                                .content(content)
                                 .strip_prefix(&blockquote_prefix)
-                                .unwrap_or(&line_info.content)
+                                .unwrap_or(line_info.content(content))
                                 .trim()
                         } else {
-                            line_info.content.trim()
+                            line_info.content(content).trim()
                         };
 
                         let starts_with_uppercase = content_to_check.chars().next().is_some_and(|c| c.is_uppercase());
@@ -2717,7 +2726,7 @@ impl<'a> LintContext<'a> {
         }
 
         // Merge adjacent blocks that should be one
-        merge_adjacent_list_blocks(&mut list_blocks, lines);
+        merge_adjacent_list_blocks(content, &mut list_blocks, lines);
 
         list_blocks
     }
@@ -2871,7 +2880,7 @@ impl<'a> LintContext<'a> {
     }
 
     /// Parse table rows in the content
-    fn parse_table_rows(lines: &[LineInfo]) -> Vec<TableRow> {
+    fn parse_table_rows(content: &str, lines: &[LineInfo]) -> Vec<TableRow> {
         let mut table_rows = Vec::with_capacity(lines.len() / 20);
 
         for (line_idx, line_info) in lines.iter().enumerate() {
@@ -2880,7 +2889,7 @@ impl<'a> LintContext<'a> {
                 continue;
             }
 
-            let line = &line_info.content;
+            let line = line_info.content(content);
             let line_num = line_idx + 1;
 
             // Check if this line contains pipes (potential table row)
@@ -3048,23 +3057,24 @@ impl<'a> LintContext<'a> {
 }
 
 /// Merge adjacent list blocks that should be treated as one
-fn merge_adjacent_list_blocks(list_blocks: &mut Vec<ListBlock>, lines: &[LineInfo]) {
+fn merge_adjacent_list_blocks(content: &str, list_blocks: &mut Vec<ListBlock>, lines: &[LineInfo]) {
     if list_blocks.len() < 2 {
         return;
     }
 
-    let mut merger = ListBlockMerger::new(lines);
+    let mut merger = ListBlockMerger::new(content, lines);
     *list_blocks = merger.merge(list_blocks);
 }
 
 /// Helper struct to manage the complex logic of merging list blocks
 struct ListBlockMerger<'a> {
+    content: &'a str,
     lines: &'a [LineInfo],
 }
 
 impl<'a> ListBlockMerger<'a> {
-    fn new(lines: &'a [LineInfo]) -> Self {
-        Self { lines }
+    fn new(content: &'a str, lines: &'a [LineInfo]) -> Self {
+        Self { content, lines }
     }
 
     fn merge(&mut self, list_blocks: &[ListBlock]) -> Vec<ListBlock> {
@@ -3131,7 +3141,7 @@ impl<'a> ListBlockMerger<'a> {
     fn can_merge_with_blank_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
         // Check if there are structural separators between the blocks
         // If has_meaningful_content_between returns true, it means there are structural separators
-        if has_meaningful_content_between(current, next, self.lines) {
+        if has_meaningful_content_between(self.content, current, next, self.lines) {
             return false; // Structural separators prevent merging
         }
 
@@ -3142,7 +3152,7 @@ impl<'a> ListBlockMerger<'a> {
     /// Check if ordered lists can be merged when there's content between them
     fn can_merge_with_content_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
         // Do not merge lists if there are structural separators between them
-        if has_meaningful_content_between(current, next, self.lines) {
+        if has_meaningful_content_between(self.content, current, next, self.lines) {
             return false; // Structural separators prevent merging
         }
 
@@ -3154,7 +3164,7 @@ impl<'a> ListBlockMerger<'a> {
     fn has_only_blank_lines_between(&self, current: &ListBlock, next: &ListBlock) -> bool {
         for line_num in (current.end_line + 1)..next.start_line {
             if let Some(line_info) = self.lines.get(line_num - 1)
-                && !line_info.content.trim().is_empty()
+                && !line_info.content(self.content).trim().is_empty()
             {
                 return false;
             }
@@ -3194,12 +3204,12 @@ enum BlockSpacing {
 }
 
 /// Check if there's meaningful content (not just blank lines) between two list blocks
-fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: &[LineInfo]) -> bool {
+fn has_meaningful_content_between(content: &str, current: &ListBlock, next: &ListBlock, lines: &[LineInfo]) -> bool {
     // Check lines between current.end_line and next.start_line
     for line_num in (current.end_line + 1)..next.start_line {
         if let Some(line_info) = lines.get(line_num - 1) {
             // Convert to 0-indexed
-            let trimmed = line_info.content.trim();
+            let trimmed = line_info.content(content).trim();
 
             // Skip empty lines
             if trimmed.is_empty() {
@@ -3238,7 +3248,7 @@ fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: 
 
             // Code block fences separate lists (unless properly indented as list content)
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                let line_indent = line_info.content.len() - line_info.content.trim_start().len();
+                let line_indent = line_info.byte_len - line_info.content(content).trim_start().len();
 
                 // Check if this code block is properly indented as list continuation
                 let min_continuation_indent = if current.is_ordered {
@@ -3254,7 +3264,7 @@ fn has_meaningful_content_between(current: &ListBlock, next: &ListBlock, lines: 
             }
 
             // Check if this line has proper indentation for list continuation
-            let line_indent = line_info.content.len() - line_info.content.trim_start().len();
+            let line_indent = line_info.byte_len - line_info.content(content).trim_start().len();
 
             // Calculate minimum indentation needed to be list continuation
             let min_indent = if current.is_ordered {
@@ -3347,7 +3357,7 @@ mod tests {
 
         // Line 1: "# Title"
         let line1 = &ctx.lines[0];
-        assert_eq!(line1.content, "# Title");
+        assert_eq!(line1.content(ctx.content), "# Title");
         assert_eq!(line1.byte_offset, 0);
         assert_eq!(line1.indent, 0);
         assert!(!line1.is_blank);
@@ -3356,14 +3366,14 @@ mod tests {
 
         // Line 2: "    indented"
         let line2 = &ctx.lines[1];
-        assert_eq!(line2.content, "    indented");
+        assert_eq!(line2.content(ctx.content), "    indented");
         assert_eq!(line2.byte_offset, 8);
         assert_eq!(line2.indent, 4);
         assert!(!line2.is_blank);
 
         // Line 3: "" (blank)
         let line3 = &ctx.lines[2];
-        assert_eq!(line3.content, "");
+        assert_eq!(line3.content(ctx.content), "");
         assert!(line3.is_blank);
 
         // Test helper methods

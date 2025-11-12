@@ -361,7 +361,7 @@ fn test_reference_in_list_continuation_paragraph() {
             "Line {}: in_code_block={}, content={:?}",
             i + 1,
             line.in_code_block,
-            line.content
+            line.content(ctx.content)
         );
     }
 
@@ -392,9 +392,12 @@ fn test_list_continuation_not_marked_as_code_block() {
     // Line 3 (index 2) is the continuation paragraph
     let continuation_line = ctx.lines.get(2).expect("Line 3 should exist");
     assert!(
-        continuation_line.content.trim().starts_with("This is a continuation"),
+        continuation_line
+            .content(ctx.content)
+            .trim()
+            .starts_with("This is a continuation"),
         "Got unexpected line content: {:?}",
-        continuation_line.content
+        continuation_line.content(ctx.content)
     );
 
     assert!(

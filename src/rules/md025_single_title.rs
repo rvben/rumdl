@@ -124,9 +124,9 @@ impl MD025SingleTitle {
             return false;
         }
 
-        let line = ctx.lines[line_num].content.trim();
+        let line = ctx.lines[line_num].content(ctx.content).trim();
         let prev_line = if line_num > 0 {
-            ctx.lines[line_num - 1].content.trim()
+            ctx.lines[line_num - 1].content(ctx.content).trim()
         } else {
             ""
         };
@@ -152,7 +152,7 @@ impl MD025SingleTitle {
                 continue;
             }
 
-            let line = &ctx.lines[line_num].content;
+            let line = &ctx.lines[line_num].content(ctx.content);
             if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(ctx, line_num) {
                 // Found a horizontal rule before this heading
                 // Check that there's no other heading between the HR and this heading
@@ -240,7 +240,7 @@ impl Rule for MD025SingleTitle {
                     }
 
                     // Calculate precise character range for the heading text content
-                    let line_content = &ctx.lines[line_num].content;
+                    let line_content = &ctx.lines[line_num].content(ctx.content);
                     let text_start_in_line = if let Some(pos) = line_content.find(heading_text) {
                         pos
                     } else {
@@ -315,7 +315,7 @@ impl Rule for MD025SingleTitle {
                     if !found_first {
                         found_first = true;
                         // Keep the first heading as-is
-                        fixed_lines.push(line_info.content.clone());
+                        fixed_lines.push(line_info.content(ctx.content).to_string());
 
                         // For Setext headings, also add the underline
                         if matches!(
@@ -323,7 +323,7 @@ impl Rule for MD025SingleTitle {
                             crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
                         ) && line_num + 1 < ctx.lines.len()
                         {
-                            fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                            fixed_lines.push(ctx.lines[line_num + 1].content(ctx.content).to_string());
                             skip_next = true;
                         }
                     } else {
@@ -333,7 +333,7 @@ impl Rule for MD025SingleTitle {
 
                         if should_allow {
                             // Keep the heading as-is
-                            fixed_lines.push(line_info.content.clone());
+                            fixed_lines.push(line_info.content(ctx.content).to_string());
 
                             // For Setext headings, also add the underline
                             if matches!(
@@ -341,7 +341,7 @@ impl Rule for MD025SingleTitle {
                                 crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
                             ) && line_num + 1 < ctx.lines.len()
                             {
-                                fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                                fixed_lines.push(ctx.lines[line_num + 1].content(ctx.content).to_string());
                                 skip_next = true;
                             }
                         } else {
@@ -415,7 +415,7 @@ impl Rule for MD025SingleTitle {
                     }
                 } else {
                     // Not a target level heading, keep as-is
-                    fixed_lines.push(line_info.content.clone());
+                    fixed_lines.push(line_info.content(ctx.content).to_string());
 
                     // For Setext headings, also add the underline
                     if matches!(
@@ -423,13 +423,13 @@ impl Rule for MD025SingleTitle {
                         crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
                     ) && line_num + 1 < ctx.lines.len()
                     {
-                        fixed_lines.push(ctx.lines[line_num + 1].content.clone());
+                        fixed_lines.push(ctx.lines[line_num + 1].content(ctx.content).to_string());
                         skip_next = true;
                     }
                 }
             } else {
                 // Not a heading line, keep as-is
-                fixed_lines.push(line_info.content.clone());
+                fixed_lines.push(line_info.content(ctx.content).to_string());
             }
         }
 

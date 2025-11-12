@@ -219,7 +219,7 @@ impl Rule for MD026NoTrailingPunctuation {
                 if self.has_trailing_punctuation(&text_to_check, &re) {
                     // Find the trailing punctuation
                     if let Some(punctuation_match) = re.find(&text_to_check) {
-                        let line = &line_info.content;
+                        let line = line_info.content(ctx.content);
 
                         // For ATX headings, find the punctuation position in the line
                         let punctuation_pos_in_text = punctuation_match.start();
@@ -311,9 +311,9 @@ impl Rule for MD026NoTrailingPunctuation {
                 // Check and fix trailing punctuation
                 if self.has_trailing_punctuation(&text_to_check, &re) {
                     fixed_lines[line_num] = if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                        self.fix_atx_heading(&line_info.content, &re)
+                        self.fix_atx_heading(line_info.content(ctx.content), &re)
                     } else {
-                        self.fix_setext_heading(&line_info.content, &re)
+                        self.fix_setext_heading(line_info.content(ctx.content), &re)
                     };
                 }
             }

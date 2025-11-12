@@ -152,7 +152,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                 // Only check ATX headings
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     // Check if there's a space after the marker
-                    let line = &line_info.content;
+                    let line = line_info.content(ctx.content);
                     let trimmed = line.trim_start();
 
                     // Skip emoji hashtags and Unicode hashtag patterns
@@ -201,7 +201,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                 }
             } else if !line_info.in_code_block && !line_info.is_blank {
                 // Check for malformed headings that weren't detected as proper headings
-                if let Some((hash_end_pos, fixed_line)) = self.check_atx_heading_line(&line_info.content) {
+                if let Some((hash_end_pos, fixed_line)) = self.check_atx_heading_line(line_info.content(ctx.content)) {
                     let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
                         line_num + 1,     // Convert to 1-indexed
                         hash_end_pos + 1, // 1-indexed column
@@ -237,7 +237,7 @@ impl Rule for MD018NoMissingSpaceAtx {
             if let Some(heading) = &line_info.heading {
                 // Fix ATX headings missing space
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    let line = &line_info.content;
+                    let line = line_info.content(ctx.content);
                     let trimmed = line.trim_start();
 
                     // Skip emoji hashtags and Unicode hashtag patterns
@@ -268,14 +268,14 @@ impl Rule for MD018NoMissingSpaceAtx {
                 }
             } else if !line_info.in_code_block && !line_info.is_blank {
                 // Fix malformed headings
-                if let Some((_, fixed_line)) = self.check_atx_heading_line(&line_info.content) {
+                if let Some((_, fixed_line)) = self.check_atx_heading_line(line_info.content(ctx.content)) {
                     lines.push(fixed_line);
                     fixed = true;
                 }
             }
 
             if !fixed {
-                lines.push(line_info.content.clone());
+                lines.push(line_info.content(ctx.content).to_string());
             }
         }
 
@@ -296,11 +296,7 @@ impl Rule for MD018NoMissingSpaceAtx {
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Fast path: check if document likely has headings
-        if !ctx.likely_has_headings() {
-            return true;
-        }
-        // Verify lines with hash symbols exist
-        !ctx.lines.iter().any(|line| line.content.contains('#'))
+        !ctx.likely_has_headings()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

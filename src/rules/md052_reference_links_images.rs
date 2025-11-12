@@ -417,7 +417,7 @@ impl MD052ReferenceLinkImages {
                 if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                     // Check if the line is in an example section or list item
                     if let Some(line_info) = ctx.line_info(link.line) {
-                        if OUTPUT_EXAMPLE_START.is_match(&line_info.content) {
+                        if OUTPUT_EXAMPLE_START.is_match(line_info.content(ctx.content)) {
                             in_example_section = true;
                             continue;
                         }
@@ -427,12 +427,12 @@ impl MD052ReferenceLinkImages {
                         }
 
                         // Skip list items
-                        if LIST_ITEM_REGEX.is_match(&line_info.content) {
+                        if LIST_ITEM_REGEX.is_match(line_info.content(ctx.content)) {
                             continue;
                         }
 
                         // Skip lines that are HTML content
-                        let trimmed = line_info.content.trim_start();
+                        let trimmed = line_info.content(ctx.content).trim_start();
                         if trimmed.starts_with('<') {
                             continue;
                         }
@@ -512,7 +512,7 @@ impl MD052ReferenceLinkImages {
                 if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                     // Check if the line is in an example section or list item
                     if let Some(line_info) = ctx.line_info(image.line) {
-                        if OUTPUT_EXAMPLE_START.is_match(&line_info.content) {
+                        if OUTPUT_EXAMPLE_START.is_match(line_info.content(ctx.content)) {
                             in_example_section = true;
                             continue;
                         }
@@ -522,12 +522,12 @@ impl MD052ReferenceLinkImages {
                         }
 
                         // Skip list items
-                        if LIST_ITEM_REGEX.is_match(&line_info.content) {
+                        if LIST_ITEM_REGEX.is_match(line_info.content(ctx.content)) {
                             continue;
                         }
 
                         // Skip lines that are HTML content
-                        let trimmed = line_info.content.trim_start();
+                        let trimmed = line_info.content(ctx.content).trim_start();
                         if trimmed.starts_with('<') {
                             continue;
                         }

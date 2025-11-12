@@ -292,7 +292,7 @@ impl MD029OrderedListPrefix {
                 }
 
                 // Skip code fence lines
-                let trimmed = line_info.content.trim();
+                let trimmed = line_info.content(ctx.content).trim();
                 if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                     continue;
                 }
@@ -303,7 +303,7 @@ impl MD029OrderedListPrefix {
                 }
 
                 // Check if this is a lazy continuation (0-2 spaces)
-                if line_info.indent <= 2 && !line_info.content.trim().is_empty() {
+                if line_info.indent <= 2 && !line_info.content(ctx.content).trim().is_empty() {
                     // This is a lazy continuation - add a style warning
                     let col = line_info.indent + 1;
 
@@ -364,7 +364,7 @@ impl MD029OrderedListPrefix {
 
         for line_num in (end_line + 1)..start_line {
             if let Some(line_info) = ctx.line_info(line_num) {
-                let trimmed = line_info.content.trim();
+                let trimmed = line_info.content(ctx.content).trim();
 
                 // Skip empty lines
                 if trimmed.is_empty() {
@@ -459,7 +459,7 @@ impl MD029OrderedListPrefix {
                     return false;
                 }
 
-                let trimmed = line_info.content.trim();
+                let trimmed = line_info.content(ctx.content).trim();
 
                 // Allow list items if properly indented
                 if line_info.list_item.is_some() {
@@ -540,7 +540,7 @@ impl MD029OrderedListPrefix {
 
         for line_num in (end_line + 1)..start_line {
             if let Some(line_info) = ctx.line_info(line_num) {
-                let trimmed = line_info.content.trim();
+                let trimmed = line_info.content(ctx.content).trim();
 
                 // Skip empty lines
                 if trimmed.is_empty() {

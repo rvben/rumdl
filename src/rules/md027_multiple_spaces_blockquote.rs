@@ -67,7 +67,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                     let mut found_markers = 0;
                     let mut found_first_space = false;
 
-                    for (i, ch) in line_info.content.char_indices() {
+                    for (i, ch) in line_info.content(ctx.content).char_indices() {
                         if found_markers < blockquote.nesting_level {
                             if ch == '>' {
                                 found_markers += 1;
@@ -83,14 +83,18 @@ impl Rule for MD027MultipleSpacesBlockquote {
                     }
 
                     // Count how many extra spaces/tabs there are
-                    let extra_spaces_bytes = line_info.content[byte_pos..]
+                    let extra_spaces_bytes = line_info.content(ctx.content)[byte_pos..]
                         .chars()
                         .take_while(|&c| c == ' ' || c == '\t')
                         .fold(0, |acc, ch| acc + ch.len_utf8());
 
                     if extra_spaces_bytes > 0 {
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num, &line_info.content, byte_pos, extra_spaces_bytes);
+                        let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                            line_num,
+                            line_info.content(ctx.content),
+                            byte_pos,
+                            extra_spaces_bytes,
+                        );
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
@@ -114,10 +118,10 @@ impl Rule for MD027MultipleSpacesBlockquote {
                 }
             } else {
                 // Part 2: Check for malformed blockquote attempts on non-blockquote lines
-                let malformed_attempts = self.detect_malformed_blockquote_attempts(&line_info.content);
+                let malformed_attempts = self.detect_malformed_blockquote_attempts(line_info.content(ctx.content));
                 for (start, len, fixed_line, description) in malformed_attempts {
                     let (start_line, start_col, end_line, end_col) =
-                        calculate_match_range(line_num, &line_info.content, start, len);
+                        calculate_match_range(line_num, line_info.content(ctx.content), start, len);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -163,17 +167,17 @@ impl Rule for MD027MultipleSpacesBlockquote {
                     };
                     result.push(fixed_line);
                 } else {
-                    result.push(line_info.content.clone());
+                    result.push(line_info.content(ctx.content).to_string());
                 }
             } else {
                 // Check for malformed blockquote attempts
-                let malformed_attempts = self.detect_malformed_blockquote_attempts(&line_info.content);
+                let malformed_attempts = self.detect_malformed_blockquote_attempts(line_info.content(ctx.content));
                 if !malformed_attempts.is_empty() {
                     // Use the first fix (there should only be one per line)
                     let (_, _, fixed_line, _) = &malformed_attempts[0];
                     result.push(fixed_line.clone());
                 } else {
-                    result.push(line_info.content.clone());
+                    result.push(line_info.content(ctx.content).to_string());
                 }
             }
         }

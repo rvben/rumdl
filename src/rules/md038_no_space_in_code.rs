@@ -60,7 +60,7 @@ impl MD038NoSpaceInCode {
             return false;
         }
 
-        let line_content = &ctx.lines[line_idx].content;
+        let line_content = &ctx.lines[line_idx].content(ctx.content);
 
         // For each pair of adjacent code spans, check what's between them
         for (_, other_span) in &same_line_spans {

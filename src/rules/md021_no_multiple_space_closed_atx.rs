@@ -93,7 +93,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
 
                 // Only check closed ATX headings
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) && heading.has_closing_sequence {
-                    let line = &line_info.content;
+                    let line = line_info.content(ctx.content);
 
                     // Check if line matches closed ATX pattern with multiple spaces
                     if self.is_closed_atx_heading_with_multiple_spaces(line) {
@@ -160,22 +160,22 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
             if let Some(heading) = &line_info.heading {
                 // Skip headings indented 4+ spaces (they're code blocks)
                 if line_info.indent >= 4 {
-                    lines.push(line_info.content.clone());
+                    lines.push(line_info.content(ctx.content).to_string());
                     continue;
                 }
 
                 // Fix closed ATX headings with multiple spaces
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
                     && heading.has_closing_sequence
-                    && self.is_closed_atx_heading_with_multiple_spaces(&line_info.content)
+                    && self.is_closed_atx_heading_with_multiple_spaces(line_info.content(ctx.content))
                 {
-                    lines.push(self.fix_closed_atx_heading(&line_info.content));
+                    lines.push(self.fix_closed_atx_heading(line_info.content(ctx.content)));
                     fixed = true;
                 }
             }
 
             if !fixed {
-                lines.push(line_info.content.clone());
+                lines.push(line_info.content(ctx.content).to_string());
             }
         }
 

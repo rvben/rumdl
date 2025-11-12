@@ -320,6 +320,7 @@ impl CodeBlockUtils {
     /// Calculate minimum indentation required for code block to continue a list
     /// Based on the most recent list item's marker width
     pub fn calculate_min_continuation_indent(
+        content: &str,
         lines: &[crate::lint_context::LineInfo],
         current_line_idx: usize,
     ) -> usize {
@@ -336,7 +337,7 @@ impl CodeBlockUtils {
                 }
 
                 // Stop at structural separators that would break list context
-                if line_info.heading.is_some() || Self::is_structural_separator(&line_info.content) {
+                if line_info.heading.is_some() || Self::is_structural_separator(line_info.content(content)) {
                     break;
                 }
             }

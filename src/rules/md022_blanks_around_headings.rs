@@ -137,7 +137,7 @@ impl MD022BlanksAroundHeadings {
                 skip_next = false;
                 continue;
             }
-            let line = &line_info.content;
+            let line = line_info.content(ctx.content);
 
             if line_info.in_code_block {
                 result.push(line.to_string());
@@ -180,7 +180,7 @@ impl MD022BlanksAroundHeadings {
                 ) {
                     // Add the underline (next line)
                     if i + 1 < ctx.lines.len() {
-                        result.push(ctx.lines[i + 1].content.clone());
+                        result.push(ctx.lines[i + 1].content(ctx.content).to_string());
                         skip_next = true; // Skip the underline in the main loop
                     }
 
@@ -200,7 +200,7 @@ impl MD022BlanksAroundHeadings {
                     let next_is_special = if let Some(idx) = next_content_line_idx {
                         let next_line = &ctx.lines[idx];
                         next_line.list_item.is_some() || {
-                            let trimmed = next_line.content.trim();
+                            let trimmed = next_line.content(ctx.content).trim();
                             (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
                                 && (trimmed.len() == 3
                                     || (trimmed.len() > 3
@@ -241,7 +241,7 @@ impl MD022BlanksAroundHeadings {
                     let next_is_special = if let Some(idx) = next_content_line_idx {
                         let next_line = &ctx.lines[idx];
                         next_line.list_item.is_some() || {
-                            let trimmed = next_line.content.trim();
+                            let trimmed = next_line.content(ctx.content).trim();
                             (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
                                 && (trimmed.len() == 3
                                     || (trimmed.len() > 3
@@ -394,7 +394,7 @@ impl Rule for MD022BlanksAroundHeadings {
                 // Check if next line is a code fence or list item
                 let next_line_is_special = next_non_blank_idx < ctx.lines.len() && {
                     let next_line = &ctx.lines[next_non_blank_idx];
-                    let next_trimmed = next_line.content.trim();
+                    let next_trimmed = next_line.content(ctx.content).trim();
 
                     // Check for code fence
                     let is_code_fence = (next_trimmed.starts_with("```") || next_trimmed.starts_with("~~~"))
@@ -431,7 +431,7 @@ impl Rule for MD022BlanksAroundHeadings {
 
             // Calculate precise character range for the heading
             let (start_line, start_col, end_line, end_col) =
-                calculate_heading_range(heading_display_line, &line_info.content);
+                calculate_heading_range(heading_display_line, line_info.content(ctx.content));
 
             let (message, insertion_point) = match position {
                 "above" => (

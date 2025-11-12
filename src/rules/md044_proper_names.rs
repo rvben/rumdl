@@ -227,7 +227,7 @@ impl MD044ProperNames {
         // Use ctx.lines for better performance
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
-            let line = &line_info.content;
+            let line = line_info.content(ctx.content);
 
             // Skip code fence lines (```language or ~~~language)
             let trimmed = line.trim_start();
@@ -553,7 +553,7 @@ impl Rule for MD044ProperNames {
 
             if let Some(line_violations) = violations_by_line.get(&line_num) {
                 // This line has violations, fix them
-                let mut fixed_line = line_info.content.clone();
+                let mut fixed_line = line_info.content(ctx.content).to_string();
 
                 for (col_num, found_name) in line_violations {
                     if let Some(proper_name) = self.get_proper_name_for(found_name) {
@@ -572,7 +572,7 @@ impl Rule for MD044ProperNames {
                 fixed_lines.push(fixed_line);
             } else {
                 // No violations on this line, keep it as is
-                fixed_lines.push(line_info.content.clone());
+                fixed_lines.push(line_info.content(ctx.content).to_string());
             }
         }
 

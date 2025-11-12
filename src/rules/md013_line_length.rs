@@ -164,7 +164,7 @@ impl Rule for MD013LineLength {
                 }
 
                 // Quick length check first
-                if line_info.content.len() > effective_config.line_length.get() {
+                if line_info.byte_len > effective_config.line_length.get() {
                     candidate_lines.push(line_idx);
                 }
             }
@@ -181,7 +181,7 @@ impl Rule for MD013LineLength {
 
         // Use ctx.lines if available for better performance
         let lines: Vec<&str> = if !ctx.lines.is_empty() {
-            ctx.lines.iter().map(|l| l.content.as_str()).collect()
+            ctx.lines.iter().map(|l| l.content(ctx.content)).collect()
         } else {
             content.lines().collect()
         };
@@ -381,7 +381,7 @@ impl Rule for MD013LineLength {
         // Use more efficient check - any() with early termination instead of all()
         !ctx.lines
             .iter()
-            .any(|line| line.content.len() > self.config.line_length.get())
+            .any(|line| line.byte_len > self.config.line_length.get())
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -527,11 +527,14 @@ impl MD013LineLength {
 
                     // Valid continuation must be indented at least marker_len
                     if indent >= marker_len {
-                        let trimmed = line_info.content.trim();
+                        let trimmed = line_info.content(ctx.content).trim();
 
                         // Use pre-computed in_code_block from ctx
                         if line_info.in_code_block {
-                            list_item_lines.push(LineType::CodeBlock(line_info.content[indent..].to_string(), indent));
+                            list_item_lines.push(LineType::CodeBlock(
+                                line_info.content(ctx.content)[indent..].to_string(),
+                                indent,
+                            ));
                             i += 1;
                             continue;
                         }
@@ -566,7 +569,7 @@ impl MD013LineLength {
                             // else: multi-paragraph context or continuation of nested list, keep collecting
                             // Mark this as a nested list item to preserve its structure
                             list_item_lines.push(LineType::NestedListItem(
-                                line_info.content[indent..].to_string(),
+                                line_info.content(ctx.content)[indent..].to_string(),
                                 indent,
                             ));
                             i += 1;
@@ -583,7 +586,7 @@ impl MD013LineLength {
                             // Extract content (remove indentation and trailing whitespace)
                             // Preserve hard breaks (2 trailing spaces) while removing excessive whitespace
                             // See: https://github.com/rvben/rumdl/issues/76
-                            let content = trim_preserving_hard_break(&line_info.content[indent..]);
+                            let content = trim_preserving_hard_break(&line_info.content(ctx.content)[indent..]);
 
                             // Check if this is a fence marker (opening or closing)
                             // These should be treated as code block lines, not paragraph content
@@ -599,7 +602,10 @@ impl MD013LineLength {
                             i += 1;
                         } else {
                             // indent >= marker_len + 4: indented code block
-                            list_item_lines.push(LineType::CodeBlock(line_info.content[indent..].to_string(), indent));
+                            list_item_lines.push(LineType::CodeBlock(
+                                line_info.content(ctx.content)[indent..].to_string(),
+                                indent,
+                            ));
                             i += 1;
                         }
                     } else {

@@ -415,7 +415,10 @@ fn test_inline_code_spans() {
     for (i, line_info) in ctx.lines.iter().enumerate() {
         println!(
             "Line {}: content='{}', in_code_block={}, byte_offset={}",
-            i, line_info.content, line_info.in_code_block, line_info.byte_offset
+            i,
+            line_info.content(ctx.content),
+            line_info.in_code_block,
+            line_info.byte_offset
         );
         if let Some(heading) = &line_info.heading {
             println!("  Has heading: level={}, text='{}'", heading.level, heading.text);

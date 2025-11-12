@@ -124,10 +124,10 @@ impl Rule for MD041FirstLineHeading {
         let mut skip_lines = 0;
 
         // Check for front matter
-        if ctx.lines.first().map(|l| l.content.trim()) == Some("---") {
+        if ctx.lines.first().map(|l| l.content(ctx.content).trim()) == Some("---") {
             // Skip front matter
             for (idx, line_info) in ctx.lines.iter().enumerate().skip(1) {
-                if line_info.content.trim() == "---" {
+                if line_info.content(ctx.content).trim() == "---" {
                     skip_lines = idx + 1;
                     break;
                 }
@@ -135,12 +135,12 @@ impl Rule for MD041FirstLineHeading {
         }
 
         for (line_num, line_info) in ctx.lines.iter().enumerate().skip(skip_lines) {
-            let line_content = line_info.content.trim();
+            let line_content = line_info.content(ctx.content).trim();
             // Skip ESM blocks in MDX files (import/export statements)
             if line_info.in_esm_block {
                 continue;
             }
-            if !line_content.is_empty() && !Self::is_non_content_line(&line_info.content) {
+            if !line_content.is_empty() && !Self::is_non_content_line(line_info.content(ctx.content)) {
                 first_content_line_num = Some(line_num);
                 break;
             }
@@ -159,13 +159,13 @@ impl Rule for MD041FirstLineHeading {
             heading.level as usize == self.level
         } else {
             // Check for HTML heading
-            Self::is_html_heading(&first_line_info.content, self.level)
+            Self::is_html_heading(first_line_info.content(ctx.content), self.level)
         };
 
         if !is_correct_heading {
             // Calculate precise character range for the entire first line
             let first_line = first_line_idx + 1; // Convert to 1-indexed
-            let first_line_content = &first_line_info.content;
+            let first_line_content = first_line_info.content(ctx.content);
             let (start_line, start_col, end_line, end_col) = calculate_line_range(first_line, first_line_content);
 
             warnings.push(LintWarning {

@@ -248,7 +248,7 @@ impl MD053LinkImageReferenceDefinitions {
         let mut i = 0;
         while i < lines.len() {
             let line_info = &lines[i];
-            let line = &line_info.content;
+            let line = line_info.content(ctx.content);
 
             // Skip code blocks and front matter using line info
             if line_info.in_code_block || line_info.in_front_matter {
@@ -260,11 +260,11 @@ impl MD053LinkImageReferenceDefinitions {
             if i > 0 && CONTINUATION_REGEX.is_match(line) {
                 // Find the reference definition this continues
                 let mut def_start = i - 1;
-                while def_start > 0 && !REFERENCE_DEFINITION_REGEX.is_match(&lines[def_start].content) {
+                while def_start > 0 && !REFERENCE_DEFINITION_REGEX.is_match(lines[def_start].content(ctx.content)) {
                     def_start -= 1;
                 }
 
-                if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(&lines[def_start].content) {
+                if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(lines[def_start].content(ctx.content)) {
                     let ref_id = caps.get(1).unwrap().as_str().trim();
                     let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
 
@@ -325,12 +325,15 @@ impl MD053LinkImageReferenceDefinitions {
             }
 
             // Skip lines that are reference definitions (start with [ref]: at beginning)
-            if REFERENCE_DEFINITION_REGEX.is_match(&line_info.content) {
+            if REFERENCE_DEFINITION_REGEX.is_match(line_info.content(ctx.content)) {
                 continue;
             }
 
             // Find potential shortcut references
-            for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(&line_info.content).flatten() {
+            for caps in SHORTCUT_REFERENCE_REGEX
+                .captures_iter(line_info.content(ctx.content))
+                .flatten()
+            {
                 if let Some(full_match) = caps.get(0)
                     && let Some(ref_id_match) = caps.get(1)
                 {
@@ -440,7 +443,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                     if i > 0 {
                         // Skip the first occurrence, report all others
                         let line_num = start_line + 1;
-                        let line_content = ctx.lines.get(start_line).map(|l| l.content.as_str()).unwrap_or("");
+                        let line_content = ctx.lines.get(start_line).map(|l| l.content(ctx.content)).unwrap_or("");
                         let (start_line_1idx, start_col, end_line, end_col) =
                             calculate_line_range(line_num, line_content);
 
@@ -462,7 +465,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
             if let Some(&(start_line, _)) = ranges.first() {
                 // Find the original case version from the line
                 if let Some(line_info) = ctx.lines.get(start_line)
-                    && let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(&line_info.content)
+                    && let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line_info.content(ctx.content))
                 {
                     let original_id = caps.get(1).unwrap().as_str().trim();
                     let lower_id = original_id.to_lowercase();
@@ -471,7 +474,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                         // Found a case-variant duplicate
                         if first_original != original_id {
                             let line_num = start_line + 1;
-                            let line_content = &line_info.content;
+                            let line_content = line_info.content(ctx.content);
                             let (start_line_1idx, start_col, end_line, end_col) =
                                 calculate_line_range(line_num, line_content);
 
@@ -497,7 +500,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         // Create warnings for unused references
         for (definition, start, _end) in unused_refs {
             let line_num = start + 1; // 1-indexed line numbers
-            let line_content = ctx.lines.get(start).map(|l| l.content.as_str()).unwrap_or("");
+            let line_content = ctx.lines.get(start).map(|l| l.content(ctx.content)).unwrap_or("");
 
             // Calculate precise character range for the entire reference definition line
             let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line_content);

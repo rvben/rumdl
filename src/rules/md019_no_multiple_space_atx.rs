@@ -45,7 +45,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
             if let Some(heading) = &line_info.heading {
                 // Only check ATX headings
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    let line = &line_info.content;
+                    let line = line_info.content(ctx.content);
                     let trimmed = line.trim_start();
                     let marker_pos = line_info.indent + heading.marker.len();
 
@@ -65,7 +65,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
                             let line_start_byte = line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
 
                             // We need to work with the original line, not trimmed
-                            let original_line = &line_info.content;
+                            let original_line = line_info.content(ctx.content);
                             let marker_byte_pos = line_start_byte + line_info.indent + heading.marker.len();
 
                             // Get the actual byte length of the spaces/tabs after the marker
@@ -115,7 +115,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
             if let Some(heading) = &line_info.heading {
                 // Fix ATX headings with multiple spaces
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    let line = &line_info.content;
+                    let line = line_info.content(ctx.content);
                     let trimmed = line.trim_start();
 
                     if trimmed.len() > heading.marker.len() {
@@ -136,7 +136,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
             }
 
             if !fixed {
-                lines.push(line_info.content.clone());
+                lines.push(line_info.content(ctx.content).to_string());
             }
         }
 

@@ -59,10 +59,10 @@ impl Rule for MD024NoDuplicateHeading {
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             // Check for MkDocs snippet markers if using MkDocs flavor
             if is_mkdocs {
-                if crate::utils::mkdocs_snippets::is_snippet_section_start(&line_info.content) {
+                if crate::utils::mkdocs_snippets::is_snippet_section_start(line_info.content(ctx.content)) {
                     in_snippet_section = true;
                     continue; // Skip this line
-                } else if crate::utils::mkdocs_snippets::is_snippet_section_end(&line_info.content) {
+                } else if crate::utils::mkdocs_snippets::is_snippet_section_end(line_info.content(ctx.content)) {
                     in_snippet_section = false;
                     continue; // Skip this line
                 }
@@ -83,19 +83,23 @@ impl Rule for MD024NoDuplicateHeading {
                 let level = heading.level;
 
                 // Calculate precise character range for the heading text content
-                let text_start_in_line = if let Some(pos) = line_info.content.find(&heading.text) {
+                let text_start_in_line = if let Some(pos) = line_info.content(ctx.content).find(&heading.text) {
                     pos
                 } else {
                     // Fallback: find after hash markers
-                    let trimmed = line_info.content.trim_start();
+                    let trimmed = line_info.content(ctx.content).trim_start();
                     let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
                     let after_hashes = &trimmed[hash_count..];
                     let text_start_in_trimmed = after_hashes.find(&heading.text).unwrap_or(0);
-                    (line_info.content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
+                    (line_info.byte_len - trimmed.len()) + hash_count + text_start_in_trimmed
                 };
 
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_match_range(line_num + 1, &line_info.content, text_start_in_line, heading.text.len());
+                let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                    line_num + 1,
+                    line_info.content(ctx.content),
+                    text_start_in_line,
+                    heading.text.len(),
+                );
 
                 if self.config.siblings_only {
                     // Update the section path based on the current heading level

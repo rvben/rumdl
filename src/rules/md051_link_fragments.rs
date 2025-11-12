@@ -63,7 +63,7 @@ impl MD051LinkFragments {
 
             // Extract HTML anchor tags with id/name attributes
             if !line_info.in_code_block {
-                let content = &line_info.content;
+                let content = line_info.content(ctx.content);
                 let bytes = content.as_bytes();
 
                 // Skip lines without HTML tags or id/name attributes

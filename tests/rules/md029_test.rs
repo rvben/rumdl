@@ -869,7 +869,7 @@ fn test_md029_nested_ordered_lists_bug() {
             println!(
                 "  Line {}: '{}' - marker: '{}', column: {}, ordered: {}",
                 line_num,
-                line_info.content.trim(),
+                line_info.content(ctx.content).trim(),
                 list_item.marker,
                 list_item.marker_column,
                 list_item.is_ordered

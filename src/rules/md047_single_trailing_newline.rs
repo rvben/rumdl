@@ -38,7 +38,7 @@ impl Rule for MD047SingleTrailingNewline {
         if !has_trailing_newline {
             let lines = &ctx.lines;
             let last_line_num = lines.len();
-            let last_line_content = lines.last().map(|s| s.content.as_str()).unwrap_or("");
+            let last_line_content = lines.last().map(|s| s.content(content)).unwrap_or("");
 
             // Calculate precise character range for the end of file
             // For missing newline, highlight the end of the last line

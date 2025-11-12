@@ -78,7 +78,7 @@ impl Rule for MD007ULIndent {
                     let mut content_start = 0;
                     let mut found_gt = false;
 
-                    for (i, ch) in line_info.content.chars().enumerate() {
+                    for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
                         if ch == '>' {
                             found_gt = true;
                             content_start = i + 1;
@@ -93,7 +93,7 @@ impl Rule for MD007ULIndent {
                     }
 
                     // Extract the content after the blockquote prefix
-                    let content_after_prefix = &line_info.content[content_start..];
+                    let content_after_prefix = &line_info.content(ctx.content)[content_start..];
                     // Adjust the marker column to be relative to the content after the prefix
                     let adjusted_col = if list_item.marker_column >= content_start {
                         list_item.marker_column - content_start
@@ -103,7 +103,7 @@ impl Rule for MD007ULIndent {
                     };
                     (content_after_prefix.to_string(), adjusted_col)
                 } else {
-                    (line_info.content.clone(), list_item.marker_column)
+                    (line_info.content(ctx.content).to_string(), list_item.marker_column)
                 };
 
                 // Convert marker position to visual column
@@ -114,14 +114,14 @@ impl Rule for MD007ULIndent {
                 let visual_content_column = if line_info.blockquote.is_some() {
                     // For blockquoted content, we already have the adjusted content
                     let adjusted_content_col =
-                        if list_item.content_column >= (line_info.content.len() - content_for_calculation.len()) {
-                            list_item.content_column - (line_info.content.len() - content_for_calculation.len())
+                        if list_item.content_column >= (line_info.byte_len - content_for_calculation.len()) {
+                            list_item.content_column - (line_info.byte_len - content_for_calculation.len())
                         } else {
                             list_item.content_column
                         };
                     Self::char_pos_to_visual_column(&content_for_calculation, adjusted_content_col)
                 } else {
-                    Self::char_pos_to_visual_column(&line_info.content, list_item.content_column)
+                    Self::char_pos_to_visual_column(line_info.content(ctx.content), list_item.content_column)
                 };
 
                 // For nesting detection, treat 1-space indent as if it's at column 0
@@ -207,7 +207,7 @@ impl Rule for MD007ULIndent {
                             let replacement = if line_info.blockquote.is_some() {
                                 // Count the blockquote markers
                                 let mut blockquote_count = 0;
-                                for ch in line_info.content.chars() {
+                                for ch in line_info.content(ctx.content).chars() {
                                     if ch == '>' {
                                         blockquote_count += 1;
                                     } else if ch != ' ' && ch != '\t' {
@@ -237,7 +237,7 @@ impl Rule for MD007ULIndent {
                             let mut end_byte = line_info.byte_offset;
 
                             // Calculate where the marker starts
-                            for (i, ch) in line_info.content.chars().enumerate() {
+                            for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
                                 if i >= list_item.marker_column {
                                     break;
                                 }

@@ -155,27 +155,27 @@ impl Rule for MD023HeadingStartLeft {
                     // This heading needs to be fixed
                     if is_setext {
                         // For Setext headings, add the heading text without indentation
-                        fixed_lines.push(line_info.content.trim().to_string());
+                        fixed_lines.push(line_info.content(ctx.content).trim().to_string());
                         // Then add the underline without indentation
                         if i + 1 < ctx.lines.len() {
-                            fixed_lines.push(ctx.lines[i + 1].content.trim().to_string());
+                            fixed_lines.push(ctx.lines[i + 1].content(ctx.content).trim().to_string());
                             skip_next = true;
                         }
                     } else {
                         // For ATX headings, simply trim the indentation
-                        fixed_lines.push(line_info.content.trim_start().to_string());
+                        fixed_lines.push(line_info.content(ctx.content).trim_start().to_string());
                     }
                 } else {
                     // This heading is already at the beginning of the line
-                    fixed_lines.push(line_info.content.clone());
+                    fixed_lines.push(line_info.content(ctx.content).to_string());
                     if is_setext && i + 1 < ctx.lines.len() {
-                        fixed_lines.push(ctx.lines[i + 1].content.clone());
+                        fixed_lines.push(ctx.lines[i + 1].content(ctx.content).to_string());
                         skip_next = true;
                     }
                 }
             } else {
                 // Not a heading, copy as-is
-                fixed_lines.push(line_info.content.clone());
+                fixed_lines.push(line_info.content(ctx.content).to_string());
             }
         }
 

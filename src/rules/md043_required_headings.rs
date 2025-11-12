@@ -233,7 +233,8 @@ impl Rule for MD043RequiredHeadings {
             for (i, line_info) in ctx.lines.iter().enumerate() {
                 if self.is_heading(i, ctx) {
                     // Calculate precise character range for the entire heading
-                    let (start_line, start_col, end_line, end_col) = calculate_heading_range(i + 1, &line_info.content);
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_heading_range(i + 1, line_info.content(ctx.content));
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),

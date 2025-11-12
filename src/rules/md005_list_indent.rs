@@ -38,8 +38,8 @@ impl LineCacheInfo {
         let mut is_list_item = Vec::with_capacity(total_lines);
 
         for line_info in &ctx.lines {
-            let content = line_info.content.trim_start();
-            let line_indent = line_info.content.len() - content.len();
+            let content = line_info.content(ctx.content).trim_start();
+            let line_indent = line_info.byte_len - content.len();
 
             indentation.push(line_indent);
             has_content.push(!content.is_empty());
@@ -223,10 +223,10 @@ impl MD005ListIndent {
 
                     // If no continuation lines, this might still be a child list
                     // but not continuation content, so continue looking for a parent
-                } else if !line_info.content.trim().is_empty() {
+                } else if !line_info.content(ctx.content).trim().is_empty() {
                     // Found non-list content - only stop if it's at the left margin
-                    let content = line_info.content.trim_start();
-                    let line_indent = line_info.content.len() - content.len();
+                    let content = line_info.content(ctx.content).trim_start();
+                    let line_indent = line_info.byte_len - content.len();
 
                     if line_indent == 0 {
                         break;
@@ -279,7 +279,7 @@ impl MD005ListIndent {
 
         for line_num in start_line..=end_line {
             if let Some(line_info) = ctx.line_info(line_num) {
-                let content = line_info.content.trim_start();
+                let content = line_info.content(ctx.content).trim_start();
 
                 // Skip empty lines
                 if content.is_empty() {
@@ -292,7 +292,7 @@ impl MD005ListIndent {
                 }
 
                 // Calculate indentation of this line
-                let line_indent = line_info.content.len() - content.len();
+                let line_indent = line_info.byte_len - content.len();
 
                 // If this line is indented at or past the parent's content column,
                 // it's continuation content - return its indentation level
@@ -515,9 +515,9 @@ impl MD005ListIndent {
                         );
 
                         let (start_line, start_col, end_line, end_col) = if *indent > 0 {
-                            calculate_match_range(*line_num, &line_info.content, 0, *indent)
+                            calculate_match_range(*line_num, line_info.content(ctx.content), 0, *indent)
                         } else {
-                            calculate_match_range(*line_num, &line_info.content, 0, 1)
+                            calculate_match_range(*line_num, line_info.content(ctx.content), 0, 1)
                         };
 
                         let fix_range = if *indent > 0 {

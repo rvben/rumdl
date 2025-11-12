@@ -97,7 +97,7 @@ impl Rule for MD001HeadingIncrement {
                     let replacement = HeadingUtils::convert_heading_style(heading_text, fixed_level as u32, style);
 
                     // Calculate precise range: highlight the entire heading
-                    let line_content = &line_info.content;
+                    let line_content = line_info.content(ctx.content);
                     let (start_line, start_col, end_line, end_col) =
                         calculate_heading_range(line_num + 1, line_content);
 
@@ -163,7 +163,7 @@ impl Rule for MD001HeadingIncrement {
 
                 prev_level = Some(fixed_level);
             } else {
-                fixed_lines.push(line_info.content.clone());
+                fixed_lines.push(line_info.content(ctx.content).to_string());
             }
         }
 

@@ -158,8 +158,9 @@ impl MD032BlanksAroundLists {
                     for check_line in (prev_item_line + 1)..item_line {
                         if check_line - 1 < ctx.lines.len() {
                             let line = &ctx.lines[check_line - 1];
+                            let line_content = line.content(ctx.content);
                             if line.in_code_block
-                                && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~"))
+                                && (line_content.trim().starts_with("```") || line_content.trim().starts_with("~~~"))
                             {
                                 // Check if this code fence is indented as part of the list item
                                 // If it's indented enough to be part of the list item, it shouldn't split
@@ -197,8 +198,9 @@ impl MD032BlanksAroundLists {
                     for check_line in (seg_end + 1)..next_start {
                         if check_line - 1 < ctx.lines.len() {
                             let line = &ctx.lines[check_line - 1];
+                            let line_content = line.content(ctx.content);
                             if line.in_code_block
-                                && (line.content.trim().starts_with("```") || line.content.trim().starts_with("~~~"))
+                                && (line_content.trim().starts_with("```") || line_content.trim().starts_with("~~~"))
                             {
                                 found_fence = true;
                                 break;
@@ -510,8 +512,14 @@ impl MD032BlanksAroundLists {
                     || (after_block_line_idx_0 < ctx.lines.len()
                         && ctx.lines[after_block_line_idx_0].in_code_block
                         && ctx.lines[after_block_line_idx_0].indent >= 2
-                        && (ctx.lines[after_block_line_idx_0].content.trim().starts_with("```")
-                            || ctx.lines[after_block_line_idx_0].content.trim().starts_with("~~~")));
+                        && (ctx.lines[after_block_line_idx_0]
+                            .content(ctx.content)
+                            .trim()
+                            .starts_with("```")
+                            || ctx.lines[after_block_line_idx_0]
+                                .content(ctx.content)
+                                .trim()
+                                .starts_with("~~~")));
                 let after_prefix = BLOCKQUOTE_PREFIX_RE
                     .find(line_after_block_content_str)
                     .map_or(String::new(), |m| m.as_str().to_string());

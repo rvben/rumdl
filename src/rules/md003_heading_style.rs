@@ -185,7 +185,7 @@ impl Rule for MD003HeadingStyle {
 
                     // Calculate precise character range for the heading marker
                     let (start_line, start_col, end_line, end_col) =
-                        calculate_heading_range(line_num + 1, &line_info.content);
+                        calculate_heading_range(line_num + 1, line_info.content(ctx.content));
 
                     result.push(LintWarning {
                         rule_name: Some(self.name().to_string()),

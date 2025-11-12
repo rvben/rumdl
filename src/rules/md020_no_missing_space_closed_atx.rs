@@ -97,7 +97,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
 
                 // Check all ATX headings (both properly closed and malformed)
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    let line = &line_info.content;
+                    let line = line_info.content(ctx.content);
 
                     // Check if line matches closed ATX pattern without space
                     // This will detect both properly closed headings with missing space
@@ -185,21 +185,21 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
             if let Some(heading) = &line_info.heading {
                 // Skip headings indented 4+ spaces (they're code blocks)
                 if line_info.indent >= 4 {
-                    lines.push(line_info.content.clone());
+                    lines.push(line_info.content(ctx.content).to_string());
                     continue;
                 }
 
                 // Fix ATX headings without space (both properly closed and malformed)
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
-                    && self.is_closed_atx_heading_without_space(&line_info.content)
+                    && self.is_closed_atx_heading_without_space(line_info.content(ctx.content))
                 {
-                    lines.push(self.fix_closed_atx_heading(&line_info.content));
+                    lines.push(self.fix_closed_atx_heading(line_info.content(ctx.content)));
                     fixed = true;
                 }
             }
 
             if !fixed {
-                lines.push(line_info.content.clone());
+                lines.push(line_info.content(ctx.content).to_string());
             }
         }
 
