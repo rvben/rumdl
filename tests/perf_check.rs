@@ -83,8 +83,8 @@ fn test_optimized_rules_performance() {
     );
     assert_eq!(
         html_warnings.len(),
-        2000,
-        "Should detect HTML tags (1000 <span> + 1000 </span> = 2000 total)"
+        1000,
+        "Should detect 1000 opening HTML tags (MD033 only reports opening tags, not closing tags)"
     );
     assert_eq!(emphasis_warnings.len(), 0, "Should not have detected emphasis issues");
 }
