@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.175] - 2025-01-12
+
+### Added
+
+- **Universal wiki-link and Obsidian block reference support**
+  - Added recognition of `[[wiki-links]]` across all rules
+  - Added support for Obsidian block references `[[note#^block-id]]`
+  - Prevents false positives in link/heading detection rules
+  - Works with all extended markdown flavors that support wiki-links
+
+- **Type-safe configuration wrappers**
+  - Added `HeadingLevel` type with validation (1-6 range)
+  - Added type-safe wrappers for MD007, MD009, MD010 configuration
+  - Added type-safe configuration for MD013 and MD030
+  - Added type-safe configuration for MD022, MD012, MD060
+  - Compile-time validation prevents invalid configuration values
+  - Backward compatible with snake_case field names via serde aliases
+
+- **Memory profiling for non-Linux platforms**
+  - Added cross-platform memory profiling support
+  - Uses physical memory instead of virtual memory for benchmarking
+  - Enables performance analysis on macOS and Windows
+
+### Fixed
+
+- **Config import: markdownlint option mapping (#137)**
+  - `rumdl import` now correctly maps markdownlint-specific option names to rumdl equivalents
+  - MD013: Maps `stern` → `strict`, warns about incompatible options (code_block_line_length, heading_line_length)
+  - MD054: Warns about incompatible `style`/`styles` options (rumdl uses individual boolean flags)
+  - Prevents "Unknown option" warnings when importing markdownlint configs
+  - Added helpful warnings explaining config model differences
+
+- **MD011: Footnote reference false positives (#147)**
+  - Fixed incorrect flagging of valid markdown: `[link](url)[^footnote]`
+  - MD011 now skips footnote references (starting with `^`)
+  - Already had support for reference links, now extended to footnotes
+  - Added regression test covering this case
+
+- **MD013: Front matter line length (#146)**
+  - MD013 now correctly skips YAML/TOML front matter blocks
+  - Prevents false positives on long lines in document metadata
+  - Works with both `---` (YAML) and `+++` (TOML) front matter delimiters
+  - Added regression test covering this case
+
+- **Config system: kebab-case support**
+  - MD041: Converted to serde-based config with kebab-case support
+  - Added backward compatibility aliases for snake_case field names
+  - Now properly supports both `front-matter-title` and `front_matter_title`
+  - Removed undocumented config options from MD032 and MD038
+
+- **MD004: Simplified configuration**
+  - Refactored to use derives instead of manual implementation
+  - Cleaner code while maintaining full functionality
+
+- **Test infrastructure improvements**
+  - Migrated from deprecated `Command::cargo_bin` to `cargo_bin_cmd!` macro
+  - Fixed Homebrew installation docs (removed unnecessary `brew tap`)
+
+### Changed
+
+- **Dependencies**
+  - Upgraded schemars from 0.8 to 1.1
+  - Updated all dependencies to latest compatible versions
+  - Updated dependencies to latest patch versions
+
 ## [0.0.174] - 2025-01-10
 
 ### Fixed
