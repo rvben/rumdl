@@ -3,6 +3,7 @@ use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use pulldown_cmark::{BrokenLink, Event, LinkType, Parser, Tag, TagEnd};
 use regex::Regex;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 // Comprehensive link pattern that captures both inline and reference links
@@ -378,6 +379,7 @@ pub struct LintContext<'a> {
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub lines: Vec<LineInfo>,             // Pre-computed line information
+    pub continuation_lines: BTreeMap<usize, usize>, // Cached map of possible continuation lines (line number to indent)
     pub links: Vec<ParsedLink>,           // Pre-parsed links
     pub images: Vec<ParsedImage>,         // Pre-parsed images
     pub broken_links: Vec<BrokenLinkInfo>, // Broken/undefined references
@@ -550,6 +552,12 @@ impl<'a> LintContext<'a> {
             eprintln!("[PROFILE] List blocks: {:?}", start.elapsed());
         }
 
+        let start = Instant::now();
+        let continuation_lines = Self::find_continuation_lines(&lines);
+        if profile {
+            eprintln!("[PROFILE] Continuation lines: {:?}", start.elapsed());
+        }
+
         // Compute character frequency for fast content analysis
         let start = Instant::now();
         let char_frequency = Self::compute_char_frequency(content);
@@ -588,6 +596,7 @@ impl<'a> LintContext<'a> {
             line_offsets,
             code_blocks,
             lines,
+            continuation_lines,
             links,
             images,
             broken_links,
@@ -961,6 +970,22 @@ impl<'a> LintContext<'a> {
         }
 
         false
+    }
+
+    fn find_continuation_lines(lines: &[LineInfo]) -> BTreeMap<usize, usize> {
+        lines
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, line_info)| {
+                let trimmed_content = line_info.content.trim_start();
+                if trimmed_content.is_empty() || line_info.list_item.is_some() {
+                    None
+                } else {
+                    let indent = line_info.content.len() - trimmed_content.len();
+                    Some((idx + 1, indent))
+                }
+            })
+            .collect()
     }
 
     /// Parse all links in the content

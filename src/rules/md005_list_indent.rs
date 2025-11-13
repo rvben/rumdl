@@ -277,7 +277,21 @@ impl MD005ListIndent {
             return None;
         }
 
-        for line_num in start_line..=end_line {
+        // TODO: remove
+        //println!("{:#?}", ctx.lines[start_line..=end_line].to_vec());
+
+        ctx.continuation_lines
+            .range(start_line..=end_line)
+            .filter_map(|(line_num, indent)| {
+                if *indent >= parent_content_column {
+                    Some(*line_num)
+                } else {
+                    None
+                }
+            })
+            .next()
+
+        /*for line_num in start_line..=end_line {
             if let Some(line_info) = ctx.line_info(line_num) {
                 let content = line_info.content.trim_start();
 
@@ -301,7 +315,7 @@ impl MD005ListIndent {
                 }
             }
         }
-        None
+        None*/
     }
 
     /// Check a group of related list blocks as one logical list structure
