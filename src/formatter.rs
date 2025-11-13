@@ -3,10 +3,6 @@
 use colored::*;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::rule::Rule;
-use rumdl_lib::rules::code_block_utils::CodeBlockStyle;
-use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
-use rumdl_lib::rules::strong_style::StrongStyle;
-use rumdl_lib::rules::*;
 
 /// Arguments for printing check results
 pub struct PrintResultsArgs<'a> {
@@ -96,7 +92,7 @@ pub fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
 }
 
 /// Print configuration with provenance information
-pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
+pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_rules: &[Box<dyn Rule>]) {
     let g = &sourced.global;
     let mut all_lines = Vec::new();
     // [global] section
@@ -132,60 +128,7 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig) {
     ));
     global_lines.push((String::new(), String::new()));
     all_lines.extend(global_lines);
-    // All rules, but only if they have config items
-    let all_rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement),
-        Box::new(MD003HeadingStyle::default()),
-        Box::new(MD004UnorderedListStyle::new(UnorderedListStyle::Consistent)),
-        Box::new(MD005ListIndent::default()),
-        Box::new(MD007ULIndent::default()),
-        Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD010NoHardTabs::default()),
-        Box::new(MD011NoReversedLinks {}),
-        Box::new(MD012NoMultipleBlanks::default()),
-        Box::new(MD013LineLength::default()),
-        Box::new(MD018NoMissingSpaceAtx {}),
-        Box::new(MD019NoMultipleSpaceAtx {}),
-        Box::new(MD020NoMissingSpaceClosedAtx {}),
-        Box::new(MD021NoMultipleSpaceClosedAtx {}),
-        Box::new(MD022BlanksAroundHeadings::default()),
-        Box::new(MD023HeadingStartLeft {}),
-        Box::new(MD024NoDuplicateHeading::default()),
-        Box::new(MD025SingleTitle::default()),
-        Box::new(MD026NoTrailingPunctuation::default()),
-        Box::new(MD027MultipleSpacesBlockquote {}),
-        Box::new(MD028NoBlanksBlockquote {}),
-        Box::new(MD029OrderedListPrefix::default()),
-        Box::new(MD030ListMarkerSpace::default()),
-        Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD032BlanksAroundLists),
-        Box::new(MD033NoInlineHtml::default()),
-        Box::new(MD034NoBareUrls {}),
-        Box::new(MD035HRStyle::default()),
-        Box::new(MD036NoEmphasisAsHeading::new(".,;:!?".to_string())),
-        Box::new(MD037NoSpaceInEmphasis),
-        Box::new(MD038NoSpaceInCode::default()),
-        Box::new(MD039NoSpaceInLinks),
-        Box::new(MD040FencedCodeLanguage {}),
-        Box::new(MD041FirstLineHeading::default()),
-        Box::new(MD042NoEmptyLinks::new()),
-        Box::new(MD043RequiredHeadings::new(Vec::new())),
-        Box::new(MD044ProperNames::new(Vec::new(), true)),
-        Box::new(MD045NoAltText::new()),
-        Box::new(MD046CodeBlockStyle::new(CodeBlockStyle::Consistent)),
-        Box::new(MD047SingleTrailingNewline),
-        Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Consistent)),
-        Box::new(MD049EmphasisStyle::default()),
-        Box::new(MD050StrongStyle::new(StrongStyle::Consistent)),
-        Box::new(MD051LinkFragments::new()),
-        Box::new(MD052ReferenceLinkImages::new()),
-        Box::new(MD053LinkImageReferenceDefinitions::default()),
-        Box::new(MD054LinkImageStyle::default()),
-        Box::new(MD055TablePipeStyle::default()),
-        Box::new(MD056TableColumnCount),
-        Box::new(MD058BlanksAroundTables::default()),
-        Box::new(MD060TableFormat::default()),
-    ];
+
     let mut rule_names: Vec<_> = all_rules.iter().map(|r| r.name().to_string()).collect();
     rule_names.sort();
     for rule_name in rule_names {

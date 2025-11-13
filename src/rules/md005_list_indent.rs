@@ -207,6 +207,7 @@ impl MD005ListIndent {
                         // Check if previous list items at this indentation are also continuation
                         if self.has_continuation_list_at_indent(
                             ctx,
+                            cache,
                             line_num,
                             list_line,
                             list_indent,
@@ -241,6 +242,7 @@ impl MD005ListIndent {
     fn has_continuation_list_at_indent(
         &self,
         ctx: &crate::lint_context::LintContext,
+        cache: &LineCacheInfo,
         parent_line: usize,
         current_line: usize,
         list_indent: usize,
@@ -254,8 +256,9 @@ impl MD005ListIndent {
                 && list_item.marker_column == list_indent
             {
                 // Found a list at same indentation - check if it has continuation content before it
-                if self
-                    .find_continuation_indent_between(ctx, parent_line + 1, line_num - 1, parent_content_column)
+                // USE CACHE instead of self.find_continuation_indent_between()
+                if cache
+                    .find_continuation_indent(parent_line + 1, line_num - 1, parent_content_column)
                     .is_some()
                 {
                     return true;
@@ -263,45 +266,6 @@ impl MD005ListIndent {
             }
         }
         false
-    }
-
-    /// Find the indentation level used for continuation content between two line numbers
-    fn find_continuation_indent_between(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        start_line: usize,
-        end_line: usize,
-        parent_content_column: usize,
-    ) -> Option<usize> {
-        if start_line > end_line {
-            return None;
-        }
-
-        for line_num in start_line..=end_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                let content = line_info.content(ctx.content).trim_start();
-
-                // Skip empty lines
-                if content.is_empty() {
-                    continue;
-                }
-
-                // Skip list items
-                if line_info.list_item.is_some() {
-                    continue;
-                }
-
-                // Calculate indentation of this line
-                let line_indent = line_info.byte_len - content.len();
-
-                // If this line is indented at or past the parent's content column,
-                // it's continuation content - return its indentation level
-                if line_indent >= parent_content_column {
-                    return Some(line_indent);
-                }
-            }
-        }
-        None
     }
 
     /// Check a group of related list blocks as one logical list structure

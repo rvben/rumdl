@@ -1055,7 +1055,7 @@ build-backend = "setuptools.build_meta"
                         }
                     } else {
                         // Otherwise, print the smart output with provenance annotations
-                        formatter::print_config_with_provenance(&final_sourced_to_print);
+                        formatter::print_config_with_provenance(&final_sourced_to_print, &all_rules_reg);
                     }
                 }
             }
