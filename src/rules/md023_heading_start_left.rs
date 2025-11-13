@@ -2,7 +2,7 @@
 ///
 /// See [docs/md023.md](../../docs/md023.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_single_line_range};
+use crate::utils::range_utils::calculate_single_line_range;
 
 #[derive(Clone)]
 pub struct MD023HeadingStartLeft;
@@ -22,7 +22,6 @@ impl Rule for MD023HeadingStartLeft {
             return Ok(vec![]);
         }
 
-        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
 
         // Process all headings using cached heading information
@@ -58,7 +57,7 @@ impl Rule for MD023HeadingStartLeft {
                             severity: Severity::Warning,
                             message: format!("Setext heading should not be indented by {indentation} spaces"),
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(
+                                range: ctx.line_index.line_col_to_byte_range_with_length(
                                     line_num + 1,
                                     start_col,
                                     indentation,
@@ -88,7 +87,7 @@ impl Rule for MD023HeadingStartLeft {
                                     severity: Severity::Warning,
                                     message: "Setext heading underline should not be indented".to_string(),
                                     fix: Some(Fix {
-                                        range: line_index.line_col_to_byte_range_with_length(
+                                        range: ctx.line_index.line_col_to_byte_range_with_length(
                                             underline_line + 1,
                                             underline_start_col,
                                             underline_indentation,
@@ -117,7 +116,7 @@ impl Rule for MD023HeadingStartLeft {
                             severity: Severity::Warning,
                             message: format!("Heading should not be indented by {indentation} spaces"),
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(
+                                range: ctx.line_index.line_col_to_byte_range_with_length(
                                     line_num + 1,
                                     atx_start_col,
                                     indentation,

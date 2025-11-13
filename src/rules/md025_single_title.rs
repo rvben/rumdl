@@ -3,7 +3,7 @@
 /// See [docs/md025.md](../../docs/md025.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::types::HeadingLevel;
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::{
     HR_ASTERISK, HR_DASH, HR_SPACED_ASTERISK, HR_SPACED_DASH, HR_SPACED_UNDERSCORE, HR_UNDERSCORE,
 };
@@ -184,7 +184,6 @@ impl Rule for MD025SingleTitle {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
 
         // Check for front matter title if configured
@@ -275,7 +274,7 @@ impl Rule for MD025SingleTitle {
                         end_column: end_col,
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_index.line_content_range(line_num + 1),
+                            range: ctx.line_index.line_content_range(line_num + 1),
                             replacement: {
                                 let leading_spaces = line_content.len() - line_content.trim_start().len();
                                 let indentation = " ".repeat(leading_spaces);

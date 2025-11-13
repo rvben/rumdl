@@ -1,7 +1,7 @@
 use crate::HeadingStyle;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::heading_utils::HeadingUtils;
-use crate::utils::range_utils::{LineIndex, calculate_heading_range};
+use crate::utils::range_utils::calculate_heading_range;
 
 /// Rule MD001: Heading levels should only increment by one level at a time
 ///
@@ -69,7 +69,6 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
         let mut prev_level: Option<usize> = None;
 
@@ -110,7 +109,7 @@ impl Rule for MD001HeadingIncrement {
                         message: format!("Expected heading level {}, but found heading level {}", prev + 1, level),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_index.line_content_range(line_num + 1),
+                            range: ctx.line_index.line_content_range(line_num + 1),
                             replacement: format!("{}{}", " ".repeat(indentation), replacement),
                         }),
                     });

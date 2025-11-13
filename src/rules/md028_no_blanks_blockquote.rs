@@ -5,7 +5,7 @@
 /// and intentional separators between distinct blockquotes.
 /// See [docs/md028.md](../../docs/md028.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 
 #[derive(Clone)]
 pub struct MD028NoBlanksBlockquote;
@@ -186,7 +186,6 @@ impl Rule for MD028NoBlanksBlockquote {
             return Ok(Vec::new());
         }
 
-        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
 
         // Get all lines
@@ -232,7 +231,9 @@ impl Rule for MD028NoBlanksBlockquote {
                     end_column: end_col,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(line_num, 1, line.len()),
+                        range: ctx
+                            .line_index
+                            .line_col_to_byte_range_with_length(line_num, 1, line.len()),
                         replacement: fix_content,
                     }),
                 });

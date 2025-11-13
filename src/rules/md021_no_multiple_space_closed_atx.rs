@@ -2,7 +2,7 @@
 ///
 /// See [docs/md021.md](../../docs/md021.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use crate::utils::regex_cache::get_cached_regex;
 
 // Regex patterns
@@ -80,7 +80,6 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = LineIndex::new(ctx.content);
         let mut warnings = Vec::new();
 
         // Check all closed ATX headings from cached info
@@ -139,7 +138,9 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                             end_column: end_col,
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(start_line, 1, line.len()),
+                                range: ctx
+                                    .line_index
+                                    .line_col_to_byte_range_with_length(start_line, 1, line.len()),
                                 replacement,
                             }),
                         });

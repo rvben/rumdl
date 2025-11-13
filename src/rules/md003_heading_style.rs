@@ -100,9 +100,6 @@ impl Rule for MD003HeadingStyle {
         // Get the target style using cached heading information
         let target_style = self.get_target_style(ctx);
 
-        // Create LineIndex once outside the loop
-        let line_index = crate::utils::range_utils::LineIndex::new(ctx.content);
-
         // Process headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
@@ -175,7 +172,7 @@ impl Rule for MD003HeadingStyle {
                         let final_heading = format!("{}{}", " ".repeat(line_info.indent), converted_heading);
 
                         // Calculate the correct range for the heading
-                        let range = line_index.line_content_range(line_num + 1);
+                        let range = ctx.line_index.line_content_range(line_num + 1);
 
                         Some(crate::rule::Fix {
                             range,
