@@ -1,4 +1,4 @@
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use regex::Regex;
@@ -106,9 +106,8 @@ impl Rule for MD027MultipleSpacesBlockquote {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: {
-                                    let line_index = LineIndex::new(ctx.content);
-                                    let start_byte = line_index.line_col_to_byte_range(line_num, start_col).start;
-                                    let end_byte = line_index.line_col_to_byte_range(line_num, end_col).start;
+                                    let start_byte = ctx.line_index.line_col_to_byte_range(line_num, start_col).start;
+                                    let end_byte = ctx.line_index.line_col_to_byte_range(line_num, end_col).start;
                                     start_byte..end_byte
                                 },
                                 replacement: "".to_string(), // Remove the extra spaces
@@ -132,10 +131,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         message: format!("Malformed quote: {description}"),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: {
-                                let line_index = LineIndex::new(ctx.content);
-                                line_index.line_col_to_byte_range(line_num, 1)
-                            },
+                            range: ctx.line_index.line_col_to_byte_range(line_num, 1),
                             replacement: fixed_line,
                         }),
                     });

@@ -1,7 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::mkdocs_tabs;
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use toml;
 
 mod md046_config;
@@ -286,7 +286,6 @@ impl MD046CodeBlockStyle {
     fn check_unclosed_code_blocks(
         &self,
         ctx: &crate::lint_context::LintContext,
-        line_index: &LineIndex,
     ) -> Result<Vec<LintWarning>, LintError> {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
@@ -477,7 +476,7 @@ impl MD046CodeBlockStyle {
                                     calculate_line_range(*open_line, lines[*open_line - 1]);
 
                                 // Calculate the byte position to insert closing fence before this line
-                                let line_start_byte = line_index.get_line_start_byte(i + 1).unwrap_or(0);
+                                let line_start_byte = ctx.line_index.get_line_start_byte(i + 1).unwrap_or(0);
 
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name().to_string()),
@@ -637,8 +636,7 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // First, always check for unclosed code blocks
-        let line_index = LineIndex::new(ctx.content);
-        let unclosed_warnings = self.check_unclosed_code_blocks(ctx, &line_index)?;
+        let unclosed_warnings = self.check_unclosed_code_blocks(ctx)?;
 
         // If we found unclosed blocks, return those warnings first
         if !unclosed_warnings.is_empty() {
@@ -669,8 +667,6 @@ impl Rule for MD046CodeBlockStyle {
         };
 
         // Process each line to find style inconsistencies
-        let line_index = LineIndex::new(ctx.content);
-
         // Pre-compute which lines are inside FENCED code blocks (not indented)
         // Use pre-computed code blocks from context
         let mut in_fenced_block = vec![false; lines.len()];
@@ -721,7 +717,7 @@ impl Rule for MD046CodeBlockStyle {
                         message: "Use indented code blocks".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
+                            range: ctx.line_index.line_col_to_byte_range(i + 1, 1),
                             replacement: String::new(),
                         }),
                     });
@@ -762,7 +758,7 @@ impl Rule for MD046CodeBlockStyle {
                         message: "Use fenced code blocks".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(i + 1, 1),
+                            range: ctx.line_index.line_col_to_byte_range(i + 1, 1),
                             replacement: format!("```\n{}", line.trim_start()),
                         }),
                     });
@@ -780,8 +776,7 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // First check if we have nested fence issues that need special handling
-        let line_index = LineIndex::new(ctx.content);
-        let unclosed_warnings = self.check_unclosed_code_blocks(ctx, &line_index)?;
+        let unclosed_warnings = self.check_unclosed_code_blocks(ctx)?;
 
         // If we have nested fence warnings, apply those fixes first
         if !unclosed_warnings.is_empty() {
