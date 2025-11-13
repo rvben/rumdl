@@ -118,7 +118,7 @@ impl Rule for MD039NoSpaceInLinks {
                 true
             } else {
                 let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
-                link.text.as_str() != trimmed
+                link.text.as_ref() != trimmed
             };
 
             if needs_warning {
@@ -185,7 +185,7 @@ impl Rule for MD039NoSpaceInLinks {
                 true
             } else {
                 let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
-                image.alt_text.as_str() != trimmed
+                image.alt_text.as_ref() != trimmed
             };
 
             if needs_warning {
@@ -257,7 +257,7 @@ impl Rule for MD039NoSpaceInLinks {
                 true
             } else {
                 let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
-                link.text.as_str() != trimmed
+                link.text.as_ref() != trimmed
             };
 
             if needs_fix {
@@ -310,7 +310,7 @@ impl Rule for MD039NoSpaceInLinks {
                 true
             } else {
                 let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
-                image.alt_text.as_str() != trimmed
+                image.alt_text.as_ref() != trimmed
             };
 
             if needs_fix {

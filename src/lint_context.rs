@@ -3,6 +3,7 @@ use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 // Comprehensive link pattern that captures both inline and reference links
@@ -117,7 +118,7 @@ pub enum HeadingStyle {
 
 /// Parsed link information
 #[derive(Debug, Clone)]
-pub struct ParsedLink {
+pub struct ParsedLink<'a> {
     /// Line number (1-indexed)
     pub line: usize,
     /// Start column (0-indexed) in the line
@@ -129,13 +130,13 @@ pub struct ParsedLink {
     /// End byte offset in document
     pub byte_end: usize,
     /// Link text
-    pub text: String,
+    pub text: Cow<'a, str>,
     /// Link URL or reference
-    pub url: String,
+    pub url: Cow<'a, str>,
     /// Whether this is a reference link [text][ref] vs inline [text](url)
     pub is_reference: bool,
     /// Reference ID for reference links
-    pub reference_id: Option<String>,
+    pub reference_id: Option<Cow<'a, str>>,
     /// Link type from pulldown-cmark
     pub link_type: LinkType,
 }
@@ -151,7 +152,7 @@ pub struct BrokenLinkInfo {
 
 /// Parsed image information
 #[derive(Debug, Clone)]
-pub struct ParsedImage {
+pub struct ParsedImage<'a> {
     /// Line number (1-indexed)
     pub line: usize,
     /// Start column (0-indexed) in the line
@@ -163,13 +164,13 @@ pub struct ParsedImage {
     /// End byte offset in document
     pub byte_end: usize,
     /// Alt text
-    pub alt_text: String,
+    pub alt_text: Cow<'a, str>,
     /// Image URL or reference
-    pub url: String,
+    pub url: Cow<'a, str>,
     /// Whether this is a reference image ![alt][ref] vs inline ![alt](url)
     pub is_reference: bool,
     /// Reference ID for reference images
-    pub reference_id: Option<String>,
+    pub reference_id: Option<Cow<'a, str>>,
     /// Link type from pulldown-cmark
     pub link_type: LinkType,
 }
@@ -389,8 +390,8 @@ pub struct LintContext<'a> {
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub lines: Vec<LineInfo>,             // Pre-computed line information
-    pub links: Vec<ParsedLink>,           // Pre-parsed links
-    pub images: Vec<ParsedImage>,         // Pre-parsed images
+    pub links: Vec<ParsedLink<'a>>,       // Pre-parsed links
+    pub images: Vec<ParsedImage<'a>>,     // Pre-parsed images
     pub broken_links: Vec<BrokenLinkInfo>, // Broken/undefined references
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
     code_spans_cache: Mutex<Option<Arc<Vec<CodeSpan>>>>, // Lazy-loaded inline code spans
@@ -722,12 +723,12 @@ impl<'a> LintContext<'a> {
     }
 
     /// Get links on a specific line
-    pub fn links_on_line(&self, line_num: usize) -> Vec<&ParsedLink> {
+    pub fn links_on_line(&self, line_num: usize) -> Vec<&ParsedLink<'_>> {
         self.links.iter().filter(|link| link.line == line_num).collect()
     }
 
     /// Get images on a specific line
-    pub fn images_on_line(&self, line_num: usize) -> Vec<&ParsedImage> {
+    pub fn images_on_line(&self, line_num: usize) -> Vec<&ParsedImage<'_>> {
         self.images.iter().filter(|img| img.line == line_num).collect()
     }
 
@@ -976,13 +977,13 @@ impl<'a> LintContext<'a> {
 
     /// Parse all links in the content
     fn parse_links(
-        content: &str,
+        content: &'a str,
         lines: &[LineInfo],
         code_blocks: &[(usize, usize)],
         code_spans: &[CodeSpan],
         flavor: MarkdownFlavor,
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-    ) -> (Vec<ParsedLink>, Vec<BrokenLinkInfo>) {
+    ) -> (Vec<ParsedLink<'a>>, Vec<BrokenLinkInfo>) {
         use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
         use std::collections::HashSet;
 
@@ -1017,7 +1018,13 @@ impl<'a> LintContext<'a> {
         )
         .into_offset_iter();
 
-        let mut link_stack: Vec<(usize, usize, String, LinkType, String)> = Vec::new();
+        let mut link_stack: Vec<(
+            usize,
+            usize,
+            pulldown_cmark::CowStr<'a>,
+            LinkType,
+            pulldown_cmark::CowStr<'a>,
+        )> = Vec::new();
         let mut text_chunks: Vec<(String, usize, usize)> = Vec::new(); // (text, start, end)
 
         for (event, range) in parser {
@@ -1029,7 +1036,7 @@ impl<'a> LintContext<'a> {
                     ..
                 }) => {
                     // Link start - record position, URL, and reference ID
-                    link_stack.push((range.start, range.end, dest_url.to_string(), link_type, id.to_string()));
+                    link_stack.push((range.start, range.end, dest_url, link_type, id));
                     text_chunks.clear();
                 }
                 Event::Text(text) if !link_stack.is_empty() => {
@@ -1109,20 +1116,20 @@ impl<'a> LintContext<'a> {
                             }
 
                             if let Some(pos) = close_pos {
-                                std::str::from_utf8(&link_bytes[1..pos]).unwrap_or("").to_string()
+                                Cow::Borrowed(std::str::from_utf8(&link_bytes[1..pos]).unwrap_or(""))
                             } else {
-                                String::new()
+                                Cow::Borrowed("")
                             }
                         } else {
-                            String::new()
+                            Cow::Borrowed("")
                         };
 
                         // For reference links, use the actual reference ID from pulldown-cmark
                         let reference_id = if is_reference && !ref_id.is_empty() {
-                            Some(ref_id.to_lowercase())
+                            Some(Cow::Owned(ref_id.to_lowercase()))
                         } else if is_reference {
                             // For collapsed/shortcut references without explicit ID, use the link text
-                            Some(link_text.to_lowercase())
+                            Some(Cow::Owned(link_text.to_lowercase()))
                         } else {
                             None
                         };
@@ -1154,7 +1161,7 @@ impl<'a> LintContext<'a> {
                             byte_offset: start_pos,
                             byte_end: range.end,
                             text: link_text,
-                            url,
+                            url: Cow::Owned(url.to_string()),
                             is_reference,
                             reference_id,
                             link_type,
@@ -1215,15 +1222,15 @@ impl<'a> LintContext<'a> {
 
             let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, match_end);
 
-            let text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+            let text = cap.get(1).map_or("", |m| m.as_str());
 
             // Only process reference links (group 6)
             if let Some(ref_id) = cap.get(6) {
                 let ref_id_str = ref_id.as_str();
                 let normalized_ref = if ref_id_str.is_empty() {
-                    text.to_lowercase() // Implicit reference
+                    Cow::Owned(text.to_lowercase()) // Implicit reference
                 } else {
-                    ref_id_str.to_lowercase()
+                    Cow::Owned(ref_id_str.to_lowercase())
                 };
 
                 // This is an undefined reference (pulldown-cmark didn't parse it)
@@ -1233,8 +1240,8 @@ impl<'a> LintContext<'a> {
                     end_col: col_end,
                     byte_offset: match_start,
                     byte_end: match_end,
-                    text,
-                    url: String::new(), // Empty URL indicates undefined reference
+                    text: Cow::Borrowed(text),
+                    url: Cow::Borrowed(""), // Empty URL indicates undefined reference
                     is_reference: true,
                     reference_id: Some(normalized_ref),
                     link_type: LinkType::Reference, // Undefined references are reference-style
@@ -1247,12 +1254,12 @@ impl<'a> LintContext<'a> {
 
     /// Parse all images in the content
     fn parse_images(
-        content: &str,
+        content: &'a str,
         lines: &[LineInfo],
         code_blocks: &[(usize, usize)],
         code_spans: &[CodeSpan],
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-    ) -> Vec<ParsedImage> {
+    ) -> Vec<ParsedImage<'a>> {
         use crate::utils::skip_context::is_in_html_comment_ranges;
         use std::collections::HashSet;
 
@@ -1262,7 +1269,8 @@ impl<'a> LintContext<'a> {
 
         // Use pulldown-cmark for parsing - more accurate and faster
         let parser = Parser::new(content).into_offset_iter();
-        let mut image_stack: Vec<(usize, String, LinkType, String)> = Vec::new();
+        let mut image_stack: Vec<(usize, pulldown_cmark::CowStr<'a>, LinkType, pulldown_cmark::CowStr<'a>)> =
+            Vec::new();
         let mut text_chunks: Vec<(String, usize, usize)> = Vec::new(); // (text, start, end)
 
         for (event, range) in parser {
@@ -1273,7 +1281,7 @@ impl<'a> LintContext<'a> {
                     id,
                     ..
                 }) => {
-                    image_stack.push((range.start, dest_url.to_string(), link_type, id.to_string()));
+                    image_stack.push((range.start, dest_url, link_type, id));
                     text_chunks.clear();
                 }
                 Event::Text(text) if !image_stack.is_empty() => {
@@ -1347,18 +1355,18 @@ impl<'a> LintContext<'a> {
                             }
 
                             if let Some(pos) = close_pos {
-                                std::str::from_utf8(&image_bytes[2..pos]).unwrap_or("").to_string()
+                                Cow::Borrowed(std::str::from_utf8(&image_bytes[2..pos]).unwrap_or(""))
                             } else {
-                                String::new()
+                                Cow::Borrowed("")
                             }
                         } else {
-                            String::new()
+                            Cow::Borrowed("")
                         };
 
                         let reference_id = if is_reference && !ref_id.is_empty() {
-                            Some(ref_id.to_lowercase())
+                            Some(Cow::Owned(ref_id.to_lowercase()))
                         } else if is_reference {
-                            Some(alt_text.to_lowercase()) // Collapsed/shortcut references
+                            Some(Cow::Owned(alt_text.to_lowercase())) // Collapsed/shortcut references
                         } else {
                             None
                         };
@@ -1371,7 +1379,7 @@ impl<'a> LintContext<'a> {
                             byte_offset: start_pos,
                             byte_end: range.end,
                             alt_text,
-                            url,
+                            url: Cow::Owned(url.to_string()),
                             is_reference,
                             reference_id,
                             link_type,
@@ -1410,12 +1418,12 @@ impl<'a> LintContext<'a> {
             if let Some(ref_id) = cap.get(6) {
                 let (_, line_num, col_start) = Self::find_line_for_offset(lines, match_start);
                 let (_, _end_line_num, col_end) = Self::find_line_for_offset(lines, match_end);
-                let alt_text = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                let alt_text = cap.get(1).map_or("", |m| m.as_str());
                 let ref_id_str = ref_id.as_str();
                 let normalized_ref = if ref_id_str.is_empty() {
-                    alt_text.to_lowercase()
+                    Cow::Owned(alt_text.to_lowercase())
                 } else {
-                    ref_id_str.to_lowercase()
+                    Cow::Owned(ref_id_str.to_lowercase())
                 };
 
                 images.push(ParsedImage {
@@ -1424,8 +1432,8 @@ impl<'a> LintContext<'a> {
                     end_col: col_end,
                     byte_offset: match_start,
                     byte_end: match_end,
-                    alt_text,
-                    url: String::new(),
+                    alt_text: Cow::Borrowed(alt_text),
+                    url: Cow::Borrowed(""),
                     is_reference: true,
                     reference_id: Some(normalized_ref),
                     link_type: LinkType::Reference, // Undefined references are reference-style

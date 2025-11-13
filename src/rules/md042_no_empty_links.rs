@@ -163,12 +163,12 @@ impl Rule for MD042NoEmptyLinks {
             // For reference links, resolve the URL
             let effective_url = if link.is_reference {
                 if let Some(ref_id) = &link.reference_id {
-                    ctx.get_reference_url(ref_id).unwrap_or("").to_string()
+                    ctx.get_reference_url(ref_id.as_ref()).unwrap_or("").to_string()
                 } else {
                     String::new()
                 }
             } else {
-                link.url.clone()
+                link.url.to_string()
             };
 
             // For MkDocs mode, check if this looks like an auto-reference
@@ -191,7 +191,7 @@ impl Rule for MD042NoEmptyLinks {
                 let stripped_text = Self::strip_backticks(&link.text);
                 // Accept if it matches MkDocs patterns OR if it's a backtick-wrapped valid identifier
                 if is_mkdocs_auto_reference(stripped_text)
-                    || (link.text.as_str() != stripped_text && Self::is_valid_python_identifier(stripped_text))
+                    || (link.text.as_ref() != stripped_text && Self::is_valid_python_identifier(stripped_text))
                 {
                     continue;
                 }

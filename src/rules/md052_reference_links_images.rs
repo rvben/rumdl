@@ -408,7 +408,7 @@ impl MD052ReferenceLinkImages {
                     && (is_mkdocs_auto_reference(stripped_ref)
                         || is_mkdocs_auto_reference(stripped_text)
                         || (ref_id != stripped_ref && Self::is_valid_python_identifier(stripped_ref))
-                        || (link.text.as_str() != stripped_text && Self::is_valid_python_identifier(stripped_text)))
+                        || (link.text.as_ref() != stripped_text && Self::is_valid_python_identifier(stripped_text)))
                 {
                     continue;
                 }
@@ -439,7 +439,7 @@ impl MD052ReferenceLinkImages {
                     }
 
                     let match_len = link.byte_end - link.byte_offset;
-                    undefined.push((link.line - 1, link.start_col, match_len, ref_id.clone()));
+                    undefined.push((link.line - 1, link.start_col, match_len, ref_id.to_string()));
                     reported_refs.insert(reference_lower, true);
                 }
             }
@@ -503,7 +503,7 @@ impl MD052ReferenceLinkImages {
                     && (is_mkdocs_auto_reference(stripped_ref)
                         || is_mkdocs_auto_reference(stripped_alt)
                         || (ref_id != stripped_ref && Self::is_valid_python_identifier(stripped_ref))
-                        || (image.alt_text.as_str() != stripped_alt && Self::is_valid_python_identifier(stripped_alt)))
+                        || (image.alt_text.as_ref() != stripped_alt && Self::is_valid_python_identifier(stripped_alt)))
                 {
                     continue;
                 }
@@ -534,7 +534,7 @@ impl MD052ReferenceLinkImages {
                     }
 
                     let match_len = image.byte_end - image.byte_offset;
-                    undefined.push((image.line - 1, image.start_col, match_len, ref_id.clone()));
+                    undefined.push((image.line - 1, image.start_col, match_len, ref_id.to_string()));
                     reported_refs.insert(reference_lower, true);
                 }
             }
