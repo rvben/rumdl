@@ -83,6 +83,40 @@ impl MD004UnorderedListStyle {
     pub fn from_config_struct(config: MD004Config) -> Self {
         Self { config }
     }
+
+    /// Count marker prevalence across all unordered list items in the document
+    /// Returns the most prevalent marker character, preferring dash in case of ties
+    fn count_marker_prevalence(&self, ctx: &crate::lint_context::LintContext) -> Option<char> {
+        let mut asterisk_count = 0;
+        let mut dash_count = 0;
+        let mut plus_count = 0;
+
+        for list_block in &ctx.list_blocks {
+            for &item_line in &list_block.item_lines {
+                if let Some(line_info) = ctx.line_info(item_line)
+                    && let Some(list_item) = &line_info.list_item
+                    && !list_item.is_ordered
+                {
+                    match list_item.marker.chars().next()? {
+                        '*' => asterisk_count += 1,
+                        '-' => dash_count += 1,
+                        '+' => plus_count += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Use the most prevalent marker as the target style
+        // In case of a tie, prefer dash (most common, GitHub default)
+        if dash_count >= asterisk_count && dash_count >= plus_count {
+            Some('-')
+        } else if asterisk_count >= plus_count {
+            Some('*')
+        } else {
+            Some('+')
+        }
+    }
 }
 
 impl Rule for MD004UnorderedListStyle {
@@ -109,35 +143,7 @@ impl Rule for MD004UnorderedListStyle {
 
         // For consistent mode, count occurrences of each marker (prevalence-based approach)
         let target_marker_for_consistent = if self.config.style == UnorderedListStyle::Consistent {
-            let mut asterisk_count = 0;
-            let mut dash_count = 0;
-            let mut plus_count = 0;
-
-            for list_block in &ctx.list_blocks {
-                for &item_line in &list_block.item_lines {
-                    if let Some(line_info) = ctx.line_info(item_line)
-                        && let Some(list_item) = &line_info.list_item
-                        && !list_item.is_ordered
-                    {
-                        match list_item.marker.chars().next().unwrap() {
-                            '*' => asterisk_count += 1,
-                            '-' => dash_count += 1,
-                            '+' => plus_count += 1,
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            // Use the most prevalent marker as the target style
-            // In case of a tie, prefer dash (most common, GitHub default)
-            if dash_count >= asterisk_count && dash_count >= plus_count {
-                Some('-')
-            } else if asterisk_count >= plus_count {
-                Some('*')
-            } else {
-                Some('+')
-            }
+            self.count_marker_prevalence(ctx)
         } else {
             None
         };
@@ -260,35 +266,7 @@ impl Rule for MD004UnorderedListStyle {
 
         // For consistent mode, count occurrences of each marker (prevalence-based approach)
         let target_marker_for_consistent = if self.config.style == UnorderedListStyle::Consistent {
-            let mut asterisk_count = 0;
-            let mut dash_count = 0;
-            let mut plus_count = 0;
-
-            for list_block in &ctx.list_blocks {
-                for &item_line in &list_block.item_lines {
-                    if let Some(line_info) = ctx.line_info(item_line)
-                        && let Some(list_item) = &line_info.list_item
-                        && !list_item.is_ordered
-                    {
-                        match list_item.marker.chars().next().unwrap() {
-                            '*' => asterisk_count += 1,
-                            '-' => dash_count += 1,
-                            '+' => plus_count += 1,
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            // Use the most prevalent marker as the target style
-            // In case of a tie, prefer dash (most common, GitHub default)
-            if dash_count >= asterisk_count && dash_count >= plus_count {
-                Some('-')
-            } else if asterisk_count >= plus_count {
-                Some('*')
-            } else {
-                Some('+')
-            }
+            self.count_marker_prevalence(ctx)
         } else {
             None
         };

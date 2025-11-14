@@ -400,16 +400,12 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
+            // Calculate line byte offset once per line (not inside the loop)
+            let line_byte_offset: usize = ctx.line_index.get_line_start_byte(line_num).unwrap_or(0);
+
             // Find all HTML opening tags in the line using regex
             for tag_match in HTML_OPENING_TAG_FINDER.find_iter(line) {
                 let tag = tag_match.as_str();
-
-                // Calculate byte offset for the tag in the entire content
-                let line_byte_offset: usize = content
-                    .lines()
-                    .take(line_num - 1)
-                    .map(|l| l.len() + 1) // +1 for newline
-                    .sum();
                 let tag_byte_start = line_byte_offset + tag_match.start();
 
                 // Skip HTML tags inside HTML comments
