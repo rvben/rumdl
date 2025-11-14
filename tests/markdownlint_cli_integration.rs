@@ -117,12 +117,12 @@ fn test_config_command_prints_source_markdownlint_json() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}\n{stderr}");
     assert!(
-        combined.contains("from markdownlint"),
-        "Expected output to mention 'from markdownlint', got: {combined}"
+        combined.contains("from project config"),
+        "Expected output to mention 'from project config', got: {combined}"
     );
 
     // In the expected output, update the provenance for global config values to [from default]
-    // Only rule-specific values set by markdownlint config should show [from markdownlint]
+    // Only rule-specific values set by markdownlint config should show [from project config]
 }
 
 #[test]
