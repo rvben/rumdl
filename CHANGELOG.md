@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.176] - 2025-01-14
 
+### Added
+
+- **Git-style intelligent configuration merging**
+  - User and project configs can now intelligently combine instead of simply overriding
+  - `disable` array uses union semantics - user can add to project disables
+  - `enable` array uses replace semantics - project can enforce specific rules
+  - When a rule appears in both `enable` and `disable`, `enable` wins (project can override user)
+  - Configuration hierarchy is now explicit and follows Git's pattern:
+    - Default (0) < UserConfig (1) < PyprojectToml (2) < ProjectConfig (3) < CLI (4)
+  - Renamed config sources for clarity:
+    - `ConfigSource::RumdlToml` → `UserConfig` (global user config)
+    - `ConfigSource::RumdlToml` → `ProjectConfig` (project-level config files)
+    - Removed `Markdownlint` source (now uses `ProjectConfig`)
+  - New API methods:
+    - `SourcedValue::merge_union()` - additive merging for disable arrays
+    - `SourcedValue::merge_override()` - replacement merging for enable arrays
+  - Example use cases:
+    - User disables MD013 globally → Project enables MD013 → MD013 is enabled ✓
+    - Project disables MD001, MD003 → User disables MD013 → All three are disabled ✓
+  - 17 comprehensive tests covering merge semantics, precedence, and conflict resolution
+  - Matches configuration pattern used by git, eslint, prettier, and other modern tools
+
 ### Performance
 
 - **Major memory optimizations eliminating string allocations**
