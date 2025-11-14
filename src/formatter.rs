@@ -84,10 +84,10 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
 pub fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
     match src {
         rumdl_config::ConfigSource::Cli => "CLI",
-        rumdl_config::ConfigSource::RumdlToml => ".rumdl.toml",
+        rumdl_config::ConfigSource::UserConfig => "user config",
+        rumdl_config::ConfigSource::ProjectConfig => "project config",
         rumdl_config::ConfigSource::PyprojectToml => "pyproject.toml",
         rumdl_config::ConfigSource::Default => "default",
-        rumdl_config::ConfigSource::Markdownlint => "markdownlint",
     }
 }
 

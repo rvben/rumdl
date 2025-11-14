@@ -203,20 +203,20 @@ impl MarkdownlintConfig {
                                 .entry(norm_config_key.clone())
                                 .and_modify(|sv| {
                                     sv.value = v.clone();
-                                    sv.source = ConfigSource::Markdownlint;
+                                    sv.source = ConfigSource::ProjectConfig;
                                     sv.overrides.push(crate::config::ConfigOverride {
                                         value: v.clone(),
-                                        source: ConfigSource::Markdownlint,
+                                        source: ConfigSource::ProjectConfig,
                                         file: file.clone(),
                                         line: None,
                                     });
                                 })
                                 .or_insert_with(|| SourcedValue {
                                     value: v.clone(),
-                                    source: ConfigSource::Markdownlint,
+                                    source: ConfigSource::ProjectConfig,
                                     overrides: vec![crate::config::ConfigOverride {
                                         value: v,
-                                        source: ConfigSource::Markdownlint,
+                                        source: ConfigSource::ProjectConfig,
                                         file: file.clone(),
                                         line: None,
                                     }],
@@ -228,20 +228,20 @@ impl MarkdownlintConfig {
                             .entry("value".to_string())
                             .and_modify(|sv| {
                                 sv.value = tv.clone();
-                                sv.source = ConfigSource::Markdownlint;
+                                sv.source = ConfigSource::ProjectConfig;
                                 sv.overrides.push(crate::config::ConfigOverride {
                                     value: tv.clone(),
-                                    source: ConfigSource::Markdownlint,
+                                    source: ConfigSource::ProjectConfig,
                                     file: file.clone(),
                                     line: None,
                                 });
                             })
                             .or_insert_with(|| SourcedValue {
                                 value: tv.clone(),
-                                source: ConfigSource::Markdownlint,
+                                source: ConfigSource::ProjectConfig,
                                 overrides: vec![crate::config::ConfigOverride {
                                     value: tv,
-                                    source: ConfigSource::Markdownlint,
+                                    source: ConfigSource::ProjectConfig,
                                     file: file.clone(),
                                     line: None,
                                 }],
@@ -253,10 +253,10 @@ impl MarkdownlintConfig {
                                 "style".to_string(),
                                 SourcedValue {
                                     value: toml::Value::String("fixed".to_string()),
-                                    source: ConfigSource::Markdownlint,
+                                    source: ConfigSource::ProjectConfig,
                                     overrides: vec![crate::config::ConfigOverride {
                                         value: toml::Value::String("fixed".to_string()),
-                                        source: ConfigSource::Markdownlint,
+                                        source: ConfigSource::ProjectConfig,
                                         file: file.clone(),
                                         line: None,
                                     }],
@@ -334,9 +334,9 @@ impl MarkdownlintConfig {
                         for (rk, rv) in table {
                             let norm_rk = crate::config::normalize_key(&rk);
                             let sv = rule_config.values.entry(norm_rk.clone()).or_insert_with(|| {
-                                crate::config::SourcedValue::new(rv.clone(), crate::config::ConfigSource::Markdownlint)
+                                crate::config::SourcedValue::new(rv.clone(), crate::config::ConfigSource::ProjectConfig)
                             });
-                            sv.push_override(rv, crate::config::ConfigSource::Markdownlint, file.clone(), None);
+                            sv.push_override(rv, crate::config::ConfigSource::ProjectConfig, file.clone(), None);
                         }
                     } else {
                         rule_config
@@ -344,20 +344,20 @@ impl MarkdownlintConfig {
                             .entry("value".to_string())
                             .and_modify(|sv| {
                                 sv.value = tv.clone();
-                                sv.source = crate::config::ConfigSource::Markdownlint;
+                                sv.source = crate::config::ConfigSource::ProjectConfig;
                                 sv.overrides.push(crate::config::ConfigOverride {
                                     value: tv.clone(),
-                                    source: crate::config::ConfigSource::Markdownlint,
+                                    source: crate::config::ConfigSource::ProjectConfig,
                                     file: file.clone(),
                                     line: None,
                                 });
                             })
                             .or_insert_with(|| crate::config::SourcedValue {
                                 value: tv.clone(),
-                                source: crate::config::ConfigSource::Markdownlint,
+                                source: crate::config::ConfigSource::ProjectConfig,
                                 overrides: vec![crate::config::ConfigOverride {
                                     value: tv,
-                                    source: crate::config::ConfigSource::Markdownlint,
+                                    source: crate::config::ConfigSource::ProjectConfig,
                                     file: file.clone(),
                                     line: None,
                                 }],
@@ -369,10 +369,10 @@ impl MarkdownlintConfig {
                                 "style".to_string(),
                                 crate::config::SourcedValue {
                                     value: toml::Value::String("fixed".to_string()),
-                                    source: crate::config::ConfigSource::Markdownlint,
+                                    source: crate::config::ConfigSource::ProjectConfig,
                                     overrides: vec![crate::config::ConfigOverride {
                                         value: toml::Value::String("fixed".to_string()),
-                                        source: crate::config::ConfigSource::Markdownlint,
+                                        source: crate::config::ConfigSource::ProjectConfig,
                                         file: file.clone(),
                                         line: None,
                                     }],
@@ -388,7 +388,7 @@ impl MarkdownlintConfig {
         if !disabled_rules.is_empty() {
             fragment.global.disable.push_override(
                 disabled_rules,
-                crate::config::ConfigSource::Markdownlint,
+                crate::config::ConfigSource::ProjectConfig,
                 file.clone(),
                 None,
             );
@@ -398,7 +398,7 @@ impl MarkdownlintConfig {
         if !enabled_rules.is_empty() {
             fragment.global.enable.push_override(
                 enabled_rules,
-                crate::config::ConfigSource::Markdownlint,
+                crate::config::ConfigSource::ProjectConfig,
                 file.clone(),
                 None,
             );
@@ -585,7 +585,7 @@ ul-style:
         let md013_config = &sourced_config.rules["MD013"];
         assert!(md013_config.values.contains_key("line-length"));
         assert_eq!(md013_config.values["line-length"].value, toml::Value::Integer(100));
-        assert_eq!(md013_config.values["line-length"].source, ConfigSource::Markdownlint);
+        assert_eq!(md013_config.values["line-length"].source, ConfigSource::ProjectConfig);
 
         // Check that loaded_files is tracked
         assert_eq!(sourced_config.loaded_files.len(), 1);

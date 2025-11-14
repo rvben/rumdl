@@ -1429,14 +1429,26 @@ enable = ["MD001"]
     }
 }
 
+/// Configuration source with clear precedence hierarchy.
+///
+/// Precedence order (lower values override higher values):
+/// - Default (0): Built-in defaults
+/// - UserConfig (1): User-level ~/.config/rumdl/rumdl.toml
+/// - PyprojectToml (2): Project-level pyproject.toml
+/// - ProjectConfig (3): Project-level .rumdl.toml (most specific)
+/// - Cli (4): Command-line flags (highest priority)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigSource {
+    /// Built-in default configuration
     Default,
-    RumdlToml,
+    /// User-level configuration from ~/.config/rumdl/rumdl.toml
+    UserConfig,
+    /// Project-level configuration from pyproject.toml
     PyprojectToml,
+    /// Project-level configuration from .rumdl.toml or rumdl.toml
+    ProjectConfig,
+    /// Command-line flags (highest precedence)
     Cli,
-    /// Value was loaded from a markdownlint config file (e.g. .markdownlint.json, .markdownlint.yaml)
-    Markdownlint,
 }
 
 #[derive(Debug, Clone)]
@@ -1482,9 +1494,9 @@ impl<T: Clone> SourcedValue<T> {
         fn source_precedence(src: ConfigSource) -> u8 {
             match src {
                 ConfigSource::Default => 0,
-                ConfigSource::PyprojectToml => 1,
-                ConfigSource::Markdownlint => 2,
-                ConfigSource::RumdlToml => 3,
+                ConfigSource::UserConfig => 1,
+                ConfigSource::PyprojectToml => 2,
+                ConfigSource::ProjectConfig => 3,
                 ConfigSource::Cli => 4,
             }
         }
@@ -1512,6 +1524,47 @@ impl<T: Clone> SourcedValue<T> {
             file,
             line,
         });
+    }
+}
+
+impl<T: Clone + Eq + std::hash::Hash> SourcedValue<Vec<T>> {
+    /// Merges a new value using union semantics (for arrays like `disable`)
+    /// Values from both sources are combined, with deduplication
+    pub fn merge_union(
+        &mut self,
+        new_value: Vec<T>,
+        new_source: ConfigSource,
+        new_file: Option<String>,
+        new_line: Option<usize>,
+    ) {
+        fn source_precedence(src: ConfigSource) -> u8 {
+            match src {
+                ConfigSource::Default => 0,
+                ConfigSource::UserConfig => 1,
+                ConfigSource::PyprojectToml => 2,
+                ConfigSource::ProjectConfig => 3,
+                ConfigSource::Cli => 4,
+            }
+        }
+
+        if source_precedence(new_source) >= source_precedence(self.source) {
+            // Union: combine values from both sources with deduplication
+            let mut combined = self.value.clone();
+            for item in new_value.iter() {
+                if !combined.contains(item) {
+                    combined.push(item.clone());
+                }
+            }
+
+            self.value = combined;
+            self.source = new_source;
+            self.overrides.push(ConfigOverride {
+                value: new_value,
+                source: new_source,
+                file: new_file,
+                line: new_line,
+            });
+        }
     }
 }
 
@@ -1601,18 +1654,28 @@ impl SourcedConfig {
     /// Uses source precedence to determine which values take effect.
     fn merge(&mut self, fragment: SourcedConfigFragment) {
         // Merge global config
+        // Enable uses replace semantics (project can enforce rules)
         self.global.enable.merge_override(
             fragment.global.enable.value,
             fragment.global.enable.source,
             fragment.global.enable.overrides.first().and_then(|o| o.file.clone()),
             fragment.global.enable.overrides.first().and_then(|o| o.line),
         );
-        self.global.disable.merge_override(
+
+        // Disable uses union semantics (user can add to project disables)
+        self.global.disable.merge_union(
             fragment.global.disable.value,
             fragment.global.disable.source,
             fragment.global.disable.overrides.first().and_then(|o| o.file.clone()),
             fragment.global.disable.overrides.first().and_then(|o| o.line),
         );
+
+        // Conflict resolution: Enable overrides disable
+        // Remove any rules from disable that appear in enable
+        self.global
+            .disable
+            .value
+            .retain(|rule| !self.global.enable.value.contains(rule));
         self.global.include.merge_override(
             fragment.global.include.value,
             fragment.global.include.source,
@@ -1915,7 +1978,7 @@ impl SourcedConfig {
                         source: e,
                         path: path_str.clone(),
                     })?;
-                    let fragment = parse_rumdl_toml(&content, &path_str)?;
+                    let fragment = parse_rumdl_toml(&content, &path_str, ConfigSource::UserConfig)?;
                     sourced_config.merge(fragment);
                     sourced_config.loaded_files.push(path_str);
                 }
@@ -1945,7 +2008,7 @@ impl SourcedConfig {
                         sourced_config.loaded_files.push(path_str.clone());
                     }
                 } else {
-                    let fragment = parse_rumdl_toml(&content, &path_str)?;
+                    let fragment = parse_rumdl_toml(&content, &path_str, ConfigSource::ProjectConfig)?;
                     sourced_config.merge(fragment);
                     sourced_config.loaded_files.push(path_str.clone());
                 }
@@ -1966,7 +2029,7 @@ impl SourcedConfig {
                     source: e,
                     path: path_str.clone(),
                 })?;
-                let fragment = parse_rumdl_toml(&content, &path_str)?;
+                let fragment = parse_rumdl_toml(&content, &path_str, ConfigSource::ProjectConfig)?;
                 sourced_config.merge(fragment);
                 sourced_config.loaded_files.push(path_str.clone());
             }
@@ -1995,7 +2058,7 @@ impl SourcedConfig {
                         source: e,
                         path: path_str.clone(),
                     })?;
-                    let fragment = parse_rumdl_toml(&content, &path_str)?;
+                    let fragment = parse_rumdl_toml(&content, &path_str, ConfigSource::ProjectConfig)?;
                     sourced_config.merge(fragment);
                     sourced_config.loaded_files.push(path_str);
                 }
@@ -2739,12 +2802,12 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
 }
 
 /// Parses rumdl.toml / .rumdl.toml content.
-fn parse_rumdl_toml(content: &str, path: &str) -> Result<SourcedConfigFragment, ConfigError> {
+fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<SourcedConfigFragment, ConfigError> {
     let doc = content
         .parse::<DocumentMut>()
         .map_err(|e| ConfigError::ParseError(format!("{path}: Failed to parse TOML: {e}")))?;
     let mut fragment = SourcedConfigFragment::default();
-    let source = ConfigSource::RumdlToml;
+    // source parameter provided by caller
     let file = Some(path.to_string());
 
     // Define known rules before the loop
@@ -3076,3 +3139,7 @@ fn load_from_markdownlint(path: &str) -> Result<SourcedConfigFragment, ConfigErr
         .map_err(|e| ConfigError::ParseError(format!("{path}: {e}")))?;
     Ok(ml_config.map_to_sourced_rumdl_config_fragment(Some(path)))
 }
+
+#[cfg(test)]
+#[path = "config_intelligent_merge_tests.rs"]
+mod config_intelligent_merge_tests;

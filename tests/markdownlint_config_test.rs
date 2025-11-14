@@ -171,17 +171,17 @@ fn test_markdownlint_config_provenance() {
     // Check that rules are present and provenance is correct
     let rule = sourced.rules.get("MD046").expect("MD046 missing");
     let style = rule.values.get("style").expect("style missing");
-    assert!(style.source == ConfigSource::Markdownlint);
+    assert!(style.source == ConfigSource::ProjectConfig);
     assert!(style.value.as_str().unwrap() == "fenced");
 
     let ul_rule = sourced.rules.get("MD004").expect("MD004 missing");
     let ul_style = ul_rule.values.get("style").expect("ul style missing");
-    assert!(ul_style.source == ConfigSource::Markdownlint);
+    assert!(ul_style.source == ConfigSource::ProjectConfig);
     assert!(ul_style.value.as_str().unwrap() == "dash");
 
     let heading_rule = sourced.rules.get("MD003").expect("MD003 missing");
     let heading_style = heading_rule.values.get("style").expect("heading style missing");
-    assert!(heading_style.source == ConfigSource::Markdownlint);
+    assert!(heading_style.source == ConfigSource::ProjectConfig);
     assert!(heading_style.value.as_str().unwrap() == "atx");
 }
 
