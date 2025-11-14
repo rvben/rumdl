@@ -4,7 +4,6 @@
 //! See [docs/md035.md](../../docs/md035.md) for full documentation, configuration, and examples.
 
 use crate::utils::range_utils::calculate_line_range;
-use crate::utils::skip_context;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::regex_cache::{
@@ -65,14 +64,9 @@ impl MD035HRStyle {
         let mut counts: HashMap<&str, usize> = HashMap::new();
         let mut order: Vec<&str> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
-            // Skip if this line is in frontmatter
-            if skip_context::is_in_front_matter(ctx.content, i) {
-                continue;
-            }
-
-            // Skip if this line is in a code block
-            if let Some(line_info) = ctx.line_info(i + 1)
-                && line_info.in_code_block
+            // Skip if this line is in frontmatter or a code block (using pre-computed LineInfo)
+            if let Some(line_info) = ctx.lines.get(i)
+                && (line_info.in_front_matter || line_info.in_code_block)
             {
                 continue;
             }
@@ -123,14 +117,9 @@ impl Rule for MD035HRStyle {
         };
 
         for (i, line) in lines.iter().enumerate() {
-            // Skip if this line is in frontmatter
-            if skip_context::is_in_front_matter(content, i) {
-                continue;
-            }
-
-            // Skip if this line is in a code block or code span
-            if let Some(line_info) = ctx.line_info(i + 1)
-                && line_info.in_code_block
+            // Skip if this line is in frontmatter or a code block (using pre-computed LineInfo)
+            if let Some(line_info) = ctx.lines.get(i)
+                && (line_info.in_front_matter || line_info.in_code_block)
             {
                 continue;
             }
@@ -188,15 +177,9 @@ impl Rule for MD035HRStyle {
         };
 
         for (i, line) in lines.iter().enumerate() {
-            // Skip if this line is in frontmatter
-            if skip_context::is_in_front_matter(content, i) {
-                result.push(line.to_string());
-                continue;
-            }
-
-            // Skip if this line is in a code block or code span
-            if let Some(line_info) = ctx.line_info(i + 1)
-                && line_info.in_code_block
+            // Skip if this line is in frontmatter or a code block (using pre-computed LineInfo)
+            if let Some(line_info) = ctx.lines.get(i)
+                && (line_info.in_front_matter || line_info.in_code_block)
             {
                 result.push(line.to_string());
                 continue;
