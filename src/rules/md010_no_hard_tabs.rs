@@ -73,37 +73,37 @@ impl MD010NoHardTabs {
         count
     }
 
-    fn find_tab_positions(line: &str) -> Vec<usize> {
-        line.chars()
-            .enumerate()
-            .filter(|(_, c)| *c == '\t')
-            .map(|(i, _)| i)
-            .collect()
-    }
-
-    fn group_consecutive_tabs(tab_positions: &[usize]) -> Vec<(usize, usize)> {
-        if tab_positions.is_empty() {
-            return Vec::new();
-        }
-
+    fn find_and_group_tabs(line: &str) -> Vec<(usize, usize)> {
         let mut groups = Vec::new();
-        let mut start = tab_positions[0];
-        let mut end = tab_positions[0];
+        let mut current_group_start: Option<usize> = None;
+        let mut last_tab_pos = 0;
 
-        for &pos in tab_positions.iter().skip(1) {
-            if pos == end + 1 {
-                // Consecutive tab
-                end = pos;
-            } else {
-                // Gap found, save current group and start new one
-                groups.push((start, end + 1)); // end + 1 for exclusive end
-                start = pos;
-                end = pos;
+        for (i, c) in line.chars().enumerate() {
+            if c == '\t' {
+                if let Some(start) = current_group_start {
+                    // We're in a group - check if this tab is consecutive
+                    if i == last_tab_pos + 1 {
+                        // Consecutive tab, continue the group
+                        last_tab_pos = i;
+                    } else {
+                        // Gap found, save current group and start new one
+                        groups.push((start, last_tab_pos + 1));
+                        current_group_start = Some(i);
+                        last_tab_pos = i;
+                    }
+                } else {
+                    // Start a new group
+                    current_group_start = Some(i);
+                    last_tab_pos = i;
+                }
             }
         }
 
-        // Add the last group
-        groups.push((start, end + 1));
+        // Add the last group if there is one
+        if let Some(start) = current_group_start {
+            groups.push((start, last_tab_pos + 1));
+        }
+
         groups
     }
 }
@@ -140,13 +140,13 @@ impl Rule for MD010NoHardTabs {
                 continue;
             }
 
-            let tab_positions = Self::find_tab_positions(line);
-            if tab_positions.is_empty() {
+            // Process tabs directly without intermediate collection
+            let tab_groups = Self::find_and_group_tabs(line);
+            if tab_groups.is_empty() {
                 continue;
             }
 
             let leading_tabs = Self::count_leading_tabs(line);
-            let tab_groups = Self::group_consecutive_tabs(&tab_positions);
 
             // Generate warning for each group of consecutive tabs
             for (start_pos, end_pos) in tab_groups {
@@ -414,27 +414,23 @@ mod tests {
     }
 
     #[test]
-    fn test_tab_positions() {
-        let tabs = MD010NoHardTabs::find_tab_positions("a\tb\tc");
-        assert_eq!(tabs, vec![1, 3]);
+    fn test_find_and_group_tabs() {
+        // Test finding and grouping tabs in one pass
+        let groups = MD010NoHardTabs::find_and_group_tabs("a\tb\tc");
+        assert_eq!(groups, vec![(1, 2), (3, 4)]);
 
-        let tabs = MD010NoHardTabs::find_tab_positions("\t\tabc");
-        assert_eq!(tabs, vec![0, 1]);
+        let groups = MD010NoHardTabs::find_and_group_tabs("\t\tabc");
+        assert_eq!(groups, vec![(0, 2)]);
 
-        let tabs = MD010NoHardTabs::find_tab_positions("no tabs");
-        assert!(tabs.is_empty());
-    }
-
-    #[test]
-    fn test_group_consecutive_tabs() {
-        let groups = MD010NoHardTabs::group_consecutive_tabs(&[0, 1, 2, 5, 6]);
-        assert_eq!(groups, vec![(0, 3), (5, 7)]);
-
-        let groups = MD010NoHardTabs::group_consecutive_tabs(&[1, 3, 5]);
-        assert_eq!(groups, vec![(1, 2), (3, 4), (5, 6)]);
-
-        let groups = MD010NoHardTabs::group_consecutive_tabs(&[]);
+        let groups = MD010NoHardTabs::find_and_group_tabs("no tabs");
         assert!(groups.is_empty());
+
+        // Test with consecutive and non-consecutive tabs
+        let groups = MD010NoHardTabs::find_and_group_tabs("\t\t\ta\t\tb");
+        assert_eq!(groups, vec![(0, 3), (4, 6)]);
+
+        let groups = MD010NoHardTabs::find_and_group_tabs("\ta\tb\tc");
+        assert_eq!(groups, vec![(0, 1), (2, 3), (4, 5)]);
     }
 
     #[test]

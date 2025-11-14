@@ -18,7 +18,7 @@ const SINGLE_LINE_DOUBLE_ASTERISK_EMPHASIS_STR: &str = r"^\s*\*\*([^*\n]+)\*\*\s
 const SINGLE_LINE_DOUBLE_UNDERSCORE_EMPHASIS_STR: &str = r"^\s*__([^_\n]+)__\s*$";
 
 /// Represents different styles of Markdown headings
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum HeadingStyle {
     Atx,       // # Heading
     AtxClosed, // # Heading #

@@ -320,6 +320,40 @@ impl MD030ListMarkerSpace {
         false
     }
 
+    /// Helper to fix marker spacing for both ordered and unordered lists
+    fn fix_marker_spacing(
+        &self,
+        marker: &str,
+        after_marker: &str,
+        indent: &str,
+        is_multi_line: bool,
+        is_ordered: bool,
+    ) -> Option<String> {
+        // Fix if there are tabs, multiple spaces, or mixed whitespace
+        if after_marker.starts_with('\t')
+            || after_marker.starts_with("  ")
+            || (after_marker.starts_with(' ') && after_marker.as_bytes().get(1) == Some(&b'\t'))
+        {
+            let content = after_marker.trim_start();
+            if !content.is_empty() {
+                // Use appropriate configuration based on list type and whether it's multi-line
+                let spaces = if is_ordered {
+                    if is_multi_line {
+                        " ".repeat(self.config.ol_multi.get())
+                    } else {
+                        " ".repeat(self.config.ol_single.get())
+                    }
+                } else if is_multi_line {
+                    " ".repeat(self.config.ul_multi.get())
+                } else {
+                    " ".repeat(self.config.ul_single.get())
+                };
+                return Some(format!("{indent}{marker}{spaces}{content}"));
+            }
+        }
+        None
+    }
+
     /// Fix list marker spacing with context - handles tabs, multiple spaces, and mixed whitespace
     fn try_fix_list_marker_spacing_with_context(&self, line: &str, is_multi_line: bool) -> Option<String> {
         let trimmed = line.trim_start();
@@ -328,21 +362,8 @@ impl MD030ListMarkerSpace {
         // Check for unordered list markers
         for marker in &["*", "-", "+"] {
             if let Some(after_marker) = trimmed.strip_prefix(marker) {
-                // Fix if there are tabs, multiple spaces, or mixed whitespace
-                if after_marker.starts_with('\t')
-                    || after_marker.starts_with("  ")
-                    || (after_marker.starts_with(' ') && after_marker.as_bytes().get(1) == Some(&b'\t'))
-                {
-                    let content = after_marker.trim_start();
-                    if !content.is_empty() {
-                        // Use appropriate configuration based on whether it's multi-line
-                        let spaces = if is_multi_line {
-                            " ".repeat(self.config.ul_multi.get())
-                        } else {
-                            " ".repeat(self.config.ul_single.get())
-                        };
-                        return Some(format!("{indent}{marker}{spaces}{content}"));
-                    }
+                if let Some(fixed) = self.fix_marker_spacing(marker, after_marker, indent, is_multi_line, false) {
+                    return Some(fixed);
                 }
                 break; // Found a marker, don't check others
             }
@@ -353,21 +374,9 @@ impl MD030ListMarkerSpace {
             let before_dot = &trimmed[..dot_pos];
             if before_dot.chars().all(|c| c.is_ascii_digit()) && !before_dot.is_empty() {
                 let after_dot = &trimmed[dot_pos + 1..];
-                // Fix if there are tabs, multiple spaces, or mixed whitespace
-                if after_dot.starts_with('\t')
-                    || after_dot.starts_with("  ")
-                    || (after_dot.starts_with(' ') && after_dot.as_bytes().get(1) == Some(&b'\t'))
-                {
-                    let content = after_dot.trim_start();
-                    if !content.is_empty() {
-                        // Use appropriate configuration based on whether it's multi-line
-                        let spaces = if is_multi_line {
-                            " ".repeat(self.config.ol_multi.get())
-                        } else {
-                            " ".repeat(self.config.ol_single.get())
-                        };
-                        return Some(format!("{indent}{before_dot}.{spaces}{content}"));
-                    }
+                let marker = format!("{before_dot}.");
+                if let Some(fixed) = self.fix_marker_spacing(&marker, after_dot, indent, is_multi_line, true) {
+                    return Some(fixed);
                 }
             }
         }

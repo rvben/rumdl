@@ -64,6 +64,8 @@ impl Rule for MD009TrailingSpaces {
 
         let mut warnings = Vec::new();
 
+        // Store lines in a Vec only for accessing previous line (for list item check)
+        // This is still necessary due to the need to look back at prev_line
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
@@ -181,6 +183,7 @@ impl Rule for MD009TrailingSpaces {
         }
 
         // For complex cases, we need line-by-line processing but with optimizations
+        // We need to collect lines since we need to look at previous lines for list item checks
         let lines: Vec<&str> = content.lines().collect();
         let mut result = String::with_capacity(content.len()); // Pre-allocate capacity
 

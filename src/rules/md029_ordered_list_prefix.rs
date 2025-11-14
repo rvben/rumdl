@@ -412,6 +412,31 @@ impl MD029OrderedListPrefix {
         true
     }
 
+    /// Calculate the minimum indentation required for continuing a list block
+    fn calculate_min_continuation_indent(&self, ctx: &crate::lint_context::LintContext, end_line: usize) -> usize {
+        if let Some(prev_block) = ctx.list_blocks.iter().find(|block| block.end_line == end_line) {
+            if let Some(&last_item_line) = prev_block.item_lines.last() {
+                if let Some(line_info) = ctx.line_info(last_item_line) {
+                    if let Some(list_item) = &line_info.list_item {
+                        if list_item.is_ordered {
+                            list_item.marker.len() + 1 // Add 1 for space after ordered markers
+                        } else {
+                            2 // Unordered lists need at least 2 spaces
+                        }
+                    } else {
+                        3 // Fallback
+                    }
+                } else {
+                    3 // Fallback
+                }
+            } else {
+                3 // Fallback
+            }
+        } else {
+            3 // Fallback
+        }
+    }
+
     /// Check if two list blocks are logically continuous (no major structural separators)
     fn blocks_are_logically_continuous(
         &self,
@@ -424,28 +449,7 @@ impl MD029OrderedListPrefix {
         }
 
         // Calculate minimum continuation indent from the previous block's last item
-        let min_continuation_indent =
-            if let Some(prev_block) = ctx.list_blocks.iter().find(|block| block.end_line == end_line) {
-                if let Some(&last_item_line) = prev_block.item_lines.last() {
-                    if let Some(line_info) = ctx.line_info(last_item_line) {
-                        if let Some(list_item) = &line_info.list_item {
-                            if list_item.is_ordered {
-                                list_item.marker.len() + 1 // Add 1 for space after ordered markers
-                            } else {
-                                2 // Unordered lists need at least 2 spaces
-                            }
-                        } else {
-                            3 // Fallback
-                        }
-                    } else {
-                        3 // Fallback
-                    }
-                } else {
-                    3 // Fallback
-                }
-            } else {
-                3 // Fallback
-            };
+        let min_continuation_indent = self.calculate_min_continuation_indent(ctx, end_line);
 
         for line_num in (end_line + 1)..start_line {
             if let Some(line_info) = ctx.line_info(line_num) {
@@ -514,29 +518,7 @@ impl MD029OrderedListPrefix {
         }
 
         // Calculate minimum continuation indent from the previous block's last item
-        let min_continuation_indent =
-            if let Some(prev_block) = ctx.list_blocks.iter().find(|block| block.end_line == end_line) {
-                // Get the last list item from the previous block
-                if let Some(&last_item_line) = prev_block.item_lines.last() {
-                    if let Some(line_info) = ctx.line_info(last_item_line) {
-                        if let Some(list_item) = &line_info.list_item {
-                            if list_item.is_ordered {
-                                list_item.marker.len() + 1 // Add 1 for space after ordered markers
-                            } else {
-                                2 // Unordered lists need at least 2 spaces
-                            }
-                        } else {
-                            3 // Fallback
-                        }
-                    } else {
-                        3 // Fallback
-                    }
-                } else {
-                    3 // Fallback
-                }
-            } else {
-                3 // Fallback
-            };
+        let min_continuation_indent = self.calculate_min_continuation_indent(ctx, end_line);
 
         for line_num in (end_line + 1)..start_line {
             if let Some(line_info) = ctx.line_info(line_num) {

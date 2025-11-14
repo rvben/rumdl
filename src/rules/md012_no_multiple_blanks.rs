@@ -1,4 +1,5 @@
 use crate::filtered_lines::FilteredLinesExt;
+use crate::utils::LineIndex;
 use crate::utils::range_utils::calculate_line_range;
 use std::collections::HashSet;
 use toml;
@@ -30,6 +31,54 @@ impl MD012NoMultipleBlanks {
 
     pub const fn from_config_struct(config: MD012Config) -> Self {
         Self { config }
+    }
+
+    /// Generate warnings for excess blank lines, handling common logic for all contexts
+    fn generate_excess_warnings(
+        &self,
+        blank_start: usize,
+        blank_count: usize,
+        lines: &[&str],
+        lines_to_check: &HashSet<usize>,
+        line_index: &LineIndex,
+    ) -> Vec<LintWarning> {
+        let mut warnings = Vec::new();
+
+        let location = if blank_start == 0 {
+            "at start of file"
+        } else {
+            "between content"
+        };
+
+        for i in self.config.maximum.get()..blank_count {
+            let excess_line_num = blank_start + i;
+            if lines_to_check.contains(&excess_line_num) {
+                let excess_line = excess_line_num + 1;
+                let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(excess_line, excess_line_content);
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    severity: Severity::Warning,
+                    message: format!("Multiple consecutive blank lines {location}"),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    fix: Some(Fix {
+                        range: {
+                            let line_start = line_index.get_line_start_byte(excess_line).unwrap_or(0);
+                            let line_end = line_index
+                                .get_line_start_byte(excess_line + 1)
+                                .unwrap_or(line_start + 1);
+                            line_start..line_end
+                        },
+                        replacement: String::new(),
+                    }),
+                });
+            }
+        }
+
+        warnings
     }
 }
 
@@ -88,39 +137,13 @@ impl Rule for MD012NoMultipleBlanks {
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 // Check for excess blanks before entering/exiting code block
                 if blank_count > self.config.maximum.get() {
-                    let location = if blank_start == 0 {
-                        "at start of file"
-                    } else {
-                        "between content"
-                    };
-                    for i in self.config.maximum.get()..blank_count {
-                        let excess_line_num = blank_start + i;
-                        if lines_to_check.contains(&excess_line_num) {
-                            let excess_line = excess_line_num + 1;
-                            let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
-                            let (start_line, start_col, end_line, end_col) =
-                                calculate_line_range(excess_line, excess_line_content);
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                severity: Severity::Warning,
-                                message: format!("Multiple consecutive blank lines {location}"),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                fix: Some(Fix {
-                                    range: {
-                                        let line_start = line_index.get_line_start_byte(excess_line).unwrap_or(0);
-                                        let line_end = line_index
-                                            .get_line_start_byte(excess_line + 1)
-                                            .unwrap_or(line_start + 1);
-                                        line_start..line_end
-                                    },
-                                    replacement: String::new(),
-                                }),
-                            });
-                        }
-                    }
+                    warnings.extend(self.generate_excess_warnings(
+                        blank_start,
+                        blank_count,
+                        &lines,
+                        &lines_to_check,
+                        line_index,
+                    ));
                 }
 
                 if !in_code_block {
@@ -149,39 +172,13 @@ impl Rule for MD012NoMultipleBlanks {
             if is_indented_code {
                 // Check for excess blanks before indented code block
                 if blank_count > self.config.maximum.get() {
-                    let location = if blank_start == 0 {
-                        "at start of file"
-                    } else {
-                        "between content"
-                    };
-                    for i in self.config.maximum.get()..blank_count {
-                        let excess_line_num = blank_start + i;
-                        if lines_to_check.contains(&excess_line_num) {
-                            let excess_line = excess_line_num + 1;
-                            let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
-                            let (start_line, start_col, end_line, end_col) =
-                                calculate_line_range(excess_line, excess_line_content);
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                severity: Severity::Warning,
-                                message: format!("Multiple consecutive blank lines {location}"),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                fix: Some(Fix {
-                                    range: {
-                                        let line_start = line_index.get_line_start_byte(excess_line).unwrap_or(0);
-                                        let line_end = line_index
-                                            .get_line_start_byte(excess_line + 1)
-                                            .unwrap_or(line_start + 1);
-                                        line_start..line_end
-                                    },
-                                    replacement: String::new(),
-                                }),
-                            });
-                        }
-                    }
+                    warnings.extend(self.generate_excess_warnings(
+                        blank_start,
+                        blank_count,
+                        &lines,
+                        &lines_to_check,
+                        line_index,
+                    ));
                 }
                 blank_count = 0;
                 lines_to_check.clear();
@@ -199,46 +196,13 @@ impl Rule for MD012NoMultipleBlanks {
                 }
             } else {
                 if blank_count > self.config.maximum.get() {
-                    // Generate warnings for each excess blank line
-                    let location = if blank_start == 0 {
-                        "at start of file"
-                    } else {
-                        "between content"
-                    };
-
-                    // Report warnings starting from the (maximum+1)th blank line
-                    for i in self.config.maximum.get()..blank_count {
-                        let excess_line_num = blank_start + i;
-                        if lines_to_check.contains(&excess_line_num) {
-                            let excess_line = excess_line_num + 1; // +1 for 1-indexed lines
-                            let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
-
-                            // Calculate precise character range for the entire blank line
-                            let (start_line, start_col, end_line, end_col) =
-                                calculate_line_range(excess_line, excess_line_content);
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                severity: Severity::Warning,
-                                message: format!("Multiple consecutive blank lines {location}"),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                fix: Some(Fix {
-                                    range: {
-                                        // Remove entire line including newline
-                                        let line_start = line_index.get_line_start_byte(excess_line).unwrap_or(0);
-                                        let line_end = line_index
-                                            .get_line_start_byte(excess_line + 1)
-                                            .unwrap_or(line_start + 1);
-                                        line_start..line_end
-                                    },
-                                    replacement: String::new(), // Remove the excess line
-                                }),
-                            });
-                        }
-                    }
+                    warnings.extend(self.generate_excess_warnings(
+                        blank_start,
+                        blank_count,
+                        &lines,
+                        &lines_to_check,
+                        line_index,
+                    ));
                 }
                 blank_count = 0;
                 lines_to_check.clear();

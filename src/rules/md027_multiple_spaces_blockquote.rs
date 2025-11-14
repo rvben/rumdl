@@ -30,6 +30,9 @@ static MALFORMED_BLOCKQUOTE_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = Laz
     ]
 });
 
+// Cached regex for blockquote validation
+static BLOCKQUOTE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*>").unwrap());
+
 /// Rule MD027: No multiple spaces after blockquote symbol
 ///
 /// See [docs/md027.md](../../docs/md027.md) for full documentation, configuration, and examples.
@@ -297,8 +300,7 @@ impl MD027MultipleSpacesBlockquote {
 
         // 4. Fixed version should actually be a valid blockquote
         // Check if it starts with optional whitespace followed by >
-        let blockquote_pattern = regex::Regex::new(r"^\s*>").unwrap();
-        if !blockquote_pattern.is_match(fixed) {
+        if !BLOCKQUOTE_PATTERN.is_match(fixed) {
             return false;
         }
 

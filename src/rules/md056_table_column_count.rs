@@ -154,14 +154,18 @@ impl Rule for MD056TableColumnCount {
             return Ok(content.to_string());
         }
 
+        // Build HashMap for O(1) lookup instead of O(n) linear search per line
+        let warning_by_line: std::collections::HashMap<usize, &LintWarning> = warnings
+            .iter()
+            .filter_map(|w| w.fix.as_ref().map(|_| (w.line, w)))
+            .collect();
+
         let lines: Vec<&str> = content.lines().collect();
         let mut result = Vec::new();
 
         for (i, line) in lines.iter().enumerate() {
-            let warning_idx = warnings.iter().position(|w| w.line == i + 1);
-
-            if let Some(idx) = warning_idx
-                && let Some(fix) = &warnings[idx].fix
+            if let Some(warning) = warning_by_line.get(&(i + 1))
+                && let Some(fix) = &warning.fix
             {
                 result.push(fix.replacement.clone());
                 continue;

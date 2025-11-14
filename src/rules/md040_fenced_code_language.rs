@@ -4,6 +4,36 @@ use crate::utils::range_utils::calculate_line_range;
 /// Rule MD040: Fenced code blocks should have a language
 ///
 /// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
+/// Helper struct to track and update disable/enable state for a rule
+struct DisableState {
+    is_disabled: bool,
+}
+
+impl DisableState {
+    fn new() -> Self {
+        Self { is_disabled: false }
+    }
+
+    /// Update the disable state based on a line's content
+    fn update(&mut self, line: &str, rule_name: &str) {
+        // Check for disable comment
+        if let Some(rules) = crate::rule::parse_disable_comment(line)
+            && (rules.is_empty() || rules.contains(&rule_name))
+        {
+            self.is_disabled = true;
+        }
+        // Check for enable comment
+        if let Some(rules) = crate::rule::parse_enable_comment(line)
+            && (rules.is_empty() || rules.contains(&rule_name))
+        {
+            self.is_disabled = false;
+        }
+    }
+
+    fn is_disabled(&self) -> bool {
+        self.is_disabled
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct MD040FencedCodeLanguage;
@@ -156,25 +186,16 @@ impl Rule for MD040FencedCodeLanguage {
         let lines: Vec<&str> = content.lines().collect();
 
         // Pre-compute disabled state to avoid O(n²) complexity
-        let mut is_disabled = false;
+        let mut disable_state = DisableState::new();
 
         for line in lines.iter() {
             let trimmed = line.trim();
 
             // Update disabled state incrementally
-            if let Some(rules) = crate::rule::parse_disable_comment(trimmed)
-                && (rules.is_empty() || rules.contains(&self.name()))
-            {
-                is_disabled = true;
-            }
-            if let Some(rules) = crate::rule::parse_enable_comment(trimmed)
-                && (rules.is_empty() || rules.contains(&self.name()))
-            {
-                is_disabled = false;
-            }
+            disable_state.update(trimmed, self.name());
 
             // Skip processing if rule is disabled, preserve the line as-is
-            if is_disabled {
+            if disable_state.is_disabled() {
                 result.push_str(line);
                 result.push('\n');
                 continue;

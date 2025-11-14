@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_fence_utils::CodeFenceStyle;
+use crate::utils::LineIndex;
 use crate::utils::range_utils::calculate_match_range;
 use toml;
 
@@ -23,6 +24,65 @@ impl MD048CodeFenceStyle {
 
     pub fn from_config_struct(config: MD048Config) -> Self {
         Self { config }
+    }
+
+    /// Check a fence and generate warning if it doesn't match the target style
+    fn check_fence(
+        &self,
+        line: &str,
+        line_num: usize,
+        target_style: CodeFenceStyle,
+        _line_index: &LineIndex,
+    ) -> Option<LintWarning> {
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
+            // Find the position and length of the backtick fence
+            let fence_start = line.len() - trimmed.len();
+            let fence_end = fence_start + trimmed.find(|c: char| c != '`').unwrap_or(trimmed.len());
+
+            // Calculate precise character range for the entire fence
+            let (start_line, start_col, end_line, end_col) =
+                calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
+
+            return Some(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                message: "Code fence style: use ~~~ instead of ```".to_string(),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                    replacement: line.replace("```", "~~~"),
+                }),
+            });
+        } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
+            // Find the position and length of the tilde fence
+            let fence_start = line.len() - trimmed.len();
+            let fence_end = fence_start + trimmed.find(|c: char| c != '~').unwrap_or(trimmed.len());
+
+            // Calculate precise character range for the entire fence
+            let (start_line, start_col, end_line, end_col) =
+                calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
+
+            return Some(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                message: "Code fence style: use ``` instead of ~~~".to_string(),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                    replacement: line.replace("~~~", "```"),
+                }),
+            });
+        }
+
+        None
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<CodeFenceStyle> {
@@ -104,98 +164,14 @@ impl Rule for MD048CodeFenceStyle {
                     code_block_fence = current_fence.clone();
 
                     // Check this opening fence
-                    if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
-                        // Find the position and length of the backtick fence
-                        let fence_start = line.len() - trimmed.len();
-                        let fence_end = fence_start + trimmed.find(|c: char| c != '`').unwrap_or(trimmed.len());
-
-                        // Calculate precise character range for the entire fence
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: "Code fence style: use ~~~ instead of ```".to_string(),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
-                                replacement: line.replace("```", "~~~"),
-                            }),
-                        });
-                    } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
-                        // Find the position and length of the tilde fence
-                        let fence_start = line.len() - trimmed.len();
-                        let fence_end = fence_start + trimmed.find(|c: char| c != '~').unwrap_or(trimmed.len());
-
-                        // Calculate precise character range for the entire fence
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: "Code fence style: use ``` instead of ~~~".to_string(),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
-                                replacement: line.replace("~~~", "```"),
-                            }),
-                        });
+                    if let Some(warning) = self.check_fence(line, line_num, target_style, _line_index) {
+                        warnings.push(warning);
                     }
                 } else if trimmed.starts_with(&code_block_fence) && trimmed[code_block_fence.len()..].trim().is_empty()
                 {
                     // Exiting the code block - check this closing fence too
-                    if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
-                        // Find the position and length of the backtick fence
-                        let fence_start = line.len() - trimmed.len();
-                        let fence_end = fence_start + trimmed.find(|c: char| c != '`').unwrap_or(trimmed.len());
-
-                        // Calculate precise character range for the entire fence
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: "Code fence style: use ~~~ instead of ```".to_string(),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
-                                replacement: line.replace("```", "~~~"),
-                            }),
-                        });
-                    } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
-                        // Find the position and length of the tilde fence
-                        let fence_start = line.len() - trimmed.len();
-                        let fence_end = fence_start + trimmed.find(|c: char| c != '~').unwrap_or(trimmed.len());
-
-                        // Calculate precise character range for the entire fence
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: "Code fence style: use ``` instead of ~~~".to_string(),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
-                                replacement: line.replace("~~~", "```"),
-                            }),
-                        });
+                    if let Some(warning) = self.check_fence(line, line_num, target_style, _line_index) {
+                        warnings.push(warning);
                     }
 
                     in_code_block = false;

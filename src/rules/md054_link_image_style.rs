@@ -6,6 +6,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_match_range;
 use regex::Regex;
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 mod md054_config;
@@ -149,13 +150,17 @@ impl Rule for MD054LinkImageStyle {
                 continue;
             }
 
-            // Find all matches in the line
-            let mut matches = Vec::new();
+            // Use BTreeSet to efficiently track occupied byte ranges
+            let mut occupied_ranges = BTreeSet::new();
+            let mut filtered_matches = Vec::new();
+
+            // Collect all non-shortcut matches first and track their byte ranges
+            let mut all_matches = Vec::new();
 
             // Find all autolinks
             for cap in AUTOLINK_RE.captures_iter(line) {
                 let m = cap.get(0).unwrap();
-                matches.push(LinkMatch {
+                all_matches.push(LinkMatch {
                     style: "autolink",
                     start: m.start(),
                     end: m.end(),
@@ -165,7 +170,7 @@ impl Rule for MD054LinkImageStyle {
             // Find all full references
             for cap in FULL_RE.captures_iter(line) {
                 let m = cap.get(0).unwrap();
-                matches.push(LinkMatch {
+                all_matches.push(LinkMatch {
                     style: "full",
                     start: m.start(),
                     end: m.end(),
@@ -175,7 +180,7 @@ impl Rule for MD054LinkImageStyle {
             // Find all collapsed references
             for cap in COLLAPSED_RE.captures_iter(line) {
                 let m = cap.get(0).unwrap();
-                matches.push(LinkMatch {
+                all_matches.push(LinkMatch {
                     style: "collapsed",
                     start: m.start(),
                     end: m.end(),
@@ -187,7 +192,7 @@ impl Rule for MD054LinkImageStyle {
                 let m = cap.get(0).unwrap();
                 let text = cap.get(1).unwrap().as_str();
                 let url = cap.get(2).unwrap().as_str();
-                matches.push(LinkMatch {
+                all_matches.push(LinkMatch {
                     style: if text == url { "url_inline" } else { "inline" },
                     start: m.start(),
                     end: m.end(),
@@ -195,33 +200,39 @@ impl Rule for MD054LinkImageStyle {
             }
 
             // Sort matches by start position to ensure we don't double-count
-            matches.sort_by_key(|m| m.start);
+            all_matches.sort_by_key(|m| m.start);
 
-            // Remove overlapping matches (keep the first one)
-            let mut filtered_matches = Vec::new();
+            // Remove overlapping matches (keep the first one) and build occupied ranges set
             let mut last_end = 0;
-            for m in matches {
+            for m in all_matches {
                 if m.start >= last_end {
                     last_end = m.end;
+                    // Add each byte in the range to the set
+                    for byte_pos in m.start..m.end {
+                        occupied_ranges.insert(byte_pos);
+                    }
                     filtered_matches.push(m);
                 }
             }
 
             // Now find shortcut references that don't overlap with other matches
+            // Using BTreeSet for O(log n) lookups instead of O(n) iteration
             for cap in SHORTCUT_RE.captures_iter(line) {
                 let m = cap.get(0).unwrap();
                 let start = m.start();
                 let end = m.end();
 
-                // Check if this overlaps with any existing match
-                let overlaps = filtered_matches.iter().any(|existing| {
-                    (start >= existing.start && start < existing.end) || (end > existing.start && end <= existing.end)
-                });
+                // Check if any byte in this range is occupied (O(log n) per byte)
+                let overlaps = (start..end).any(|byte_pos| occupied_ranges.contains(&byte_pos));
 
                 if !overlaps {
                     // Check if followed by '(', '[', '[]', or ']['
                     let after = &line[end..];
                     if !after.starts_with('(') && !after.starts_with('[') {
+                        // Add this range to occupied set
+                        for byte_pos in start..end {
+                            occupied_ranges.insert(byte_pos);
+                        }
                         filtered_matches.push(LinkMatch {
                             style: "shortcut",
                             start,

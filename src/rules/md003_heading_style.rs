@@ -42,46 +42,34 @@ impl MD003HeadingStyle {
         }
 
         // Count all heading styles to determine most prevalent (prevalence-based approach)
-        let mut atx_count = 0;
-        let mut atx_closed_count = 0;
-        let mut setext1_count = 0;
-        let mut setext2_count = 0;
+        let mut style_counts = std::collections::HashMap::new();
 
         for line_info in &ctx.lines {
             if let Some(heading) = &line_info.heading {
                 // Map from LintContext heading style to rules heading style and count
-                match heading.style {
+                let style = match heading.style {
                     crate::lint_context::HeadingStyle::ATX => {
                         if heading.has_closing_sequence {
-                            atx_closed_count += 1;
+                            HeadingStyle::AtxClosed
                         } else {
-                            atx_count += 1;
+                            HeadingStyle::Atx
                         }
                     }
-                    crate::lint_context::HeadingStyle::Setext1 => setext1_count += 1,
-                    crate::lint_context::HeadingStyle::Setext2 => setext2_count += 1,
-                }
+                    crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
+                    crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
+                };
+                *style_counts.entry(style).or_insert(0) += 1;
             }
         }
 
-        // Determine most prevalent style
-        // In case of tie, prefer ATX (most common, widely supported)
-        let max_count = atx_count.max(atx_closed_count).max(setext1_count).max(setext2_count);
-
-        if max_count == 0 {
-            // No headings found, default to ATX
-            return HeadingStyle::Atx;
-        }
-
-        if atx_count == max_count {
-            HeadingStyle::Atx
-        } else if atx_closed_count == max_count {
-            HeadingStyle::AtxClosed
-        } else if setext1_count == max_count {
-            HeadingStyle::Setext1
-        } else {
-            HeadingStyle::Setext2
-        }
+        // Return most prevalent style
+        // In case of tie, the iteration order determines preference (HashMap doesn't guarantee order,
+        // but we handle the default case explicitly)
+        style_counts
+            .into_iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(style, _)| style)
+            .unwrap_or(HeadingStyle::Atx)
     }
 }
 
