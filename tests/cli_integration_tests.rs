@@ -1059,7 +1059,7 @@ line_length = 123
     let (success, stdout, stderr) = run_cmd(&["config", "get", "global.exclude"]);
     assert!(success, "config get global.exclude should succeed, stderr: {stderr}");
     assert!(
-        stdout.contains("global.exclude = [\"docs/temp\", \"node_modules\"] [from .rumdl.toml]"),
+        stdout.contains("global.exclude = [\"docs/temp\", \"node_modules\"] [from project config]"),
         "Unexpected output: {stdout}. Stderr: {stderr}"
     );
 
@@ -1067,7 +1067,7 @@ line_length = 123
     let (success, stdout, stderr) = run_cmd(&["config", "get", "MD013.line_length"]);
     assert!(success, "config get MD013.line_length should succeed, stderr: {stderr}");
     assert!(
-        stdout.contains("MD013.line-length = 123 [from .rumdl.toml]"),
+        stdout.contains("MD013.line-length = 123 [from project config]"),
         "Unexpected output: {stdout}. Stderr: {stderr}"
     );
 
