@@ -407,23 +407,52 @@ impl MD060TableFormat {
             return None;
         }
 
-        let first_line = table_lines[0];
-        let cells = Self::parse_table_row(first_line);
+        // Check all rows (except delimiter) to determine consistent style
+        // A table is only "tight" or "compact" if ALL rows follow that pattern
+        let mut is_tight = true;
+        let mut is_compact = true;
 
-        if cells.is_empty() {
-            return None;
+        for line in table_lines {
+            let cells = Self::parse_table_row(line);
+
+            if cells.is_empty() {
+                continue;
+            }
+
+            // Skip delimiter rows when detecting style
+            if Self::is_delimiter_row(&cells) {
+                continue;
+            }
+
+            // Check if this row has no padding
+            let row_has_no_padding = cells.iter().all(|cell| !cell.starts_with(' ') && !cell.ends_with(' '));
+
+            // Check if this row has exactly single-space padding
+            let row_has_single_space = cells.iter().all(|cell| {
+                let trimmed = cell.trim();
+                cell == &format!(" {trimmed} ")
+            });
+
+            // If any row doesn't match tight, the table isn't tight
+            if !row_has_no_padding {
+                is_tight = false;
+            }
+
+            // If any row doesn't match compact, the table isn't compact
+            if !row_has_single_space {
+                is_compact = false;
+            }
+
+            // Early exit: if neither tight nor compact, it must be aligned
+            if !is_tight && !is_compact {
+                return Some("aligned".to_string());
+            }
         }
 
-        let has_no_padding = cells.iter().all(|cell| !cell.starts_with(' ') && !cell.ends_with(' '));
-
-        let has_single_space = cells.iter().all(|cell| {
-            let trimmed = cell.trim();
-            cell == &format!(" {trimmed} ")
-        });
-
-        if has_no_padding {
+        // Return the most restrictive style that matches
+        if is_tight {
             Some("tight".to_string())
-        } else if has_single_space {
+        } else if is_compact {
             Some("compact".to_string())
         } else {
             Some("aligned".to_string())
@@ -1111,6 +1140,41 @@ mod tests {
         let first_warning = auto_compact_warnings[0];
         assert!(first_warning.message.contains("85 chars > max-width: 50"));
         assert!(first_warning.message.contains("Table too wide for aligned formatting"));
+    }
+
+    #[test]
+    fn test_md060_issue_129_detect_style_from_all_rows() {
+        // Issue #129: detect_table_style should check all rows, not just the first row
+        // If header row has single-space padding but content rows have extra padding,
+        // the table should be detected as "aligned" and preserved
+        let rule = MD060TableFormat::new(true, "any".to_string());
+
+        // Table where header looks compact but content is aligned
+        let content = "| a long heading | another long heading |\n\
+                       | -------------- | -------------------- |\n\
+                       | a              | 1                    |\n\
+                       | b b            | 2                    |\n\
+                       | c c c          | 3                    |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should preserve the aligned formatting of content rows
+        assert!(
+            fixed.contains("| a              | 1                    |"),
+            "Should preserve aligned padding in first content row"
+        );
+        assert!(
+            fixed.contains("| b b            | 2                    |"),
+            "Should preserve aligned padding in second content row"
+        );
+        assert!(
+            fixed.contains("| c c c          | 3                    |"),
+            "Should preserve aligned padding in third content row"
+        );
+
+        // Entire table should remain unchanged because it's already properly aligned
+        assert_eq!(fixed, content, "Table should be detected as aligned and preserved");
     }
 
     #[test]
