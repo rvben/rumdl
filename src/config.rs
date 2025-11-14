@@ -779,9 +779,9 @@ disable = ["MD013"]
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
         let config: Config = sourced.into();
 
-        // Both should be present - resolution happens at runtime
+        // Conflict resolution: enable wins over disable
         assert!(config.global.enable.contains(&"MD013".to_string()));
-        assert!(config.global.disable.contains(&"MD013".to_string()));
+        assert!(!config.global.disable.contains(&"MD013".to_string()));
     }
 
     #[test]
