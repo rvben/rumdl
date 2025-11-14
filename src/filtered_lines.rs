@@ -56,7 +56,9 @@ pub struct FilteredLine<'a> {
 ///     .skip_front_matter()
 ///     .skip_code_blocks()
 ///     .skip_html_blocks()
-///     .skip_html_comments();
+///     .skip_html_comments()
+///     .skip_mkdocstrings()
+///     .skip_esm_blocks();
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct LineFilterConfig {
@@ -68,6 +70,10 @@ pub struct LineFilterConfig {
     pub skip_html_blocks: bool,
     /// Skip lines inside HTML comments
     pub skip_html_comments: bool,
+    /// Skip lines inside mkdocstrings blocks
+    pub skip_mkdocstrings: bool,
+    /// Skip lines inside ESM (ECMAScript Module) blocks
+    pub skip_esm_blocks: bool,
 }
 
 impl LineFilterConfig {
@@ -117,12 +123,34 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside mkdocstrings blocks
+    ///
+    /// Mkdocstrings blocks contain auto-generated documentation and most
+    /// markdown rules should not process them.
+    #[must_use]
+    pub fn skip_mkdocstrings(mut self) -> Self {
+        self.skip_mkdocstrings = true;
+        self
+    }
+
+    /// Skip lines inside ESM (ECMAScript Module) blocks
+    ///
+    /// ESM blocks contain JavaScript/TypeScript module code and most
+    /// markdown rules should not process them.
+    #[must_use]
+    pub fn skip_esm_blocks(mut self) -> Self {
+        self.skip_esm_blocks = true;
+        self
+    }
+
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         (self.skip_front_matter && line_info.in_front_matter)
             || (self.skip_code_blocks && line_info.in_code_block)
             || (self.skip_html_blocks && line_info.in_html_block)
             || (self.skip_html_comments && line_info.in_html_comment)
+            || (self.skip_mkdocstrings && line_info.in_mkdocstrings)
+            || (self.skip_esm_blocks && line_info.in_esm_block)
     }
 }
 
@@ -265,6 +293,20 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_html_comments(mut self) -> Self {
         self.config = self.config.skip_html_comments();
+        self
+    }
+
+    /// Skip lines inside mkdocstrings blocks
+    #[must_use]
+    pub fn skip_mkdocstrings(mut self) -> Self {
+        self.config = self.config.skip_mkdocstrings();
+        self
+    }
+
+    /// Skip lines inside ESM (ECMAScript Module) blocks
+    #[must_use]
+    pub fn skip_esm_blocks(mut self) -> Self {
+        self.config = self.config.skip_esm_blocks();
         self
     }
 }
@@ -467,5 +509,185 @@ mod tests {
             assert!(!line.line_info.in_front_matter);
             assert!(!line.line_info.in_code_block);
         }
+    }
+
+    #[test]
+    fn test_skip_mkdocstrings() {
+        let content = r#"# API Documentation
+
+::: mymodule.MyClass
+    options:
+      show_root_heading: true
+      show_source: false
+
+Some regular content here.
+
+::: mymodule.function
+    options:
+      show_signature: true
+
+More content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+        let lines: Vec<_> = ctx.filtered_lines().skip_mkdocstrings().into_iter().collect();
+
+        // Verify lines OUTSIDE mkdocstrings blocks are INCLUDED
+        assert!(
+            lines.iter().any(|l| l.content.contains("# API Documentation")),
+            "Should include lines outside mkdocstrings blocks"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Some regular content")),
+            "Should include content between mkdocstrings blocks"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("More content")),
+            "Should include content after mkdocstrings blocks"
+        );
+
+        // Verify lines INSIDE mkdocstrings blocks are EXCLUDED
+        assert!(
+            !lines.iter().any(|l| l.content.contains("::: mymodule")),
+            "Should exclude mkdocstrings marker lines"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("show_root_heading")),
+            "Should exclude mkdocstrings option lines"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("show_signature")),
+            "Should exclude all mkdocstrings option lines"
+        );
+
+        // Verify line numbers are preserved (1-indexed)
+        assert_eq!(lines[0].line_num, 1, "First line should be line 1");
+    }
+
+    #[test]
+    fn test_skip_esm_blocks() {
+        let content = r#"import {Chart} from './components.js'
+import {Table} from './table.js'
+export const year = 2023
+
+# Last year's snowfall
+
+Content about snowfall data.
+
+import {Footer} from './footer.js'
+
+More content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX);
+        let lines: Vec<_> = ctx.filtered_lines().skip_esm_blocks().into_iter().collect();
+
+        // Verify lines OUTSIDE ESM blocks are INCLUDED
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Last year's snowfall")),
+            "Should include markdown headings"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content about snowfall")),
+            "Should include markdown content"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("More content")),
+            "Should include content after ESM blocks"
+        );
+
+        // Verify lines INSIDE ESM blocks (at top of file) are EXCLUDED
+        assert!(
+            !lines.iter().any(|l| l.content.contains("import {Chart}")),
+            "Should exclude import statements at top of file"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("import {Table}")),
+            "Should exclude all import statements at top of file"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("export const year")),
+            "Should exclude export statements at top of file"
+        );
+        // ESM blocks end once markdown starts, so import after markdown is NOT in ESM block
+        assert!(
+            lines.iter().any(|l| l.content.contains("import {Footer}")),
+            "Should include import statements after markdown content (not in ESM block)"
+        );
+
+        // Verify line numbers are preserved
+        let heading_line = lines
+            .iter()
+            .find(|l| l.content.contains("# Last year's snowfall"))
+            .unwrap();
+        assert_eq!(heading_line.line_num, 5, "Heading should be on line 5");
+    }
+
+    #[test]
+    fn test_all_filters_combined() {
+        let content = r#"---
+title: Test
+---
+
+# Title
+
+```
+code
+```
+
+<!-- HTML comment here -->
+
+::: mymodule.Class
+    options:
+      show_root_heading: true
+
+<div>
+HTML block
+</div>
+
+Content"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+
+        let lines: Vec<_> = ctx
+            .filtered_lines()
+            .skip_front_matter()
+            .skip_code_blocks()
+            .skip_html_blocks()
+            .skip_html_comments()
+            .skip_mkdocstrings()
+            .into_iter()
+            .collect();
+
+        // Verify markdown content is INCLUDED
+        assert!(
+            lines.iter().any(|l| l.content == "# Title"),
+            "Should include markdown headings"
+        );
+        assert!(
+            lines.iter().any(|l| l.content == "Content"),
+            "Should include markdown content"
+        );
+
+        // Verify all filtered content is EXCLUDED
+        assert!(
+            !lines.iter().any(|l| l.content == "title: Test"),
+            "Should exclude front matter"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content == "code"),
+            "Should exclude code block content"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("HTML comment")),
+            "Should exclude HTML comments"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("::: mymodule")),
+            "Should exclude mkdocstrings blocks"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("show_root_heading")),
+            "Should exclude mkdocstrings options"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("HTML block")),
+            "Should exclude HTML blocks"
+        );
     }
 }
