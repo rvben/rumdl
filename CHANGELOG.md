@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.176] - 2025-01-14
+
+### Performance
+
+- **Major memory optimizations eliminating string allocations**
+  - Converted `LineInfo` to use byte ranges instead of owned strings (50-80% memory reduction)
+  - Eliminates N string allocations where N = number of lines in document
+  - Added zero-copy `content(&self, source: &str) -> &str` method for on-demand access
+  - Converted `LineIndex` to borrow `&'a str` instead of cloning (eliminates one full document copy per lint operation)
+  - Converted `ParsedLink`/`ParsedImage` to use `Cow<'a, str>` (60-80% reduction in heap allocations for link/image parsing)
+  - Zero-cost when borrowing, minimal overhead when owning - most data borrowed directly from source
+
+- **Eliminated O(n²) complexity in multiple rules**
+  - Fixed quadratic bottlenecks in MD027 (Multiple spaces after blockquote symbol)
+  - Fixed quadratic bottlenecks in MD020 (No space inside hashes on closed atx style heading)
+  - Fixed quadratic bottlenecks in MD046 (Code block style)
+  - All three rules now use pre-computed context data with O(1) lookups
+
+- **Optimized CLI commands**
+  - `rumdl config` now executes in ~18ms (eliminated duplicate rule instantiation)
+  - Removed duplicate instantiation of ~50 rule objects between main.rs and formatter.rs
+  - Cleaner architecture with single source of truth for rule instances
+
+### Fixed
+
+- **Config loading: User config now always loaded as base layer (#131)**
+  - Fixed LSP server ignoring user config when finding project-level config files
+  - User configuration is now always loaded first (unless `--no-config` is used)
+  - Project configs merge on top of user config, CLI flags have highest priority
+  - Configuration hierarchy now consistent between CLI and LSP:
+    1. User/global config (`~/.config/rumdl/rumdl.toml`) - base layer
+    2. Project config (discovered or explicit) - overrides user config
+    3. CLI flags - highest priority
+  - Matches pattern used by git, eslint, prettier, and other tools
+  - Added regression test verifying user config preserved with explicit project config
+
+- **MD035: Frontmatter delimiter false positives (#40)**
+  - Fixed incorrect flagging of YAML/TOML frontmatter delimiters (`---`/`+++`) as horizontal rules
+  - Rule now correctly skips frontmatter in three places:
+    - `most_prevalent_hr_style()` - don't count frontmatter HRs for prevalence
+    - `check()` - don't flag frontmatter delimiters as violations
+    - `fix()` - don't replace frontmatter delimiters when fixing
+  - Uses pre-computed `LineInfo.in_front_matter` field for efficient detection
+
+### Changed
+
+- **Architecture: Consistent use of pre-computed context data**
+  - MD035 now uses pre-computed `LineInfo.in_front_matter` instead of function calls
+  - All rules now consistently use `ctx.line_index` for line-based operations
+  - Eliminates redundant function calls and O(n) scans
+  - More efficient with O(1) field access patterns
+
+- **Test infrastructure improvements**
+  - Implemented dynamic fixture downloading for performance tests
+  - Test downloads now happen on-demand instead of being checked into repository
+  - Better handling of large test files for performance benchmarking
+
+- **Test quality improvements**
+  - Corrected ESM block test assertions to match actual MDX behavior
+  - ESM blocks only exist at TOP of MDX files and end at first non-ESM line
+  - Tests now assert correct behavior rather than documenting implementation quirks
+  - Fixed MD033 test assertions to properly validate HTML inline rules
+
+### Breaking Changes
+
+**For library users only** (CLI users unaffected):
+
+- `LineInfo.content` field is no longer public - use new `content(source: &str)` method instead
+- Since `LineInfo` was primarily internal API, impact should be minimal
+
 ## [0.0.175] - 2025-01-12
 
 ### Added
