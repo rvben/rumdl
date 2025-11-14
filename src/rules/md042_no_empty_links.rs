@@ -161,14 +161,14 @@ impl Rule for MD042NoEmptyLinks {
             }
 
             // For reference links, resolve the URL
-            let effective_url = if link.is_reference {
+            let effective_url: &str = if link.is_reference {
                 if let Some(ref_id) = &link.reference_id {
-                    ctx.get_reference_url(ref_id.as_ref()).unwrap_or("").to_string()
+                    ctx.get_reference_url(ref_id.as_ref()).unwrap_or("")
                 } else {
-                    String::new()
+                    ""
                 }
             } else {
-                link.url.to_string()
+                &link.url
             };
 
             // For MkDocs mode, check if this looks like an auto-reference

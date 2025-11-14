@@ -23,34 +23,47 @@ pub struct MD005ListIndent {
 struct LineCacheInfo {
     /// Indentation level for each line (0 for empty lines)
     indentation: Vec<usize>,
-    /// Whether each line has non-empty content
-    has_content: Vec<bool>,
-    /// Whether each line is a list item
-    is_list_item: Vec<bool>,
+    /// Bit flags: bit 0 = has_content, bit 1 = is_list_item
+    flags: Vec<u8>,
 }
+
+const FLAG_HAS_CONTENT: u8 = 1;
+const FLAG_IS_LIST_ITEM: u8 = 2;
 
 impl LineCacheInfo {
     /// Build cache from context in one O(n) pass
     fn new(ctx: &crate::lint_context::LintContext) -> Self {
         let total_lines = ctx.lines.len();
         let mut indentation = Vec::with_capacity(total_lines);
-        let mut has_content = Vec::with_capacity(total_lines);
-        let mut is_list_item = Vec::with_capacity(total_lines);
+        let mut flags = Vec::with_capacity(total_lines);
 
         for line_info in &ctx.lines {
             let content = line_info.content(ctx.content).trim_start();
             let line_indent = line_info.byte_len - content.len();
 
             indentation.push(line_indent);
-            has_content.push(!content.is_empty());
-            is_list_item.push(line_info.list_item.is_some());
+
+            let mut flag = 0u8;
+            if !content.is_empty() {
+                flag |= FLAG_HAS_CONTENT;
+            }
+            if line_info.list_item.is_some() {
+                flag |= FLAG_IS_LIST_ITEM;
+            }
+            flags.push(flag);
         }
 
-        Self {
-            indentation,
-            has_content,
-            is_list_item,
-        }
+        Self { indentation, flags }
+    }
+
+    /// Check if line has content
+    fn has_content(&self, idx: usize) -> bool {
+        self.flags.get(idx).is_some_and(|&f| f & FLAG_HAS_CONTENT != 0)
+    }
+
+    /// Check if line is a list item
+    fn is_list_item(&self, idx: usize) -> bool {
+        self.flags.get(idx).is_some_and(|&f| f & FLAG_IS_LIST_ITEM != 0)
     }
 
     /// Fast O(n) check for continuation content between lines using cached data
@@ -70,7 +83,7 @@ impl LineCacheInfo {
 
         for idx in start_idx..=end_idx {
             // Skip empty lines and list items
-            if !self.has_content[idx] || self.is_list_item[idx] {
+            if !self.has_content(idx) || self.is_list_item(idx) {
                 continue;
             }
 
@@ -99,7 +112,7 @@ impl LineCacheInfo {
 
         for idx in start_idx..=end_idx {
             // Skip empty lines and list items
-            if !self.has_content[idx] || self.is_list_item[idx] {
+            if !self.has_content(idx) || self.is_list_item(idx) {
                 continue;
             }
 
