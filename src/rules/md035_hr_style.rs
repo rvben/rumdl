@@ -4,6 +4,7 @@
 //! See [docs/md035.md](../../docs/md035.md) for full documentation, configuration, and examples.
 
 use crate::utils::range_utils::calculate_line_range;
+use crate::utils::skip_context;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::regex_cache::{
@@ -58,12 +59,17 @@ impl MD035HRStyle {
         (is_dash_line || is_equals_line) && prev_line_has_content
     }
 
-    /// Find the most prevalent HR style in the document (excluding setext headings and code blocks)
+    /// Find the most prevalent HR style in the document (excluding setext headings, code blocks, and frontmatter)
     fn most_prevalent_hr_style(lines: &[&str], ctx: &crate::lint_context::LintContext) -> Option<String> {
         use std::collections::HashMap;
         let mut counts: HashMap<&str, usize> = HashMap::new();
         let mut order: Vec<&str> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
+            // Skip if this line is in frontmatter
+            if skip_context::is_in_front_matter(ctx.content, i) {
+                continue;
+            }
+
             // Skip if this line is in a code block
             if let Some(line_info) = ctx.line_info(i + 1)
                 && line_info.in_code_block
@@ -117,6 +123,11 @@ impl Rule for MD035HRStyle {
         };
 
         for (i, line) in lines.iter().enumerate() {
+            // Skip if this line is in frontmatter
+            if skip_context::is_in_front_matter(content, i) {
+                continue;
+            }
+
             // Skip if this line is in a code block or code span
             if let Some(line_info) = ctx.line_info(i + 1)
                 && line_info.in_code_block
@@ -177,6 +188,12 @@ impl Rule for MD035HRStyle {
         };
 
         for (i, line) in lines.iter().enumerate() {
+            // Skip if this line is in frontmatter
+            if skip_context::is_in_front_matter(content, i) {
+                result.push(line.to_string());
+                continue;
+            }
+
             // Skip if this line is in a code block or code span
             if let Some(line_info) = ctx.line_info(i + 1)
                 && line_info.in_code_block
