@@ -463,17 +463,17 @@ second line of second item"#;
         "Should detect lazy continuations and wrong numbering"
     );
 
-    // Check for lazy continuation warnings
+    // Check for lazy continuation warnings (by message content)
     let lazy_warnings = result
         .iter()
-        .filter(|w| w.rule_name.as_deref() == Some("MD029-style"))
+        .filter(|w| w.message.contains("lazy continuation"))
         .count();
     assert_eq!(lazy_warnings, 2, "Should have 2 lazy continuation warnings");
 
-    // Check for numbering warning
+    // Check for numbering warning (by message content)
     let numbering_warnings = result
         .iter()
-        .filter(|w| w.rule_name.as_deref() == Some("MD029"))
+        .filter(|w| w.message.contains("does not match style"))
         .count();
     assert_eq!(numbering_warnings, 1, "Should have 1 numbering warning");
 }
@@ -729,10 +729,10 @@ lazy line
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should detect lazy continuations (0 and 2 space lines)
+    // Should detect lazy continuations (0 and 2 space lines) - filter by message content
     let lazy_warnings = result
         .iter()
-        .filter(|w| w.rule_name.as_deref() == Some("MD029-style"))
+        .filter(|w| w.message.contains("lazy continuation"))
         .count();
     // Note: Only line 2 is detected as lazy continuation because it's within the list block.
     // Line 5 has 2 spaces but it's after line 4 which starts a new list, so it's not

@@ -186,13 +186,8 @@ impl Rule for MD029OrderedListPrefix {
         }
 
         // Collect fixes and sort by position
-        // Only apply MD029 fixes (numbering), not MD029-style fixes (indentation)
         let mut fixes: Vec<&Fix> = Vec::new();
         for warning in &warnings {
-            // Skip MD029-style warnings (lazy continuation indentation)
-            if warning.rule_name.as_deref() == Some("MD029-style") {
-                continue;
-            }
             if let Some(ref fix) = warning.fix {
                 fixes.push(fix);
             }
@@ -308,7 +303,7 @@ impl MD029OrderedListPrefix {
                     let col = line_info.indent + 1;
 
                     warnings.push(LintWarning {
-                        rule_name: Some("MD029-style".to_string()),
+                        rule_name: Some(self.name().to_string()),
                         message: "List continuation should be indented (lazy continuation detected)".to_string(),
                         line: line_num,
                         column: col,
