@@ -2247,4 +2247,256 @@ mod tests {
         assert!(!text_ends_with_abbreviation("word")); // no punctuation
         assert!(!text_ends_with_abbreviation("")); // empty string
     }
+
+    #[test]
+    fn test_all_abbreviations_comprehensive() {
+        // Property-based test: ALL abbreviations in the list should be detected
+        let all_abbreviations = [
+            "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr",
+            "Jr",
+        ];
+
+        for abbr in all_abbreviations {
+            // Test standalone abbreviation with period
+            let with_period = format!("{abbr}.");
+            assert!(
+                text_ends_with_abbreviation(&with_period),
+                "Should detect '{with_period}' as abbreviation"
+            );
+
+            // Test abbreviation in context
+            let in_context = format!("word {abbr}.");
+            assert!(
+                text_ends_with_abbreviation(&in_context),
+                "Should detect '{in_context}' as abbreviation"
+            );
+
+            // Test with multiple words before
+            let multi_word = format!("multiple words before {abbr}.");
+            assert!(
+                text_ends_with_abbreviation(&multi_word),
+                "Should detect '{multi_word}' as abbreviation"
+            );
+        }
+    }
+
+    #[test]
+    fn test_abbreviation_case_insensitivity() {
+        // All case variations should work
+        let case_variations = vec![
+            ("dr.", true),   // lowercase
+            ("Dr.", true),   // capitalized
+            ("DR.", true),   // uppercase
+            ("dR.", true),   // mixed case
+            ("mR.", true),   // Mr in mixed case
+            ("MR.", true),   // Mr uppercase
+            ("mrs.", true),  // Mrs lowercase
+            ("MRS.", true),  // Mrs uppercase
+            ("pRoF.", true), // Prof mixed case
+        ];
+
+        for (input, expected) in case_variations {
+            assert_eq!(
+                text_ends_with_abbreviation(input),
+                expected,
+                "'{input}' should be {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_abbreviation_at_eof() {
+        // Sentences ending with abbreviation at end of file (no following sentence)
+        // Single sentence ending with abbreviation
+        let inputs = vec![
+            "Talk to Dr.",
+            "Use e.g.",
+            "See Mr. Smith",
+            "Prof. Jones",
+            "It's vs.",
+        ];
+
+        for input in inputs {
+            let sentences = split_into_sentences(input);
+            assert_eq!(
+                sentences.len(),
+                1,
+                "'{input}' should be 1 sentence (ends with abbreviation at EOF)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_abbreviation_followed_by_sentence() {
+        // Abbreviation immediately followed by another sentence
+        let text = "See Dr. Smith went home. Another sentence here.";
+        let sentences = split_into_sentences(text);
+
+        assert_eq!(sentences.len(), 2, "Should detect 2 sentences");
+        assert!(
+            sentences[0].contains("Dr. Smith went home"),
+            "First sentence should include 'Dr. Smith went home'"
+        );
+        assert_eq!(sentences[1], "Another sentence here.");
+    }
+
+    #[test]
+    fn test_multiple_consecutive_spaces_with_abbreviations() {
+        // Multiple spaces shouldn't break abbreviation detection
+        let text = "Talk  to  Dr.  Smith went home.";
+        let sentences = split_into_sentences(text);
+
+        assert_eq!(
+            sentences.len(),
+            1,
+            "Should be 1 sentence despite multiple spaces"
+        );
+    }
+
+    #[test]
+    fn test_all_false_positive_word_endings() {
+        // Property-based test: Common word endings that look like abbreviations
+        // should NOT be detected as abbreviations
+        let false_positive_words = vec![
+            // Words ending in "ms"
+            ("paradigms.", "ms"),
+            ("programs.", "ms"),
+            ("items.", "ms"),
+            ("systems.", "ms"),
+            ("teams.", "ms"),
+            ("schemes.", "ms"),
+            ("problems.", "ms"),
+            ("algorithms.", "ms"),
+            // Words ending in "vs"
+            ("obviouslyvs.", "vs"), // contrived but tests the pattern
+            // Words ending in "ex"
+            ("complex.", "ex"),
+            ("index.", "ex"),
+            ("regex.", "ex"),
+            ("vertex.", "ex"),
+            ("cortex.", "ex"),
+            // Words ending in "ie"
+            ("cookie.", "ie"),
+            ("movie.", "ie"),
+            ("zombie.", "ie"),
+            // Words ending in "eg"
+            ("nutmeg.", "eg"),
+            ("peg.", "eg"),
+            // Words ending in "sr"
+            ("usr.", "sr"), // like /usr/ directory
+            // Words ending in "jr"
+            ("mjr.", "jr"), // like major abbreviated differently
+        ];
+
+        for (word, pattern) in false_positive_words {
+            assert!(
+                !text_ends_with_abbreviation(word),
+                "'{word}' should NOT be detected as abbreviation (ends with '{pattern}' pattern)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_abbreviations_in_sentence_per_line_integration() {
+        // Integration test: Test all abbreviations in sentence-per-line mode
+        // This verifies the complete flow works correctly
+        let options = ReflowOptions {
+            line_length: 0, // unlimited
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Test with multiple abbreviations in different contexts
+        let content = r#"Talk to Dr. Smith about the research. The experiment uses e.g. neural networks. Meet Prof. Jones and Mr. Wilson tomorrow. This is important, i.e. very critical. Compare apples vs. oranges in the study. See also Sr. Developer position. Contact Jr. Analyst for details. Use etc. for additional items. Check ex. references in appendix. Define ie. for clarity. Consider eg. alternative approaches."#;
+
+        // Should complete without hanging
+        let result = reflow_markdown(content, &options);
+
+        // Verify each sentence is on its own line
+        let lines: Vec<&str> = result.lines().collect();
+
+        // Should have 11 sentences (one per line)
+        assert_eq!(
+            lines.len(),
+            11,
+            "Should have 11 sentences on separate lines"
+        );
+
+        // Verify abbreviations are preserved in output
+        assert!(result.contains("Dr. Smith"));
+        assert!(result.contains("e.g. neural"));
+        assert!(result.contains("Prof. Jones"));
+        assert!(result.contains("Mr. Wilson"));
+        assert!(result.contains("i.e. very"));
+        assert!(result.contains("vs. oranges"));
+        assert!(result.contains("Sr. Developer"));
+        assert!(result.contains("Jr. Analyst"));
+        assert!(result.contains("etc. for"));
+        assert!(result.contains("ex. references"));
+    }
+
+    #[test]
+    fn test_issue_150_all_reported_variations() {
+        // Test all variations mentioned in issue #150
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Original case: "paradigms"
+        let paradigms = "Why doesn't `rumdl` like the word paradigms?\nNext sentence.";
+        let result = reflow_markdown(paradigms, &options);
+        assert!(result.contains("paradigms?"), "Should handle 'paradigms'");
+
+        // Mentioned variation: removing "s" from "paradigms" = "paradigm"
+        let paradigm = "Why doesn't `rumdl` like the word paradigm?\nNext sentence.";
+        let result = reflow_markdown(paradigm, &options);
+        assert!(result.contains("paradigm?"), "Should handle 'paradigm'");
+
+        // Mentioned variation: "another word that ends in 's'"
+        let programs = "Why doesn't `rumdl` like programs?\nNext sentence.";
+        let result = reflow_markdown(programs, &options);
+        assert!(result.contains("programs?"), "Should handle 'programs'");
+
+        let items = "Why doesn't `rumdl` like items?\nNext sentence.";
+        let result = reflow_markdown(items, &options);
+        assert!(result.contains("items?"), "Should handle 'items'");
+    }
+
+    #[test]
+    fn test_performance_no_hang_on_false_positives() {
+        // Performance regression test: Ensure processing completes quickly
+        // Previously these would hang indefinitely
+        use std::time::Instant;
+
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let test_cases = vec![
+            "paradigms?",
+            "programs!",
+            "items.",
+            "systems?",
+            "teams!",
+            "complex.",
+            "regex?",
+            "cookie.",
+            "vertex!",
+        ];
+
+        for case in test_cases {
+            let start = Instant::now();
+            let _result = reflow_line(case, &options);
+            let elapsed = start.elapsed();
+
+            assert!(
+                elapsed.as_millis() < 100,
+                "'{case}' took {elapsed:?} (should be <100ms)"
+            );
+        }
+    }
 }
