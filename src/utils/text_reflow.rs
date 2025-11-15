@@ -33,6 +33,46 @@ impl Default for ReflowOptions {
     }
 }
 
+/// Check if text ends with a common abbreviation followed by a period
+///
+/// Abbreviations only count when followed by a period, not ! or ?.
+/// This prevents false positives where words ending in abbreviation-like
+/// letter sequences (e.g., "paradigms" ending in "ms") are incorrectly
+/// detected as abbreviations.
+///
+/// Examples:
+///   - "Dr." -> true (abbreviation)
+///   - "Dr?" -> false (question, not abbreviation)
+///   - "paradigms." -> false (not in abbreviation list)
+///   - "paradigms?" -> false (question mark, not abbreviation)
+///
+/// See: Issue #150
+fn text_ends_with_abbreviation(text: &str) -> bool {
+    // Only check if text ends with a period (abbreviations require periods)
+    if !text.ends_with('.') {
+        return false;
+    }
+
+    // Remove the trailing period
+    let without_period = text.trim_end_matches('.');
+
+    // Get the last word by splitting on whitespace
+    let last_word = without_period.split_whitespace().last().unwrap_or("");
+
+    if last_word.is_empty() {
+        return false;
+    }
+
+    // Common abbreviations (without periods - we already stripped it)
+    // This list matches the abbreviations from sentences-per-line
+    let abbreviations = [
+        "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr", "Jr",
+    ];
+
+    // Case-insensitive exact word match (not substring match)
+    abbreviations.iter().any(|abbr| last_word.eq_ignore_ascii_case(abbr))
+}
+
 /// Detect if a character position is a sentence boundary
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
 fn is_sentence_boundary(text: &str, pos: usize) -> bool {
@@ -69,22 +109,17 @@ fn is_sentence_boundary(text: &str, pos: usize) -> bool {
         return false;
     }
 
-    // Look back to check for common abbreviations
-    if pos > 0 {
-        // Abbreviation list similar to sentences-per-line
-        let prev_word = &text[..pos];
-        let ignored_words = [
-            "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr", "Jr",
-        ];
-        for word in &ignored_words {
-            if prev_word.to_lowercase().ends_with(&word.to_lowercase()) {
-                return false;
-            }
+    // Look back to check for common abbreviations (only applies to periods)
+    if pos > 0 && c == '.' {
+        // Check if the text up to and including this period ends with an abbreviation
+        // Note: text[..=pos] includes the character at pos (the period)
+        if text_ends_with_abbreviation(&text[..=pos]) {
+            return false;
         }
 
         // Check for decimal numbers (e.g., "3.14")
         // Make sure to check if next_char_pos is within bounds
-        if pos > 0 && chars[pos - 1].is_numeric() && next_char_pos < chars.len() && chars[next_char_pos].is_numeric() {
+        if chars[pos - 1].is_numeric() && next_char_pos < chars.len() && chars[next_char_pos].is_numeric() {
             return false;
         }
     }
@@ -728,26 +763,8 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
                         // First sentence might continue from previous elements
                         // But check if it ends with an abbreviation
                         let trimmed = sentence.trim();
-                        let ends_with_sentence_punct =
-                            trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
-                        let ends_with_abbreviation = if ends_with_sentence_punct {
-                            // Strip the final punctuation before checking abbreviations
-                            let without_punct = trimmed
-                                .trim_end_matches('.')
-                                .trim_end_matches('!')
-                                .trim_end_matches('?');
-                            let ignored_words = [
-                                "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr",
-                                "Jr",
-                            ];
-                            ignored_words
-                                .iter()
-                                .any(|word| without_punct.to_lowercase().ends_with(&word.to_lowercase()))
-                        } else {
-                            false
-                        };
 
-                        if ends_with_abbreviation {
+                        if text_ends_with_abbreviation(trimmed) {
                             // Don't emit yet - this sentence ends with abbreviation, continue accumulating
                             current_line = sentence.to_string();
                         } else {
@@ -761,25 +778,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
                         let ends_with_sentence_punct =
                             trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
 
-                        // Check if it ends with an abbreviation
-                        let ends_with_abbreviation = if ends_with_sentence_punct {
-                            // Strip the final punctuation before checking abbreviations
-                            let without_punct = trimmed
-                                .trim_end_matches('.')
-                                .trim_end_matches('!')
-                                .trim_end_matches('?');
-                            let ignored_words = [
-                                "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr",
-                                "Jr",
-                            ];
-                            ignored_words
-                                .iter()
-                                .any(|word| without_punct.to_lowercase().ends_with(&word.to_lowercase()))
-                        } else {
-                            false
-                        };
-
-                        if ends_with_sentence_punct && !ends_with_abbreviation {
+                        if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed) {
                             // Complete sentence - emit it immediately
                             lines.push(sentence.to_string());
                             current_line.clear();
@@ -2094,5 +2093,158 @@ mod tests {
         let content3 = "Term\n:\tDefinition";
         let result3 = reflow_markdown(content3, &options);
         assert!(result3.contains("\n:\tDefinition"));
+    }
+
+    // Tests for issue #150: Abbreviation detection bug
+    // https://github.com/rvben/rumdl/issues/150
+
+    #[test]
+    fn test_abbreviation_false_positives_word_boundary() {
+        // Issue #150: Words ending in abbreviation letter sequences
+        // should NOT be detected as abbreviations
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // False positives to prevent (word endings that look like abbreviations)
+        let false_positive_cases = vec![
+            ("Why doesn't `rumdl` like the word paradigms?", 1),
+            ("There are many programs?", 1),
+            ("We have multiple items?", 1),
+            ("The systems?", 1),
+            ("Complex regex?", 1),
+            ("These teams!", 1),
+            ("Multiple schemes.", 1), // ends with period but "schemes" != "Ms"
+        ];
+
+        for (input, expected_sentences) in false_positive_cases {
+            let result = reflow_line(input, &options);
+            assert_eq!(
+                result.len(),
+                expected_sentences,
+                "Input '{}' should be {} sentence(s), got {}: {:?}",
+                input,
+                expected_sentences,
+                result.len(),
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_abbreviation_period_vs_other_punctuation() {
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Questions and exclamations are NOT abbreviations (only periods count)
+        let not_abbreviations = vec![
+            "Who is Dr?",  // ? means not abbreviation
+            "See Mr!",     // ! means not abbreviation
+            "What is Ms?", // ? means not abbreviation
+        ];
+
+        for input in not_abbreviations {
+            let result = reflow_line(input, &options);
+            assert_eq!(
+                result.len(),
+                1,
+                "'{input}' should be 1 complete sentence (punctuation is not period)"
+            );
+        }
+
+        // Only periods after abbreviations count
+        let actual_abbreviations = vec![
+            "See Dr. Smith today",   // Dr. is abbreviation
+            "Use e.g. this example", // e.g. is abbreviation
+            "Call Mr. Jones",        // Mr. is abbreviation
+        ];
+
+        for input in actual_abbreviations {
+            let sentences = split_into_sentences(input);
+            assert_eq!(
+                sentences.len(),
+                1,
+                "'{input}' should be 1 sentence (contains abbreviation with period)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_abbreviation_true_positives() {
+        // Actual abbreviations should still be detected correctly
+        let text = "Talk to Dr. Smith. He is helpful. See also Mr. Jones.";
+        let sentences = split_into_sentences(text);
+
+        // Should NOT split at "Dr." or "Mr."
+        assert_eq!(sentences.len(), 3);
+        assert!(sentences[0].contains("Dr. Smith"));
+        assert!(sentences[2].contains("Mr. Jones"));
+    }
+
+    #[test]
+    fn test_issue_150_paradigms_with_question_mark() {
+        // The actual issue: "paradigms?" should be a complete sentence
+        let text = "Why doesn't `rumdl` like the word paradigms? Next sentence.";
+        let sentences = split_into_sentences(text);
+
+        assert_eq!(sentences.len(), 2, "Should split at '?' (not an abbreviation)");
+        assert!(sentences[0].ends_with("paradigms?"));
+        assert_eq!(sentences[1], "Next sentence.");
+    }
+
+    #[test]
+    fn test_issue_150_exact_reproduction() {
+        // Exact test case from issue #150
+        let options = ReflowOptions {
+            line_length: 0, // unlimited
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = "Why doesn't `rumdl` like the word paradigms?\nIf I remove the \"s\" from \"paradigms\", or if I replace \"paradigms\" with another word that ends in \"s\", this passes!";
+
+        // This should complete without hanging (use reflow_markdown for multi-line input)
+        let result = reflow_markdown(input, &options);
+
+        // Should have 2 lines (one sentence per line)
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 2, "Should have 2 sentences on separate lines");
+        assert!(
+            lines[0].contains("paradigms?"),
+            "First line should contain 'paradigms?'"
+        );
+        assert!(lines[1].contains("passes!"), "Second line should contain 'passes!'");
+    }
+
+    #[test]
+    fn test_helper_function_text_ends_with_abbreviation() {
+        // Test the helper function directly
+
+        // True cases (should detect abbreviations)
+        assert!(text_ends_with_abbreviation("Dr."));
+        assert!(text_ends_with_abbreviation("word Dr."));
+        assert!(text_ends_with_abbreviation("e.g."));
+        assert!(text_ends_with_abbreviation("i.e."));
+        assert!(text_ends_with_abbreviation("etc."));
+        assert!(text_ends_with_abbreviation("Mr."));
+        assert!(text_ends_with_abbreviation("Mrs."));
+        assert!(text_ends_with_abbreviation("Ms."));
+        assert!(text_ends_with_abbreviation("Prof."));
+
+        // False cases (should NOT detect as abbreviations)
+        assert!(!text_ends_with_abbreviation("paradigms."));
+        assert!(!text_ends_with_abbreviation("programs."));
+        assert!(!text_ends_with_abbreviation("items."));
+        assert!(!text_ends_with_abbreviation("systems."));
+        assert!(!text_ends_with_abbreviation("Dr?")); // question mark, not period
+        assert!(!text_ends_with_abbreviation("Mr!")); // exclamation, not period
+        assert!(!text_ends_with_abbreviation("paradigms?")); // question mark
+        assert!(!text_ends_with_abbreviation("word")); // no punctuation
+        assert!(!text_ends_with_abbreviation("")); // empty string
     }
 }
