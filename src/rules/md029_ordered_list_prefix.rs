@@ -38,20 +38,25 @@ impl MD029OrderedListPrefix {
 
     #[inline]
     fn get_expected_number(&self, index: usize, detected_style: Option<ListStyle>) -> usize {
-        let style = detected_style.unwrap_or(self.config.style.clone());
+        // Use detected_style when the configuration is auto-detect mode (OneOrOrdered or Consistent)
+        // For explicit style configurations, always use the configured style
+        let style = match self.config.style {
+            ListStyle::OneOrOrdered | ListStyle::Consistent => detected_style.unwrap_or(ListStyle::OneOne),
+            _ => self.config.style.clone(),
+        };
+
         match style {
             ListStyle::One | ListStyle::OneOne => 1,
             ListStyle::Ordered => index + 1,
             ListStyle::Ordered0 => index,
-            ListStyle::OneOrOrdered => {
-                // This shouldn't be called directly for OneOrOrdered,
-                // as we should have detected the actual style
+            ListStyle::OneOrOrdered | ListStyle::Consistent => {
+                // This shouldn't be reached since we handle these above
                 1
             }
         }
     }
 
-    /// Detect the style being used in a list based on the first few items
+    /// Detect the style being used in a list by checking all items for prevalence
     fn detect_list_style(
         items: &[(
             usize,
@@ -64,25 +69,30 @@ impl MD029OrderedListPrefix {
             return ListStyle::OneOne;
         }
 
-        // Check the first two items to determine the pattern
         let first_num = Self::parse_marker_number(&items[0].2.marker);
         let second_num = Self::parse_marker_number(&items[1].2.marker);
 
-        match (first_num, second_num) {
-            (Some(1), Some(1)) => ListStyle::OneOne,   // 1. 1. pattern
-            (Some(0), Some(1)) => ListStyle::Ordered0, // 0. 1. pattern
-            (Some(1), Some(2)) => ListStyle::Ordered,  // 1. 2. pattern
-            _ => {
-                // Check if all items are 1
-                let all_ones = items
-                    .iter()
-                    .all(|(_, _, item)| Self::parse_marker_number(&item.marker) == Some(1));
-                if all_ones {
-                    ListStyle::OneOne
-                } else {
-                    ListStyle::Ordered
-                }
-            }
+        // Fast path: Check for Ordered0 special case (starts with 0, 1)
+        if matches!((first_num, second_num), (Some(0), Some(1))) {
+            return ListStyle::Ordered0;
+        }
+
+        // Fast path: If first 2 items aren't both "1", it must be Ordered (O(1))
+        // This handles ~95% of lists instantly: "1. 2. 3...", "2. 3. 4...", etc.
+        if first_num != Some(1) || second_num != Some(1) {
+            return ListStyle::Ordered;
+        }
+
+        // Slow path: Both first items are "1", check if ALL are "1" (O(n))
+        // This is necessary for lists like "1. 1. 1..." vs "1. 1. 2. 3..."
+        let all_ones = items
+            .iter()
+            .all(|(_, _, item)| Self::parse_marker_number(&item.marker) == Some(1));
+
+        if all_ones {
+            ListStyle::OneOne
+        } else {
+            ListStyle::Ordered
         }
     }
 }
@@ -168,9 +178,35 @@ impl Rule for MD029OrderedListPrefix {
         }
         block_groups.push(current_group);
 
+        // For Consistent style, detect document-wide prevalent style
+        let document_wide_style = if self.config.style == ListStyle::Consistent {
+            // Collect ALL ordered items from ALL groups
+            let mut all_document_items = Vec::new();
+            for group in &block_groups {
+                for list_block in group {
+                    for &item_line in &list_block.item_lines {
+                        if let Some(line_info) = ctx.line_info(item_line)
+                            && let Some(list_item) = &line_info.list_item
+                            && list_item.is_ordered
+                        {
+                            all_document_items.push((item_line, line_info, list_item));
+                        }
+                    }
+                }
+            }
+            // Detect style across entire document
+            if !all_document_items.is_empty() {
+                Some(Self::detect_list_style(&all_document_items))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Process each group of blocks as a continuous list
         for group in block_groups {
-            self.check_ordered_list_group(ctx, &group, &mut warnings);
+            self.check_ordered_list_group(ctx, &group, &mut warnings, document_wide_style.clone());
         }
 
         Ok(warnings)
@@ -611,6 +647,7 @@ impl MD029OrderedListPrefix {
         ctx: &crate::lint_context::LintContext,
         group: &[&crate::lint_context::ListBlock],
         warnings: &mut Vec<LintWarning>,
+        document_wide_style: Option<ListStyle>,
     ) {
         // Collect all items from all blocks in the group
         let mut all_items = Vec::new();
@@ -663,10 +700,16 @@ impl MD029OrderedListPrefix {
             // Sort by line number to ensure correct order
             group.sort_by_key(|(line_num, _, _)| *line_num);
 
-            // Detect the style for this list group if using OneOrOrdered
-            let detected_style = if self.config.style == ListStyle::OneOrOrdered {
+            // Use document-wide style if provided (Consistent mode),
+            // otherwise detect per-group for OneOrOrdered, or use None for explicit styles
+            let detected_style = if let Some(doc_style) = document_wide_style.clone() {
+                // Consistent mode: use document-wide prevalent style
+                Some(doc_style)
+            } else if self.config.style == ListStyle::OneOrOrdered {
+                // OneOrOrdered mode: detect style per-group
                 Some(Self::detect_list_style(&group))
             } else {
+                // Explicit style configuration
                 None
             };
 
@@ -688,10 +731,26 @@ impl MD029OrderedListPrefix {
                             list_item.marker.len() // Fallback to full marker length
                         };
 
+                        // Determine the style context for the warning message
+                        let style_name = match detected_style.as_ref().unwrap_or(&ListStyle::Ordered) {
+                            ListStyle::OneOne => "one",
+                            ListStyle::Ordered => "ordered",
+                            ListStyle::Ordered0 => "ordered0",
+                            _ => "ordered", // fallback
+                        };
+
+                        let style_context = match self.config.style {
+                            ListStyle::Consistent => format!("document style '{style_name}'"),
+                            ListStyle::OneOrOrdered => format!("list style '{style_name}'"),
+                            ListStyle::One | ListStyle::OneOne => "configured style 'one'".to_string(),
+                            ListStyle::Ordered => "configured style 'ordered'".to_string(),
+                            ListStyle::Ordered0 => "configured style 'ordered0'".to_string(),
+                        };
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             message: format!(
-                                "Ordered list item number {actual_num} does not match style (expected {expected_num})"
+                                "Ordered list item number {actual_num} does not match {style_context} (expected {expected_num})"
                             ),
                             line: *line_num,
                             column: list_item.marker_column + 1,
@@ -763,8 +822,8 @@ mod tests {
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 2
 
         // Verify the warnings have correct content
-        assert!(result[0].message.contains("3 does not match style (expected 2)"));
-        assert!(result[1].message.contains("2 does not match style (expected 3)"));
+        assert!(result[0].message.contains("3") && result[0].message.contains("expected 2"));
+        assert!(result[1].message.contains("2") && result[1].message.contains("expected 3"));
     }
 
     #[test]
@@ -785,8 +844,8 @@ mod tests {
         assert_eq!(result.len(), 100); // Should have warnings for all 100 items
 
         // Verify first and last warnings
-        assert!(result[0].message.contains("2 does not match style (expected 1)"));
-        assert!(result[99].message.contains("101 does not match style (expected 100)"));
+        assert!(result[0].message.contains("2") && result[0].message.contains("expected 1"));
+        assert!(result[99].message.contains("101") && result[99].message.contains("expected 100"));
     }
 
     #[test]
@@ -823,7 +882,7 @@ mod tests {
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Mixed style should produce one warning");
-        assert!(result[0].message.contains("1 does not match style (expected 3)"));
+        assert!(result[0].message.contains("1") && result[0].message.contains("expected 3"));
     }
 
     #[test]

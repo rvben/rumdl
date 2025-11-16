@@ -1432,7 +1432,6 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

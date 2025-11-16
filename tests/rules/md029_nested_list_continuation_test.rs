@@ -278,11 +278,11 @@ fn test_md029_fix_renumbers_correctly_after_nested_content() {
 
     // Check first error
     assert_eq!(warnings[0].line, 6);
-    assert!(warnings[0].message.contains("1 does not match style (expected 3)"));
+    assert!(warnings[0].message.contains("1") && warnings[0].message.contains("expected 3"));
 
     // Check second error
     assert_eq!(warnings[1].line, 8);
-    assert!(warnings[1].message.contains("2 does not match style (expected 4)"));
+    assert!(warnings[1].message.contains("2") && warnings[1].message.contains("expected 4"));
 
     // Test the fix
     let fixed = rule.fix(&ctx).unwrap();

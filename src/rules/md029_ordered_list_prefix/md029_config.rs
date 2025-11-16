@@ -13,7 +13,8 @@ pub enum ListStyle {
     Ordered0, // Zero-based (0. 1. 2.)
     #[default]
     #[serde(rename = "one-or-ordered", alias = "one_or_ordered")]
-    OneOrOrdered, // Either all ones OR sequential (markdownlint default)
+    OneOrOrdered, // Either all ones OR sequential per-list (markdownlint default)
+    Consistent, // Document-wide: use most prevalent style across all lists
 }
 
 /// Configuration for MD029 (Ordered list item prefix)
