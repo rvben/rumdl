@@ -100,10 +100,10 @@ impl MD044ProperNames {
     // Helper function for consistent ASCII normalization
     fn ascii_normalize(s: &str) -> String {
         s.replace(['é', 'è', 'ê', 'ë'], "e")
-            .replace(['à', 'á', 'â', 'ä'], "a")
+            .replace(['à', 'á', 'â', 'ä', 'ã', 'å'], "a")
             .replace(['ï', 'î', 'í', 'ì'], "i")
             .replace(['ü', 'ú', 'ù', 'û'], "u")
-            .replace(['ö', 'ó', 'ò', 'ô'], "o")
+            .replace(['ö', 'ó', 'ò', 'ô', 'õ'], "o")
             .replace('ñ', "n")
             .replace('ç', "c")
     }
