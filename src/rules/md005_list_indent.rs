@@ -23,8 +23,11 @@ pub struct MD005ListIndent {
 struct LineCacheInfo {
     /// Indentation level for each line (0 for empty lines)
     indentation: Vec<usize>,
-    /// Bit flags: bit 0 = has_content, bit 1 = is_list_item
+    /// Bit flags: bit 0 = has_content, bit 1 = is_list_item, bit 2 = is_continuation_content
     flags: Vec<u8>,
+    /// Parent list item line number for each list item (1-indexed, 0 = no parent)
+    /// Pre-computed in O(n) to avoid O(n²) backward scanning
+    parent_map: HashMap<usize, usize>,
 }
 
 const FLAG_HAS_CONTENT: u8 = 1;
@@ -36,8 +39,13 @@ impl LineCacheInfo {
         let total_lines = ctx.lines.len();
         let mut indentation = Vec::with_capacity(total_lines);
         let mut flags = Vec::with_capacity(total_lines);
+        let mut parent_map = HashMap::new();
 
-        for line_info in &ctx.lines {
+        // Track most recent list item at each indentation level for O(1) parent lookups
+        // Key: marker_column, Value: line_num (1-indexed)
+        let mut indent_to_line: HashMap<usize, usize> = HashMap::new();
+
+        for (idx, line_info) in ctx.lines.iter().enumerate() {
             let content = line_info.content(ctx.content).trim_start();
             let line_indent = line_info.byte_len - content.len();
 
@@ -47,13 +55,40 @@ impl LineCacheInfo {
             if !content.is_empty() {
                 flag |= FLAG_HAS_CONTENT;
             }
-            if line_info.list_item.is_some() {
+            if let Some(list_item) = &line_info.list_item {
                 flag |= FLAG_IS_LIST_ITEM;
+
+                let line_num = idx + 1; // Convert to 1-indexed
+                let marker_column = list_item.marker_column;
+
+                // Find parent: most recent list item with strictly less indentation
+                // Scan through tracked indents to find the best parent (O(k) where k = unique indents)
+                let mut best_parent: Option<(usize, usize)> = None; // (indent, line_num)
+
+                for (&tracked_indent, &tracked_line) in &indent_to_line {
+                    if tracked_indent < marker_column {
+                        // Potential parent - keep the one with largest indent (closest parent)
+                        if best_parent.is_none() || tracked_indent > best_parent.unwrap().0 {
+                            best_parent = Some((tracked_indent, tracked_line));
+                        }
+                    }
+                }
+
+                if let Some((_parent_indent, parent_line)) = best_parent {
+                    parent_map.insert(line_num, parent_line);
+                }
+
+                // Track this list item for future children
+                indent_to_line.insert(marker_column, line_num);
             }
             flags.push(flag);
         }
 
-        Self { indentation, flags }
+        Self {
+            indentation,
+            flags,
+            parent_map,
+        }
     }
 
     /// Check if line has content
@@ -179,7 +214,7 @@ impl MD005ListIndent {
     }
 
     /// Check if a list item is continuation content of a parent list item
-    /// Uses pre-built cache for O(1) lookups instead of O(n) scanning
+    /// Uses pre-computed parent map for O(1) lookup instead of O(n) backward scanning
     fn is_continuation_content(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -187,67 +222,51 @@ impl MD005ListIndent {
         list_line: usize,
         list_indent: usize,
     ) -> bool {
-        // Look backward to find the true parent list item (not just immediate previous)
-        for line_num in (1..list_line).rev() {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                if let Some(parent_list_item) = &line_info.list_item {
-                    let parent_marker_column = parent_list_item.marker_column;
-                    let parent_content_column = parent_list_item.content_column;
+        // Use pre-computed parent map instead of O(n) backward scan
+        let parent_line = cache.parent_map.get(&list_line).copied();
 
-                    // Skip list items at the same or greater indentation - we want the true parent
-                    if parent_marker_column >= list_indent {
-                        continue;
-                    }
+        if let Some(parent_line) = parent_line
+            && let Some(line_info) = ctx.line_info(parent_line)
+            && let Some(parent_list_item) = &line_info.list_item
+        {
+            let parent_marker_column = parent_list_item.marker_column;
+            let parent_content_column = parent_list_item.content_column;
 
-                    // Check if there are continuation lines between parent and current list
-                    // USE CACHE instead of self.find_continuation_indent_between()
-                    let continuation_indent =
-                        cache.find_continuation_indent(line_num + 1, list_line - 1, parent_content_column);
+            // Check if there are continuation lines between parent and current list
+            let continuation_indent =
+                cache.find_continuation_indent(parent_line + 1, list_line - 1, parent_content_column);
 
-                    if let Some(continuation_indent) = continuation_indent {
-                        let is_standard_continuation =
-                            list_indent == parent_content_column + Self::STANDARD_CONTINUATION_OFFSET;
-                        let matches_content_indent = list_indent == continuation_indent;
+            if let Some(continuation_indent) = continuation_indent {
+                let is_standard_continuation =
+                    list_indent == parent_content_column + Self::STANDARD_CONTINUATION_OFFSET;
+                let matches_content_indent = list_indent == continuation_indent;
 
-                        if matches_content_indent || is_standard_continuation {
-                            return true;
-                        }
-                    }
+                if matches_content_indent || is_standard_continuation {
+                    return true;
+                }
+            }
 
-                    // Special case: if this list item is at the same indentation as previous
-                    // continuation lists, it might be part of the same continuation block
-                    if list_indent > parent_marker_column {
-                        // Check if previous list items at this indentation are also continuation
-                        if self.has_continuation_list_at_indent(
-                            ctx,
-                            cache,
-                            line_num,
-                            list_line,
-                            list_indent,
-                            parent_content_column,
-                        ) {
-                            return true;
-                        }
+            // Special case: if this list item is at the same indentation as previous
+            // continuation lists, it might be part of the same continuation block
+            if list_indent > parent_marker_column {
+                // Check if previous list items at this indentation are also continuation
+                if self.has_continuation_list_at_indent(
+                    ctx,
+                    cache,
+                    parent_line,
+                    list_line,
+                    list_indent,
+                    parent_content_column,
+                ) {
+                    return true;
+                }
 
-                        // USE CACHE instead of self.has_any_continuation_content_after_parent()
-                        if cache.has_continuation_content(line_num, list_line, parent_content_column) {
-                            return true;
-                        }
-                    }
-
-                    // If no continuation lines, this might still be a child list
-                    // but not continuation content, so continue looking for a parent
-                } else if !line_info.content(ctx.content).trim().is_empty() {
-                    // Found non-list content - only stop if it's at the left margin
-                    let content = line_info.content(ctx.content).trim_start();
-                    let line_indent = line_info.byte_len - content.len();
-
-                    if line_indent == 0 {
-                        break;
-                    }
+                if cache.has_continuation_content(parent_line, list_line, parent_content_column) {
+                    return true;
                 }
             }
         }
+
         false
     }
 
@@ -331,11 +350,13 @@ impl MD005ListIndent {
         let mut level_map: HashMap<usize, usize> = HashMap::new();
         let mut level_indents: HashMap<usize, Vec<usize>> = HashMap::new(); // Track all indents seen at each level
 
-        // Process items in order to build the level hierarchy
-        for i in 0..all_list_items.len() {
-            let (line_num, indent, _, _) = &all_list_items[i];
+        // Track the most recent item at each indent level for O(1) parent lookups
+        // Key: indent value, Value: (level, line_num)
+        let mut indent_to_level: HashMap<usize, (usize, usize)> = HashMap::new();
 
-            let level = if i == 0 {
+        // Process items in order to build the level hierarchy - now O(n) instead of O(n²)
+        for (line_num, indent, _, _) in &all_list_items {
+            let level = if indent_to_level.is_empty() {
                 // First item establishes level 1
                 level_indents.entry(1).or_default().push(*indent);
                 1
@@ -344,49 +365,50 @@ impl MD005ListIndent {
                 let mut determined_level = 0;
 
                 // First, check if this indent matches any existing level exactly
-                for (lvl, indents) in &level_indents {
-                    if indents.contains(indent) {
-                        determined_level = *lvl;
-                        break;
-                    }
-                }
-
-                if determined_level == 0 {
+                if let Some(&(existing_level, _)) = indent_to_level.get(indent) {
+                    determined_level = existing_level;
+                } else {
                     // No exact match - determine level based on hierarchy
-                    // Look for the most recent item with clearly less indentation (parent)
-                    for j in (0..i).rev() {
-                        let (prev_line, prev_indent, _, _) = &all_list_items[j];
-                        let prev_level = level_map[prev_line];
+                    // Find the most recent item with clearly less indentation (parent)
+                    // Instead of scanning backward O(n), look through tracked indents O(k) where k is number of unique indents
+                    let mut best_parent: Option<(usize, usize, usize)> = None; // (indent, level, line)
 
+                    for (&tracked_indent, &(tracked_level, tracked_line)) in &indent_to_level {
+                        if tracked_indent < *indent {
+                            // This is a potential parent (less indentation)
+                            // Keep the one with the largest indent (closest parent)
+                            if best_parent.is_none() || tracked_indent > best_parent.unwrap().0 {
+                                best_parent = Some((tracked_indent, tracked_level, tracked_line));
+                            }
+                        }
+                    }
+
+                    if let Some((parent_indent, parent_level, _parent_line)) = best_parent {
                         // A clear parent has at least MIN_CHILD_INDENT_INCREASE spaces less indentation
-                        if *prev_indent + Self::MIN_CHILD_INDENT_INCREASE <= *indent {
-                            // This is a child of prev_item
-                            determined_level = prev_level + 1;
-                            break;
-                        } else if (*prev_indent as i32 - *indent as i32).abs() <= Self::SAME_LEVEL_TOLERANCE {
+                        if parent_indent + Self::MIN_CHILD_INDENT_INCREASE <= *indent {
+                            // This is a child of the parent
+                            determined_level = parent_level + 1;
+                        } else if (*indent as i32 - parent_indent as i32).abs() <= Self::SAME_LEVEL_TOLERANCE {
                             // Within SAME_LEVEL_TOLERANCE - likely meant to be same level but inconsistent
-                            determined_level = prev_level;
-                            break;
-                        } else if *prev_indent < *indent {
+                            determined_level = parent_level;
+                        } else {
                             // Less than 2 space difference but more than 1
                             // This is ambiguous - could be same level or child
-                            // Look at the pattern: if prev_level already has items with similar indent,
-                            // this is probably meant to be at the same level
-                            if let Some(indents_at_level) = level_indents.get(&prev_level) {
-                                // Check if any indent at prev_level is close to this indent
+                            // Check if any existing level has a similar indent
+                            let mut found_similar = false;
+                            if let Some(indents_at_level) = level_indents.get(&parent_level) {
                                 for &level_indent in indents_at_level {
                                     if (level_indent as i32 - *indent as i32).abs() <= Self::SAME_LEVEL_TOLERANCE {
-                                        // Close to an existing indent at prev_level
-                                        determined_level = prev_level;
+                                        determined_level = parent_level;
+                                        found_similar = true;
                                         break;
                                     }
                                 }
                             }
-                            if determined_level == 0 {
-                                // Still not determined - treat as child since it has more indent
-                                determined_level = prev_level + 1;
+                            if !found_similar {
+                                // Treat as child since it has more indent
+                                determined_level = parent_level + 1;
                             }
-                            break;
                         }
                     }
 
@@ -403,6 +425,8 @@ impl MD005ListIndent {
             };
 
             level_map.insert(*line_num, level);
+            // Track this indent and level for future O(1) lookups
+            indent_to_level.insert(*indent, (level, *line_num));
         }
 
         // Now group items by their level
