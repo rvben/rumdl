@@ -63,11 +63,25 @@ impl MD003HeadingStyle {
         }
 
         // Return most prevalent style
-        // In case of tie, the iteration order determines preference (HashMap doesn't guarantee order,
-        // but we handle the default case explicitly)
+        // In case of tie, prefer ATX as the default (deterministic tiebreaker)
         style_counts
             .into_iter()
-            .max_by_key(|(_, count)| *count)
+            .max_by(|(style_a, count_a), (style_b, count_b)| {
+                match count_a.cmp(count_b) {
+                    std::cmp::Ordering::Equal => {
+                        // Tiebreaker: prefer ATX (most common), then Setext1, then Setext2, then AtxClosed
+                        let priority = |s: &HeadingStyle| match s {
+                            HeadingStyle::Atx => 0,
+                            HeadingStyle::Setext1 => 1,
+                            HeadingStyle::Setext2 => 2,
+                            HeadingStyle::AtxClosed => 3,
+                            _ => 4,
+                        };
+                        priority(style_b).cmp(&priority(style_a)) // Reverse for min priority wins
+                    }
+                    other => other,
+                }
+            })
             .map(|(style, _)| style)
             .unwrap_or(HeadingStyle::Atx)
     }
