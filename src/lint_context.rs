@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 static LINK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"(?sx)
-        \[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]          # Link text in group 1 (handles nested brackets)
+        \[((?:[^\[\]\\]|\\.)*)\]          # Link text in group 1 (optimized - no nested brackets to prevent catastrophic backtracking)
         (?:
             \((?:<([^<>\n]*)>|([^)"']*))(?:\s+(?:"([^"]*)"|'([^']*)'))?\)  # URL in group 2 (angle) or 3 (bare), title in 4/5
             |
@@ -25,7 +25,7 @@ static LINK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"(?sx)
-        !\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]         # Alt text in group 1 (handles nested brackets)
+        !\[((?:[^\[\]\\]|\\.)*)\]         # Alt text in group 1 (optimized - no nested brackets to prevent catastrophic backtracking)
         (?:
             \((?:<([^<>\n]*)>|([^)"']*))(?:\s+(?:"([^"]*)"|'([^']*)'))?\)  # URL in group 2 (angle) or 3 (bare), title in 4/5
             |
