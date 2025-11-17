@@ -722,16 +722,6 @@ impl<'a> LintContext<'a> {
             .map(|def| def.url.as_str())
     }
 
-    /// Get links on a specific line
-    pub fn links_on_line(&self, line_num: usize) -> Vec<&ParsedLink<'_>> {
-        self.links.iter().filter(|link| link.line == line_num).collect()
-    }
-
-    /// Get images on a specific line
-    pub fn images_on_line(&self, line_num: usize) -> Vec<&ParsedImage<'_>> {
-        self.images.iter().filter(|img| img.line == line_num).collect()
-    }
-
     /// Check if a line is part of a list block
     pub fn is_in_list_block(&self, line_num: usize) -> bool {
         self.list_blocks
@@ -2213,13 +2203,50 @@ impl<'a> LintContext<'a> {
     }
 
     /// Parse all list blocks in the content (legacy line-by-line approach)
+    ///
+    /// Uses a forward-scanning O(n) algorithm that tracks two variables during iteration:
+    /// - `has_list_breaking_content_since_last_item`: Set when encountering content that
+    ///   terminates a list (headings, horizontal rules, tables, insufficiently indented content)
+    /// - `min_continuation_for_tracking`: Minimum indentation required for content to be
+    ///   treated as list continuation (based on the list marker width)
+    ///
+    /// When a new list item is encountered, we check if list-breaking content was seen
+    /// since the last item. If so, we start a new list block.
     fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBlock> {
+        // Minimum indentation for unordered list continuation per CommonMark spec
+        const UNORDERED_LIST_MIN_CONTINUATION_INDENT: usize = 2;
+
+        /// Initialize or reset the forward-scanning tracking state.
+        /// This helper eliminates code duplication across three initialization sites.
+        #[inline]
+        fn reset_tracking_state(
+            list_item: &ListItemInfo,
+            has_list_breaking_content: &mut bool,
+            min_continuation: &mut usize,
+        ) {
+            *has_list_breaking_content = false;
+            let marker_width = if list_item.is_ordered {
+                list_item.marker.len() + 1 // Ordered markers need space after period/paren
+            } else {
+                list_item.marker.len()
+            };
+            *min_continuation = if list_item.is_ordered {
+                marker_width
+            } else {
+                UNORDERED_LIST_MIN_CONTINUATION_INDENT
+            };
+        }
+
         // Pre-size based on lines that could be list items
         let mut list_blocks = Vec::with_capacity(lines.len() / 10); // Estimate ~10% of lines might start list blocks
         let mut current_block: Option<ListBlock> = None;
         let mut last_list_item_line = 0;
         let mut current_indent_level = 0;
         let mut last_marker_width = 0;
+
+        // Track list-breaking content since last item (fixes O(n²) bottleneck from issue #148)
+        let mut has_list_breaking_content_since_last_item = false;
+        let mut min_continuation_for_tracking = 0;
 
         for (line_idx, line_info) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -2265,6 +2292,29 @@ impl<'a> LintContext<'a> {
                 String::new()
             };
 
+            // Track list-breaking content for non-list, non-blank lines (O(n) replacement for nested loop)
+            if current_block.is_some() && line_info.list_item.is_none() && !line_info.is_blank {
+                let line_content = line_info.content(content).trim();
+
+                // Check for structural separators that break lists
+                let breaks_list = line_info.heading.is_some()
+                    || line_content.starts_with("---")
+                    || line_content.starts_with("***")
+                    || line_content.starts_with("___")
+                    || (line_content.contains('|')
+                        && !line_content.contains("](")
+                        && !line_content.contains("http")
+                        && (line_content.matches('|').count() > 1
+                            || line_content.starts_with('|')
+                            || line_content.ends_with('|')))
+                    || line_content.starts_with(">")
+                    || (line_info.indent < min_continuation_for_tracking);
+
+                if breaks_list {
+                    has_list_breaking_content_since_last_item = true;
+                }
+            }
+
             // Check if this line is a list item
             if let Some(list_item) = &line_info.list_item {
                 // Calculate nesting level based on indentation
@@ -2285,120 +2335,9 @@ impl<'a> LintContext<'a> {
                     let marker_compatible =
                         block.is_ordered || block.marker.is_none() || block.marker.as_ref() == Some(&list_item.marker);
 
-                    // Check if there's non-list content between the last item and this one
-                    let has_non_list_content = {
-                        let mut found_non_list = false;
-                        // Use the last item from the current block, not the global last_list_item_line
-                        let block_last_item_line = block.item_lines.last().copied().unwrap_or(block.end_line);
-
-                        // Debug: Special check for problematic line
-                        if block_last_item_line > 0 && block_last_item_line <= lines.len() {
-                            let last_line = &lines[block_last_item_line - 1];
-                            let last_line_content = last_line.content(content);
-                            if last_line_content.contains(r"`sqlalchemy`") && last_line_content.contains(r"\`") {
-                                log::debug!(
-                                    "After problematic line {}: checking lines {} to {} for non-list content",
-                                    block_last_item_line,
-                                    block_last_item_line + 1,
-                                    line_num
-                                );
-                                // If they're consecutive list items, there's no content between
-                                if line_num == block_last_item_line + 1 {
-                                    log::debug!("Lines are consecutive, no content between");
-                                }
-                            }
-                        }
-
-                        for check_line in (block_last_item_line + 1)..line_num {
-                            let check_idx = check_line - 1;
-                            if check_idx < lines.len() {
-                                let check_info = &lines[check_idx];
-                                // Check for content that breaks the list
-                                let is_list_breaking_content = if check_info.in_code_block {
-                                    // Use enhanced code block classification for list separation
-                                    let last_item_marker_width =
-                                        if block_last_item_line > 0 && block_last_item_line <= lines.len() {
-                                            lines[block_last_item_line - 1]
-                                                .list_item
-                                                .as_ref()
-                                                .map(|li| {
-                                                    if li.is_ordered {
-                                                        li.marker.len() + 1 // Add 1 for the space after ordered list markers
-                                                    } else {
-                                                        li.marker.len()
-                                                    }
-                                                })
-                                                .unwrap_or(3) // fallback to 3 if no list item found
-                                        } else {
-                                            3 // fallback
-                                        };
-
-                                    let min_continuation = if block.is_ordered { last_item_marker_width } else { 2 };
-
-                                    // Analyze code block context using our enhanced classification
-                                    let context = CodeBlockUtils::analyze_code_block_context(
-                                        lines,
-                                        check_line - 1,
-                                        min_continuation,
-                                    );
-
-                                    // Standalone code blocks break lists, indented ones continue them
-                                    matches!(context, CodeBlockContext::Standalone)
-                                } else if !check_info.is_blank && check_info.list_item.is_none() {
-                                    // Check for structural separators that should break lists (from issue #42)
-                                    let line_content = check_info.content(content).trim();
-
-                                    // Any of these structural separators break lists
-                                    if check_info.heading.is_some()
-                                        || line_content.starts_with("---")
-                                        || line_content.starts_with("***")
-                                        || line_content.starts_with("___")
-                                        || (line_content.contains('|')
-                                            && !line_content.contains("](")
-                                            && !line_content.contains("http")
-                                            && (line_content.matches('|').count() > 1
-                                                || line_content.starts_with('|')
-                                                || line_content.ends_with('|')))
-                                        || line_content.starts_with(">")
-                                    {
-                                        true
-                                    }
-                                    // Other non-list content - check if properly indented
-                                    else {
-                                        let last_item_marker_width =
-                                            if block_last_item_line > 0 && block_last_item_line <= lines.len() {
-                                                lines[block_last_item_line - 1]
-                                                    .list_item
-                                                    .as_ref()
-                                                    .map(|li| {
-                                                        if li.is_ordered {
-                                                            li.marker.len() + 1 // Add 1 for the space after ordered list markers
-                                                        } else {
-                                                            li.marker.len()
-                                                        }
-                                                    })
-                                                    .unwrap_or(3) // fallback to 3 if no list item found
-                                            } else {
-                                                3 // fallback
-                                            };
-
-                                        let min_continuation =
-                                            if block.is_ordered { last_item_marker_width } else { 2 };
-                                        check_info.indent < min_continuation
-                                    }
-                                } else {
-                                    false
-                                };
-
-                                if is_list_breaking_content {
-                                    // Not indented enough, so it breaks the list
-                                    found_non_list = true;
-                                    break;
-                                }
-                            }
-                        }
-                        found_non_list
-                    };
+                    // O(1) check: Use the tracked variable instead of O(n) nested loop
+                    // This eliminates the quadratic bottleneck from issue #148
+                    let has_non_list_content = has_list_breaking_content_since_last_item;
 
                     // A list continues if:
                     // 1. It's a nested item (indented more than the parent), OR
@@ -2408,28 +2347,7 @@ impl<'a> LintContext<'a> {
                         same_context && reasonable_distance && !has_non_list_content
                     } else {
                         // Same-level items need to match type and markers
-                        let result = same_type
-                            && same_context
-                            && reasonable_distance
-                            && marker_compatible
-                            && !has_non_list_content;
-
-                        // Debug logging for lines after problematic content
-                        if block.item_lines.last().is_some_and(|&last_line| {
-                            last_line > 0
-                                && last_line <= lines.len()
-                                && lines[last_line - 1].content(content).contains(r"`sqlalchemy`")
-                                && lines[last_line - 1].content(content).contains(r"\`")
-                        }) {
-                            log::debug!(
-                                "List continuation check after problematic line at line {line_num}: same_type={same_type}, same_context={same_context}, reasonable_distance={reasonable_distance}, marker_compatible={marker_compatible}, has_non_list_content={has_non_list_content}, continues={result}"
-                            );
-                            if line_num > 0 && line_num <= lines.len() {
-                                log::debug!("Current line content: {:?}", lines[line_num - 1].content(content));
-                            }
-                        }
-
-                        result
+                        same_type && same_context && reasonable_distance && marker_compatible && !has_non_list_content
                     };
 
                     // WORKAROUND: If items are truly consecutive (no blank lines), they MUST be in the same list
@@ -2462,6 +2380,13 @@ impl<'a> LintContext<'a> {
                             // Mixed markers, clear the marker field
                             block.marker = None;
                         }
+
+                        // Reset tracked state for issue #148 optimization
+                        reset_tracking_state(
+                            list_item,
+                            &mut has_list_breaking_content_since_last_item,
+                            &mut min_continuation_for_tracking,
+                        );
                     } else {
                         // End current block and start a new one
 
@@ -2485,6 +2410,13 @@ impl<'a> LintContext<'a> {
                                 list_item.marker.len()
                             },
                         };
+
+                        // Initialize tracked state for new block (issue #148 optimization)
+                        reset_tracking_state(
+                            list_item,
+                            &mut has_list_breaking_content_since_last_item,
+                            &mut min_continuation_for_tracking,
+                        );
                     }
                 } else {
                     // Start a new block
@@ -2502,6 +2434,13 @@ impl<'a> LintContext<'a> {
                         nesting_level: nesting,
                         max_marker_width: list_item.marker.len(),
                     });
+
+                    // Initialize tracked state for new block (issue #148 optimization)
+                    reset_tracking_state(
+                        list_item,
+                        &mut has_list_breaking_content_since_last_item,
+                        &mut min_continuation_for_tracking,
+                    );
                 }
 
                 last_list_item_line = line_num;
