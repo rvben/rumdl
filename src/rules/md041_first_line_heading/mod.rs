@@ -100,6 +100,69 @@ impl MD041FirstLineHeading {
         }
         false
     }
+
+    /// Check if lines starting at a given index form a multi-line HTML heading
+    ///
+    /// This handles cases like:
+    /// ```markdown
+    /// <h1>
+    /// Some text
+    /// </h1>
+    /// ```
+    ///
+    /// Returns true if the opening tag matches the required level and a matching
+    /// closing tag is found within a reasonable distance (10 lines).
+    fn is_multiline_html_heading(
+        lines: &[crate::lint_context::LineInfo],
+        start_idx: usize,
+        level: usize,
+        content: &str,
+    ) -> bool {
+        if start_idx >= lines.len() {
+            return false;
+        }
+
+        let first_line = lines[start_idx].content(content).trim();
+
+        // Check if this line starts with an opening heading tag of the correct level
+        // Pattern: <h1>, <h1 >, <h1 class="foo">, etc.
+        let opening_pattern = format!(r"^<h{level}(?:\s|>)");
+        let Ok(opening_regex) = regex::Regex::new(&opening_pattern) else {
+            return false;
+        };
+
+        if !opening_regex.is_match(first_line) {
+            return false;
+        }
+
+        // Check if the opening tag is complete (has >) and doesn't have the closing tag
+        // If the line is like "<h1>text</h1>", the single-line check would have caught it
+        let has_opening_close = first_line.contains('>');
+        let closing_tag = format!("</h{level}>");
+
+        if !has_opening_close {
+            // Malformed - opening tag doesn't close on this line
+            return false;
+        }
+
+        // If both opening and closing tags are on the same line, single-line check handles it
+        if first_line.contains(&closing_tag) {
+            return false; // Let single-line check handle this
+        }
+
+        // Look for closing tag in subsequent lines (within reasonable distance)
+        const MAX_LINES_TO_SCAN: usize = 10;
+        let end_idx = (start_idx + MAX_LINES_TO_SCAN).min(lines.len());
+
+        for line_info in lines.iter().take(end_idx).skip(start_idx + 1) {
+            let line_content = line_info.content(content);
+            if line_content.trim().contains(&closing_tag) {
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 impl Rule for MD041FirstLineHeading {
@@ -158,8 +221,10 @@ impl Rule for MD041FirstLineHeading {
         let is_correct_heading = if let Some(heading) = &first_line_info.heading {
             heading.level as usize == self.level
         } else {
-            // Check for HTML heading
+            // Check for single-line HTML heading
             Self::is_html_heading(first_line_info.content(ctx.content), self.level)
+                // Check for multi-line HTML heading
+                || Self::is_multiline_html_heading(&ctx.lines, first_line_idx, self.level, ctx.content)
         };
 
         if !is_correct_heading {
@@ -549,6 +614,125 @@ mod tests {
             // Wrong level
             let wrong_level = if level == 1 { 2 } else { 1 };
             let content = format!("{} Wrong Level Heading\n\nContent.", "#".repeat(wrong_level));
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(result.len(), 1);
+            assert!(result[0].message.contains(&format!("level {level} heading")));
+        }
+    }
+
+    #[test]
+    fn test_issue_152_multiline_html_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multi-line HTML h1 heading (should pass - issue #152)
+        let content = "<h1>\nSome text\n</h1>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Issue #152: Multi-line HTML h1 should be recognized as valid heading"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_heading_with_attributes() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multi-line HTML heading with attributes
+        let content = "<h1 class=\"title\" id=\"main\">\nHeading Text\n</h1>\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multi-line HTML heading with attributes should be recognized"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_heading_wrong_level() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multi-line HTML h2 heading (should fail with level 1 requirement)
+        let content = "<h2>\nSome text\n</h2>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("level 1 heading"));
+    }
+
+    #[test]
+    fn test_multiline_html_heading_with_content_after() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multi-line HTML heading followed by content
+        let content = "<h1>\nMy Document\n</h1>\n\nThis is the document content.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multi-line HTML heading followed by content should be valid"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_heading_incomplete() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Incomplete multi-line HTML heading (missing closing tag)
+        let content = "<h1>\nSome text\n\nMore content without closing tag";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("level 1 heading"));
+    }
+
+    #[test]
+    fn test_singleline_html_heading_still_works() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Single-line HTML heading should still work
+        let content = "<h1>My Document</h1>\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Single-line HTML headings should still be recognized"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_heading_with_nested_tags() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multi-line HTML heading with nested tags
+        let content = "<h1>\n<strong>Bold</strong> Heading\n</h1>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multi-line HTML heading with nested tags should be recognized"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_heading_various_levels() {
+        // Test multi-line headings at different levels
+        for level in 1..=6 {
+            let rule = MD041FirstLineHeading::new(level, false);
+
+            // Correct level multi-line
+            let content = format!("<h{level}>\nHeading Text\n</h{level}>\n\nContent.");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Multi-line HTML heading at level {level} should be recognized"
+            );
+
+            // Wrong level multi-line
+            let wrong_level = if level == 1 { 2 } else { 1 };
+            let content = format!("<h{wrong_level}>\nHeading Text\n</h{wrong_level}>\n\nContent.");
             let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
             let result = rule.check(&ctx).unwrap();
             assert_eq!(result.len(), 1);

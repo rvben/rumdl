@@ -127,6 +127,11 @@ impl MD034NoBareUrls {
             return warnings;
         }
 
+        // Skip lines inside HTML blocks - URLs in HTML attributes should not be linted
+        if ctx.line_info(line_number).is_some_and(|info| info.in_html_block) {
+            return warnings;
+        }
+
         // Skip lines that are continuations of multiline markdown links
         // Pattern: text](url) without a leading [
         if let Ok(re) = get_cached_regex(MULTILINE_LINK_CONTINUATION_STR)

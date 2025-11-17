@@ -787,3 +787,100 @@ fn test_issue_116_exact_reproduction() {
         "Issue #116: URL in front matter should not be flagged"
     );
 }
+
+#[test]
+fn test_issue_151_urls_in_html_block_attributes() {
+    // This is the exact test case from issue #151
+    // URLs in HTML tag attributes should not be flagged
+    let rule = MD034NoBareUrls;
+    let content = r#"<figure>
+  <img
+    src="https://example.com/test.html"
+  />
+</figure>"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Issue #151: URL in HTML block attribute should not be flagged"
+    );
+}
+
+#[test]
+fn test_issue_151_single_line_html_tag_with_url() {
+    let rule = MD034NoBareUrls;
+    let content = r#"<img src="https://example.com/image.png" alt="test" />"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Single-line HTML tag with URL in attribute should not be flagged"
+    );
+}
+
+#[test]
+fn test_issue_151_multiple_urls_in_html_block() {
+    let rule = MD034NoBareUrls;
+    let content = r#"<div>
+  <img src="https://example.com/image1.png" />
+  <img src="https://example.com/image2.png" />
+  <a href="https://example.com/page.html">Link</a>
+</div>"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Multiple URLs in HTML block attributes should not be flagged"
+    );
+}
+
+#[test]
+fn test_issue_151_various_html_tag_types() {
+    let rule = MD034NoBareUrls;
+    let content = r#"<section>
+  <div data-url="https://example.com/api">
+    <iframe src="https://example.com/embed.html"></iframe>
+  </div>
+</section>"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "URLs in various HTML tag types should not be flagged"
+    );
+}
+
+#[test]
+fn test_issue_151_nested_html_blocks_with_urls() {
+    let rule = MD034NoBareUrls;
+    let content = r#"<article>
+  <header>
+    <img src="https://example.com/logo.png" />
+  </header>
+  <div class="content">
+    <a href="https://example.com/link1.html">Link 1</a>
+    <figure>
+      <img src="https://example.com/image.png" />
+    </figure>
+  </div>
+</article>"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Nested HTML blocks with URLs should not be flagged");
+}
+
+#[test]
+fn test_issue_151_html_block_with_mixed_content() {
+    let rule = MD034NoBareUrls;
+    let content = r#"<div>
+  Some text content
+  <img src="https://example.com/image.png" />
+  More text
+</div>
+
+Outside HTML: https://example.com/should-flag.html"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Only bare URL outside HTML block should be flagged");
+    assert_eq!(result[0].line, 7);
+}
