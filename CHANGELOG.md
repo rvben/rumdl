@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.177] - 2025-01-17
+
+### Fixed
+
+- **MD003 (heading-style): Fixed non-deterministic test failure**
+  - Eliminated flaky behavior caused by HashMap iteration order when multiple heading styles had equal counts
+  - Added deterministic tiebreaker that prefers ATX style over Setext styles
+  - Ensures consistent style detection across all test runs
+
+- **MD044 (proper-names): Added international character support**
+  - Added tilde characters (ã, õ) and Nordic å to ASCII normalization
+  - Enables proper name matching for international cities like São Paulo, Coimbra, and Århus
+
+- **MD013 (line-length): Fixed infinite hang in sentence-per-line reflow mode**
+  - Fixed abbreviation detection causing hang on words ending in letter sequences
+  - Corrected logic to properly detect abbreviations vs. sentence endings
+  - Issue #150: Resolves infinite loop that occurred with certain text patterns
+
+- **Table style detection improvements**
+  - MD055/MD056/MD058: Now analyze all table rows to detect style, not just first row
+  - Prevents false positives when first row has different separator style than rest of table
+
+- **Code quality fixes**
+  - Resolved Issues #151 and #152 with comprehensive test coverage
+  - Eliminated code duplication in MD005, MD042, and other rules
+  - Extracted shared helper methods to reduce maintenance burden
+
+### Added
+
+- **MD013: Comprehensive abbreviation detection tests**
+  - 42 test cases covering sentence-per-line reflow edge cases
+  - Validates correct behavior for abbreviations, acronyms, and punctuation patterns
+
+- **Text reflow test organization**
+  - Separated 42 integration tests into dedicated test file (`text_reflow_test.rs`)
+  - Follows established codebase pattern for test organization
+  - Improves maintainability while keeping 1 private helper test inline
+
+### Changed
+
+- **MD029 (ordered-list-prefix): Improved warning messages**
+  - Messages now include contextual style information
+  - Shows both configured style and detected document style for clarity
+  - Examples: "configured style 'one'" vs "document style 'ordered'"
+
+- **MD029 rule name standardization**
+  - Removed deprecated MD029-style suffix variant
+  - Unified to single consistent "MD029" identifier across codebase
+
+### Performance
+
+- **Memory optimization in MD005 and MD042**
+  - Reduced memory allocations in list consistency and link reference checks
+  - More efficient data structure usage
+
 ## [0.0.176] - 2025-01-14
 
 ### Added
