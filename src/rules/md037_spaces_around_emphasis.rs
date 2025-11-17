@@ -16,6 +16,24 @@ fn has_spacing_issues(span: &EmphasisSpan) -> bool {
     span.has_leading_space || span.has_trailing_space
 }
 
+/// Truncate long text for display in warning messages
+/// Shows first ~30 and last ~30 chars with ellipsis in middle for readability
+#[inline]
+fn truncate_for_display(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+
+    let prefix_len = max_len / 2 - 2; // -2 for "..."
+    let suffix_len = max_len / 2 - 2;
+
+    format!(
+        "{}...{}",
+        &text[..prefix_len.min(text.len())],
+        &text[text.len().saturating_sub(suffix_len)..]
+    )
+}
+
 /// Rule MD037: Spaces inside emphasis markers
 #[derive(Clone)]
 pub struct MD037NoSpaceInEmphasis;
@@ -303,9 +321,12 @@ impl MD037NoSpaceInEmphasis {
                 let trimmed_content = span.content.trim();
                 let fixed_text = format!("{marker_str}{trimmed_content}{marker_str}");
 
+                // Truncate long emphasis spans for readable warning messages
+                let display_text = truncate_for_display(full_text, 60);
+
                 let warning = LintWarning {
                     rule_name: Some(self.name().to_string()),
-                    message: format!("Spaces inside emphasis markers: {full_text:?}"),
+                    message: format!("Spaces inside emphasis markers: {display_text:?}"),
                     line: line_num,
                     column: offset + full_start + 1, // +1 because columns are 1-indexed
                     end_line: line_num,
