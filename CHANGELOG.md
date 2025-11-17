@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.178] - 2025-01-17
+
+### Performance
+
+- **Critical: Eliminated O(n²) bottleneck in list block parsing (Issue #148)**
+  - Replaced nested loop with forward-scanning O(n) algorithm using state tracking
+  - Performance improvement: 900-line files with nested lists now parse in ~20ms (previously 50+ seconds)
+  - User-reported case: 890-line file improved from 50.2s to ~0.2s (250x speedup)
+  - User-reported case: 1780-line file improved from 347s to ~0.4s (867x speedup)
+  - Algorithm now scales linearly O(n) instead of quadratically O(n²)
+  - Uses two tracking variables to detect list-breaking content and validate continuation indentation
+  - Extracted `reset_tracking_state()` helper to eliminate code duplication
+  - Replaced magic number 2 with `UNORDERED_LIST_MIN_CONTINUATION_INDENT` constant
+
+### Changed
+
+- **Code cleanup: Removed unused O(n²) trap methods**
+  - Removed `links_on_line()` and `images_on_line()` methods from `LintContext`
+  - These methods were never used but could cause performance issues if called in loops
+
+### Added
+
+- **Comprehensive regression tests for list block parsing**
+  - 27 new tests covering edge cases: consecutive items, list-breaking content, indentation rules
+  - Performance tests verify O(n) scaling for 1000+ item lists
+  - Tests reproduce exact Issue #148 pattern (nested lists with brackets)
+
 ## [0.0.177] - 2025-01-17
 
 ### Fixed
