@@ -2042,6 +2042,7 @@ impl<'a> LintContext<'a> {
             "nav",
             "ol",
             "p",
+            "picture",
             "pre",
             "script",
             "section",
@@ -2049,6 +2050,7 @@ impl<'a> LintContext<'a> {
             "table",
             "tbody",
             "td",
+            "textarea",
             "tfoot",
             "th",
             "thead",
@@ -2076,7 +2078,7 @@ impl<'a> LintContext<'a> {
                 // Extract tag name (stop at space, >, /, or end of string)
                 let tag_name = tag_start
                     .chars()
-                    .take_while(|c| c.is_ascii_alphabetic() || *c == '-')
+                    .take_while(|c| c.is_ascii_alphabetic() || *c == '-' || c.is_ascii_digit())
                     .collect::<String>()
                     .to_lowercase();
 

@@ -91,77 +91,42 @@ impl MD041FirstLineHeading {
         false
     }
 
-    /// Check if a line is an HTML heading
-    fn is_html_heading(line: &str, level: usize) -> bool {
-        if let Ok(Some(captures)) = HTML_HEADING_PATTERN.captures(line.trim())
+    /// Check if a line is an HTML heading using the centralized HTML parser
+    fn is_html_heading(ctx: &crate::lint_context::LintContext, first_line_idx: usize, level: usize) -> bool {
+        // Check for single-line HTML heading using regex (fast path)
+        let first_line_content = ctx.lines[first_line_idx].content(ctx.content);
+        if let Ok(Some(captures)) = HTML_HEADING_PATTERN.captures(first_line_content.trim())
             && let Some(h_level) = captures.get(1)
+            && h_level.as_str().parse::<usize>().unwrap_or(0) == level
         {
-            return h_level.as_str().parse::<usize>().unwrap_or(0) == level;
+            return true;
         }
-        false
-    }
 
-    /// Check if lines starting at a given index form a multi-line HTML heading
-    ///
-    /// This handles cases like:
-    /// ```markdown
-    /// <h1>
-    /// Some text
-    /// </h1>
-    /// ```
-    ///
-    /// Returns true if the opening tag matches the required level and a matching
-    /// closing tag is found within a reasonable distance (10 lines).
-    fn is_multiline_html_heading(
-        lines: &[crate::lint_context::LineInfo],
-        start_idx: usize,
-        level: usize,
-        content: &str,
-    ) -> bool {
-        if start_idx >= lines.len() {
+        // Use centralized HTML parser for multi-line headings
+        let html_tags = ctx.html_tags();
+        let target_tag = format!("h{level}");
+
+        // Find opening tag on first line
+        let has_opening = html_tags.iter().any(|tag| {
+            tag.line == first_line_idx + 1 // HtmlTag uses 1-indexed lines
+                && tag.tag_name == target_tag
+                && !tag.is_closing
+        });
+
+        if !has_opening {
             return false;
         }
 
-        let first_line = lines[start_idx].content(content).trim();
-
-        // Check if this line starts with an opening heading tag of the correct level
-        // Pattern: <h1>, <h1 >, <h1 class="foo">, etc.
-        let opening_pattern = format!(r"^<h{level}(?:\s|>)");
-        let Ok(opening_regex) = regex::Regex::new(&opening_pattern) else {
-            return false;
-        };
-
-        if !opening_regex.is_match(first_line) {
-            return false;
-        }
-
-        // Check if the opening tag is complete (has >) and doesn't have the closing tag
-        // If the line is like "<h1>text</h1>", the single-line check would have caught it
-        let has_opening_close = first_line.contains('>');
-        let closing_tag = format!("</h{level}>");
-
-        if !has_opening_close {
-            // Malformed - opening tag doesn't close on this line
-            return false;
-        }
-
-        // If both opening and closing tags are on the same line, single-line check handles it
-        if first_line.contains(&closing_tag) {
-            return false; // Let single-line check handle this
-        }
-
-        // Look for closing tag in subsequent lines (within reasonable distance)
+        // Find matching closing tag within reasonable distance
         const MAX_LINES_TO_SCAN: usize = 10;
-        let end_idx = (start_idx + MAX_LINES_TO_SCAN).min(lines.len());
+        let end_line = (first_line_idx + 1 + MAX_LINES_TO_SCAN).min(ctx.lines.len());
 
-        for line_info in lines.iter().take(end_idx).skip(start_idx + 1) {
-            let line_content = line_info.content(content);
-            if line_content.trim().contains(&closing_tag) {
-                return true;
-            }
-        }
-
-        false
+        html_tags.iter().any(|tag| {
+            tag.line > first_line_idx + 1 // Closing must be after opening
+                && tag.line <= end_line
+                && tag.tag_name == target_tag
+                && tag.is_closing
+        })
     }
 }
 
@@ -221,10 +186,8 @@ impl Rule for MD041FirstLineHeading {
         let is_correct_heading = if let Some(heading) = &first_line_info.heading {
             heading.level as usize == self.level
         } else {
-            // Check for single-line HTML heading
-            Self::is_html_heading(first_line_info.content(ctx.content), self.level)
-                // Check for multi-line HTML heading
-                || Self::is_multiline_html_heading(&ctx.lines, first_line_idx, self.level, ctx.content)
+            // Check for HTML heading (both single-line and multi-line)
+            Self::is_html_heading(ctx, first_line_idx, self.level)
         };
 
         if !is_correct_heading {

@@ -293,3 +293,121 @@ fn test_mdbook_edge_cases() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Unclosed directive should require heading");
 }
+
+#[test]
+fn test_issue_152_nested_html_with_multiline_attributes() {
+    let rule = MD041FirstLineHeading::new(1, false);
+
+    // Test exact scenario from issue #152
+    let content = r#"<h1>
+  <div>
+    <img
+      href="https://example.com/image.png"
+      alt="Example Image"
+    />
+    <a
+      href="https://example.com"
+    >Example Project</a>
+  </div>
+</h1>
+
+Regular markdown text."#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Issue #152: h1 with nested HTML and multi-line attributes should be recognized"
+    );
+}
+
+#[test]
+fn test_issue_152_h2_through_h6_nested() {
+    // Test h2-h6 with similar nested structures
+    let rule = MD041FirstLineHeading::new(2, false);
+    let content = r#"<h2>
+  <div>
+    <img
+      src="https://example.com/image.png"
+      alt="Example"
+      width="100"
+      height="100"
+    />
+  </div>
+</h2>"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "h2 with nested HTML should be recognized");
+
+    let rule = MD041FirstLineHeading::new(3, false);
+    let content = r#"<h3>
+  <picture>
+    <source
+      srcset="https://example.com/image.webp"
+      type="image/webp"
+    />
+    <img src="fallback.png" alt="Fallback" />
+  </picture>
+</h3>"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "h3 with picture tag should be recognized");
+
+    let rule = MD041FirstLineHeading::new(4, false);
+    let content = r#"<h4 id="heading-4" class="main">Heading 4</h4>"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "h4 with attributes should be recognized");
+
+    let rule = MD041FirstLineHeading::new(5, false);
+    let content = "<h5 id=\"heading-5\">Heading 5</h5>";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "h5 should be recognized");
+
+    let rule = MD041FirstLineHeading::new(6, false);
+    let content = "<h6 id=\"heading-6\">Heading 6</h6>";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "h6 should be recognized");
+}
+
+#[test]
+fn test_issue_152_deeply_nested_html() {
+    let rule = MD041FirstLineHeading::new(1, false);
+
+    // Test deeply nested structure
+    let content = r#"<h1>
+  <div>
+    <section>
+      <article>
+        <p>
+          Text with <a href="https://example.com">link</a>
+        </p>
+      </article>
+    </section>
+  </div>
+</h1>
+
+Content"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Deeply nested HTML structure in h1 should be recognized"
+    );
+}
+
+#[test]
+fn test_issue_152_all_h_tags_with_attributes() {
+    // Test that all h1-h6 tags work correctly as HTML blocks
+    let rule = MD041FirstLineHeading::new(1, false);
+    let content = r#"<h1 id="heading-1" class="main">Heading 1</h1>
+<h2 id="heading-2" class="sub">Heading 2</h2>
+<h3 id="heading-3">Heading 3</h3>"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "h1 with attributes in multi-tag document should pass"
+    );
+}
