@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.179] - 2025-11-18
+
+### Fixed
+
+- **MD041 (first-line-heading): Fixed multiline HTML detection for headings**
+  - Replace manual HTML parsing with centralized `ctx.html_tags()` parser
+  - Correctly handles nested HTML elements with multiline attributes
+  - Fixes Issue #152: No longer incorrectly flags headings when preceded by multiline HTML
+
+- **MD037 (no-space-in-emphasis): Improved warning message clarity**
+  - Truncate long emphasis text in warning messages to prevent display issues
+  - Long emphasis spans are now shown with ellipsis for better readability
+
+### Performance
+
+- **MD005 (list-indent): Eliminated O(n²) complexity by pre-computing parent relationships**
+  - Pre-compute parent list item relationships during initial parsing
+  - Reduces algorithmic complexity from O(n²) to O(n) for deeply nested lists
+  - Improves performance for files with complex list structures
+
+- **Optimized link/image regex patterns to prevent catastrophic backtracking**
+  - Added atomic grouping and possessive quantifiers to regex patterns in `lint_context.rs`
+  - Prevents regex engine from exponential backtracking on pathological inputs
+  - Improves parsing speed for files with many links and images
+
+### Changed
+
+- **MD033 (no-inline-html): Refactored to use centralized HTML parser**
+  - Removed 109 lines of broken `find_multiline_html_tags()` function that detected 0 multiline HTML tags
+  - Replaced two-pass approach (single-line regex + multiline detection) with single-pass using `ctx.html_tags()`
+  - Now correctly detects all multiline HTML tags (previously missed 100% of them)
+  - Follows pattern from MD041 refactoring for consistency
+  - Preserves all existing filters (code blocks, kramdown, comments, etc.)
+
+### Added
+
+- **Comprehensive MD005 test coverage**
+  - Added 21 new edge case tests for list indentation detection
+  - Updated unicode test to verify dynamic parent relationship detection
+  - Ensures robustness for nested and complex list structures
+
 ## [0.0.178] - 2025-01-17
 
 ### Performance

@@ -1848,7 +1848,7 @@ dependencies = [
 
 [[package]]
 name = "rumdl"
-version = "0.0.178"
+version = "0.0.179"
 dependencies = [
  "anyhow",
  "assert_cmd",
