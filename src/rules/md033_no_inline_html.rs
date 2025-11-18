@@ -5,10 +5,8 @@
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::kramdown_utils::{is_kramdown_block_attribute, is_kramdown_extension};
-use crate::utils::range_utils::calculate_html_tag_range;
 use crate::utils::regex_cache::*;
 use std::collections::HashSet;
-use std::sync::LazyLock;
 
 mod md033_config;
 use md033_config::MD033Config;
@@ -201,118 +199,6 @@ impl MD033NoInlineHtml {
         // If no closing tag found, just remove the opening tag
         Some((tag_byte_start..tag_byte_start + opening_tag.len(), String::new()))
     }
-
-    /// Find HTML tags that span multiple lines
-    fn find_multiline_html_tags(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        content: &str,
-        nomarkdown_ranges: &[(usize, usize)],
-        warnings: &mut Vec<LintWarning>,
-    ) {
-        // Early return: if content has no incomplete tags at line ends, skip processing
-        if !content.contains('<') || !content.lines().any(|line| line.trim_end().ends_with('<')) {
-            return;
-        }
-
-        // Simple approach: use regex to find patterns like <tagname and then look for closing >
-        static INCOMPLETE_TAG_START: LazyLock<regex::Regex> =
-            LazyLock::new(|| regex::Regex::new(r"(?i)<[a-zA-Z][^>]*$").unwrap());
-
-        let lines: Vec<&str> = content.lines().collect();
-
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-
-            // Skip code blocks and empty lines
-            if line.trim().is_empty() || ctx.line_info(line_num).is_some_and(|info| info.in_code_block) {
-                continue;
-            }
-
-            // Skip lines inside nomarkdown blocks
-            if nomarkdown_ranges
-                .iter()
-                .any(|(start, end)| line_num >= *start && line_num <= *end)
-            {
-                continue;
-            }
-
-            // Early return: skip lines that don't end with incomplete tags
-            if !line.contains('<') {
-                continue;
-            }
-
-            // Look for incomplete HTML tags at the end of the line
-            if let Some(incomplete_match) = INCOMPLETE_TAG_START.find(line) {
-                let start_column = incomplete_match.start() + 1; // 1-indexed
-
-                // Build the complete tag by looking at subsequent lines
-                let mut complete_tag = incomplete_match.as_str().to_string();
-                let mut found_end = false;
-
-                // Look for the closing > in subsequent lines (limit search to 10 lines)
-                for (j, next_line) in lines.iter().enumerate().skip(i + 1).take(10) {
-                    let next_line_num = j + 1;
-
-                    // Stop if we hit a code block
-                    if ctx.line_info(next_line_num).is_some_and(|info| info.in_code_block) {
-                        break;
-                    }
-
-                    complete_tag.push(' '); // Add space to normalize whitespace
-                    complete_tag.push_str(next_line.trim());
-
-                    if next_line.contains('>') {
-                        found_end = true;
-                        break;
-                    }
-                }
-
-                if found_end {
-                    // Extract just the tag part (up to the first >)
-                    if let Some(end_pos) = complete_tag.find('>') {
-                        let final_tag = &complete_tag[0..=end_pos];
-
-                        // Apply the same filters as single-line tags
-                        let skip_mkdocs_markdown = ctx.flavor == crate::config::MarkdownFlavor::MkDocs
-                            && self.has_markdown_attribute(final_tag);
-
-                        if !self.is_html_comment(final_tag)
-                            && !self.is_likely_type_annotation(final_tag)
-                            && !self.is_email_address(final_tag)
-                            && !self.is_url_in_angle_brackets(final_tag)
-                            && !self.is_tag_allowed(final_tag)
-                            && !skip_mkdocs_markdown
-                            && HTML_OPENING_TAG_FINDER.is_match(final_tag)
-                        {
-                            // Check for duplicates (avoid flagging the same position twice)
-                            let already_warned =
-                                warnings.iter().any(|w| w.line == line_num && w.column == start_column);
-
-                            if !already_warned {
-                                let (start_line, start_col, end_line, end_col) = calculate_html_tag_range(
-                                    line_num,
-                                    line,
-                                    incomplete_match.start(),
-                                    incomplete_match.len(),
-                                );
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name().to_string()),
-                                    line: start_line,
-                                    column: start_col,
-                                    end_line,
-                                    end_column: end_col,
-                                    message: format!("HTML tag found: {final_tag}"),
-                                    severity: Severity::Warning,
-                                    fix: None,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 impl Rule for MD033NoInlineHtml {
@@ -340,14 +226,13 @@ impl Rule for MD033NoInlineHtml {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
-        // Track nomarkdown and comment blocks
+        // Track nomarkdown and comment blocks (Kramdown extension)
         let mut in_nomarkdown = false;
         let mut in_comment = false;
         let mut nomarkdown_ranges: Vec<(usize, usize)> = Vec::new();
         let mut nomarkdown_start = 0;
         let mut comment_start = 0;
 
-        // First pass: identify nomarkdown and comment blocks
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
 
@@ -370,21 +255,36 @@ impl Rule for MD033NoInlineHtml {
             }
         }
 
-        // Second pass: find single-line HTML tags
-        // To match markdownlint behavior, report one warning per HTML tag
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
+        // Use centralized HTML parser to get all HTML tags (including multiline)
+        let html_tags = ctx.html_tags();
 
-            if line.trim().is_empty() {
+        for html_tag in html_tags.iter() {
+            // Skip closing tags (only warn on opening tags)
+            if html_tag.is_closing {
                 continue;
             }
+
+            let line_num = html_tag.line;
+            let tag_byte_start = html_tag.byte_offset;
+
+            // Reconstruct tag string from byte offsets
+            let tag = &content[html_tag.byte_offset..html_tag.byte_end];
+
+            // Skip tags in code blocks
             if ctx.line_info(line_num).is_some_and(|info| info.in_code_block) {
                 continue;
             }
-            // Skip lines that are indented code blocks (4+ spaces or tab) per CommonMark spec
-            // Even if they're not in the structure's code blocks (e.g., HTML blocks)
-            if line.starts_with("    ") || line.starts_with('\t') {
-                continue;
+
+            // Skip lines that are indented code blocks (4+ spaces or tab)
+            if let Some(line) = lines.get(line_num.saturating_sub(1)) {
+                if line.starts_with("    ") || line.starts_with('\t') {
+                    continue;
+                }
+
+                // Skip Kramdown extensions and block attributes
+                if is_kramdown_extension(line) || is_kramdown_block_attribute(line) {
+                    continue;
+                }
             }
 
             // Skip lines inside nomarkdown blocks
@@ -395,99 +295,69 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
-            // Skip Kramdown extensions and block attributes
-            if is_kramdown_extension(line) || is_kramdown_block_attribute(line) {
+            // Skip HTML tags inside HTML comments
+            if ctx.is_in_html_comment(tag_byte_start) {
                 continue;
             }
 
-            // Calculate line byte offset once per line (not inside the loop)
-            let line_byte_offset: usize = ctx.line_index.get_line_start_byte(line_num).unwrap_or(0);
-
-            // Find all HTML opening tags in the line using regex
-            for tag_match in HTML_OPENING_TAG_FINDER.find_iter(line) {
-                let tag = tag_match.as_str();
-                let tag_byte_start = line_byte_offset + tag_match.start();
-
-                // Skip HTML tags inside HTML comments
-                if ctx.is_in_html_comment(tag_byte_start) {
-                    continue;
-                }
-
-                // Skip HTML comments themselves
-                if self.is_html_comment(tag) {
-                    continue;
-                }
-
-                // Skip JSX components in MDX files (e.g., <Chart />, <MyComponent>)
-                // JSX components start with uppercase letter
-                if ctx.flavor.supports_jsx() {
-                    // Extract tag name (remove angle brackets, slashes, and attributes)
-                    let tag_clean = tag.trim_start_matches('<').trim_start_matches('/');
-                    let tag_name = tag_clean
-                        .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
-                        .next()
-                        .unwrap_or("");
-
-                    if tag_name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                        continue;
-                    }
-                }
-
-                // Skip likely programming type annotations
-                if self.is_likely_type_annotation(tag) {
-                    continue;
-                }
-
-                // Skip email addresses in angle brackets
-                if self.is_email_address(tag) {
-                    continue;
-                }
-
-                // Skip URLs in angle brackets
-                if self.is_url_in_angle_brackets(tag) {
-                    continue;
-                }
-
-                // Skip tags inside code spans
-                let tag_start_col = tag_match.start() + 1; // 1-indexed
-                if ctx.is_in_code_span(line_num, tag_start_col) {
-                    continue;
-                }
-
-                // Skip allowed tags
-                if self.is_tag_allowed(tag) {
-                    continue;
-                }
-
-                // Skip tags with markdown attribute in MkDocs mode
-                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs && self.has_markdown_attribute(tag) {
-                    continue;
-                }
-
-                // Report each HTML tag individually (true markdownlint compatibility)
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_html_tag_range(line_num, line, tag_match.start(), tag_match.len());
-
-                // Calculate fix to remove HTML tags but keep content
-                let fix = self
-                    .calculate_fix(content, tag, tag_byte_start)
-                    .map(|(range, replacement)| Fix { range, replacement });
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    message: format!("Inline HTML found: {tag}"),
-                    severity: Severity::Warning,
-                    fix,
-                });
+            // Skip HTML comments themselves
+            if self.is_html_comment(tag) {
+                continue;
             }
-        }
 
-        // Third pass: find multi-line HTML tags
-        self.find_multiline_html_tags(ctx, ctx.content, &nomarkdown_ranges, &mut warnings);
+            // Skip JSX components in MDX files (e.g., <Chart />, <MyComponent>)
+            if ctx.flavor.supports_jsx() && html_tag.tag_name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                continue;
+            }
+
+            // Skip likely programming type annotations
+            if self.is_likely_type_annotation(tag) {
+                continue;
+            }
+
+            // Skip email addresses in angle brackets
+            if self.is_email_address(tag) {
+                continue;
+            }
+
+            // Skip URLs in angle brackets
+            if self.is_url_in_angle_brackets(tag) {
+                continue;
+            }
+
+            // Skip tags inside code spans
+            let tag_start_col = html_tag.start_col + 1; // Convert to 1-indexed
+            if ctx.is_in_code_span(line_num, tag_start_col) {
+                continue;
+            }
+
+            // Skip allowed tags
+            if self.is_tag_allowed(tag) {
+                continue;
+            }
+
+            // Skip tags with markdown attribute in MkDocs mode
+            if ctx.flavor == crate::config::MarkdownFlavor::MkDocs && self.has_markdown_attribute(tag) {
+                continue;
+            }
+
+            // Calculate fix to remove HTML tags but keep content
+            let fix = self
+                .calculate_fix(content, tag, tag_byte_start)
+                .map(|(range, replacement)| Fix { range, replacement });
+
+            // Report the HTML tag
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: line_num,
+                column: html_tag.start_col + 1,   // Convert to 1-indexed
+                end_line: line_num,               // TODO: calculate actual end line for multiline tags
+                end_column: html_tag.end_col + 1, // Convert to 1-indexed
+                message: format!("Inline HTML found: {tag}"),
+                severity: Severity::Warning,
+                fix,
+            });
+        }
 
         Ok(warnings)
     }
