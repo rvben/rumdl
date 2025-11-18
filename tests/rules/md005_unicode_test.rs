@@ -30,6 +30,8 @@ fn test_unicode_list_items_invalid() {
 * Item with Arabic مرحبا";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
+    // Dynamic detection: Line 3 with 3 spaces is accepted as a valid nested indent
+    // Only lines 2 (1 space) and 4 (2 spaces) are flagged as incorrect
     assert_eq!(
         result.len(),
         2,
@@ -40,11 +42,11 @@ fn test_unicode_list_items_invalid() {
     let violation_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
     assert!(
         violation_lines.contains(&2),
-        "Should have violation on line 2 (1 space instead of 2)"
+        "Should have violation on line 2 (1 space instead of 0)"
     );
     assert!(
-        violation_lines.contains(&3),
-        "Should have violation on line 3 (3 spaces instead of 2)"
+        violation_lines.contains(&4),
+        "Should have violation on line 4 (2 spaces instead of 0 or 3)"
     );
 }
 

@@ -43,6 +43,15 @@ impl LineCacheInfo {
 
         // Track most recent list item at each indentation level for O(1) parent lookups
         // Key: marker_column, Value: line_num (1-indexed)
+        //
+        // Algorithm correctness invariant:
+        // For each list item L at line N with marker_column M:
+        //   parent_map[N] = the line number of the most recent list item P where:
+        //     1. P.line < N (appears before L)
+        //     2. P.marker_column < M (less indented than L)
+        //     3. P.marker_column is maximal among all candidates (closest parent)
+        //
+        // This matches the original O(n) backward scan logic but pre-computes in O(n).
         let mut indent_to_line: HashMap<usize, usize> = HashMap::new();
 
         for (idx, line_info) in ctx.lines.iter().enumerate() {
@@ -79,6 +88,10 @@ impl LineCacheInfo {
                 }
 
                 // Track this list item for future children
+                // CRITICAL: Remove all entries at this indent level or deeper, since they cannot
+                // be parents of any future list items (a parent must have strictly less indentation).
+                // This ensures we always find the most recent list item with less indentation.
+                indent_to_line.retain(|&indent, _| indent < marker_column);
                 indent_to_line.insert(marker_column, line_num);
             }
             flags.push(flag);
