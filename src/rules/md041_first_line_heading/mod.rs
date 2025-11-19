@@ -180,6 +180,10 @@ impl Rule for MD041FirstLineHeading {
             if line_info.in_esm_block {
                 continue;
             }
+            // Skip HTML comments - they are non-visible and should not affect MD041
+            if line_info.in_html_comment {
+                continue;
+            }
             if !line_content.is_empty() && !Self::is_non_content_line(line_info.content(ctx.content)) {
                 first_content_line_num = Some(line_num);
                 break;
@@ -390,12 +394,183 @@ mod tests {
     fn test_html_comments_before_heading() {
         let rule = MD041FirstLineHeading::default();
 
-        // HTML comment before heading (should fail)
+        // HTML comment before heading (should pass - comments are skipped, issue #155)
         let content = "<!-- This is a comment -->\n# My Document\n\nContent.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].line, 1); // HTML comment is the first line
+        assert!(
+            result.is_empty(),
+            "HTML comments should be skipped when checking for first heading"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_comment_before_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multi-line HTML comment before heading (should pass - issue #155)
+        let content = "<!--\nThis is a multi-line\nHTML comment\n-->\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multi-line HTML comments should be skipped when checking for first heading"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_with_blank_lines_before_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // HTML comment with blank lines before heading (should pass - issue #155)
+        let content = "<!-- This is a comment -->\n\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "HTML comments with blank lines should be skipped when checking for first heading"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_before_html_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // HTML comment before HTML heading (should pass - issue #155)
+        let content = "<!-- This is a comment -->\n<h1>My Document</h1>\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "HTML comments should be skipped before HTML headings"
+        );
+    }
+
+    #[test]
+    fn test_document_with_only_html_comments() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Document with only HTML comments (should pass - no warnings for comment-only files)
+        let content = "<!-- This is a comment -->\n<!-- Another comment -->";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Documents with only HTML comments should not trigger MD041"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_followed_by_non_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // HTML comment followed by non-heading content (should still fail - issue #155)
+        let content = "<!-- This is a comment -->\nThis is not a heading\n\nSome content.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "HTML comment followed by non-heading should still trigger MD041"
+        );
+        assert_eq!(
+            result[0].line, 2,
+            "Warning should be on the first non-comment, non-heading line"
+        );
+    }
+
+    #[test]
+    fn test_multiple_html_comments_before_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multiple HTML comments before heading (should pass - issue #155)
+        let content = "<!-- First comment -->\n<!-- Second comment -->\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multiple HTML comments should all be skipped before heading"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_with_wrong_level_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // HTML comment followed by wrong-level heading (should fail - issue #155)
+        let content = "<!-- This is a comment -->\n## Wrong Level Heading\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "HTML comment followed by wrong-level heading should still trigger MD041"
+        );
+        assert!(
+            result[0].message.contains("level 1 heading"),
+            "Should require level 1 heading"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_mixed_with_reference_definitions() {
+        let rule = MD041FirstLineHeading::default();
+
+        // HTML comment mixed with reference definitions before heading (should pass - issue #155)
+        let content = "<!-- Comment -->\n[ref]: https://example.com\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "HTML comments and reference definitions should both be skipped before heading"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_after_front_matter() {
+        let rule = MD041FirstLineHeading::default();
+
+        // HTML comment after front matter, before heading (should pass - issue #155)
+        let content = "---\nauthor: John\n---\n<!-- Comment -->\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "HTML comments after front matter should be skipped before heading"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_not_at_start_should_not_affect_rule() {
+        let rule = MD041FirstLineHeading::default();
+
+        // HTML comment in middle of document should not affect MD041 check
+        let content = "# Valid Heading\n\nSome content.\n\n<!-- Comment in middle -->\n\nMore content.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "HTML comments in middle of document should not affect MD041 (only first content matters)"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_comment_followed_by_non_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multi-line HTML comment followed by non-heading (should still fail - issue #155)
+        let content = "<!--\nMulti-line\ncomment\n-->\nThis is not a heading\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Multi-line HTML comment followed by non-heading should still trigger MD041"
+        );
+        assert_eq!(
+            result[0].line, 5,
+            "Warning should be on the first non-comment, non-heading line"
+        );
     }
 
     #[test]
@@ -548,13 +723,15 @@ mod tests {
     fn test_complex_document_structure() {
         let rule = MD041FirstLineHeading::default();
 
-        // Complex document with various elements
+        // Complex document with various elements - HTML comment should be skipped (issue #155)
         let content =
             "---\nauthor: John\n---\n\n<!-- Comment -->\n\n\n# Valid Heading\n\n## Subheading\n\nContent here.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].line, 5); // The comment line
+        assert!(
+            result.is_empty(),
+            "HTML comments should be skipped, so first heading after comment should be valid"
+        );
     }
 
     #[test]

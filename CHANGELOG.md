@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MD041 (first-line-heading): HTML comments are now correctly skipped (fixes #155)**
+  - HTML comments before headings are now treated as non-visible content and ignored
+  - Aligns with documentation and markdownlint behavior
+  - Multi-line HTML comments are properly handled using parser metadata
+
 ## [0.0.179] - 2025-11-18
 
 ### Fixed

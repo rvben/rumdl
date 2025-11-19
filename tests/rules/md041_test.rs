@@ -154,11 +154,11 @@ fn test_skip_non_content_lines() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should skip abbreviation definitions");
 
-    // Test HTML comments - should NOT be skipped, as per MD041 spec
+    // Test HTML comments - should be skipped (issue #155)
     let content = "<!-- Comment -->\n# First Heading\nContent";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "HTML comments should not be skipped");
+    assert!(result.is_empty(), "HTML comments should be skipped before heading");
 }
 
 #[test]
