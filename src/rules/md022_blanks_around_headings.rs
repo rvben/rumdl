@@ -94,13 +94,13 @@ impl MD022BlanksAroundHeadings {
         }
     }
 
-    /// Create with custom numbers of blank lines
+    /// Create with custom numbers of blank lines (applies to all heading levels)
     pub fn with_values(lines_above: usize, lines_below: usize) -> Self {
-        use crate::types::PositiveUsize;
+        use md022_config::HeadingLevelConfig;
         Self {
             config: MD022Config {
-                lines_above: PositiveUsize::new(lines_above).unwrap_or(PositiveUsize::from_const(1)),
-                lines_below: PositiveUsize::new(lines_below).unwrap_or(PositiveUsize::from_const(1)),
+                lines_above: HeadingLevelConfig::scalar(lines_above),
+                lines_below: HeadingLevelConfig::scalar(lines_below),
                 allowed_at_start: true,
             },
         }
@@ -148,6 +148,7 @@ impl MD022BlanksAroundHeadings {
             if let Some(heading) = &line_info.heading {
                 // This is a heading line (ATX or Setext content)
                 let is_first_heading = Some(i) == heading_at_start_idx;
+                let heading_level = heading.level as usize;
 
                 // Count existing blank lines above in the result
                 let mut blank_lines_above = 0;
@@ -158,10 +159,11 @@ impl MD022BlanksAroundHeadings {
                 }
 
                 // Determine how many blank lines we need above
+                let requirement_above = self.config.lines_above.get_for_level(heading_level);
                 let needed_blanks_above = if is_first_heading && self.config.allowed_at_start {
                     0
                 } else {
-                    self.config.lines_above.get()
+                    requirement_above.required_count().unwrap_or(0)
                 };
 
                 // Add missing blank lines above if needed
@@ -214,10 +216,11 @@ impl MD022BlanksAroundHeadings {
                     };
 
                     // Add missing blank lines below if needed
+                    let requirement_below = self.config.lines_below.get_for_level(heading_level);
                     let needed_blanks_below = if next_is_special {
                         0
                     } else {
-                        self.config.lines_below.get()
+                        requirement_below.required_count().unwrap_or(0)
                     };
                     if blank_lines_below < needed_blanks_below {
                         for _ in 0..(needed_blanks_below - blank_lines_below) {
@@ -255,10 +258,11 @@ impl MD022BlanksAroundHeadings {
                     };
 
                     // Add missing blank lines below if needed
+                    let requirement_below = self.config.lines_below.get_for_level(heading_level);
                     let needed_blanks_below = if next_is_special {
                         0
                     } else {
-                        self.config.lines_below.get()
+                        requirement_below.required_count().unwrap_or(0)
                     };
                     if blank_lines_below < needed_blanks_below {
                         for _ in 0..(needed_blanks_below - blank_lines_below) {
@@ -332,6 +336,7 @@ impl Rule for MD022BlanksAroundHeadings {
             }
 
             let heading = line_info.heading.as_ref().unwrap();
+            let heading_level = heading.level as usize;
 
             // For Setext headings, skip the underline line (we process from the content line)
             if matches!(
@@ -349,28 +354,27 @@ impl Rule for MD022BlanksAroundHeadings {
             // Check if this heading is at document start
             let is_first_heading = Some(line_num) == heading_at_start_idx;
 
-            // Count blank lines above
-            let blank_lines_above = if line_num > 0 && (!is_first_heading || !self.config.allowed_at_start) {
-                let mut count = 0;
+            // Get configured blank line requirements for this heading level
+            let required_above_count = self.config.lines_above.get_for_level(heading_level).required_count();
+            let required_below_count = self.config.lines_below.get_for_level(heading_level).required_count();
+
+            // Count blank lines above if needed
+            let should_check_above =
+                required_above_count.is_some() && line_num > 0 && (!is_first_heading || !self.config.allowed_at_start);
+            if should_check_above {
+                let mut blank_lines_above = 0;
                 for j in (0..line_num).rev() {
                     if ctx.lines[j].is_blank {
-                        count += 1;
+                        blank_lines_above += 1;
                     } else {
                         break;
                     }
                 }
-                count
-            } else {
-                self.config.lines_above.get() // Consider it as having enough blanks if it's the first heading
-            };
-
-            // Check if we need blank lines above
-            if line_num > 0
-                && blank_lines_above < self.config.lines_above.get()
-                && (!is_first_heading || !self.config.allowed_at_start)
-            {
-                let needed_blanks = self.config.lines_above.get() - blank_lines_above;
-                heading_violations.push((line_num, "above", needed_blanks));
+                let required = required_above_count.unwrap();
+                if blank_lines_above < required {
+                    let needed_blanks = required - blank_lines_above;
+                    heading_violations.push((line_num, "above", needed_blanks, heading_level));
+                }
             }
 
             // Determine the effective last line of the heading
@@ -412,20 +416,20 @@ impl Rule for MD022BlanksAroundHeadings {
                 };
 
                 // Only generate warning if next line is NOT a code fence or list item
-                if !next_line_is_special {
+                if !next_line_is_special && let Some(required) = required_below_count {
                     // Count blank lines below
                     let blank_lines_below = next_non_blank_idx - effective_last_line - 1;
 
-                    if blank_lines_below < self.config.lines_below.get() {
-                        let needed_blanks = self.config.lines_below.get() - blank_lines_below;
-                        heading_violations.push((line_num, "below", needed_blanks));
+                    if blank_lines_below < required {
+                        let needed_blanks = required - blank_lines_below;
+                        heading_violations.push((line_num, "below", needed_blanks, heading_level));
                     }
                 }
             }
         }
 
         // Generate warnings for all violations
-        for (heading_line, position, needed_blanks) in heading_violations {
+        for (heading_line, position, needed_blanks, heading_level) in heading_violations {
             let heading_display_line = heading_line + 1; // 1-indexed for display
             let line_info = &ctx.lines[heading_line];
 
@@ -433,16 +437,25 @@ impl Rule for MD022BlanksAroundHeadings {
             let (start_line, start_col, end_line, end_col) =
                 calculate_heading_range(heading_display_line, line_info.content(ctx.content));
 
+            let required_above_count = self
+                .config
+                .lines_above
+                .get_for_level(heading_level)
+                .required_count()
+                .expect("Violations only generated for limited 'above' requirements");
+            let required_below_count = self
+                .config
+                .lines_below
+                .get_for_level(heading_level)
+                .required_count()
+                .expect("Violations only generated for limited 'below' requirements");
+
             let (message, insertion_point) = match position {
                 "above" => (
                     format!(
                         "Expected {} blank {} above heading",
-                        self.config.lines_above.get(),
-                        if self.config.lines_above.get() == 1 {
-                            "line"
-                        } else {
-                            "lines"
-                        }
+                        required_above_count,
+                        if required_above_count == 1 { "line" } else { "lines" }
                     ),
                     heading_line, // Insert before the heading line
                 ),
@@ -462,12 +475,8 @@ impl Rule for MD022BlanksAroundHeadings {
                     (
                         format!(
                             "Expected {} blank {} below heading",
-                            self.config.lines_below.get(),
-                            if self.config.lines_below.get() == 1 {
-                                "line"
-                            } else {
-                                "lines"
-                            }
+                            required_below_count,
+                            if required_below_count == 1 { "line" } else { "lines" }
                         ),
                         insert_after,
                     )
@@ -837,5 +846,181 @@ Final content.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule._fix_content(&ctx);
         assert_eq!(result, expected, "Fix should not add blank lines before lists");
+    }
+
+    #[test]
+    fn test_per_level_configuration_no_blank_above_h1() {
+        use md022_config::HeadingLevelConfig;
+
+        // Configure: no blank above H1, 1 blank above H2-H6
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::per_level([0, 1, 1, 1, 1, 1]),
+            lines_below: HeadingLevelConfig::scalar(1),
+            allowed_at_start: false, // Disable special handling for first heading
+        });
+
+        // H1 without blank above should be OK
+        let content = "Some text\n# Heading 1\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 0, "H1 without blank above should not trigger warning");
+
+        // H2 without blank above should trigger warning
+        let content = "Some text\n## Heading 2\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "H2 without blank above should trigger warning");
+        assert!(warnings[0].message.contains("above"));
+    }
+
+    #[test]
+    fn test_per_level_configuration_different_requirements() {
+        use md022_config::HeadingLevelConfig;
+
+        // Configure: 0 blank above H1, 1 above H2-H3, 2 above H4-H6
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::per_level([0, 1, 1, 2, 2, 2]),
+            lines_below: HeadingLevelConfig::scalar(1),
+            allowed_at_start: false,
+        });
+
+        let content = "Text\n# H1\n\nText\n\n## H2\n\nText\n\n### H3\n\nText\n\n\n#### H4\n\nText";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should have no warnings - all headings satisfy their level-specific requirements
+        assert_eq!(
+            warnings.len(),
+            0,
+            "All headings should satisfy level-specific requirements"
+        );
+    }
+
+    #[test]
+    fn test_per_level_configuration_violations() {
+        use md022_config::HeadingLevelConfig;
+
+        // Configure: H4 needs 2 blanks above
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::per_level([1, 1, 1, 2, 1, 1]),
+            lines_below: HeadingLevelConfig::scalar(1),
+            allowed_at_start: false,
+        });
+
+        // H4 with only 1 blank above should trigger warning
+        let content = "Text\n\n#### Heading 4\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1, "H4 with insufficient blanks should trigger warning");
+        assert!(warnings[0].message.contains("2 blank lines above"));
+    }
+
+    #[test]
+    fn test_per_level_fix_different_levels() {
+        use md022_config::HeadingLevelConfig;
+
+        // Configure: 0 blank above H1, 1 above H2, 2 above H3+
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::per_level([0, 1, 2, 2, 2, 2]),
+            lines_below: HeadingLevelConfig::scalar(1),
+            allowed_at_start: false,
+        });
+
+        let content = "Text\n# H1\nContent\n## H2\nContent\n### H3\nContent";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Verify structure: H1 gets 0 blanks above, H2 gets 1, H3 gets 2
+        assert!(fixed.contains("Text\n# H1\n\nContent"));
+        assert!(fixed.contains("Content\n\n## H2\n\nContent"));
+        assert!(fixed.contains("Content\n\n\n### H3\n\nContent"));
+    }
+
+    #[test]
+    fn test_per_level_below_configuration() {
+        use md022_config::HeadingLevelConfig;
+
+        // Configure: different blank line requirements below headings
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::scalar(1),
+            lines_below: HeadingLevelConfig::per_level([2, 1, 1, 1, 1, 1]), // H1 needs 2 blanks below
+            allowed_at_start: true,
+        });
+
+        // H1 with only 1 blank below should trigger warning
+        let content = "# Heading 1\n\nSome text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "H1 with insufficient blanks below should trigger warning"
+        );
+        assert!(warnings[0].message.contains("2 blank lines below"));
+    }
+
+    #[test]
+    fn test_scalar_configuration_still_works() {
+        use md022_config::HeadingLevelConfig;
+
+        // Ensure scalar configuration still works (backward compatibility)
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::scalar(2),
+            lines_below: HeadingLevelConfig::scalar(2),
+            allowed_at_start: false,
+        });
+
+        let content = "Text\n# H1\nContent\n## H2\nContent";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // All headings should need 2 blanks above and below
+        assert!(!warnings.is_empty(), "Should have violations for insufficient blanks");
+    }
+
+    #[test]
+    fn test_unlimited_configuration_skips_requirements() {
+        use md022_config::{HeadingBlankRequirement, HeadingLevelConfig};
+
+        // H1 can have any number of blank lines above/below; others require defaults
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::per_level_requirements([
+                HeadingBlankRequirement::unlimited(),
+                HeadingBlankRequirement::limited(1),
+                HeadingBlankRequirement::limited(1),
+                HeadingBlankRequirement::limited(1),
+                HeadingBlankRequirement::limited(1),
+                HeadingBlankRequirement::limited(1),
+            ]),
+            lines_below: HeadingLevelConfig::per_level_requirements([
+                HeadingBlankRequirement::unlimited(),
+                HeadingBlankRequirement::limited(1),
+                HeadingBlankRequirement::limited(1),
+                HeadingBlankRequirement::limited(1),
+                HeadingBlankRequirement::limited(1),
+                HeadingBlankRequirement::limited(1),
+            ]),
+            allowed_at_start: false,
+        });
+
+        let content = "# H1\nParagraph\n## H2\nParagraph";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // H1 has no blanks above/below but is unlimited; H2 should get violations
+        assert_eq!(warnings.len(), 2, "Only non-unlimited headings should warn");
+        assert!(
+            warnings.iter().all(|w| w.line >= 3),
+            "Warnings should target later headings"
+        );
+
+        // Fixing should insert blanks around H2 but leave H1 untouched
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.starts_with("# H1\nParagraph\n\n## H2"),
+            "H1 should remain unchanged"
+        );
     }
 }
