@@ -107,26 +107,38 @@ impl MD041FirstLineHeading {
         let target_tag = format!("h{level}");
 
         // Find opening tag on first line
-        let has_opening = html_tags.iter().any(|tag| {
+        let opening_index = html_tags.iter().position(|tag| {
             tag.line == first_line_idx + 1 // HtmlTag uses 1-indexed lines
                 && tag.tag_name == target_tag
                 && !tag.is_closing
         });
 
-        if !has_opening {
+        let Some(open_idx) = opening_index else {
             return false;
+        };
+
+        // Walk HTML tags to find the corresponding closing tag, allowing arbitrary nesting depth.
+        // This avoids brittle line-count heuristics and handles long headings with nested content.
+        let mut depth = 1usize;
+        for tag in html_tags.iter().skip(open_idx + 1) {
+            // Ignore tags that appear before the first heading line (possible when multiple tags share a line)
+            if tag.line <= first_line_idx + 1 {
+                continue;
+            }
+
+            if tag.tag_name == target_tag {
+                if tag.is_closing {
+                    depth -= 1;
+                    if depth == 0 {
+                        return true;
+                    }
+                } else if !tag.is_self_closing {
+                    depth += 1;
+                }
+            }
         }
 
-        // Find matching closing tag within reasonable distance
-        const MAX_LINES_TO_SCAN: usize = 10;
-        let end_line = (first_line_idx + 1 + MAX_LINES_TO_SCAN).min(ctx.lines.len());
-
-        html_tags.iter().any(|tag| {
-            tag.line > first_line_idx + 1 // Closing must be after opening
-                && tag.line <= end_line
-                && tag.tag_name == target_tag
-                && tag.is_closing
-        })
+        false
     }
 }
 
@@ -701,5 +713,28 @@ mod tests {
             assert_eq!(result.len(), 1);
             assert!(result[0].message.contains(&format!("level {level} heading")));
         }
+    }
+
+    #[test]
+    fn test_issue_152_nested_heading_spans_many_lines() {
+        let rule = MD041FirstLineHeading::default();
+
+        let content = "<h1>\n  <div>\n    <img\n      href=\"https://example.com/image.png\"\n      alt=\"Example Image\"\n    />\n    <a\n      href=\"https://example.com\"\n    >Example Project</a>\n    <span>Documentation</span>\n  </div>\n</h1>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Nested multi-line HTML heading should be recognized");
+    }
+
+    #[test]
+    fn test_issue_152_picture_tag_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        let content = "<h1>\n  <picture>\n    <source\n      srcset=\"https://example.com/light.png\"\n      media=\"(prefers-color-scheme: light)\"\n    />\n    <source\n      srcset=\"https://example.com/dark.png\"\n      media=\"(prefers-color-scheme: dark)\"\n    />\n    <img src=\"https://example.com/default.png\" />\n  </picture>\n</h1>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Picture tag inside multi-line HTML heading should be recognized"
+        );
     }
 }
