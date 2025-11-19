@@ -5,14 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.180] - 2025-11-19
+
+### Added
+
+- **MD022 (blanks-around-headings): Per-level unlimited blank handling**
+  - Added per-level configuration to allow unlimited blank lines around specific heading levels
+  - Enables fine-grained control over blank line requirements for different heading levels
+  - Supports both global and per-level unlimited blank line settings
 
 ### Fixed
+
+- **Range utilities: Handle UTF-8 character boundaries safely (fixes #154)**
+  - Fixed panic when processing files with multi-byte UTF-8 characters (CJK, emoji)
+  - String slicing operations now safely handle byte indices that fall in the middle of multi-byte characters
+  - Added comprehensive test suite covering Korean, Chinese, Japanese characters, emoji, and edge cases
+  - All string slicing operations now occur at valid UTF-8 character boundaries
 
 - **MD041 (first-line-heading): HTML comments are now correctly skipped (fixes #155)**
   - HTML comments before headings are now treated as non-visible content and ignored
   - Aligns with documentation and markdownlint behavior
   - Multi-line HTML comments are properly handled using parser metadata
+  - Fixed handling of deeply nested HTML headings
 
 ## [0.0.179] - 2025-11-18
 
