@@ -3,6 +3,38 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
+/// Find the nearest valid UTF-8 character boundary at or before the given byte index.
+/// This is critical for safely slicing strings that may contain multi-byte UTF-8 characters.
+///
+/// # Safety
+/// Returns a byte index that is guaranteed to be a valid character boundary,
+/// or the string length if the index is beyond the string.
+fn find_char_boundary(s: &str, byte_idx: usize) -> usize {
+    if byte_idx >= s.len() {
+        return s.len();
+    }
+
+    // If the index is already at a character boundary, return it
+    if s.is_char_boundary(byte_idx) {
+        return byte_idx;
+    }
+
+    // Find the nearest character boundary by scanning backwards
+    // This is safe because we know byte_idx < s.len()
+    let mut pos = byte_idx;
+    while pos > 0 && !s.is_char_boundary(pos) {
+        pos -= 1;
+    }
+    pos
+}
+
+/// Convert a byte index to a character count (1-indexed).
+/// This safely handles multi-byte UTF-8 characters by finding the nearest character boundary.
+fn byte_to_char_count(s: &str, byte_idx: usize) -> usize {
+    let safe_byte_idx = find_char_boundary(s, byte_idx);
+    s[..safe_byte_idx].chars().count() + 1 // 1-indexed
+}
+
 #[derive(Debug)]
 pub struct LineIndex<'a> {
     line_starts: Vec<usize>,
@@ -39,23 +71,55 @@ impl<'a> LineIndex<'a> {
         let line_start = *self.line_starts.get(line).unwrap_or(&self.content.len());
 
         let current_line = self.content.lines().nth(line).unwrap_or("");
-        let col = column.clamp(1, current_line.len() + 1);
+        // Column is 1-indexed character position, not byte position
+        let char_col = column.saturating_sub(1);
+        let char_count = current_line.chars().count();
+        let safe_char_col = char_col.min(char_count);
 
-        let start = line_start + col - 1;
+        // Convert character position to byte position
+        let byte_offset = current_line
+            .char_indices()
+            .nth(safe_char_col)
+            .map(|(idx, _)| idx)
+            .unwrap_or(current_line.len());
+
+        let start = line_start + byte_offset;
         start..start
     }
 
     /// Calculate a proper byte range for replacing text with a specific length
     /// This is the correct function to use for LSP fixes
+    ///
+    /// # Safety
+    /// This function correctly handles multi-byte UTF-8 characters by converting
+    /// character positions (columns) to byte positions.
     pub fn line_col_to_byte_range_with_length(&self, line: usize, column: usize, length: usize) -> Range<usize> {
         let line = line.saturating_sub(1);
         let line_start = *self.line_starts.get(line).unwrap_or(&self.content.len());
 
         let current_line = self.content.lines().nth(line).unwrap_or("");
-        let col = column.clamp(1, current_line.len() + 1);
+        // Column is 1-indexed character position, not byte position
+        let char_col = column.saturating_sub(1);
+        let char_count = current_line.chars().count();
+        let safe_char_col = char_col.min(char_count);
 
-        let start = line_start + col - 1;
-        let end = (start + length).min(line_start + current_line.len());
+        // Convert character positions to byte positions
+        let mut char_indices = current_line.char_indices();
+        let start_byte = char_indices
+            .nth(safe_char_col)
+            .map(|(idx, _)| idx)
+            .unwrap_or(current_line.len());
+
+        // Calculate end position (start + length in characters)
+        let end_char_col = (safe_char_col + length).min(char_count);
+        let end_byte = current_line
+            .char_indices()
+            .nth(end_char_col)
+            .map(|(idx, _)| idx)
+            .unwrap_or(current_line.len());
+
+        let start = line_start + start_byte;
+        let end = line_start + end_byte;
         start..end
     }
 
@@ -74,17 +138,37 @@ impl<'a> LineIndex<'a> {
 
     /// Calculate byte range for text within a line (excluding newline)
     /// Useful for replacing specific parts of a line
+    ///
+    /// # Safety
+    /// This function correctly handles multi-byte UTF-8 characters by converting
+    /// character positions (columns) to byte positions.
     pub fn line_text_range(&self, line: usize, start_col: usize, end_col: usize) -> Range<usize> {
         let line_idx = line.saturating_sub(1);
         let line_start = *self.line_starts.get(line_idx).unwrap_or(&self.content.len());
 
         // Get the actual line content to ensure we don't exceed bounds
         let current_line = self.content.lines().nth(line_idx).unwrap_or("");
-        let line_len = current_line.len();
+        let char_count = current_line.chars().count();
 
-        let start = line_start + start_col.saturating_sub(1).min(line_len);
-        let end = line_start + end_col.saturating_sub(1).min(line_len);
-        start..end.max(start)
+        // Convert character positions to byte positions
+        let start_char_col = start_col.saturating_sub(1).min(char_count);
+        let end_char_col = end_col.saturating_sub(1).min(char_count);
+
+        let mut char_indices = current_line.char_indices();
+        let start_byte = char_indices
+            .nth(start_char_col)
+            .map(|(idx, _)| idx)
+            .unwrap_or(current_line.len());
+
+        let end_byte = current_line
+            .char_indices()
+            .nth(end_char_col)
+            .map(|(idx, _)| idx)
+            .unwrap_or(current_line.len());
+
+        let start = line_start + start_byte;
+        let end = line_start + end_byte.max(start_byte);
+        start..end
     }
 
     /// Calculate byte range from start of line to end of line content (excluding newline)
@@ -261,6 +345,10 @@ pub fn calculate_line_range(line: usize, line_content: &str) -> (usize, usize, u
 }
 
 /// Calculate range from regex match on a line
+///
+/// # Safety
+/// This function safely handles multi-byte UTF-8 characters by ensuring all
+/// string slicing operations occur at valid character boundaries.
 pub fn calculate_match_range(
     line: usize,
     line_content: &str,
@@ -275,13 +363,15 @@ pub fn calculate_match_range(
         return (line, char_count + 1, line, char_count + 1);
     }
 
-    let safe_match_end = (match_start + match_len).min(line_len);
-    let safe_match_len = safe_match_end.saturating_sub(match_start);
+    // Find safe character boundaries for the match range
+    let safe_match_start = find_char_boundary(line_content, match_start);
+    let safe_match_end_byte = find_char_boundary(line_content, (match_start + match_len).min(line_len));
 
-    // Convert byte positions to character positions
-    let char_start = line_content[..match_start].chars().count() + 1; // 1-indexed
-    let char_len = if safe_match_len > 0 {
-        line_content[match_start..safe_match_end].chars().count()
+    // Convert byte positions to character positions safely
+    let char_start = byte_to_char_count(line_content, safe_match_start);
+    let char_len = if safe_match_end_byte > safe_match_start {
+        // Count characters in the safe range
+        line_content[safe_match_start..safe_match_end_byte].chars().count()
     } else {
         0
     };
@@ -289,8 +379,14 @@ pub fn calculate_match_range(
 }
 
 /// Calculate range for trailing content (like trailing spaces)
+///
+/// # Safety
+/// This function safely handles multi-byte UTF-8 characters by ensuring all
+/// string slicing operations occur at valid character boundaries.
 pub fn calculate_trailing_range(line: usize, line_content: &str, content_end: usize) -> (usize, usize, usize, usize) {
-    let char_content_end = line_content[..content_end].chars().count() + 1; // 1-indexed
+    // Find safe character boundary for content_end
+    let safe_content_end = find_char_boundary(line_content, content_end);
+    let char_content_end = byte_to_char_count(line_content, safe_content_end);
     let line_char_len = line_content.chars().count() + 1;
     (line, char_content_end, line, line_char_len)
 }
@@ -301,14 +397,21 @@ pub fn calculate_heading_range(line: usize, line_content: &str) -> (usize, usize
 }
 
 /// Calculate range for emphasis markers and content
+///
+/// # Safety
+/// This function safely handles multi-byte UTF-8 characters by ensuring all
+/// string slicing operations occur at valid character boundaries.
 pub fn calculate_emphasis_range(
     line: usize,
     line_content: &str,
     start_pos: usize,
     end_pos: usize,
 ) -> (usize, usize, usize, usize) {
-    let char_start = line_content[..start_pos].chars().count() + 1; // 1-indexed
-    let char_end = line_content[..end_pos].chars().count() + 1; // 1-indexed
+    // Find safe character boundaries for start and end positions
+    let safe_start_pos = find_char_boundary(line_content, start_pos);
+    let safe_end_pos = find_char_boundary(line_content, end_pos);
+    let char_start = byte_to_char_count(line_content, safe_start_pos);
+    let char_end = byte_to_char_count(line_content, safe_end_pos);
     (line, char_start, line, char_end)
 }
 
@@ -493,5 +596,238 @@ mod tests {
         assert_eq!(start_col, 6); // position 5 + 1
         assert_eq!(end_line, 10);
         assert_eq!(end_col, 6); // same as start for zero length
+    }
+
+    // ============================================================================
+    // UTF-8 Multi-byte Character Tests (Issue #154)
+    // ============================================================================
+
+    #[test]
+    fn test_issue_154_korean_character_boundary() {
+        // Exact reproduction of issue #154: Korean character '후' (3 bytes: 18..21)
+        // The error was: "byte index 19 is not a char boundary; it is inside '후'"
+        let line_content = "- 2023 년 초 이후 주가 상승        +1,000% (10 배 상승)  ";
+
+        // Test match at byte 19 (middle of '후' character)
+        // This should not panic and should find the nearest character boundary
+        let (line, start_col, end_line, end_col) = calculate_match_range(1, line_content, 19, 1);
+
+        // Should successfully calculate without panicking
+        assert!(start_col > 0);
+        assert_eq!(line, 1);
+        assert_eq!(end_line, 1);
+        assert!(end_col >= start_col);
+    }
+
+    #[test]
+    fn test_calculate_match_range_korean() {
+        // Korean text: "안녕하세요" (Hello in Korean)
+        // Each character is 3 bytes
+        let line_content = "안녕하세요";
+        // Match at byte 3 (start of second character)
+        let (line, start_col, end_line, end_col) = calculate_match_range(1, line_content, 3, 3);
+        assert_eq!(line, 1);
+        assert_eq!(start_col, 2); // Second character (1-indexed)
+        assert_eq!(end_line, 1);
+        assert_eq!(end_col, 3); // End of second character
+
+        // Match at byte 4 (middle of second character - should round down)
+        let (line, start_col, end_line, _end_col) = calculate_match_range(1, line_content, 4, 3);
+        assert_eq!(line, 1);
+        assert_eq!(start_col, 2); // Should round to start of character
+        assert_eq!(end_line, 1);
+    }
+
+    #[test]
+    fn test_calculate_match_range_chinese() {
+        // Chinese text: "你好世界" (Hello World)
+        // Each character is 3 bytes
+        let line_content = "你好世界";
+        // Match at byte 6 (start of third character)
+        let (line, start_col, end_line, end_col) = calculate_match_range(1, line_content, 6, 3);
+        assert_eq!(line, 1);
+        assert_eq!(start_col, 3); // Third character (1-indexed)
+        assert_eq!(end_line, 1);
+        assert_eq!(end_col, 4); // End of third character
+    }
+
+    #[test]
+    fn test_calculate_match_range_japanese() {
+        // Japanese text: "こんにちは" (Hello)
+        // Each character is 3 bytes
+        let line_content = "こんにちは";
+        // Match at byte 9 (start of fourth character)
+        let (line, start_col, end_line, end_col) = calculate_match_range(1, line_content, 9, 3);
+        assert_eq!(line, 1);
+        assert_eq!(start_col, 4); // Fourth character (1-indexed)
+        assert_eq!(end_line, 1);
+        assert_eq!(end_col, 5); // End of fourth character
+    }
+
+    #[test]
+    fn test_calculate_match_range_mixed_unicode() {
+        // Mixed ASCII and CJK: "Hello 世界"
+        // "Hello " = 6 bytes (H, e, l, l, o, space)
+        // "世" = bytes 6-8 (3 bytes), character 7
+        // "界" = bytes 9-11 (3 bytes), character 8
+        let line_content = "Hello 世界";
+
+        // Match at byte 5 (space character)
+        let (line, start_col, end_line, end_col) = calculate_match_range(1, line_content, 5, 1);
+        assert_eq!(line, 1);
+        assert_eq!(start_col, 6); // Space character (1-indexed: H=1, e=2, l=3, l=4, o=5, space=6)
+        assert_eq!(end_line, 1);
+        assert_eq!(end_col, 7); // After space
+
+        // Match at byte 6 (start of first Chinese character "世")
+        let (line, start_col, end_line, end_col) = calculate_match_range(1, line_content, 6, 3);
+        assert_eq!(line, 1);
+        assert_eq!(start_col, 7); // First Chinese character (1-indexed)
+        assert_eq!(end_line, 1);
+        assert_eq!(end_col, 8); // End of first Chinese character
+    }
+
+    #[test]
+    fn test_calculate_trailing_range_korean() {
+        // Korean text with trailing spaces
+        let line_content = "안녕하세요   ";
+        // content_end at byte 15 (middle of last character + spaces)
+        let (line, start_col, end_line, end_col) = calculate_trailing_range(1, line_content, 15);
+        assert_eq!(line, 1);
+        assert!(start_col > 0);
+        assert_eq!(end_line, 1);
+        assert!(end_col > start_col);
+    }
+
+    #[test]
+    fn test_calculate_emphasis_range_chinese() {
+        // Chinese text with emphasis markers
+        let line_content = "这是**重要**的";
+        // start_pos and end_pos at byte boundaries within Chinese characters
+        let (line, start_col, end_line, end_col) = calculate_emphasis_range(1, line_content, 6, 12);
+        assert_eq!(line, 1);
+        assert!(start_col > 0);
+        assert_eq!(end_line, 1);
+        assert!(end_col > start_col);
+    }
+
+    #[test]
+    fn test_line_col_to_byte_range_korean() {
+        // Test that column positions (character positions) are correctly converted to byte positions
+        let content = "안녕하세요\nWorld";
+        let line_index = LineIndex::new(content);
+
+        // Column 1 (first character)
+        let range = line_index.line_col_to_byte_range(1, 1);
+        assert_eq!(range, 0..0);
+
+        // Column 2 (second character)
+        let range = line_index.line_col_to_byte_range(1, 2);
+        assert_eq!(range, 3..3); // 3 bytes for first character
+
+        // Column 3 (third character)
+        let range = line_index.line_col_to_byte_range(1, 3);
+        assert_eq!(range, 6..6); // 6 bytes for first two characters
+    }
+
+    #[test]
+    fn test_line_col_to_byte_range_with_length_chinese() {
+        // Test byte range calculation with length for Chinese characters
+        let content = "你好世界\nTest";
+        let line_index = LineIndex::new(content);
+
+        // Column 1, length 2 (first two Chinese characters)
+        let range = line_index.line_col_to_byte_range_with_length(1, 1, 2);
+        assert_eq!(range, 0..6); // 6 bytes for two 3-byte characters
+
+        // Column 2, length 1 (second Chinese character)
+        let range = line_index.line_col_to_byte_range_with_length(1, 2, 1);
+        assert_eq!(range, 3..6); // Bytes 3-6 for second character
+    }
+
+    #[test]
+    fn test_line_text_range_japanese() {
+        // Test text range calculation for Japanese characters
+        let content = "こんにちは\nHello";
+        let line_index = LineIndex::new(content);
+
+        // Columns 2-4 (second to fourth Japanese characters)
+        let range = line_index.line_text_range(1, 2, 4);
+        assert_eq!(range, 3..9); // Bytes 3-9 for three 3-byte characters
+    }
+
+    #[test]
+    fn test_find_char_boundary_edge_cases() {
+        // Test the helper function directly
+        let s = "안녕";
+
+        // Byte 0 (start) - should be valid
+        assert_eq!(find_char_boundary(s, 0), 0);
+
+        // Byte 1 (middle of first character) - should round down to 0
+        assert_eq!(find_char_boundary(s, 1), 0);
+
+        // Byte 2 (middle of first character) - should round down to 0
+        assert_eq!(find_char_boundary(s, 2), 0);
+
+        // Byte 3 (start of second character) - should be valid
+        assert_eq!(find_char_boundary(s, 3), 3);
+
+        // Byte 4 (middle of second character) - should round down to 3
+        assert_eq!(find_char_boundary(s, 4), 3);
+
+        // Byte beyond string length - should return string length
+        assert_eq!(find_char_boundary(s, 100), s.len());
+    }
+
+    #[test]
+    fn test_byte_to_char_count_unicode() {
+        // Test character counting with multi-byte characters
+        let s = "안녕하세요";
+
+        // Byte 0 (start) - 1 character
+        assert_eq!(byte_to_char_count(s, 0), 1);
+
+        // Byte 3 (start of second character) - 2 characters
+        assert_eq!(byte_to_char_count(s, 3), 2);
+
+        // Byte 6 (start of third character) - 3 characters
+        assert_eq!(byte_to_char_count(s, 6), 3);
+
+        // Byte 9 (start of fourth character) - 4 characters
+        assert_eq!(byte_to_char_count(s, 9), 4);
+
+        // Byte 12 (start of fifth character) - 5 characters
+        assert_eq!(byte_to_char_count(s, 12), 5);
+
+        // Byte 15 (end) - 6 characters (5 + 1 for 1-indexed)
+        assert_eq!(byte_to_char_count(s, 15), 6);
+    }
+
+    #[test]
+    fn test_all_range_functions_with_emoji() {
+        // Test with emoji (4-byte UTF-8 characters)
+        let line_content = "Hello 🎉 World 🌍";
+
+        // calculate_match_range
+        let (line, start_col, end_line, end_col) = calculate_match_range(1, line_content, 6, 4);
+        assert_eq!(line, 1);
+        assert!(start_col > 0);
+        assert_eq!(end_line, 1);
+        assert!(end_col > start_col);
+
+        // calculate_trailing_range
+        let (line, start_col, end_line, end_col) = calculate_trailing_range(1, line_content, 12);
+        assert_eq!(line, 1);
+        assert!(start_col > 0);
+        assert_eq!(end_line, 1);
+        assert!(end_col > start_col);
+
+        // calculate_emphasis_range
+        let (line, start_col, end_line, end_col) = calculate_emphasis_range(1, line_content, 0, 5);
+        assert_eq!(line, 1);
+        assert_eq!(start_col, 1);
+        assert_eq!(end_line, 1);
+        assert!(end_col > start_col);
     }
 }
