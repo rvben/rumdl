@@ -167,6 +167,19 @@ Alternatively, you can use flakes to run it without installation.
 nix run --extra-experimental-features 'flakes nix-command' nixpkgs/nixpkgs-unstable#rumdl -- --version
 ```
 
+### Using Termux User Repository (TUR) (Android)
+
+After enabling the TUR repo using
+```bash
+pkg install tur-repo
+```
+
+```bash
+pkg install rumdl
+```
+
+
+
 ### Download binary
 
 ```bash
