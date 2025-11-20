@@ -16,7 +16,7 @@ use tower_lsp::{Client, LanguageServer};
 use crate::config::Config;
 use crate::lint;
 use crate::lsp::types::{RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
-use crate::rule::Rule;
+use crate::rule::{FixCapability, Rule};
 use crate::rules;
 
 /// Represents a document in the LSP server's cache
@@ -412,10 +412,28 @@ impl RumdlLanguageServer {
 
                 // Add "Fix all" action if there are multiple fixable issues in range
                 if fixable_count > 1 {
-                    // Count total fixable issues in the document
-                    let total_fixable = warnings.iter().filter(|w| w.fix.is_some()).count();
+                    // Only apply fixes from fixable rules during "Fix all"
+                    // Unfixable rules provide warning-level fixes for individual Quick Fix actions
+                    let fixable_warnings: Vec<_> = warnings
+                        .iter()
+                        .filter(|w| {
+                            if let Some(rule_name) = &w.rule_name {
+                                filtered_rules
+                                    .iter()
+                                    .find(|r| r.name() == rule_name)
+                                    .map(|r| r.fix_capability() != FixCapability::Unfixable)
+                                    .unwrap_or(false)
+                            } else {
+                                false
+                            }
+                        })
+                        .cloned()
+                        .collect();
 
-                    if let Ok(fixed_content) = crate::utils::fix_utils::apply_warning_fixes(text, &warnings)
+                    // Count total fixable issues (excluding Unfixable rules)
+                    let total_fixable = fixable_warnings.len();
+
+                    if let Ok(fixed_content) = crate::utils::fix_utils::apply_warning_fixes(text, &fixable_warnings)
                         && fixed_content != text
                     {
                         // Calculate proper end position
@@ -997,7 +1015,26 @@ impl LanguageServer for RumdlLanguageServer {
 
                     let has_fixes = warnings.iter().any(|w| w.fix.is_some());
                     if has_fixes {
-                        match crate::utils::fix_utils::apply_warning_fixes(&text, &warnings) {
+                        // Only apply fixes from fixable rules during formatting
+                        // Unfixable rules provide warning-level fixes for Quick Fix actions,
+                        // but should not be applied during bulk format operations
+                        let fixable_warnings: Vec<_> = warnings
+                            .iter()
+                            .filter(|w| {
+                                if let Some(rule_name) = &w.rule_name {
+                                    filtered_rules
+                                        .iter()
+                                        .find(|r| r.name() == rule_name)
+                                        .map(|r| r.fix_capability() != FixCapability::Unfixable)
+                                        .unwrap_or(false)
+                                } else {
+                                    false
+                                }
+                            })
+                            .cloned()
+                            .collect();
+
+                        match crate::utils::fix_utils::apply_warning_fixes(&text, &fixable_warnings) {
                             Ok(fixed_content) => {
                                 if fixed_content != text {
                                     log::debug!("Returning formatting edits");
@@ -1406,6 +1443,97 @@ mod tests {
         // and a final newline added
         let expected = "# Test\n\nThis is a test  \nWith trailing spaces\n";
         assert_eq!(edit.new_text, expected);
+    }
+
+    /// Test that Unfixable rules are excluded from formatting/Fix All but available for Quick Fix
+    /// Regression test for issue #158: formatting deleted HTML img tags
+    #[tokio::test]
+    async fn test_unfixable_rules_excluded_from_formatting() {
+        let server = create_test_server();
+        let uri = Url::parse("file:///test.md").unwrap();
+
+        // Content with both fixable (trailing spaces) and unfixable (HTML) issues
+        let text = "# Test Document\n\n<img src=\"test.png\" alt=\"Test\" />\n\nTrailing spaces  ";
+
+        // Store document
+        let entry = DocumentEntry {
+            content: text.to_string(),
+            version: Some(1),
+            from_disk: false,
+        };
+        server.documents.write().await.insert(uri.clone(), entry);
+
+        // Test 1: Formatting should preserve HTML (Unfixable) but fix trailing spaces (fixable)
+        let format_params = DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: FormattingOptions {
+                tab_size: 4,
+                insert_spaces: true,
+                properties: HashMap::new(),
+                trim_trailing_whitespace: Some(true),
+                insert_final_newline: Some(true),
+                trim_final_newlines: Some(true),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        let format_result = server.formatting(format_params).await.unwrap();
+        assert!(format_result.is_some(), "Should return formatting edits");
+
+        let edits = format_result.unwrap();
+        assert!(!edits.is_empty(), "Should have formatting edits");
+
+        let formatted = &edits[0].new_text;
+        assert!(
+            formatted.contains("<img src=\"test.png\" alt=\"Test\" />"),
+            "HTML should be preserved during formatting (Unfixable rule)"
+        );
+        assert!(
+            !formatted.contains("spaces  "),
+            "Trailing spaces should be removed (fixable rule)"
+        );
+
+        // Test 2: Quick Fix actions should still be available for Unfixable rules
+        let range = Range {
+            start: Position { line: 0, character: 0 },
+            end: Position { line: 10, character: 0 },
+        };
+
+        let code_actions = server.get_code_actions(&uri, text, range).await.unwrap();
+
+        // Should have individual Quick Fix actions for each warning
+        let html_fix_actions: Vec<_> = code_actions
+            .iter()
+            .filter(|action| action.title.contains("MD033") || action.title.contains("HTML"))
+            .collect();
+
+        assert!(
+            !html_fix_actions.is_empty(),
+            "Quick Fix actions should be available for HTML (Unfixable rules)"
+        );
+
+        // Test 3: "Fix All" action should exclude Unfixable rules
+        let fix_all_actions: Vec<_> = code_actions
+            .iter()
+            .filter(|action| action.title.contains("Fix all"))
+            .collect();
+
+        if let Some(fix_all_action) = fix_all_actions.first()
+            && let Some(ref edit) = fix_all_action.edit
+            && let Some(ref changes) = edit.changes
+            && let Some(text_edits) = changes.get(&uri)
+            && let Some(text_edit) = text_edits.first()
+        {
+            let fixed_all = &text_edit.new_text;
+            assert!(
+                fixed_all.contains("<img src=\"test.png\" alt=\"Test\" />"),
+                "Fix All should preserve HTML (Unfixable rules)"
+            );
+            assert!(
+                !fixed_all.contains("spaces  "),
+                "Fix All should remove trailing spaces (fixable rules)"
+            );
+        }
     }
 
     /// Test that resolve_config_for_file() finds the correct config in multi-root workspace
