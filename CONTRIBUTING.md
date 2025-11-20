@@ -77,17 +77,17 @@ rumdl uses [Conventional Commits](https://www.conventionalcommits.org/) for auto
 
 ### Types
 
-| Type | Section | Description | Example |
-|------|---------|-------------|---------|
-| `feat` | **Added** | New features | `feat(cache): add file-level caching` |
-| `fix` | **Fixed** | Bug fixes | `fix(MD013): enforce line length in sentence mode` |
-| `perf` | **Performance** | Performance improvements | `perf(fix): enable parallel file processing` |
-| `refactor` | **Changed** | Code refactoring | `refactor(cache): simplify cache key generation` |
-| `docs` | **Changed** | Documentation only | `docs(readme): update installation steps` |
-| `chore` | *(skipped)* | Maintenance tasks | `chore(deps): update dependencies` |
-| `test` | *(skipped)* | Adding/updating tests | `test(cache): add cache invalidation tests` |
-| `ci` | *(skipped)* | CI configuration | `ci: update GitHub Actions workflow` |
-| `style` | *(skipped)* | Code formatting | `style: run cargo fmt` |
+| Type       | Section         | Description              | Example                                            |
+| ---------- | --------------- | ------------------------ | -------------------------------------------------- |
+| `feat`     | **Added**       | New features             | `feat(cache): add file-level caching`              |
+| `fix`      | **Fixed**       | Bug fixes                | `fix(MD013): enforce line length in sentence mode` |
+| `perf`     | **Performance** | Performance improvements | `perf(fix): enable parallel file processing`       |
+| `refactor` | **Changed**     | Code refactoring         | `refactor(cache): simplify cache key generation`   |
+| `docs`     | **Changed**     | Documentation only       | `docs(readme): update installation steps`          |
+| `chore`    | *(skipped)*     | Maintenance tasks        | `chore(deps): update dependencies`                 |
+| `test`     | *(skipped)*     | Adding/updating tests    | `test(cache): add cache invalidation tests`        |
+| `ci`       | *(skipped)*     | CI configuration         | `ci: update GitHub Actions workflow`               |
+| `style`    | *(skipped)*     | Code formatting          | `style: run cargo fmt`                             |
 
 ### Examples
 
@@ -191,7 +191,7 @@ make changelog-draft
 #
 # - **File-Level Caching**: Blake3-based content hashing for fast lookups
 #   - Automatic cache invalidation on content/config changes
-#   - Cache stored in `.rumdl-cache/{version}/{hash}.json`
+#   - Cache stored in `.rumdl_cache/{version}/{hash}.json`
 #   - Enabled by default for instant subsequent runs
 ```
 
@@ -201,13 +201,13 @@ make changelog-draft
 
 rumdl uses [cargo-nextest](https://nexte.st/) with optimized test profiles:
 
-| Command | Duration | Use Case |
-|---------|----------|----------|
-| `make test-pre-commit` | ~6s | Pre-commit hook (lib tests only) |
-| `make test-quick` | ~15s | Quick feedback (skips slow tests) |
-| `make test-dev` | ~20s | Development default (skips slowest) |
-| `make test` | ~30s | Full suite with dev profile |
-| `make test-ci` | varies | CI environment |
+| Command                | Duration | Use Case                            |
+| ---------------------- | -------- | ----------------------------------- |
+| `make test-pre-commit` | ~6s      | Pre-commit hook (lib tests only)    |
+| `make test-quick`      | ~15s     | Quick feedback (skips slow tests)   |
+| `make test-dev`        | ~20s     | Development default (skips slowest) |
+| `make test`            | ~30s     | Full suite with dev profile         |
+| `make test-ci`         | varies   | CI environment                      |
 
 **⚠️ Never use `cargo test` directly** - it's 30-100x slower!
 

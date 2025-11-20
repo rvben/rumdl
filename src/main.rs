@@ -470,7 +470,7 @@ pub struct CheckArgs {
     /// Directory to store cache files
     #[arg(
         long,
-        help = "Directory to store cache files (default: .rumdl-cache, or $RUMDL_CACHE_DIR)"
+        help = "Directory to store cache files (default: .rumdl_cache, or $RUMDL_CACHE_DIR, or cache-dir in config)"
     )]
     cache_dir: Option<String>,
 
@@ -1438,17 +1438,25 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         // Do NOT exit; continue with valid config
     }
 
-    // 4. Convert to Config for the rest of the linter
+    // 4. Extract cache_dir before converting sourced
+    let cache_dir_from_config = sourced
+        .global
+        .cache_dir
+        .as_ref()
+        .map(|sv| std::path::PathBuf::from(&sv.value));
+
+    // 5. Convert to Config for the rest of the linter
     let config: rumdl_config::Config = sourced.into();
 
-    // 5. Initialize cache if enabled
+    // 6. Initialize cache if enabled
     let cache_enabled = !args.no_cache;
     let cache_dir = args
         .cache_dir
         .as_ref()
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var("RUMDL_CACHE_DIR").ok().map(std::path::PathBuf::from))
-        .unwrap_or_else(|| std::path::PathBuf::from(".rumdl-cache"));
+        .or(cache_dir_from_config)
+        .unwrap_or_else(|| std::path::PathBuf::from(".rumdl_cache"));
 
     let cache = if cache_enabled {
         let cache_instance = cache::LintCache::new(cache_dir.clone(), cache_enabled);

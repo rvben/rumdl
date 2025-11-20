@@ -1068,3 +1068,73 @@ line-length = 99"#,
     // Restore original environment
     env::set_current_dir(original_dir).unwrap();
 }
+
+#[test]
+fn test_cache_dir_config() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let temp_path = temp_dir.path();
+
+    // Test with kebab-case
+    let config_path = temp_path.join("test_cache_dir.toml");
+    let config_content = r#"
+[global]
+cache-dir = "/custom/cache/path"
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write test config file");
+
+    let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
+    let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+        .expect("Should load config successfully");
+
+    let config: rumdl_lib::config::Config = sourced.into();
+    assert!(config.global.cache_dir.is_some(), "cache_dir should be set from config");
+    assert_eq!(
+        config.global.cache_dir.as_ref().unwrap(),
+        "/custom/cache/path",
+        "cache_dir should match the configured value"
+    );
+
+    // Test with snake_case
+    let config_path2 = temp_path.join("test_cache_dir_snake.toml");
+    let config_content2 = r#"
+[global]
+cache_dir = "/another/cache/path"
+"#;
+
+    fs::write(&config_path2, config_content2).expect("Failed to write test config file");
+
+    let config_path2_str = config_path2.to_str().expect("Path should be valid UTF-8");
+    let sourced2 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path2_str), None, true)
+        .expect("Should load config successfully");
+
+    let config2: rumdl_lib::config::Config = sourced2.into();
+    assert!(
+        config2.global.cache_dir.is_some(),
+        "cache_dir should be set from config with snake_case"
+    );
+    assert_eq!(
+        config2.global.cache_dir.as_ref().unwrap(),
+        "/another/cache/path",
+        "cache_dir should match the configured value with snake_case"
+    );
+
+    // Test default (no cache_dir specified)
+    let config_path3 = temp_path.join("test_no_cache_dir.toml");
+    let config_content3 = r#"
+[global]
+line-length = 100
+"#;
+
+    fs::write(&config_path3, config_content3).expect("Failed to write test config file");
+
+    let config_path3_str = config_path3.to_str().expect("Path should be valid UTF-8");
+    let sourced3 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path3_str), None, true)
+        .expect("Should load config successfully");
+
+    let config3: rumdl_lib::config::Config = sourced3.into();
+    assert!(
+        config3.global.cache_dir.is_none(),
+        "cache_dir should be None when not configured"
+    );
+}

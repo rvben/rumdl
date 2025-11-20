@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **cache-dir configuration option**
+  - Added support for `cache-dir` in `.rumdl.toml` and `pyproject.toml` config files
+  - Precedence: CLI `--cache-dir` → `RUMDL_CACHE_DIR` env var → config file → default
+  - Follows Ruff's configuration pattern for cache directory management
+
+### Changed
+
+- **BREAKING: Cache directory renamed from `.rumdl-cache` to `.rumdl_cache`**
+  - Aligns with Ruff's naming convention (`.ruff_cache`)
+  - Follows Rust ecosystem preference for underscores over hyphens
+  - Migration: Old `.rumdl-cache` directories can be safely deleted
+
 ## [0.0.180] - 2025-11-19
 
 ### Added

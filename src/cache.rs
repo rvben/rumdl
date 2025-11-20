@@ -5,7 +5,7 @@
 //!
 //! Cache key: (file_content_hash, config_hash, rumdl_version)
 //! Cache value: Vec<LintWarning>
-//! Storage: .rumdl-cache/{version}/{hash}.json
+//! Storage: .rumdl_cache/{version}/{hash}.json
 
 use rumdl_lib::rule::LintWarning;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ struct CacheEntry {
 
 /// File-level cache for lint results
 pub struct LintCache {
-    /// Base cache directory (e.g., .rumdl-cache/)
+    /// Base cache directory (e.g., .rumdl_cache/)
     cache_dir: PathBuf,
     /// Whether caching is enabled
     enabled: bool,
@@ -65,7 +65,7 @@ impl LintCache {
     /// Create a new cache instance
     ///
     /// # Arguments
-    /// * `cache_dir` - Base directory for cache (e.g., ".rumdl-cache")
+    /// * `cache_dir` - Base directory for cache (e.g., ".rumdl_cache")
     /// * `enabled` - Whether caching is enabled
     pub fn new(cache_dir: PathBuf, enabled: bool) -> Self {
         Self {

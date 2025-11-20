@@ -292,6 +292,11 @@ pub struct GlobalConfig {
     #[serde(default)]
     #[deprecated(since = "0.0.156", note = "Exclude patterns are now always respected")]
     pub force_exclude: bool,
+
+    /// Directory to store cache files (default: .rumdl_cache)
+    /// Can also be set via --cache-dir CLI flag or RUMDL_CACHE_DIR environment variable
+    #[serde(default, alias = "cache_dir", skip_serializing_if = "Option::is_none")]
+    pub cache_dir: Option<String>,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -318,6 +323,7 @@ impl Default for GlobalConfig {
             unfixable: Vec::new(),
             flavor: MarkdownFlavor::default(),
             force_exclude: false,
+            cache_dir: None,
         }
     }
 }
@@ -1581,6 +1587,7 @@ pub struct SourcedGlobalConfig {
     pub unfixable: SourcedValue<Vec<String>>,
     pub flavor: SourcedValue<MarkdownFlavor>,
     pub force_exclude: SourcedValue<bool>,
+    pub cache_dir: Option<SourcedValue<String>>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -1597,6 +1604,7 @@ impl Default for SourcedGlobalConfig {
             unfixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             flavor: SourcedValue::new(MarkdownFlavor::default(), ConfigSource::Default),
             force_exclude: SourcedValue::new(false, ConfigSource::Default),
+            cache_dir: None,
         }
     }
 }
@@ -1755,6 +1763,20 @@ impl SourcedConfig {
                 );
             } else {
                 self.global.output_format = Some(output_format_fragment);
+            }
+        }
+
+        // Merge cache_dir if present
+        if let Some(cache_dir_fragment) = fragment.global.cache_dir {
+            if let Some(ref mut cache_dir) = self.global.cache_dir {
+                cache_dir.merge_override(
+                    cache_dir_fragment.value,
+                    cache_dir_fragment.source,
+                    cache_dir_fragment.overrides.first().and_then(|o| o.file.clone()),
+                    cache_dir_fragment.overrides.first().and_then(|o| o.line),
+                );
+            } else {
+                self.global.cache_dir = Some(cache_dir_fragment);
             }
         }
 
@@ -2165,6 +2187,7 @@ impl From<SourcedConfig> for Config {
             unfixable: sourced.global.unfixable.value,
             flavor: sourced.global.flavor.value,
             force_exclude: sourced.global.force_exclude.value,
+            cache_dir: sourced.global.cache_dir.as_ref().map(|v| v.value.clone()),
         };
         Config {
             global,
@@ -2359,6 +2382,7 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
         "flavor".to_string(),
         "force-exclude".to_string(),
         "output-format".to_string(),
+        "cache-dir".to_string(),
     ];
 
     for (section, key, file_path) in &sourced.unknown_keys {
@@ -2626,6 +2650,21 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                     .or_insert_with(|| SourcedValue::new(line_length.clone(), ConfigSource::Default));
                 sv.push_override(line_length.clone(), source, file.clone(), None);
             }
+
+            if let Some(cache_dir) = table.get("cache-dir").or_else(|| table.get("cache_dir"))
+                && let Ok(value) = String::deserialize(cache_dir.clone())
+            {
+                if fragment.global.cache_dir.is_none() {
+                    fragment.global.cache_dir = Some(SourcedValue::new(value.clone(), source));
+                } else {
+                    fragment
+                        .global
+                        .cache_dir
+                        .as_mut()
+                        .unwrap()
+                        .push_override(value, source, file.clone(), None);
+                }
+            }
         };
 
         // First, check for [tool.rumdl.global] section
@@ -2684,6 +2723,9 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 "per-file-ignores",
                 "per_file_ignores",
                 "global",
+                "flavor",
+                "cache_dir",
+                "cache-dir",
             ]
             .contains(&norm_rule_key.as_str())
             {
@@ -2796,6 +2838,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         || !fragment.global.fixable.value.is_empty()
         || !fragment.global.unfixable.value.is_empty()
         || fragment.global.output_format.is_some()
+        || fragment.global.cache_dir.is_some()
         || !fragment.per_file_ignores.value.is_empty()
         || !fragment.rules.is_empty();
     if has_any { Ok(Some(fragment)) } else { Ok(None) }
@@ -2941,6 +2984,29 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                                 file.clone(),
                                 None,
                             );
+                        }
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected string for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "cache_dir" | "cache-dir" => {
+                    // Handle both cases
+                    if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
+                        let val = formatted_string.value().clone();
+                        if fragment.global.cache_dir.is_none() {
+                            fragment.global.cache_dir = Some(SourcedValue::new(val.clone(), source));
+                        } else {
+                            fragment
+                                .global
+                                .cache_dir
+                                .as_mut()
+                                .unwrap()
+                                .push_override(val, source, file.clone(), None);
                         }
                     } else {
                         log::warn!(
