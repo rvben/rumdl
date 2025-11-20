@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.181] - 2025-11-20
+
 ### Added
 
 - **cache-dir configuration option**
   - Added support for `cache-dir` in `.rumdl.toml` and `pyproject.toml` config files
   - Precedence: CLI `--cache-dir` → `RUMDL_CACHE_DIR` env var → config file → default
   - Follows Ruff's configuration pattern for cache directory management
+- **Termux installation support**
+  - Added Termux User Repository install method to README (thanks @ha1ix in #157)
 
 ### Changed
 
@@ -23,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **LSP: Exclude Unfixable rules from formatting and Fix All (fixes #158)**
+  - Filter warnings from Unfixable rules (like MD033) before applying fixes during LSP formatting
+  - Prevents unintended destructive changes (e.g., HTML deletion) during document formatting
+  - Unfixable rules still available through Quick Fix actions for user choice
+  - Fix All action now correctly excludes Unfixable rules
 - **Cache directory now created at project root, not CWD (fixes #159)**
   - Cache directory is now anchored to the project root (determined by `.git` location)
   - Prevents multiple cache directories when running from subdirectories
