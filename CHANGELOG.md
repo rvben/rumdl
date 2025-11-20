@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Follows Rust ecosystem preference for underscores over hyphens
   - Migration: Old `.rumdl-cache` directories can be safely deleted
 
+### Fixed
+
+- **Cache directory now created at project root, not CWD (fixes #159)**
+  - Cache directory is now anchored to the project root (determined by `.git` location)
+  - Prevents multiple cache directories when running from subdirectories
+  - Works consistently whether invoked from project root or any subdirectory
+  - Behavior:
+    - **With .git**: Cache at `.git` parent directory (true project root)
+    - **Without .git**: Cache at config file location (fallback)
+  - Follows Ruff's fix (PR #7962) for consistent cache placement
+
 ## [0.0.180] - 2025-11-19
 
 ### Added

@@ -1643,6 +1643,8 @@ pub struct SourcedConfig {
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     pub loaded_files: Vec<String>,
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
+    /// Project root directory (parent of config file), used for resolving relative paths
+    pub project_root: Option<std::path::PathBuf>,
 }
 
 impl Default for SourcedConfig {
@@ -1653,6 +1655,7 @@ impl Default for SourcedConfig {
             rules: BTreeMap::new(),
             loaded_files: Vec::new(),
             unknown_keys: Vec::new(),
+            project_root: None,
         }
     }
 }
@@ -1822,9 +1825,38 @@ impl SourcedConfig {
         Self::load_with_discovery(config_path, cli_overrides, false)
     }
 
+    /// Finds project root by walking up from start_dir looking for .git directory.
+    /// Falls back to start_dir if no .git found.
+    fn find_project_root_from(start_dir: &Path) -> std::path::PathBuf {
+        let mut current = start_dir.to_path_buf();
+        const MAX_DEPTH: usize = 100;
+
+        for _ in 0..MAX_DEPTH {
+            if current.join(".git").exists() {
+                log::debug!("[rumdl-config] Found .git at: {}", current.display());
+                return current;
+            }
+
+            match current.parent() {
+                Some(parent) => current = parent.to_path_buf(),
+                None => break,
+            }
+        }
+
+        // No .git found, use start_dir as project root
+        log::debug!(
+            "[rumdl-config] No .git found, using config location as project root: {}",
+            start_dir.display()
+        );
+        start_dir.to_path_buf()
+    }
+
     /// Discover configuration file by traversing up the directory tree.
     /// Returns the first configuration file found.
-    fn discover_config_upward() -> Option<std::path::PathBuf> {
+    /// Discovers config file and returns both the config path and project root.
+    /// Returns: (config_file_path, project_root_path)
+    /// Project root is the directory containing .git, or config parent as fallback.
+    fn discover_config_upward() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
         use std::env;
 
         const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml"];
@@ -1840,6 +1872,7 @@ impl SourcedConfig {
 
         let mut current_dir = start_dir.clone();
         let mut depth = 0;
+        let mut found_config: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
 
         loop {
             if depth >= MAX_DEPTH {
@@ -1849,24 +1882,30 @@ impl SourcedConfig {
 
             log::debug!("[rumdl-config] Searching for config in: {}", current_dir.display());
 
-            // Check for config files in order of precedence
-            for config_name in CONFIG_FILES {
-                let config_path = current_dir.join(config_name);
+            // Check for config files in order of precedence (only if not already found)
+            if found_config.is_none() {
+                for config_name in CONFIG_FILES {
+                    let config_path = current_dir.join(config_name);
 
-                if config_path.exists() {
-                    // For pyproject.toml, verify it contains [tool.rumdl] section
-                    if *config_name == "pyproject.toml" {
-                        if let Ok(content) = std::fs::read_to_string(&config_path) {
-                            if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") {
-                                log::debug!("[rumdl-config] Found config file: {}", config_path.display());
-                                return Some(config_path);
+                    if config_path.exists() {
+                        // For pyproject.toml, verify it contains [tool.rumdl] section
+                        if *config_name == "pyproject.toml" {
+                            if let Ok(content) = std::fs::read_to_string(&config_path) {
+                                if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") {
+                                    log::debug!("[rumdl-config] Found config file: {}", config_path.display());
+                                    // Store config, but continue looking for .git
+                                    found_config = Some((config_path.clone(), current_dir.clone()));
+                                    break;
+                                }
+                                log::debug!("[rumdl-config] Found pyproject.toml but no [tool.rumdl] section");
+                                continue;
                             }
-                            log::debug!("[rumdl-config] Found pyproject.toml but no [tool.rumdl] section");
-                            continue;
+                        } else {
+                            log::debug!("[rumdl-config] Found config file: {}", config_path.display());
+                            // Store config, but continue looking for .git
+                            found_config = Some((config_path.clone(), current_dir.clone()));
+                            break;
                         }
-                    } else {
-                        log::debug!("[rumdl-config] Found config file: {}", config_path.display());
-                        return Some(config_path);
                     }
                 }
             }
@@ -1888,6 +1927,12 @@ impl SourcedConfig {
                     break;
                 }
             }
+        }
+
+        // If config found, determine project root by walking up from config location
+        if let Some((config_path, config_dir)) = found_config {
+            let project_root = Self::find_project_root_from(&config_dir);
+            return Some((config_path, project_root));
         }
 
         None
@@ -2016,6 +2061,16 @@ impl SourcedConfig {
             log::debug!("[rumdl-config] Trying to load config file: {filename}");
             let path_str = path.to_string();
 
+            // Find project root by walking up from config location looking for .git
+            if let Some(config_parent) = path_obj.parent() {
+                let project_root = Self::find_project_root_from(config_parent);
+                log::debug!(
+                    "[rumdl-config] Project root (from explicit config): {}",
+                    project_root.display()
+                );
+                sourced_config.project_root = Some(project_root);
+            }
+
             // Known markdownlint config files
             const MARKDOWNLINT_FILENAMES: &[&str] = &[".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml"];
 
@@ -2060,11 +2115,15 @@ impl SourcedConfig {
         // 3. Perform auto-discovery for project config if not skipped AND no explicit config path
         if !skip_auto_discovery && config_path.is_none() {
             // Look for project configuration files (override user config)
-            if let Some(config_file) = Self::discover_config_upward() {
+            if let Some((config_file, project_root)) = Self::discover_config_upward() {
                 let path_str = config_file.display().to_string();
                 let filename = config_file.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
                 log::debug!("[rumdl-config] Loading discovered config file: {path_str}");
+                log::debug!("[rumdl-config] Project root: {}", project_root.display());
+
+                // Store project root for cache directory resolution
+                sourced_config.project_root = Some(project_root);
 
                 if filename == "pyproject.toml" {
                     let content = std::fs::read_to_string(&config_file).map_err(|e| ConfigError::IoError {

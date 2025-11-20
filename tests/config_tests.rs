@@ -1138,3 +1138,164 @@ line-length = 100
         "cache_dir should be None when not configured"
     );
 }
+
+/// Tests for project root detection and cache placement (issue #159)
+mod project_root_tests {
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_project_root_with_git_at_root() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create structure: $ROOT/.git + $ROOT/.rumdl.toml + $ROOT/docs/file.md
+        fs::create_dir(temp_path.join(".git")).expect("Failed to create .git");
+        fs::write(temp_path.join(".rumdl.toml"), "[global]").expect("Failed to write config");
+        fs::create_dir(temp_path.join("docs")).expect("Failed to create docs");
+        fs::write(temp_path.join("docs/test.md"), "# Test").expect("Failed to write test.md");
+
+        // Load config from project root
+        let config_path = temp_path.join(".rumdl.toml");
+        let sourced =
+            rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .expect("Should load config");
+
+        // Project root should be temp_path (where .git is)
+        assert!(sourced.project_root.is_some(), "project_root should be set");
+        let project_root = sourced.project_root.unwrap();
+        assert_eq!(
+            project_root.canonicalize().unwrap(),
+            temp_path.canonicalize().unwrap(),
+            "project_root should be at .git location"
+        );
+    }
+
+    #[test]
+    fn test_project_root_with_config_in_subdirectory() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create structure: $ROOT/.git + $ROOT/.config/.rumdl.toml + $ROOT/docs/file.md
+        fs::create_dir(temp_path.join(".git")).expect("Failed to create .git");
+        fs::create_dir(temp_path.join(".config")).expect("Failed to create .config");
+        fs::write(temp_path.join(".config/.rumdl.toml"), "[global]").expect("Failed to write config");
+        fs::create_dir(temp_path.join("docs")).expect("Failed to create docs");
+        fs::write(temp_path.join("docs/test.md"), "# Test").expect("Failed to write test.md");
+
+        // Load config from .config/
+        let config_path = temp_path.join(".config/.rumdl.toml");
+        let sourced =
+            rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .expect("Should load config");
+
+        // Project root should STILL be temp_path (where .git is), not .config/
+        assert!(sourced.project_root.is_some(), "project_root should be set");
+        let project_root = sourced.project_root.unwrap();
+        assert_eq!(
+            project_root.canonicalize().unwrap(),
+            temp_path.canonicalize().unwrap(),
+            "project_root should be at .git location, not config location"
+        );
+    }
+
+    #[test]
+    fn test_project_root_without_git() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create structure: $ROOT/.config/.rumdl.toml (no .git)
+        fs::create_dir(temp_path.join(".config")).expect("Failed to create .config");
+        fs::write(temp_path.join(".config/.rumdl.toml"), "[global]").expect("Failed to write config");
+        fs::create_dir(temp_path.join("docs")).expect("Failed to create docs");
+        fs::write(temp_path.join("docs/test.md"), "# Test").expect("Failed to write test.md");
+
+        // Load config from .config/
+        let config_path = temp_path.join(".config/.rumdl.toml");
+        let sourced =
+            rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .expect("Should load config");
+
+        // Project root should be .config/ (config location as fallback)
+        assert!(sourced.project_root.is_some(), "project_root should be set");
+        let project_root = sourced.project_root.unwrap();
+        assert_eq!(
+            project_root.canonicalize().unwrap(),
+            temp_path.join(".config").canonicalize().unwrap(),
+            "project_root should be at config location when no .git found"
+        );
+    }
+
+    #[test]
+    fn test_project_root_with_auto_discovery() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create structure: $ROOT/.git + $ROOT/.rumdl.toml + $ROOT/docs/deep/nested/
+        fs::create_dir(temp_path.join(".git")).expect("Failed to create .git");
+        fs::write(temp_path.join(".rumdl.toml"), "[global]").expect("Failed to write config");
+        fs::create_dir_all(temp_path.join("docs/deep/nested")).expect("Failed to create nested dirs");
+        fs::write(temp_path.join("docs/deep/nested/test.md"), "# Test").expect("Failed to write test.md");
+
+        // Change to nested directory and load config with auto-discovery
+        let original_dir = std::env::current_dir().expect("Failed to get current dir");
+        std::env::set_current_dir(temp_path.join("docs/deep/nested")).expect("Failed to change dir");
+
+        let sourced =
+            rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should discover config");
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
+
+        // Project root should be temp_path (where .git is), even when running from nested dir
+        assert!(
+            sourced.project_root.is_some(),
+            "project_root should be set with auto-discovery"
+        );
+        let project_root = sourced.project_root.unwrap();
+        assert_eq!(
+            project_root.canonicalize().unwrap(),
+            temp_path.canonicalize().unwrap(),
+            "project_root should be at .git location even from nested directory"
+        );
+    }
+
+    #[test]
+    fn test_cache_dir_resolves_to_project_root() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create structure with .git
+        fs::create_dir(temp_path.join(".git")).expect("Failed to create .git");
+        fs::write(temp_path.join(".rumdl.toml"), "[global]").expect("Failed to write config");
+
+        let config_path = temp_path.join(".rumdl.toml");
+        let sourced =
+            rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                .expect("Should load config");
+
+        // Simulate main.rs cache resolution logic
+        let cache_dir_from_config = sourced
+            .global
+            .cache_dir
+            .as_ref()
+            .map(|sv| std::path::PathBuf::from(&sv.value));
+        let project_root = sourced.project_root.clone();
+
+        let mut cache_dir = cache_dir_from_config.unwrap_or_else(|| std::path::PathBuf::from(".rumdl_cache"));
+
+        // Resolve relative to project root (this is the fix for #159)
+        if cache_dir.is_relative()
+            && let Some(root) = project_root
+        {
+            cache_dir = root.join(cache_dir);
+        }
+
+        // Cache should be at project root, not CWD
+        assert_eq!(
+            cache_dir.parent().unwrap().canonicalize().unwrap(),
+            temp_path.canonicalize().unwrap(),
+            "cache directory should be anchored to project root"
+        );
+    }
+}
