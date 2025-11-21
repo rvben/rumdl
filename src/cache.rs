@@ -187,7 +187,6 @@ impl LintCache {
     }
 
     /// Clear the entire cache
-    #[cfg(test)]
     pub fn clear(&self) -> std::io::Result<()> {
         if self.cache_dir.exists() {
             fs::remove_dir_all(&self.cache_dir)?;
