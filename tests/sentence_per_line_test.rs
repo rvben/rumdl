@@ -14,6 +14,7 @@ fn create_sentence_per_line_rule() -> MD013LineLength {
         strict: false,
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
     })
 }
 
@@ -163,6 +164,7 @@ fn test_single_sentence_with_no_line_length_constraint() {
         strict: false,
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
     });
     let content = "This document provides advice for porting Rust code using PyO3 to run under\n\
                    free-threaded Python.";

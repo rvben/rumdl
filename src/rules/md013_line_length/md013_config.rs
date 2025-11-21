@@ -16,6 +16,23 @@ pub enum ReflowMode {
     SentencePerLine,
 }
 
+/// Length calculation mode for MD013
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum LengthMode {
+    /// Count Unicode characters (grapheme clusters)
+    /// Use this only if you need backward compatibility with character-based counting
+    #[serde(alias = "chars", alias = "characters")]
+    Chars,
+    /// Count visual display width (CJK characters = 2 columns, emoji = 2, etc.) - default
+    /// This is semantically correct: line-length = 80 means "80 columns on screen"
+    #[default]
+    #[serde(alias = "display", alias = "visual_width")]
+    Visual,
+    /// Count raw bytes (legacy mode, not recommended for Unicode text)
+    Bytes,
+}
+
 /// Configuration for MD013 (Line length)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -53,6 +70,13 @@ pub struct MD013Config {
     /// Reflow mode - how to handle reflowing (default: "long-lines")
     #[serde(default, alias = "reflow_mode")]
     pub reflow_mode: ReflowMode,
+
+    /// Length calculation mode (default: "chars")
+    /// - "chars": Count Unicode characters (emoji = 1, CJK = 1)
+    /// - "visual": Count visual display width (emoji = 2, CJK = 2)
+    /// - "bytes": Count raw bytes (not recommended for Unicode)
+    #[serde(default, alias = "length_mode")]
+    pub length_mode: LengthMode,
 }
 
 fn default_line_length() -> LineLength {
@@ -86,6 +110,7 @@ impl Default for MD013Config {
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
+            length_mode: LengthMode::default(),
         }
     }
 }
@@ -170,6 +195,7 @@ mod tests {
             strict: false,
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
+            length_mode: LengthMode::default(),
         };
 
         let toml_str = toml::to_string(&config).unwrap();

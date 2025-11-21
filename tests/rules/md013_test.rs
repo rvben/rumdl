@@ -562,8 +562,17 @@ More regular text exceeding 40 characters"#;
 
 #[test]
 fn test_unicode_characters_counted_correctly() {
-    let rule = MD013LineLength::new(20, true, true, true, false);
-    // This line has emojis which should be counted as single characters
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+
+    // Test with explicit chars mode (for backward compatibility testing)
+    let config = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Chars,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // This line has emojis which should be counted as single characters in chars mode
     let content = "Hello 👋 World 🌍 Test"; // Should be exactly 20 chars
     assert_eq!(content.chars().count(), 20);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
@@ -1109,4 +1118,261 @@ fn test_reflow_unicode_handling() {
     for line in fixed.lines() {
         assert!(line.chars().count() <= 30, "Line too long: {line}");
     }
+}
+
+#[test]
+fn test_length_mode_chars_with_cjk() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+
+    // Default mode (chars) counts CJK characters as 1 each
+    let config = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Chars,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // "你好世界" = 4 CJK chars + "Hello" = 5 ASCII = 9 chars total (should pass)
+    let content = "你好世界Hello";
+    assert_eq!(content.chars().count(), 9);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should pass with 9 chars (limit 20)");
+
+    // Add more characters to exceed limit
+    let content_long = "你好世界HelloWorld你好世界Hello"; // 23 chars
+    assert_eq!(content_long.chars().count(), 23);
+    let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_long = rule.check(&ctx_long).unwrap();
+    assert_eq!(result_long.len(), 1, "Should fail with 23 chars (limit 20)");
+}
+
+#[test]
+fn test_length_mode_visual_with_cjk() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+    use unicode_width::UnicodeWidthStr;
+
+    // Visual mode counts CJK characters as 2 columns each
+    let config = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Visual,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // "你好世界" = 4 CJK chars * 2 = 8 visual columns + "Hello" = 5 ASCII = 13 visual columns total
+    let content = "你好世界Hello";
+    assert_eq!(content.width(), 13);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should pass with 13 visual columns (limit 20)");
+
+    // Add more to exceed visual limit: "你好世界HelloWorld" = 8+10 = 18 visual columns
+    let content_medium = "你好世界HelloWorld";
+    assert_eq!(content_medium.width(), 18);
+    let ctx_medium = LintContext::new(content_medium, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_medium = rule.check(&ctx_medium).unwrap();
+    assert!(
+        result_medium.is_empty(),
+        "Should pass with 18 visual columns (limit 20)"
+    );
+
+    // Exceed limit: "你好世界HelloWorld你" = 8+10+2 = 20 visual columns (edge case: exactly at limit should pass)
+    let content_edge = "你好世界HelloWorld你";
+    assert_eq!(content_edge.width(), 20);
+    let ctx_edge = LintContext::new(content_edge, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_edge = rule.check(&ctx_edge).unwrap();
+    assert!(result_edge.is_empty(), "Should pass with exactly 20 visual columns");
+
+    // Now exceed: "你好世界HelloWorld你好" = 8+10+4 = 22 visual columns
+    let content_long = "你好世界HelloWorld你好";
+    assert_eq!(content_long.width(), 22);
+    let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_long = rule.check(&ctx_long).unwrap();
+    assert_eq!(result_long.len(), 1, "Should fail with 22 visual columns (limit 20)");
+}
+
+#[test]
+fn test_length_mode_chars_with_emoji() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+
+    // Chars mode counts emoji as 1 character each
+    let config = MD013Config {
+        line_length: LineLength::from_const(15),
+        length_mode: LengthMode::Chars,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // "Hello 👋 World 🌍" = 5 + 1 + 1 + 1 + 5 + 1 + 1 = 15 chars (should pass)
+    let content = "Hello 👋 World 🌍";
+    assert_eq!(content.chars().count(), 15);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should pass with 15 chars");
+}
+
+#[test]
+fn test_length_mode_visual_with_emoji() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+    use unicode_width::UnicodeWidthStr;
+
+    // Visual mode: Most emoji are 2 columns wide
+    let config = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Visual,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // "Hello 👋 World 🌍" = 5 + 1 + 2 + 1 + 5 + 1 + 2 = 17 visual columns
+    let content = "Hello 👋 World 🌍";
+    let width = content.width();
+    assert_eq!(width, 17, "Visual width should be 17 for this content");
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should pass with 17 visual columns (limit 20)");
+
+    // Add one more emoji to exceed: "Hello 👋 World 🌍 🚀" = 17 + 1 + 2 = 20 (edge case)
+    let content_edge = "Hello 👋 World 🌍 🚀";
+    let ctx_edge = LintContext::new(content_edge, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_edge = rule.check(&ctx_edge).unwrap();
+    assert!(result_edge.is_empty(), "Should pass with exactly 20 visual columns");
+
+    // Now exceed: "Hello 👋 World 🌍 🚀!" = 20 + 1 = 21
+    let content_long = "Hello 👋 World 🌍 🚀!";
+    let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_long = rule.check(&ctx_long).unwrap();
+    assert_eq!(result_long.len(), 1, "Should fail with 21 visual columns (limit 20)");
+}
+
+#[test]
+fn test_length_mode_bytes() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+
+    // Bytes mode counts raw UTF-8 bytes
+    let config = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Bytes,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // "Hello" = 5 bytes (should pass)
+    let content = "Hello";
+    assert_eq!(content.len(), 5);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should pass with 5 bytes");
+
+    // "你好" = 6 bytes (2 CJK chars * 3 bytes each in UTF-8)
+    let content_cjk = "你好";
+    assert_eq!(content_cjk.len(), 6);
+    let ctx_cjk = LintContext::new(content_cjk, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_cjk = rule.check(&ctx_cjk).unwrap();
+    assert!(result_cjk.is_empty(), "Should pass with 6 bytes");
+
+    // Create a line that exceeds 20 bytes
+    let content_long = "Hello你好World你好世界"; // 5 + 6 + 5 + 12 = 28 bytes
+    assert_eq!(content_long.len(), 28);
+    let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_long = rule.check(&ctx_long).unwrap();
+    assert_eq!(result_long.len(), 1, "Should fail with 28 bytes (limit 20)");
+}
+
+#[test]
+fn test_length_mode_mixed_content() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+    use unicode_width::UnicodeWidthStr;
+
+    // Test with mixed CJK, emoji, and ASCII content
+    let content = "API文档🚀Guide";
+
+    // Chars mode: 3 + 2 + 1 + 5 = 11 chars
+    let config_chars = MD013Config {
+        line_length: LineLength::from_const(15),
+        length_mode: LengthMode::Chars,
+        ..Default::default()
+    };
+    let rule_chars = MD013LineLength::from_config_struct(config_chars);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_chars = rule_chars.check(&ctx).unwrap();
+    assert!(result_chars.is_empty(), "Should pass with 11 chars (limit 15)");
+
+    // Visual mode: 3 + 4 + 2 + 5 = 14 visual columns
+    let config_visual = MD013Config {
+        line_length: LineLength::from_const(15),
+        length_mode: LengthMode::Visual,
+        ..Default::default()
+    };
+    let rule_visual = MD013LineLength::from_config_struct(config_visual);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_visual = rule_visual.check(&ctx).unwrap();
+    assert!(
+        result_visual.is_empty(),
+        "Should pass with 14 visual columns (limit 15)"
+    );
+
+    // Verify the visual width calculation
+    assert_eq!(content.width(), 14, "Visual width should be 14");
+}
+
+#[test]
+fn test_length_mode_with_urls() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+
+    // Test that URL exceptions work correctly with different length modes
+    // Note: Non-strict mode replaces long URLs with placeholders
+    let content = "Short text with https://example.com/very/long/url/path";
+
+    // Visual mode counts the same as chars mode for ASCII text
+    let config = MD013Config {
+        line_length: LineLength::from_const(100), // Set high limit to test behavior
+        length_mode: LengthMode::Visual,
+        strict: false,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    // With a reasonable line limit, this should pass due to URL placeholder replacement
+    assert!(result.is_empty(), "Should pass with URL placeholder replacement");
+}
+
+#[test]
+fn test_length_mode_japanese_text() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{LengthMode, MD013Config};
+    use unicode_width::UnicodeWidthStr;
+
+    // Real-world Japanese example
+    let content = "これは日本語のテストです"; // "This is a Japanese test"
+
+    // Chars mode: 12 characters
+    let config_chars = MD013Config {
+        line_length: LineLength::from_const(15),
+        length_mode: LengthMode::Chars,
+        ..Default::default()
+    };
+    let rule_chars = MD013LineLength::from_config_struct(config_chars);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_chars = rule_chars.check(&ctx).unwrap();
+    assert!(result_chars.is_empty(), "Should pass with 12 chars (limit 15)");
+
+    // Visual mode: 24 visual columns (each Japanese char = 2 columns)
+    let config_visual = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Visual,
+        ..Default::default()
+    };
+    let rule_visual = MD013LineLength::from_config_struct(config_visual);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result_visual = rule_visual.check(&ctx).unwrap();
+    assert_eq!(result_visual.len(), 1, "Should fail with 24 visual columns (limit 20)");
+    assert_eq!(content.width(), 24, "Visual width should be 24");
 }

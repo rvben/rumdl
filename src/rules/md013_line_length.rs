@@ -14,7 +14,8 @@ use toml;
 
 pub mod md013_config;
 pub use md013_config::MD013Config;
-use md013_config::ReflowMode;
+use md013_config::{LengthMode, ReflowMode};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Default)]
 pub struct MD013LineLength {
@@ -33,6 +34,7 @@ impl MD013LineLength {
                 strict,
                 reflow: false,
                 reflow_mode: ReflowMode::default(),
+                length_mode: LengthMode::default(),
             },
         }
     }
@@ -1548,22 +1550,31 @@ impl MD013LineLength {
         warnings
     }
 
+    /// Calculate string length based on the configured length mode
+    fn calculate_string_length(&self, s: &str) -> usize {
+        match self.config.length_mode {
+            LengthMode::Chars => s.chars().count(),
+            LengthMode::Visual => s.width(),
+            LengthMode::Bytes => s.len(),
+        }
+    }
+
     /// Calculate effective line length excluding unbreakable URLs
     fn calculate_effective_length(&self, line: &str) -> usize {
         if self.config.strict {
             // In strict mode, count everything
-            return line.chars().count();
+            return self.calculate_string_length(line);
         }
 
         // Quick byte-level check: if line doesn't contain "http" or "[", it can't have URLs or markdown links
         let bytes = line.as_bytes();
         if !bytes.contains(&b'h') && !bytes.contains(&b'[') {
-            return line.chars().count();
+            return self.calculate_string_length(line);
         }
 
         // More precise check for URLs and links
         if !line.contains("http") && !line.contains('[') {
-            return line.chars().count();
+            return self.calculate_string_length(line);
         }
 
         let mut effective_line = line.to_string();
@@ -1596,7 +1607,7 @@ impl MD013LineLength {
             }
         }
 
-        effective_line.chars().count()
+        self.calculate_string_length(&effective_line)
     }
 }
 
@@ -3776,6 +3787,7 @@ with multiple lines."#;
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3804,6 +3816,7 @@ with multiple lines."#;
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3833,6 +3846,7 @@ This is a very long line in a code block that exceeds fifty characters.
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3860,6 +3874,7 @@ This is a very long line in a code block that exceeds fifty characters.
             strict: false,
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3887,6 +3902,7 @@ This is a very long line in a code block that exceeds fifty characters.
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3914,6 +3930,7 @@ This is a very long line in a code block that exceeds fifty characters.
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3941,6 +3958,7 @@ This is a very long line in a code block that exceeds fifty characters.
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3968,6 +3986,7 @@ This is a very long line in a code block that exceeds fifty characters.
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3995,6 +4014,7 @@ This is a very long line in a code block that exceeds fifty characters.
             strict: false,
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -4050,6 +4070,7 @@ Final paragraph.
             strict: false,
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
+            length_mode: LengthMode::default(),
         };
         let rule = MD013LineLength::from_config_struct(config);
         let result = rule.check(&ctx).unwrap();
