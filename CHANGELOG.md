@@ -105,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated unicode test to verify dynamic parent relationship detection
   - Ensures robustness for nested and complex list structures
 
-## [0.0.178] - 2025-01-17
+## [0.0.178] - 2025-11-17
 
 ### Performance
 
@@ -132,7 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Performance tests verify O(n) scaling for 1000+ item lists
   - Tests reproduce exact Issue #148 pattern (nested lists with brackets)
 
-## [0.0.177] - 2025-01-17
+## [0.0.177] - 2025-11-17
 
 ### Fixed
 
@@ -187,7 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reduced memory allocations in list consistency and link reference checks
   - More efficient data structure usage
 
-## [0.0.176] - 2025-01-14
+## [0.0.176] - 2025-11-14
 
 ### Added
 
@@ -279,7 +279,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LineInfo.content` field is no longer public - use new `content(source: &str)` method instead
 - Since `LineInfo` was primarily internal API, impact should be minimal
 
-## [0.0.175] - 2025-01-12
+## [0.0.175] - 2025-11-12
 
 ### Added
 
@@ -374,7 +374,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated all dependencies to latest compatible versions
   - Updated dependencies to latest patch versions
 
-## [0.0.174] - 2025-01-10
+## [0.0.174] - 2025-11-10
 
 ### Fixed
 
@@ -403,7 +403,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Config path properly passed through entire LSP initialization stack
   - Enables custom configuration files for LSP/editor integrations
 
-## [0.0.173] - 2025-01-08
+## [0.0.173] - 2025-11-08
 
 ### Added
 
@@ -460,7 +460,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reflects modern configuration best practices
   - Improved clarity for MD013 reflow requirement in README
 
-## [0.0.172] - 2025-01-06
+## [0.0.172] - 2025-11-06
 
 ### Added
 
