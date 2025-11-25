@@ -240,7 +240,7 @@ impl Config {
 
 /// Global configuration options
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
-#[serde(default)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct GlobalConfig {
     /// Enabled rules
     #[serde(default)]
@@ -259,15 +259,15 @@ pub struct GlobalConfig {
     pub include: Vec<String>,
 
     /// Respect .gitignore files when scanning directories
-    #[serde(default = "default_respect_gitignore")]
+    #[serde(default = "default_respect_gitignore", alias = "respect_gitignore")]
     pub respect_gitignore: bool,
 
     /// Global line length setting (used by MD013 and other rules if not overridden)
-    #[serde(default = "default_line_length")]
+    #[serde(default = "default_line_length", alias = "line_length")]
     pub line_length: u64,
 
     /// Output format for linting results (e.g., "text", "json", "pylint", etc.)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", alias = "output_format")]
     pub output_format: Option<String>,
 
     /// Rules that are allowed to be fixed when --fix is used
@@ -289,7 +289,7 @@ pub struct GlobalConfig {
     /// This option is deprecated as of v0.0.156 and has no effect.
     /// Exclude patterns are now always respected, even for explicitly provided files.
     /// This prevents duplication between rumdl config and tool configs like pre-commit.
-    #[serde(default)]
+    #[serde(default, alias = "force_exclude")]
     #[deprecated(since = "0.0.156", note = "Exclude patterns are now always respected")]
     pub force_exclude: bool,
 
