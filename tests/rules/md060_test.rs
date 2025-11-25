@@ -1485,3 +1485,61 @@ fn test_md060_empty_and_whitespace_only_cells_mixed() {
     assert!(fixed.contains("X"));
     assert!(fixed.contains("Y"));
 }
+
+// ISSUE #164: Already-aligned tables with short separators should not be reformatted
+
+#[test]
+fn test_md060_issue_164_already_aligned_short_separators() {
+    // This is the exact example from issue #164
+    // Tables with 3-character separators that are already aligned should pass
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| a   |  b  |   c |\n| :-- | :-: | --: |\n| 1   |  2  |   3 |\n| 10  | 20  |  30 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // Should produce NO warnings - table is already aligned
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Already-aligned table with short (3-char) separators should not produce warnings"
+    );
+
+    // Should NOT modify the content - preserve as-is
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "Already-aligned table should be preserved exactly as-is"
+    );
+
+    // Verify all rows have consistent length
+    let lines: Vec<&str> = fixed.lines().collect();
+    let first_len = lines[0].len();
+    assert!(
+        lines.iter().all(|line| line.len() == first_len),
+        "All rows should maintain consistent length"
+    );
+
+    // Verify short separators are preserved (not expanded to 4+ chars)
+    assert!(
+        fixed.contains("| :-- | :-: | --: |"),
+        "Short separator format should be preserved"
+    );
+}
+
+#[test]
+fn test_md060_issue_164_misaligned_short_separators_detected() {
+    // Contrast case: tables with short separators but NOT aligned should be detected
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Misaligned table - inconsistent column widths
+    let content = "| a |  b  | c |\n| :-- | :-: | --: |\n| 1 |  2  |   3 |\n| 10 | 20 |  30 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    // Should produce warnings - table is NOT aligned
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        !warnings.is_empty(),
+        "Misaligned table should produce warnings even with short separators"
+    );
+}
