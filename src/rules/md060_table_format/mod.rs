@@ -788,14 +788,17 @@ mod tests {
     }
 
     #[test]
-    fn test_md060_inline_code_with_pipes() {
+    fn test_md060_inline_code_with_escaped_pipes() {
+        // In GFM tables, bare pipes in inline code STILL act as cell delimiters.
+        // To include a literal pipe in table content (even in code), escape it with \|
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
-        let content = "| Pattern | Regex |\n|---|---|\n| Time | `[0-9]|[0-9]` |";
+        // CORRECT: `[0-9]\|[0-9]` - the \| is escaped, stays as content (2 columns)
+        let content = "| Pattern | Regex |\n|---|---|\n| Time | `[0-9]\\|[0-9]` |";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert!(fixed.contains("`[0-9]|[0-9]`"));
+        assert!(fixed.contains(r"`[0-9]\|[0-9]`"), "Escaped pipes should be preserved");
     }
 
     #[test]

@@ -358,18 +358,27 @@ Some text in between.
     }
 
     #[test]
-    #[ignore = "Table utils doesn't handle escaped pipes in code correctly yet"]
     fn test_table_with_escaped_pipes() {
         let rule = MD056TableColumnCount;
+
+        // Single backslash escapes the pipe: \| keeps pipe as content (2 columns)
         let content = "| Command | Description |
 |---------|-------------|
 | `echo \\| grep` | Pipe example |
 | `ls` | List files |";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "escaped pipe \\| should not split cells");
 
-        // Should handle escaped pipes correctly
-        assert_eq!(result.len(), 0);
+        // Double backslash + pipe: \\| means escaped backslash + pipe delimiter (3 columns)
+        let content_double = "| Command | Description |
+|---------|-------------|
+| `echo \\\\| grep` | Pipe example |
+| `ls` | List files |";
+        let ctx2 = LintContext::new(content_double, crate::config::MarkdownFlavor::Standard);
+        let result2 = rule.check(&ctx2).unwrap();
+        // Line 3 has \\| which becomes 3 cells, but header expects 2
+        assert_eq!(result2.len(), 1, "double backslash \\\\| should split cells");
     }
 
     #[test]

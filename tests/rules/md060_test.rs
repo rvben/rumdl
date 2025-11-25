@@ -103,16 +103,22 @@ fn test_md060_zwj_emoji_skipped() {
 }
 
 #[test]
-fn test_md060_inline_code_with_pipes() {
+fn test_md060_inline_code_with_escaped_pipes() {
+    // In GFM tables, bare pipes in inline code STILL act as cell delimiters.
+    // To include a literal pipe in table content (even in code), escape it with \|
+
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
-    let content = "| Pattern | Regex |\n|---|---|\n| Time | `[0-9]|[0-9]` |";
+    // WRONG: `[0-9]|[0-9]` - the | splits cells (3 columns total)
+    // CORRECT: `[0-9]\|[0-9]` - the \| is escaped, stays as content (2 columns)
+    let content = "| Pattern | Regex |\n|---|---|\n| Time | `[0-9]\\|[0-9]` |";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
 
     let fixed = rule.fix(&ctx).unwrap();
+    // The escaped pipe \| should be preserved in the output
     assert!(
-        fixed.contains("`[0-9]|[0-9]`"),
-        "Pipes in inline code should be preserved"
+        fixed.contains(r"`[0-9]\|[0-9]`"),
+        "Escaped pipes in inline code should be preserved"
     );
 
     // Verify all rows have equal length in aligned mode
@@ -122,17 +128,22 @@ fn test_md060_inline_code_with_pipes() {
 }
 
 #[test]
-fn test_md060_complex_regex_in_inline_code() {
+fn test_md060_complex_regex_with_escaped_pipes() {
+    // In GFM tables, bare pipes in inline code STILL act as cell delimiters.
+    // Regex patterns with | must escape the pipe character with \|
+
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
+    // CORRECT: Pipes escaped with \| stay as content
     let content =
-        "| Challenge | Solution |\n|---|---|\n| Hour:minute:second | `^([0-1]?\\d|2[0-3]):[0-5]\\d:[0-5]\\d$` |";
+        "| Challenge | Solution |\n|---|---|\n| Hour:minute:second | `^([0-1]?\\d\\|2[0-3]):[0-5]\\d:[0-5]\\d$` |";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
 
     let fixed = rule.fix(&ctx).unwrap();
+    // The escaped pipe \| should be preserved
     assert!(
-        fixed.contains("`^([0-1]?\\d|2[0-3]):[0-5]\\d:[0-5]\\d$`"),
-        "Complex regex should be preserved"
+        fixed.contains(r"`^([0-1]?\d\|2[0-3]):[0-5]\d:[0-5]\d$`"),
+        "Complex regex with escaped pipes should be preserved"
     );
 
     // Verify all rows have equal length in aligned mode

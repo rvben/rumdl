@@ -303,35 +303,41 @@ impl TableUtils {
         result
     }
 
-    /// Mask both inline code pipes AND escaped pipes for accurate table cell parsing
+    /// Mask escaped pipes for accurate table cell parsing
     ///
-    /// This function combines two types of masking:
-    /// 1. Pipes inside inline code blocks (between backticks) → masked as '_'
-    /// 2. Escaped pipes `\|` → masked as `\_` (backslash + underscore)
+    /// In GFM tables, escape handling happens BEFORE cell boundary detection:
+    /// - `\|` → escaped pipe → masked (stays as cell content)
+    /// - `\\|` → escaped backslash + pipe → NOT masked (pipe is a delimiter)
     ///
-    /// This allows `split('|')` to correctly identify cell boundaries without
-    /// accidentally splitting on:
-    /// - Literal pipes inside code: `| a | b |` → treated as single cell
-    /// - Escaped pipes: `a \| b` → treated as single cell containing literal pipe
+    /// IMPORTANT: Inline code spans do NOT protect pipes in GFM tables!
+    /// The pipe in `` `a | b` `` still acts as a cell delimiter, splitting into
+    /// two cells: `` `a `` and ` b` ``. This matches GitHub's actual rendering.
     ///
-    /// The original text is reconstructed from byte offsets, so these masks only
-    /// affect where we split, not the actual cell content.
+    /// To include a literal pipe in a table cell (even in code), you must escape it:
+    /// `` `a \| b` `` → single cell containing `a | b` (with code formatting)
     pub fn mask_pipes_for_table_parsing(text: &str) -> String {
-        // First pass: mask inline code pipes
-        let after_code_masking = Self::mask_pipes_in_inline_code(text);
-
-        // Second pass: mask escaped pipes
         let mut result = String::new();
-        let chars: Vec<char> = after_code_masking.chars().collect();
+        let chars: Vec<char> = text.chars().collect();
         let mut i = 0;
 
         while i < chars.len() {
-            if i + 1 < chars.len() && chars[i] == '\\' && chars[i + 1] == '|' {
-                // Found escaped pipe: \|
-                // Replace with \_ to keep same byte length while preventing split
-                result.push('\\');
-                result.push('_'); // Mask the pipe
-                i += 2;
+            if chars[i] == '\\' {
+                if i + 1 < chars.len() && chars[i + 1] == '\\' {
+                    // Escaped backslash: \\ → push both and continue
+                    // The next character (if it's a pipe) will be a real delimiter
+                    result.push('\\');
+                    result.push('\\');
+                    i += 2;
+                } else if i + 1 < chars.len() && chars[i + 1] == '|' {
+                    // Escaped pipe: \| → mask the pipe
+                    result.push('\\');
+                    result.push('_'); // Mask the pipe
+                    i += 2;
+                } else {
+                    // Single backslash not followed by \ or | → just push it
+                    result.push(chars[i]);
+                    i += 1;
+                }
             } else {
                 result.push(chars[i]);
                 i += 1;
@@ -482,31 +488,38 @@ mod tests {
     }
 
     #[test]
-    fn test_count_cells_with_inline_code() {
-        // Test the user's actual example from Issue #34
+    fn test_count_cells_with_escaped_pipes() {
+        // In GFM tables, escape handling happens BEFORE cell splitting.
+        // Inline code does NOT protect pipes - they still act as cell delimiters.
+        // To include a literal pipe in a table cell, you MUST escape it with \|
+
+        // Basic table structure
         assert_eq!(TableUtils::count_cells("| Challenge | Solution |"), 2);
-        assert_eq!(
-            TableUtils::count_cells("| Hour:minute:second formats | `^([0-1]?\\d|2[0-3]):[0-5]\\d:[0-5]\\d$` |"),
-            2
-        );
-
-        // Test basic inline code with pipes
-        assert_eq!(TableUtils::count_cells("| Command | `echo | grep` |"), 2);
-        assert_eq!(TableUtils::count_cells("| A | `code | with | pipes` | B |"), 3);
-
-        // Test escaped pipes (correct GFM)
-        assert_eq!(TableUtils::count_cells("| Command | `echo \\| grep` |"), 2);
-
-        // Test multiple inline code blocks
-        assert_eq!(TableUtils::count_cells("| `code | one` | `code | two` |"), 2);
-
-        // Test edge cases
-        assert_eq!(TableUtils::count_cells("| Empty inline | `` | cell |"), 3);
-        assert_eq!(TableUtils::count_cells("| `single|pipe` |"), 1);
-
-        // Test that basic table structure still works
         assert_eq!(TableUtils::count_cells("| A | B | C |"), 3);
         assert_eq!(TableUtils::count_cells("| One | Two |"), 2);
+
+        // Escaped pipes: \| keeps the pipe as content
+        assert_eq!(TableUtils::count_cells(r"| Command | echo \| grep |"), 2);
+        assert_eq!(TableUtils::count_cells(r"| A | B \| C |"), 2); // B | C is one cell
+
+        // Escaped pipes inside backticks (correct way to include | in code in tables)
+        assert_eq!(TableUtils::count_cells(r"| Command | `echo \| grep` |"), 2);
+
+        // Double backslash + pipe: \\| means escaped backslash followed by pipe delimiter
+        assert_eq!(TableUtils::count_cells(r"| A | B \\| C |"), 3); // \\| is NOT escaped pipe
+        assert_eq!(TableUtils::count_cells(r"| A | `B \\| C` |"), 3); // Same inside code
+
+        // IMPORTANT: Bare pipes in inline code DO act as delimiters (GFM behavior)
+        // This matches GitHub's actual rendering where `a | b` splits into two cells
+        assert_eq!(TableUtils::count_cells("| Command | `echo | grep` |"), 3);
+        assert_eq!(TableUtils::count_cells("| `code | one` | `code | two` |"), 4);
+        assert_eq!(TableUtils::count_cells("| `single|pipe` |"), 2);
+
+        // The regex example from Issue #34 - pipes in regex patterns need escaping
+        // Unescaped: `^([0-1]?\d|2[0-3])` has a bare | which splits cells
+        assert_eq!(TableUtils::count_cells(r"| Hour formats | `^([0-1]?\d|2[0-3])` |"), 3);
+        // Escaped: `^([0-1]?\d\|2[0-3])` keeps the | as part of the regex
+        assert_eq!(TableUtils::count_cells(r"| Hour formats | `^([0-1]?\d\|2[0-3])` |"), 2);
     }
 
     #[test]
