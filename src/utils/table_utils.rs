@@ -218,43 +218,7 @@ impl TableUtils {
     /// to handle inline code spans before splitting by pipes, while GitHub GFM
     /// splits by pipes first.
     pub fn count_cells_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> usize {
-        let trimmed = row.trim();
-
-        // Skip non-table rows
-        if !trimmed.contains('|') {
-            return 0;
-        }
-
-        // First, apply escape handling (same for all flavors)
-        let escaped_row = Self::mask_pipes_for_table_parsing(trimmed);
-
-        // For MkDocs flavor, also mask pipes inside inline code
-        // Python-Markdown parses inline code before splitting by pipes
-        let masked_row = if flavor == crate::config::MarkdownFlavor::MkDocs {
-            Self::mask_pipes_in_inline_code(&escaped_row)
-        } else {
-            escaped_row
-        };
-
-        // Handle case with leading/trailing pipes
-        let mut cell_count = 0;
-        let parts: Vec<&str> = masked_row.split('|').collect();
-
-        for (i, part) in parts.iter().enumerate() {
-            // Skip first part if it's empty and there's a leading pipe
-            if i == 0 && part.trim().is_empty() && parts.len() > 1 {
-                continue;
-            }
-
-            // Skip last part if it's empty and there's a trailing pipe
-            if i == parts.len() - 1 && part.trim().is_empty() && parts.len() > 1 {
-                continue;
-            }
-
-            cell_count += 1;
-        }
-
-        cell_count
+        Self::split_table_row_with_flavor(row, flavor).len()
     }
 
     /// Mask pipes inside inline code blocks with a placeholder character
@@ -367,6 +331,83 @@ impl TableUtils {
         }
 
         result
+    }
+
+    /// Split a table row into individual cell contents with flavor-specific behavior.
+    ///
+    /// Returns a Vec of cell content strings (not trimmed - preserves original spacing).
+    /// This is the foundation for both cell counting and cell content extraction.
+    ///
+    /// Different Markdown flavors handle pipes inside inline code differently:
+    /// - Standard/GFM: Pipes in backticks ARE cell delimiters (GitHub behavior)
+    /// - MkDocs: Pipes in backticks are NOT cell delimiters (Python-Markdown behavior)
+    pub fn split_table_row_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
+        let trimmed = row.trim();
+
+        if !trimmed.contains('|') {
+            return Vec::new();
+        }
+
+        // First, mask escaped pipes (same for all flavors)
+        let masked = Self::mask_pipes_for_table_parsing(trimmed);
+
+        // For MkDocs flavor, also mask pipes inside inline code
+        let final_masked = if flavor == crate::config::MarkdownFlavor::MkDocs {
+            Self::mask_pipes_in_inline_code(&masked)
+        } else {
+            masked
+        };
+
+        let has_leading = final_masked.starts_with('|');
+        let has_trailing = final_masked.ends_with('|');
+
+        let mut masked_content = final_masked.as_str();
+        let mut orig_content = trimmed;
+
+        if has_leading {
+            masked_content = &masked_content[1..];
+            orig_content = &orig_content[1..];
+        }
+
+        // Track whether we actually strip a trailing pipe
+        let stripped_trailing = has_trailing && !masked_content.is_empty();
+        if stripped_trailing {
+            masked_content = &masked_content[..masked_content.len() - 1];
+            orig_content = &orig_content[..orig_content.len() - 1];
+        }
+
+        // Handle edge cases for degenerate inputs
+        if masked_content.is_empty() {
+            if stripped_trailing {
+                // "||" case: two pipes with empty content between = one empty cell
+                return vec![String::new()];
+            } else {
+                // "|" case: single pipe, not a valid table row
+                return Vec::new();
+            }
+        }
+
+        let masked_parts: Vec<&str> = masked_content.split('|').collect();
+        let mut cells = Vec::new();
+        let mut pos = 0;
+
+        for masked_cell in masked_parts {
+            let cell_len = masked_cell.len();
+            let orig_cell = if pos + cell_len <= orig_content.len() {
+                &orig_content[pos..pos + cell_len]
+            } else {
+                masked_cell
+            };
+            cells.push(orig_cell.to_string());
+            pos += cell_len + 1; // +1 for the pipe delimiter
+        }
+
+        cells
+    }
+
+    /// Split a table row into individual cell contents using Standard/GFM behavior.
+    pub fn split_table_row(row: &str) -> Vec<String> {
+        Self::split_table_row_with_flavor(row, crate::config::MarkdownFlavor::Standard)
     }
 
     /// Determine the pipe style of a table row
@@ -764,5 +805,71 @@ But no delimiter row
         assert_eq!(cloned.header_line, block.header_line);
         assert_eq!(cloned.delimiter_line, block.delimiter_line);
         assert_eq!(cloned.content_lines, block.content_lines);
+    }
+
+    #[test]
+    fn test_split_table_row() {
+        // Basic split
+        let cells = TableUtils::split_table_row("| Cell 1 | Cell 2 | Cell 3 |");
+        assert_eq!(cells.len(), 3);
+        assert_eq!(cells[0].trim(), "Cell 1");
+        assert_eq!(cells[1].trim(), "Cell 2");
+        assert_eq!(cells[2].trim(), "Cell 3");
+
+        // Without trailing pipe
+        let cells = TableUtils::split_table_row("| Cell 1 | Cell 2");
+        assert_eq!(cells.len(), 2);
+
+        // Empty cells
+        let cells = TableUtils::split_table_row("| | | |");
+        assert_eq!(cells.len(), 3);
+
+        // Single cell
+        let cells = TableUtils::split_table_row("| Cell |");
+        assert_eq!(cells.len(), 1);
+        assert_eq!(cells[0].trim(), "Cell");
+
+        // No pipes
+        let cells = TableUtils::split_table_row("No pipes here");
+        assert_eq!(cells.len(), 0);
+    }
+
+    #[test]
+    fn test_split_table_row_with_escaped_pipes() {
+        // Escaped pipes should be preserved in cell content
+        let cells = TableUtils::split_table_row(r"| A | B \| C |");
+        assert_eq!(cells.len(), 2);
+        assert!(cells[1].contains(r"\|"), "Escaped pipe should be in cell content");
+
+        // Double backslash + pipe is NOT escaped
+        let cells = TableUtils::split_table_row(r"| A | B \\| C |");
+        assert_eq!(cells.len(), 3);
+    }
+
+    #[test]
+    fn test_split_table_row_with_flavor_mkdocs() {
+        // MkDocs flavor: pipes in inline code are NOT cell delimiters
+        let cells =
+            TableUtils::split_table_row_with_flavor("| Type | `x | y` |", crate::config::MarkdownFlavor::MkDocs);
+        assert_eq!(cells.len(), 2);
+        assert!(
+            cells[1].contains("`x | y`"),
+            "Inline code with pipe should be single cell in MkDocs flavor"
+        );
+
+        // Multiple pipes in inline code
+        let cells =
+            TableUtils::split_table_row_with_flavor("| Type | `a | b | c` |", crate::config::MarkdownFlavor::MkDocs);
+        assert_eq!(cells.len(), 2);
+        assert!(cells[1].contains("`a | b | c`"));
+    }
+
+    #[test]
+    fn test_split_table_row_with_flavor_standard() {
+        // Standard/GFM flavor: pipes in inline code ARE cell delimiters
+        let cells =
+            TableUtils::split_table_row_with_flavor("| Type | `x | y` |", crate::config::MarkdownFlavor::Standard);
+        // In GFM, `x | y` splits into separate cells
+        assert_eq!(cells.len(), 3);
     }
 }

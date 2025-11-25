@@ -212,7 +212,7 @@ impl MD060TableFormat {
     /// Used for tests and backward compatibility.
     #[cfg(test)]
     fn parse_table_row(line: &str) -> Vec<String> {
-        Self::parse_table_row_with_flavor(line, crate::config::MarkdownFlavor::Standard)
+        TableUtils::split_table_row(line)
     }
 
     /// Parse a table row into cells, respecting flavor-specific behavior.
@@ -220,49 +220,7 @@ impl MD060TableFormat {
     /// For MkDocs flavor, pipes inside inline code are NOT cell delimiters.
     /// For Standard/GFM flavor, all pipes (except escaped) are cell delimiters.
     fn parse_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
-        let trimmed = line.trim();
-
-        // First, mask escaped pipes (same for all flavors)
-        let masked = TableUtils::mask_pipes_for_table_parsing(trimmed);
-
-        // For MkDocs flavor, also mask pipes inside inline code
-        let final_masked = if flavor == crate::config::MarkdownFlavor::MkDocs {
-            TableUtils::mask_pipes_in_inline_code(&masked)
-        } else {
-            masked
-        };
-
-        let has_leading = final_masked.starts_with('|');
-        let has_trailing = final_masked.ends_with('|');
-
-        let mut masked_content = final_masked.as_str();
-        let mut orig_content = trimmed;
-
-        if has_leading {
-            masked_content = &masked_content[1..];
-            orig_content = &orig_content[1..];
-        }
-        if has_trailing && !masked_content.is_empty() {
-            masked_content = &masked_content[..masked_content.len() - 1];
-            orig_content = &orig_content[..orig_content.len() - 1];
-        }
-
-        let masked_parts: Vec<&str> = masked_content.split('|').collect();
-        let mut cells = Vec::new();
-        let mut pos = 0;
-
-        for masked_cell in masked_parts {
-            let cell_len = masked_cell.len();
-            let orig_cell = if pos + cell_len <= orig_content.len() {
-                &orig_content[pos..pos + cell_len]
-            } else {
-                masked_cell
-            };
-            cells.push(orig_cell.to_string());
-            pos += cell_len + 1;
-        }
-
-        cells
+        TableUtils::split_table_row_with_flavor(line, flavor)
     }
 
     fn is_delimiter_row(row: &[String]) -> bool {
