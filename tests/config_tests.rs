@@ -1298,4 +1298,80 @@ mod project_root_tests {
             "cache directory should be anchored to project root"
         );
     }
+
+    #[test]
+    fn test_config_dir_discovery() {
+        // Test that .config/rumdl.toml is discovered when no root-level config exists
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create structure with .git and .config/rumdl.toml (no root-level config)
+        fs::create_dir(temp_path.join(".git")).expect("Failed to create .git");
+        fs::create_dir(temp_path.join(".config")).expect("Failed to create .config");
+        fs::write(
+            temp_path.join(".config/rumdl.toml"),
+            r#"
+[global]
+line-length = 42
+"#,
+        )
+        .expect("Failed to write config");
+
+        // Change to the temp directory and test auto-discovery
+        let original_dir = std::env::current_dir().expect("Failed to get current dir");
+        std::env::set_current_dir(temp_path).expect("Failed to change dir");
+
+        let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false)
+            .expect("Should discover .config/rumdl.toml");
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
+
+        let config: rumdl_lib::config::Config = sourced.into();
+        assert_eq!(config.global.line_length, 42, ".config/rumdl.toml should be discovered");
+    }
+
+    #[test]
+    fn test_config_dir_precedence() {
+        // Test that .rumdl.toml takes precedence over .config/rumdl.toml
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create both root-level and .config configs
+        fs::create_dir(temp_path.join(".git")).expect("Failed to create .git");
+        fs::write(
+            temp_path.join(".rumdl.toml"),
+            r#"
+[global]
+line-length = 100
+"#,
+        )
+        .expect("Failed to write root config");
+
+        fs::create_dir(temp_path.join(".config")).expect("Failed to create .config");
+        fs::write(
+            temp_path.join(".config/rumdl.toml"),
+            r#"
+[global]
+line-length = 42
+"#,
+        )
+        .expect("Failed to write .config config");
+
+        // Change to the temp directory and test auto-discovery
+        let original_dir = std::env::current_dir().expect("Failed to get current dir");
+        std::env::set_current_dir(temp_path).expect("Failed to change dir");
+
+        let sourced =
+            rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should discover config");
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
+
+        let config: rumdl_lib::config::Config = sourced.into();
+        assert_eq!(
+            config.global.line_length, 100,
+            ".rumdl.toml should take precedence over .config/rumdl.toml"
+        );
+    }
 }

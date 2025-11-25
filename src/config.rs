@@ -1859,7 +1859,7 @@ impl SourcedConfig {
     fn discover_config_upward() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
         use std::env;
 
-        const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml"];
+        const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", ".config/rumdl.toml", "pyproject.toml"];
         const MAX_DEPTH: usize = 100; // Prevent infinite traversal
 
         let start_dir = match env::current_dir() {
