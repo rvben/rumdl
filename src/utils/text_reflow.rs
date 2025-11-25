@@ -9,6 +9,8 @@ use crate::utils::regex_cache::{
     INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX, REF_IMAGE_REGEX, REF_LINK_REGEX,
     SHORTCUT_REF_REGEX, STRIKETHROUGH_FANCY_REGEX, WIKI_LINK_REGEX,
 };
+use std::collections::HashSet;
+
 /// Options for reflowing text
 #[derive(Clone)]
 pub struct ReflowOptions {
@@ -20,6 +22,10 @@ pub struct ReflowOptions {
     pub preserve_breaks: bool,
     /// Whether to enforce one sentence per line
     pub sentence_per_line: bool,
+    /// Custom abbreviations for sentence detection
+    /// Periods are optional - both "Dr" and "Dr." work the same
+    /// Custom abbreviations are always added to the built-in defaults
+    pub abbreviations: Option<Vec<String>>,
 }
 
 impl Default for ReflowOptions {
@@ -29,8 +35,44 @@ impl Default for ReflowOptions {
             break_on_sentences: true,
             preserve_breaks: false,
             sentence_per_line: false,
+            abbreviations: None,
         }
     }
+}
+
+/// Get the effective abbreviations set based on options
+/// All abbreviations are normalized to lowercase for case-insensitive matching
+/// Custom abbreviations are always merged with built-in defaults
+fn get_abbreviations(custom: &Option<Vec<String>>) -> HashSet<String> {
+    // Only include abbreviations that:
+    // 1. Conventionally ALWAYS have a period in standard writing
+    // 2. Are followed by something (name, example), not sentence-final
+    //
+    // Do NOT include:
+    // - Words that don't typically take periods (vs, etc)
+    // - Abbreviations that can end sentences (Inc., Ph.D., U.S.)
+    let mut abbreviations: HashSet<String> = [
+        // Titles - always have period, always followed by a name
+        "Mr", "Mrs", "Ms", "Dr", "Prof", "Sr", "Jr",
+        // Latin - always written with periods, introduce examples/references
+        "i.e", "e.g",
+    ]
+    .iter()
+    .map(|s| s.to_lowercase())
+    .collect();
+
+    // Always extend defaults with custom abbreviations
+    // Strip any trailing periods and normalize to lowercase for consistent matching
+    if let Some(custom_list) = custom {
+        for abbr in custom_list {
+            let normalized = abbr.trim_end_matches('.').to_lowercase();
+            if !normalized.is_empty() {
+                abbreviations.insert(normalized);
+            }
+        }
+    }
+
+    abbreviations
 }
 
 /// Check if text ends with a common abbreviation followed by a period
@@ -47,7 +89,7 @@ impl Default for ReflowOptions {
 ///   - "paradigms?" -> false (question mark, not abbreviation)
 ///
 /// See: Issue #150
-fn text_ends_with_abbreviation(text: &str) -> bool {
+fn text_ends_with_abbreviation(text: &str, abbreviations: &HashSet<String>) -> bool {
     // Only check if text ends with a period (abbreviations require periods)
     if !text.ends_with('.') {
         return false;
@@ -63,19 +105,13 @@ fn text_ends_with_abbreviation(text: &str) -> bool {
         return false;
     }
 
-    // Common abbreviations (without periods - we already stripped it)
-    // This list matches the abbreviations from sentences-per-line
-    let abbreviations = [
-        "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr", "Jr",
-    ];
-
-    // Case-insensitive exact word match (not substring match)
-    abbreviations.iter().any(|abbr| last_word.eq_ignore_ascii_case(abbr))
+    // O(1) HashSet lookup (abbreviations are already lowercase)
+    abbreviations.contains(&last_word.to_lowercase())
 }
 
 /// Detect if a character position is a sentence boundary
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
-fn is_sentence_boundary(text: &str, pos: usize) -> bool {
+fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>) -> bool {
     let chars: Vec<char> = text.chars().collect();
 
     if pos + 1 >= chars.len() {
@@ -113,7 +149,7 @@ fn is_sentence_boundary(text: &str, pos: usize) -> bool {
     if pos > 0 && c == '.' {
         // Check if the text up to and including this period ends with an abbreviation
         // Note: text[..=pos] includes the character at pos (the period)
-        if text_ends_with_abbreviation(&text[..=pos]) {
+        if text_ends_with_abbreviation(&text[..=pos], abbreviations) {
             return false;
         }
 
@@ -128,6 +164,18 @@ fn is_sentence_boundary(text: &str, pos: usize) -> bool {
 
 /// Split text into sentences
 pub fn split_into_sentences(text: &str) -> Vec<String> {
+    split_into_sentences_custom(text, &None)
+}
+
+/// Split text into sentences with custom abbreviations
+pub fn split_into_sentences_custom(text: &str, custom_abbreviations: &Option<Vec<String>>) -> Vec<String> {
+    let abbreviations = get_abbreviations(custom_abbreviations);
+    split_into_sentences_with_set(text, &abbreviations)
+}
+
+/// Internal function to split text into sentences with a pre-computed abbreviations set
+/// Use this when calling multiple times in a loop to avoid repeatedly computing the set
+fn split_into_sentences_with_set(text: &str, abbreviations: &HashSet<String>) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
     let mut chars = text.chars().peekable();
@@ -136,7 +184,7 @@ pub fn split_into_sentences(text: &str) -> Vec<String> {
     while let Some(c) = chars.next() {
         current_sentence.push(c);
 
-        if is_sentence_boundary(text, pos) {
+        if is_sentence_boundary(text, pos, abbreviations) {
             // Include the space after sentence if it exists
             if chars.peek() == Some(&' ') {
                 chars.next();
@@ -253,7 +301,7 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
         let elements = parse_markdown_elements(line);
-        return reflow_elements_sentence_per_line(&elements);
+        return reflow_elements_sentence_per_line(&elements, &options.abbreviations);
     }
 
     // Quick check: if line is already short enough, return as-is
@@ -743,7 +791,8 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
 }
 
 /// Reflow elements for sentence-per-line mode
-fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
+fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations: &Option<Vec<String>>) -> Vec<String> {
+    let abbreviations = get_abbreviations(custom_abbreviations);
     let mut lines = Vec::new();
     let mut current_line = String::new();
 
@@ -754,7 +803,8 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
         if let Element::Text(text) = element {
             // Simply append text - it already has correct spacing from tokenization
             let combined = format!("{current_line}{text}");
-            let sentences = split_into_sentences(&combined);
+            // Use the pre-computed abbreviations set to avoid redundant computation
+            let sentences = split_into_sentences_with_set(&combined, &abbreviations);
 
             if sentences.len() > 1 {
                 // We found sentence boundaries
@@ -764,7 +814,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
                         // But check if it ends with an abbreviation
                         let trimmed = sentence.trim();
 
-                        if text_ends_with_abbreviation(trimmed) {
+                        if text_ends_with_abbreviation(trimmed, &abbreviations) {
                             // Don't emit yet - this sentence ends with abbreviation, continue accumulating
                             current_line = sentence.to_string();
                         } else {
@@ -778,7 +828,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element]) -> Vec<String> {
                         let ends_with_sentence_punct =
                             trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
 
-                        if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed) {
+                        if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed, &abbreviations) {
                             // Complete sentence - emit it immediately
                             lines.push(sentence.to_string());
                             current_line.clear();
@@ -828,19 +878,28 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 
         // For text elements that might need breaking
         if let Element::Text(text) = element {
+            // Check if original text had leading whitespace
+            let has_leading_space = text.starts_with(char::is_whitespace);
             // If this is a text element, always process it word by word
             let words: Vec<&str> = text.split_whitespace().collect();
 
-            for word in words {
+            for (i, word) in words.iter().enumerate() {
                 let word_len = word.chars().count();
-                if current_length > 0 && current_length + 1 + word_len > options.line_length {
-                    // Start a new line
+                // Check if this "word" is just punctuation that should stay attached
+                let is_trailing_punct = word
+                    .chars()
+                    .all(|c| matches!(c, ',' | '.' | ':' | ';' | '!' | '?' | ')' | ']' | '}'));
+
+                if current_length > 0 && current_length + 1 + word_len > options.line_length && !is_trailing_punct {
+                    // Start a new line (but never for trailing punctuation)
                     lines.push(current_line.trim().to_string());
                     current_line = word.to_string();
                     current_length = word_len;
                 } else {
                     // Add word to current line
-                    if current_length > 0 {
+                    // Only add space if: we have content AND (this isn't the first word OR original had leading space)
+                    // AND this isn't trailing punctuation (which attaches directly)
+                    if current_length > 0 && (i > 0 || has_leading_space) && !is_trailing_punct {
                         current_line.push(' ');
                         current_length += 1;
                     }
@@ -858,7 +917,10 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                 current_length = element_len;
             } else {
                 // Add element to current line
-                if current_length > 0 {
+                // Don't add space if the current line ends with an opening bracket/paren
+                let ends_with_opener =
+                    current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
+                if current_length > 0 && !ends_with_opener {
                     current_line.push(' ');
                     current_length += 1;
                 }
@@ -1401,6 +1463,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: false,
+        abbreviations: None,
     };
 
     // Reflow the paragraph using reflow_markdown to handle it properly
@@ -1443,27 +1506,28 @@ mod tests {
     #[test]
     fn test_helper_function_text_ends_with_abbreviation() {
         // Test the helper function directly
+        let abbreviations = get_abbreviations(&None);
 
-        // True cases (should detect abbreviations)
-        assert!(text_ends_with_abbreviation("Dr."));
-        assert!(text_ends_with_abbreviation("word Dr."));
-        assert!(text_ends_with_abbreviation("e.g."));
-        assert!(text_ends_with_abbreviation("i.e."));
-        assert!(text_ends_with_abbreviation("etc."));
-        assert!(text_ends_with_abbreviation("Mr."));
-        assert!(text_ends_with_abbreviation("Mrs."));
-        assert!(text_ends_with_abbreviation("Ms."));
-        assert!(text_ends_with_abbreviation("Prof."));
+        // True cases - built-in abbreviations (titles and i.e./e.g.)
+        assert!(text_ends_with_abbreviation("Dr.", &abbreviations));
+        assert!(text_ends_with_abbreviation("word Dr.", &abbreviations));
+        assert!(text_ends_with_abbreviation("e.g.", &abbreviations));
+        assert!(text_ends_with_abbreviation("i.e.", &abbreviations));
+        assert!(text_ends_with_abbreviation("Mr.", &abbreviations));
+        assert!(text_ends_with_abbreviation("Mrs.", &abbreviations));
+        assert!(text_ends_with_abbreviation("Ms.", &abbreviations));
+        assert!(text_ends_with_abbreviation("Prof.", &abbreviations));
 
-        // False cases (should NOT detect as abbreviations)
-        assert!(!text_ends_with_abbreviation("paradigms."));
-        assert!(!text_ends_with_abbreviation("programs."));
-        assert!(!text_ends_with_abbreviation("items."));
-        assert!(!text_ends_with_abbreviation("systems."));
-        assert!(!text_ends_with_abbreviation("Dr?")); // question mark, not period
-        assert!(!text_ends_with_abbreviation("Mr!")); // exclamation, not period
-        assert!(!text_ends_with_abbreviation("paradigms?")); // question mark
-        assert!(!text_ends_with_abbreviation("word")); // no punctuation
-        assert!(!text_ends_with_abbreviation("")); // empty string
+        // False cases - NOT in built-in list (etc doesn't always have period)
+        assert!(!text_ends_with_abbreviation("etc.", &abbreviations));
+        assert!(!text_ends_with_abbreviation("paradigms.", &abbreviations));
+        assert!(!text_ends_with_abbreviation("programs.", &abbreviations));
+        assert!(!text_ends_with_abbreviation("items.", &abbreviations));
+        assert!(!text_ends_with_abbreviation("systems.", &abbreviations));
+        assert!(!text_ends_with_abbreviation("Dr?", &abbreviations)); // question mark, not period
+        assert!(!text_ends_with_abbreviation("Mr!", &abbreviations)); // exclamation, not period
+        assert!(!text_ends_with_abbreviation("paradigms?", &abbreviations)); // question mark
+        assert!(!text_ends_with_abbreviation("word", &abbreviations)); // no punctuation
+        assert!(!text_ends_with_abbreviation("", &abbreviations)); // empty string
     }
 }

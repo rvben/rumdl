@@ -12,6 +12,7 @@ fn test_list_item_trailing_whitespace_removal() {
         break_on_sentences: true, // MD013 uses true by default
         preserve_breaks: false,
         sentence_per_line: false,
+        abbreviations: None,
     };
 
     let result = reflow_markdown(input, &options);
@@ -173,6 +174,7 @@ fn test_sentence_per_line_reflow() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        abbreviations: None,
     };
 
     let input = "First sentence. Second sentence. Third sentence.";
@@ -194,6 +196,7 @@ fn test_sentence_per_line_with_backticks() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -210,6 +213,7 @@ fn test_sentence_per_line_with_backticks_in_parens() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -226,6 +230,7 @@ fn test_sentence_per_line_with_questions_exclamations() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -426,52 +431,60 @@ fn test_footnote_patterns_preserved() {
 
 #[test]
 fn test_reflow_markdown_numbered_lists() {
+    // Use shorter line length to force wrapping
     let options = ReflowOptions {
-        line_length: 80,
+        line_length: 40,
         ..Default::default()
     };
 
-    let input = "1. This is the first item in a numbered list\n2. This is the second item with a continuation\n   that spans multiple lines\n3. Third item";
+    let input = "1. This is the first item in a numbered list\n2. This is the second item with a continuation that spans multiple lines\n3. Third item";
     let result = reflow_markdown(input, &options);
 
     // Lists should preserve their markers
-    assert!(result.contains("1. "));
-    assert!(result.contains("2. "));
-    assert!(result.contains("3. "));
+    assert!(result.contains("1. "), "Should have first list marker");
+    assert!(result.contains("2. "), "Should have second list marker");
+    assert!(result.contains("3. "), "Should have third list marker");
 
     // Continuations should be indented with 3 spaces (marker + space = 3 chars)
     let lines: Vec<&str> = result.lines().collect();
-    let continuation_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with("   ")).collect();
+    let continuation_lines: Vec<&&str> = lines
+        .iter()
+        .filter(|l| l.starts_with("   ") && !l.starts_with("   that"))
+        .collect();
 
-    // Should have at least one continuation line (the second item's continuation)
+    // Should have at least one continuation line (wrapped content)
     assert!(
         !continuation_lines.is_empty(),
-        "Numbered list continuations should be indented with 3 spaces"
+        "Numbered list continuations should be indented with 3 spaces. Got:\n{result}"
     );
 }
 
 #[test]
 fn test_reflow_markdown_bullet_lists() {
+    // Use shorter line length to force wrapping
     let options = ReflowOptions {
-        line_length: 80,
+        line_length: 40,
         ..Default::default()
     };
 
-    let input = "- This is the first bullet item\n- This is the second bullet with a continuation\n  that spans multiple lines\n- Third item";
+    let input = "- This is the first bullet item\n- This is the second bullet with a continuation that spans multiple lines\n- Third item";
     let result = reflow_markdown(input, &options);
 
     // Bullet lists should preserve their markers
-    assert!(result.contains("- This"));
+    assert!(result.contains("- This"), "Should have bullet markers");
 
     // Continuations should be indented with 2 spaces (marker + space = 2 chars)
     let lines: Vec<&str> = result.lines().collect();
-    let continuation_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with("  ")).collect();
+    // Look for lines that start with 2 spaces but not a list marker
+    let continuation_lines: Vec<&&str> = lines
+        .iter()
+        .filter(|l| l.starts_with("  ") && !l.starts_with("- ") && !l.starts_with("  that"))
+        .collect();
 
-    // Should have continuation lines
+    // Should have continuation lines (wrapped content)
     assert!(
         !continuation_lines.is_empty(),
-        "Bullet lists should preserve markers and indent continuations with 2 spaces.\nExpected:\n{}\nGot:\n{result}",
-        "- First bullet\n  continuation\n- Second bullet"
+        "Bullet lists should preserve markers and indent continuations with 2 spaces. Got:\n{result}"
     );
 }
 
@@ -484,6 +497,7 @@ fn test_ie_abbreviation_split_debug() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        abbreviations: None,
     };
 
     let result = reflow_line(input, &options);
@@ -502,6 +516,7 @@ fn test_ie_abbreviation_paragraph() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        abbreviations: None,
     };
 
     let result = reflow_markdown(input, &options);
@@ -518,6 +533,7 @@ fn test_definition_list_preservation() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -536,6 +552,7 @@ fn test_definition_list_multiline() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -552,6 +569,7 @@ fn test_definition_list_multiple() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -569,6 +587,7 @@ fn test_definition_list_with_paragraphs() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        abbreviations: None,
     };
 
     let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";
@@ -613,6 +632,7 @@ fn test_abbreviation_false_positives_word_boundary() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -644,6 +664,7 @@ fn test_abbreviation_period_vs_other_punctuation() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -709,6 +730,7 @@ fn test_issue_150_exact_reproduction() {
     let options = ReflowOptions {
         line_length: 0, // unlimited
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -729,13 +751,12 @@ fn test_issue_150_exact_reproduction() {
 
 #[test]
 fn test_all_abbreviations_comprehensive() {
-    // Property-based test: ALL abbreviations in the list should be detected
-    let all_abbreviations = [
-        "ie", "i.e", "eg", "e.g", "etc", "ex", "vs", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr", "Jr",
-    ];
+    // Property-based test: ALL built-in abbreviations should be detected
+    // Built-in list: titles (Mr, Mrs, Ms, Dr, Prof, Sr, Jr) and Latin (i.e, e.g)
+    let all_abbreviations = ["i.e", "e.g", "Mr", "Mrs", "Dr", "Ms", "Prof", "Sr", "Jr"];
 
     for abbr in all_abbreviations {
-        // Test standalone abbreviation with period
+        // Test standalone abbreviation with period - should be 1 sentence
         let with_period = format!("{abbr}.");
         let sentences = split_into_sentences(&with_period);
         assert_eq!(
@@ -744,14 +765,21 @@ fn test_all_abbreviations_comprehensive() {
             "Should detect '{with_period}' as complete (ends with abbreviation)"
         );
 
-        // Test abbreviation in context followed by another sentence
-        let in_context = format!("word {abbr}. Next sentence.");
-        let sentences = split_into_sentences(&in_context);
-        assert_eq!(sentences.len(), 2, "Should detect 2 sentences in '{in_context}'");
-        assert!(
-            sentences[0].contains(&format!("{abbr}.")),
-            "First sentence should contain abbreviation"
+        // Test abbreviation NOT splitting inline usage - should be 1 sentence
+        // "word i.e. next" is ONE sentence because i.e. is an inline abbreviation
+        let inline = format!("word {abbr}. next word");
+        let sentences = split_into_sentences(&inline);
+        assert_eq!(
+            sentences.len(),
+            1,
+            "'{inline}' should be 1 sentence (abbreviation doesn't end sentence)"
         );
+
+        // Test abbreviation with content AFTER it that ends the sentence
+        // "See Dr. Smith. He" should be 2 sentences - split happens after "Smith."
+        let with_content = format!("See {abbr}. Name here. Next sentence.");
+        let sentences = split_into_sentences(&with_content);
+        assert!(sentences.len() >= 2, "'{with_content}' should have multiple sentences");
     }
 }
 
@@ -864,6 +892,7 @@ fn test_abbreviations_in_sentence_per_line_integration() {
     let options = ReflowOptions {
         line_length: 0, // unlimited
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -898,6 +927,7 @@ fn test_issue_150_all_reported_variations() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -928,6 +958,7 @@ fn test_performance_no_hang_on_false_positives() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        abbreviations: None,
         ..Default::default()
     };
 
@@ -953,4 +984,152 @@ fn test_performance_no_hang_on_false_positives() {
             "'{case}' took {elapsed:?} (should be <100ms)"
         );
     }
+}
+
+// Tests for spacing preservation during reflow
+// These test cases verify that punctuation stays attached to adjacent elements
+
+#[test]
+fn test_reflow_preserves_colon_after_code() {
+    // Bug: `code`: was becoming `code` : (spurious space before colon)
+    let options = ReflowOptions {
+        line_length: 20,
+        ..Default::default()
+    };
+
+    let input = "This has `code`: followed by text";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+
+    // Colon should stay attached to backtick
+    assert!(
+        joined.contains("`code`:"),
+        "Colon should stay attached to code span, got: {joined:?}"
+    );
+    assert!(
+        !joined.contains("`code` :"),
+        "Should not have space before colon, got: {joined:?}"
+    );
+}
+
+#[test]
+fn test_reflow_preserves_comma_after_code() {
+    // Bug: `a`, was becoming `a` , (spurious space before comma)
+    let options = ReflowOptions {
+        line_length: 30,
+        ..Default::default()
+    };
+
+    let input = "List: `a`, `b`, `c`.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+
+    // Commas should stay attached
+    assert!(
+        joined.contains("`a`,"),
+        "Comma should stay attached to code span, got: {joined:?}"
+    );
+    assert!(
+        !joined.contains("`a` ,"),
+        "Should not have space before comma, got: {joined:?}"
+    );
+}
+
+#[test]
+fn test_reflow_preserves_closing_paren_after_code() {
+    // Bug: `parens`) was becoming `parens` ) (spurious space before paren)
+    let options = ReflowOptions {
+        line_length: 40,
+        ..Default::default()
+    };
+
+    let input = "And (`parens`) here";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+
+    // Closing paren should stay attached
+    assert!(
+        joined.contains("`parens`)"),
+        "Closing paren should stay attached, got: {joined:?}"
+    );
+    assert!(
+        !joined.contains("`parens` )"),
+        "Should not have space before closing paren, got: {joined:?}"
+    );
+}
+
+#[test]
+fn test_reflow_no_space_after_opening_paren() {
+    // Bug: (`Mr` was becoming ( `Mr` (spurious space after open paren)
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    let input = "titles (`Mr`, `Mrs`, `Ms`)";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+
+    // No space after opening paren
+    assert!(
+        joined.contains("(`Mr`"),
+        "No space after opening paren, got: {joined:?}"
+    );
+    assert!(
+        !joined.contains("( `Mr`"),
+        "Should not have space after opening paren, got: {joined:?}"
+    );
+}
+
+#[test]
+fn test_reflow_punctuation_never_starts_line() {
+    // Bug: punctuation like comma could end up at start of new line
+    let options = ReflowOptions {
+        line_length: 10,
+        ..Default::default()
+    };
+
+    let input = "List: `a`, `b`, `c`.";
+    let result = reflow_line(input, &options);
+
+    // No line should start with punctuation
+    for line in &result {
+        let trimmed = line.trim_start();
+        assert!(!trimmed.starts_with(','), "Line should not start with comma: {line:?}");
+        assert!(!trimmed.starts_with('.'), "Line should not start with period: {line:?}");
+        assert!(
+            !trimmed.starts_with(')'),
+            "Line should not start with closing paren: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_reflow_complex_punctuation_case() {
+    // Combined test case from original bug report
+    let options = ReflowOptions {
+        line_length: 200,
+        ..Default::default()
+    };
+
+    let input = "- `abbreviations`: Custom abbreviations for sentence-per-line mode (optional). Periods are optional - both `\"Dr\"` and `\"Dr.\"` work the same. Custom abbreviations are added to the built-in defaults: titles (`Mr`, `Mrs`, `Ms`, `Dr`, `Prof`, `Sr`, `Jr`) and Latin (`i.e`, `e.g`).";
+    let result = reflow_markdown(input, &options);
+
+    // Verify no spurious spaces around punctuation
+    assert!(
+        !result.contains("` :"),
+        "No space before colon after backtick: {result:?}"
+    );
+    assert!(
+        !result.contains("` ,"),
+        "No space before comma after backtick: {result:?}"
+    );
+    assert!(
+        !result.contains("` )"),
+        "No space before paren after backtick: {result:?}"
+    );
+    assert!(
+        !result.contains("( `"),
+        "No space after opening paren before backtick: {result:?}"
+    );
 }

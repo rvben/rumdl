@@ -35,6 +35,7 @@ impl MD013LineLength {
                 reflow: false,
                 reflow_mode: ReflowMode::default(),
                 length_mode: LengthMode::default(),
+                abbreviations: None,
             },
         }
     }
@@ -1044,6 +1045,7 @@ impl MD013LineLength {
                         break_on_sentences: true,
                         preserve_breaks: false,
                         sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+                        abbreviations: config.abbreviations.clone(),
                     };
 
                     let mut result: Vec<String> = Vec::new();
@@ -1462,6 +1464,7 @@ impl MD013LineLength {
                     break_on_sentences: true,
                     preserve_breaks: false,
                     sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+                    abbreviations: config.abbreviations.clone(),
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
@@ -3788,6 +3791,7 @@ with multiple lines."#;
             reflow: false,
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3817,6 +3821,7 @@ with multiple lines."#;
             reflow: false,
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3847,6 +3852,7 @@ This is a very long line in a code block that exceeds fifty characters.
             reflow: false,
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3875,6 +3881,7 @@ This is a very long line in a code block that exceeds fifty characters.
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3903,6 +3910,7 @@ This is a very long line in a code block that exceeds fifty characters.
             reflow: false,
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3931,6 +3939,7 @@ This is a very long line in a code block that exceeds fifty characters.
             reflow: false,
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3959,6 +3968,7 @@ This is a very long line in a code block that exceeds fifty characters.
             reflow: false,
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -3987,6 +3997,7 @@ This is a very long line in a code block that exceeds fifty characters.
             reflow: false,
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -4015,6 +4026,7 @@ This is a very long line in a code block that exceeds fifty characters.
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
 
@@ -4071,6 +4083,7 @@ Final paragraph.
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
             length_mode: LengthMode::default(),
+            abbreviations: None,
         };
         let rule = MD013LineLength::from_config_struct(config);
         let result = rule.check(&ctx).unwrap();
