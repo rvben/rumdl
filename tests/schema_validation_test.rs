@@ -234,3 +234,84 @@ respect_gitignore = "true"  # Should be boolean, not string
         "Wrong type for respect_gitignore should fail validation"
     );
 }
+
+/// Regression test: GlobalConfig schema properties must use kebab-case
+///
+/// This prevents regression where snake_case properties were being output
+/// in the JSON schema, which broke tooling expecting kebab-case (like Ruff uses).
+#[test]
+fn test_schema_globalconfig_uses_kebab_case() {
+    let schema = load_schema();
+
+    // Navigate to GlobalConfig properties in the schema
+    let global_config = &schema["$defs"]["GlobalConfig"]["properties"];
+
+    // These properties MUST use kebab-case in the schema
+    let expected_kebab_case_properties = [
+        "line-length",
+        "respect-gitignore",
+        "force-exclude",
+        "output-format",
+        "cache-dir",
+    ];
+
+    // These properties MUST NOT use snake_case in the schema
+    let forbidden_snake_case_properties = [
+        "line_length",
+        "respect_gitignore",
+        "force_exclude",
+        "output_format",
+        "cache_dir",
+    ];
+
+    for prop in expected_kebab_case_properties {
+        assert!(
+            global_config.get(prop).is_some(),
+            "Schema must have kebab-case property '{prop}' in GlobalConfig"
+        );
+    }
+
+    for prop in forbidden_snake_case_properties {
+        assert!(
+            global_config.get(prop).is_none(),
+            "Schema must NOT have snake_case property '{prop}' in GlobalConfig (use kebab-case instead)"
+        );
+    }
+}
+
+/// Test that config files can use both kebab-case and snake_case (backward compatibility)
+/// This tests parsing directly without schema validation (which has unrelated issues)
+#[test]
+fn test_config_accepts_both_kebab_and_snake_case() {
+    use rumdl_lib::config::Config;
+
+    // Kebab-case (preferred)
+    let kebab_toml = r#"
+[global]
+line-length = 100
+respect-gitignore = false
+force-exclude = true
+"#;
+    let kebab_config: Config = toml::from_str(kebab_toml).expect("Kebab-case config should parse");
+    assert_eq!(kebab_config.global.line_length, 100);
+    assert!(!kebab_config.global.respect_gitignore);
+
+    // Snake_case (backward compatible)
+    let snake_toml = r#"
+[global]
+line_length = 100
+respect_gitignore = false
+force_exclude = true
+"#;
+    let snake_config: Config =
+        toml::from_str(snake_toml).expect("Snake_case config should parse for backward compatibility");
+    assert_eq!(snake_config.global.line_length, 100);
+    assert!(!snake_config.global.respect_gitignore);
+
+    // Both should produce the same result
+    assert_eq!(kebab_config.global.line_length, snake_config.global.line_length);
+    assert_eq!(
+        kebab_config.global.respect_gitignore,
+        snake_config.global.respect_gitignore
+    );
+}

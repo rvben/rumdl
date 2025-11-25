@@ -1,12 +1,15 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "additionalProperties": {
-    "$ref": "#/definitions/RuleConfig"
-  },
-  "definitions": {
+  "$defs": {
     "GlobalConfig": {
       "description": "Global configuration options",
       "properties": {
+        "cache-dir": {
+          "description": "Directory to store cache files (default: .rumdl_cache)\nCan also be set via --cache-dir CLI flag or RUMDL_CACHE_DIR environment variable",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "disable": {
           "default": [],
           "description": "Disabled rules",
@@ -33,25 +36,21 @@
         },
         "fixable": {
           "default": [],
-          "description": "Rules that are allowed to be fixed when --fix is used If specified, only these rules will be fixed",
+          "description": "Rules that are allowed to be fixed when --fix is used\nIf specified, only these rules will be fixed",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "flavor": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/MarkdownFlavor"
-            }
-          ],
+          "$ref": "#/$defs/MarkdownFlavor",
           "default": "standard",
-          "description": "Markdown flavor/dialect to use (mkdocs, gfm, commonmark, etc.) When set, adjusts parsing and validation rules for that specific Markdown variant"
+          "description": "Markdown flavor/dialect to use (mkdocs, gfm, commonmark, etc.)\nWhen set, adjusts parsing and validation rules for that specific Markdown variant"
         },
-        "force_exclude": {
+        "force-exclude": {
           "default": false,
           "deprecated": true,
-          "description": "[DEPRECATED] Whether to enforce exclude patterns for explicitly passed paths. This option is deprecated as of v0.0.156 and has no effect. Exclude patterns are now always respected, even for explicitly provided files. This prevents duplication between rumdl config and tool configs like pre-commit.",
+          "description": "[DEPRECATED] Whether to enforce exclude patterns for explicitly passed paths.\nThis option is deprecated as of v0.0.156 and has no effect.\nExclude patterns are now always respected, even for explicitly provided files.\nThis prevents duplication between rumdl config and tool configs like pre-commit.",
           "type": "boolean"
         },
         "include": {
@@ -62,28 +61,28 @@
           },
           "type": "array"
         },
-        "line_length": {
+        "line-length": {
           "default": 80,
           "description": "Global line length setting (used by MD013 and other rules if not overridden)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
-        "output_format": {
+        "output-format": {
           "description": "Output format for linting results (e.g., \"text\", \"json\", \"pylint\", etc.)",
           "type": [
             "string",
             "null"
           ]
         },
-        "respect_gitignore": {
+        "respect-gitignore": {
           "default": true,
           "description": "Respect .gitignore files when scanning directories",
           "type": "boolean"
         },
         "unfixable": {
           "default": [],
-          "description": "Rules that should never be fixed, even when --fix is used Takes precedence over fixable",
+          "description": "Rules that should never be fixed, even when --fix is used\nTakes precedence over fixable",
           "items": {
             "type": "string"
           },
@@ -96,31 +95,23 @@
       "description": "Markdown flavor/dialect enumeration",
       "oneOf": [
         {
+          "const": "standard",
           "description": "Standard Markdown without flavor-specific adjustments",
-          "enum": [
-            "standard"
-          ],
           "type": "string"
         },
         {
+          "const": "mkdocs",
           "description": "MkDocs flavor with auto-reference support",
-          "enum": [
-            "mkdocs"
-          ],
           "type": "string"
         },
         {
+          "const": "mdx",
           "description": "MDX flavor with JSX and ESM support (.mdx files)",
-          "enum": [
-            "mdx"
-          ],
           "type": "string"
         },
         {
+          "const": "quarto",
           "description": "Quarto/RMarkdown flavor for scientific publishing (.qmd, .Rmd files)",
-          "enum": [
-            "quarto"
-          ],
           "type": "string"
         }
       ]
@@ -131,24 +122,24 @@
       "type": "object"
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": {
+    "$ref": "#/definitions/RuleConfig"
+  },
   "description": "rumdl configuration for linting Markdown files. Rules can be configured individually using [MD###] sections with rule-specific options.",
   "properties": {
     "global": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/GlobalConfig"
-        }
-      ],
+      "$ref": "#/$defs/GlobalConfig",
       "default": {
         "disable": [],
         "enable": [],
         "exclude": [],
         "fixable": [],
         "flavor": "standard",
-        "force_exclude": false,
+        "force-exclude": false,
         "include": [],
-        "line_length": 80,
-        "respect_gitignore": true,
+        "line-length": 80,
+        "respect-gitignore": true,
         "unfixable": []
       },
       "description": "Global configuration options"
@@ -161,7 +152,7 @@
         "type": "array"
       },
       "default": {},
-      "description": "Per-file rule ignores: maps file patterns to lists of rules to ignore Example: { \"README.md\": [\"MD033\"], \"docs/**/*.md\": [\"MD013\"] }",
+      "description": "Per-file rule ignores: maps file patterns to lists of rules to ignore\nExample: { \"README.md\": [\"MD033\"], \"docs/**/*.md\": [\"MD013\"] }",
       "type": "object"
     }
   },
