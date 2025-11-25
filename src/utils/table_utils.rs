@@ -203,7 +203,21 @@ impl TableUtils {
     }
 
     /// Count the number of cells in a table row
+    /// Uses Standard/GFM behavior where pipes in inline code ARE cell delimiters
     pub fn count_cells(row: &str) -> usize {
+        Self::count_cells_with_flavor(row, crate::config::MarkdownFlavor::Standard)
+    }
+
+    /// Count the number of cells in a table row with flavor-specific behavior
+    ///
+    /// Different Markdown flavors handle pipes inside inline code differently:
+    /// - Standard/GFM: Pipes in backticks ARE cell delimiters (GitHub behavior)
+    /// - MkDocs: Pipes in backticks are NOT cell delimiters (Python-Markdown behavior)
+    ///
+    /// This difference is due to Python-Markdown (used by MkDocs) fixing the parsing
+    /// to handle inline code spans before splitting by pipes, while GitHub GFM
+    /// splits by pipes first.
+    pub fn count_cells_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> usize {
         let trimmed = row.trim();
 
         // Skip non-table rows
@@ -211,8 +225,16 @@ impl TableUtils {
             return 0;
         }
 
-        // Users shouldn't have to escape pipes in regex patterns, inline code, etc.
-        let masked_row = Self::mask_pipes_for_table_parsing(trimmed);
+        // First, apply escape handling (same for all flavors)
+        let escaped_row = Self::mask_pipes_for_table_parsing(trimmed);
+
+        // For MkDocs flavor, also mask pipes inside inline code
+        // Python-Markdown parses inline code before splitting by pipes
+        let masked_row = if flavor == crate::config::MarkdownFlavor::MkDocs {
+            Self::mask_pipes_in_inline_code(&escaped_row)
+        } else {
+            escaped_row
+        };
 
         // Handle case with leading/trailing pipes
         let mut cell_count = 0;

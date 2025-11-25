@@ -17,8 +17,8 @@ impl Default for MD056TableColumnCount {
 
 impl MD056TableColumnCount {
     /// Try to fix a table row to match the expected column count
-    fn fix_table_row(&self, row: &str, expected_count: usize) -> Option<String> {
-        let current_count = TableUtils::count_cells(row);
+    fn fix_table_row(&self, row: &str, expected_count: usize, flavor: crate::config::MarkdownFlavor) -> Option<String> {
+        let current_count = TableUtils::count_cells_with_flavor(row, flavor);
 
         if current_count == expected_count || current_count == 0 {
             return None;
@@ -28,30 +28,30 @@ impl MD056TableColumnCount {
         let has_leading_pipe = trimmed.starts_with('|');
         let has_trailing_pipe = trimmed.ends_with('|');
 
-        let parts: Vec<&str> = trimmed.split('|').collect();
-        let mut cells = Vec::new();
+        // Use flavor-aware cell splitting
+        let cells = Self::split_row_into_cells(trimmed, flavor);
 
-        // Extract actual cell content
-        for (i, part) in parts.iter().enumerate() {
+        let mut cell_contents: Vec<&str> = Vec::new();
+        for (i, cell) in cells.iter().enumerate() {
             // Skip empty leading/trailing parts
-            if (i == 0 && part.trim().is_empty() && has_leading_pipe)
-                || (i == parts.len() - 1 && part.trim().is_empty() && has_trailing_pipe)
+            if (i == 0 && cell.trim().is_empty() && has_leading_pipe)
+                || (i == cells.len() - 1 && cell.trim().is_empty() && has_trailing_pipe)
             {
                 continue;
             }
-            cells.push(part.trim());
+            cell_contents.push(cell.trim());
         }
 
         // Adjust cell count to match expected count
         match current_count.cmp(&expected_count) {
             std::cmp::Ordering::Greater => {
                 // Too many cells, remove excess
-                cells.truncate(expected_count);
+                cell_contents.truncate(expected_count);
             }
             std::cmp::Ordering::Less => {
                 // Too few cells, add empty ones
-                while cells.len() < expected_count {
-                    cells.push("");
+                while cell_contents.len() < expected_count {
+                    cell_contents.push("");
                 }
             }
             std::cmp::Ordering::Equal => {
@@ -65,14 +65,48 @@ impl MD056TableColumnCount {
             result.push('|');
         }
 
-        for (i, cell) in cells.iter().enumerate() {
+        for (i, cell) in cell_contents.iter().enumerate() {
             result.push_str(&format!(" {cell} "));
-            if i < cells.len() - 1 || has_trailing_pipe {
+            if i < cell_contents.len() - 1 || has_trailing_pipe {
                 result.push('|');
             }
         }
 
         Some(result)
+    }
+
+    /// Split a table row into cells, respecting flavor-specific behavior
+    ///
+    /// For MkDocs flavor, pipes inside inline code are NOT cell delimiters.
+    /// For Standard/GFM flavor, all pipes are cell delimiters.
+    fn split_row_into_cells(row: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
+        // First, mask escaped pipes (same for all flavors)
+        let masked = TableUtils::mask_pipes_for_table_parsing(row);
+
+        // For MkDocs flavor, also mask pipes inside inline code
+        let final_masked = if flavor == crate::config::MarkdownFlavor::MkDocs {
+            TableUtils::mask_pipes_in_inline_code(&masked)
+        } else {
+            masked
+        };
+
+        // Split by pipes on the masked string, then extract corresponding
+        // original content from the unmasked row
+        let masked_parts: Vec<&str> = final_masked.split('|').collect();
+        let mut cells = Vec::new();
+        let mut pos = 0;
+
+        for masked_part in masked_parts {
+            let cell_len = masked_part.len();
+            if pos + cell_len <= row.len() {
+                cells.push(row[pos..pos + cell_len].to_string());
+            } else {
+                cells.push(masked_part.to_string());
+            }
+            pos += cell_len + 1; // +1 for the pipe delimiter
+        }
+
+        cells
     }
 }
 
@@ -92,6 +126,7 @@ impl Rule for MD056TableColumnCount {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+        let flavor = ctx.flavor;
         let mut warnings = Vec::new();
 
         // Early return for empty content or content without tables
@@ -106,7 +141,7 @@ impl Rule for MD056TableColumnCount {
 
         for table_block in table_blocks {
             // Determine expected column count from header row
-            let expected_count = TableUtils::count_cells(lines[table_block.header_line]);
+            let expected_count = TableUtils::count_cells_with_flavor(lines[table_block.header_line], flavor);
 
             if expected_count == 0 {
                 continue; // Skip invalid tables
@@ -119,10 +154,10 @@ impl Rule for MD056TableColumnCount {
 
             for line_idx in all_lines {
                 let line = lines[line_idx];
-                let count = TableUtils::count_cells(line);
+                let count = TableUtils::count_cells_with_flavor(line, flavor);
 
                 if count > 0 && count != expected_count {
-                    let fix_result = self.fix_table_row(line, expected_count);
+                    let fix_result = self.fix_table_row(line, expected_count, flavor);
 
                     // Calculate precise character range for the entire table row
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);

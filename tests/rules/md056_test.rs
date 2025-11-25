@@ -156,3 +156,95 @@ but isn't actually a table row.
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
+
+/// Test for issue #165: MkDocs flavor should treat pipes inside backticks as content, not delimiters
+#[test]
+fn test_mkdocs_flavor_pipes_in_code_spans_issue_165() {
+    let rule = MD056TableColumnCount;
+
+    // This table has pipes inside inline code - in MkDocs flavor they should NOT be cell delimiters
+    let content = r#"
+| Python type | Example  |
+| ----------- | -------- |
+| Union       | `x | y`  |
+| Dict        | `dict[str, int]` |
+"#;
+
+    // With MkDocs flavor, the table should be valid (2 columns throughout)
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        0,
+        "MkDocs flavor should treat pipes in backticks as content, not delimiters"
+    );
+
+    // With Standard/GFM flavor, the same table would have inconsistent columns
+    // because GFM treats pipes inside backticks as delimiters
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Standard flavor treats pipes in backticks as delimiters, causing column mismatch"
+    );
+}
+
+/// Test various code span patterns with pipes in MkDocs flavor
+#[test]
+fn test_mkdocs_flavor_various_code_spans_with_pipes() {
+    let rule = MD056TableColumnCount;
+
+    let content = r#"
+| Type | Syntax |
+| ---- | ------ |
+| OR   | `a | b` |
+| Pipe | `|` |
+| Multi | `a | b | c` |
+"#;
+
+    // MkDocs: all rows should have 2 columns
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "MkDocs should handle multiple pipes in code spans");
+}
+
+/// Test that escaped pipes work correctly in both flavors
+#[test]
+fn test_escaped_pipes_both_flavors() {
+    let rule = MD056TableColumnCount;
+
+    let content = r#"
+| Col1 | Col2 |
+| ---- | ---- |
+| a \| b | c |
+"#;
+
+    // Escaped pipes should work in both flavors
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "Escaped pipes should work in Standard flavor");
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "Escaped pipes should work in MkDocs flavor");
+}
+
+/// Test fix preserves inline code with pipes in MkDocs flavor
+#[test]
+fn test_mkdocs_flavor_fix_preserves_inline_code_pipes() {
+    let rule = MD056TableColumnCount;
+
+    // Table with missing column but also inline code with pipe
+    let content = r#"
+| Type | Syntax | Description |
+| ---- | ------ | ----------- |
+| OR   | `a | b` |
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let result = rule.fix(&ctx).unwrap();
+
+    // The fix should add an empty cell, preserving the inline code
+    assert!(result.contains("`a | b`"), "Fix should preserve inline code with pipe");
+}
