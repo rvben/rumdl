@@ -402,6 +402,72 @@ impl MD060TableFormat {
         format!("|{}|", formatted_cells.join("|"))
     }
 
+    /// Checks if a table is already aligned with consistent column widths.
+    ///
+    /// A table is considered "already aligned" if:
+    /// 1. All rows have the same display length
+    /// 2. Each column has consistent cell width across all rows
+    /// 3. The delimiter row has valid minimum widths (at least 3 chars per cell)
+    fn is_table_already_aligned(table_lines: &[&str]) -> bool {
+        if table_lines.len() < 2 {
+            return false;
+        }
+
+        // Check 1: All rows must have the same length
+        let first_len = table_lines[0].len();
+        if !table_lines.iter().all(|line| line.len() == first_len) {
+            return false;
+        }
+
+        // Parse all rows and check column count consistency
+        let parsed: Vec<Vec<String>> = table_lines.iter().map(|line| Self::parse_table_row(line)).collect();
+
+        if parsed.is_empty() {
+            return false;
+        }
+
+        let num_columns = parsed[0].len();
+        if !parsed.iter().all(|row| row.len() == num_columns) {
+            return false;
+        }
+
+        // Check delimiter row has valid minimum widths (3 chars: at least one dash + optional colons)
+        // Delimiter row is always at index 1
+        if let Some(delimiter_row) = parsed.get(1) {
+            if !Self::is_delimiter_row(delimiter_row) {
+                return false;
+            }
+            // Check each delimiter cell has at least one dash (minimum valid is "---" or ":--" etc)
+            for cell in delimiter_row {
+                let trimmed = cell.trim();
+                let dash_count = trimmed.chars().filter(|&c| c == '-').count();
+                if dash_count < 1 {
+                    return false;
+                }
+            }
+        }
+
+        // Check each column has consistent width across all content rows
+        for col_idx in 0..num_columns {
+            let mut widths = Vec::new();
+            for (row_idx, row) in parsed.iter().enumerate() {
+                // Skip delimiter row for content width check
+                if row_idx == 1 {
+                    continue;
+                }
+                if let Some(cell) = row.get(col_idx) {
+                    widths.push(cell.len());
+                }
+            }
+            // All content cells in this column should have the same raw width
+            if !widths.is_empty() && !widths.iter().all(|&w| w == widths[0]) {
+                return false;
+            }
+        }
+
+        true
+    }
+
     fn detect_table_style(table_lines: &[&str]) -> Option<String> {
         if table_lines.is_empty() {
             return None;
@@ -531,6 +597,16 @@ impl MD060TableFormat {
                 }
             }
             "aligned" => {
+                // If the table is already aligned with consistent column widths,
+                // preserve it as-is rather than forcing our preferred minimum widths
+                if Self::is_table_already_aligned(&table_lines) {
+                    return TableFormatResult {
+                        lines: table_lines.iter().map(|s| s.to_string()).collect(),
+                        auto_compacted: false,
+                        aligned_width: None,
+                    };
+                }
+
                 let column_widths = Self::calculate_column_widths(&table_lines);
 
                 // Calculate aligned table width: 1 (leading pipe) + num_columns * 3 (| cell |) + sum(column_widths)

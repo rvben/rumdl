@@ -256,7 +256,8 @@ fn test_md060_table_with_trailing_newline() {
 fn test_md060_multiple_tables() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
-    let content = "# First Table\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n# Second Table\n\n| X | Y | Z |\n|---|---|---|\n| a | b | c |";
+    // Use ACTUALLY misaligned tables (different row lengths within each table)
+    let content = "# First Table\n\n| A | B |\n|---|---|\n| 1 | 2222 |\n\n# Second Table\n\n| X | Y | Z |\n|---|---|---|\n| aaaa | b | c |";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
 
     let fixed = rule.fix(&ctx).unwrap();
