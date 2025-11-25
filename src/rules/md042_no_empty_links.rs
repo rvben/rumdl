@@ -1,6 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
-use pulldown_cmark::LinkType;
 
 /// Rule MD042: No empty links
 ///
@@ -205,12 +204,20 @@ impl Rule for MD042NoEmptyLinks {
                 continue;
             }
 
-            // Skip Obsidian block references (wiki-links with #^ pattern)
-            // Examples: [[#^block-id]] or [[Note#^block-id]]
-            // These are valid Obsidian syntax where the display text is auto-generated from the referenced block
-            if matches!(link.link_type, LinkType::WikiLink { .. })
-                && link.text.trim().is_empty()
-                && link.url.contains("#^")
+            // Skip wiki-style links (Obsidian/Notion syntax: [[Page Name]] or [[Page|Display]])
+            // Wiki links are valid syntax and should never be flagged as "empty links".
+            // This covers all wiki link patterns including:
+            // - Basic: [[Page Name]]
+            // - With path: [[Folder/Page]]
+            // - With alias: [[Page|Display Text]]
+            // - With heading: [[Page#heading]]
+            // - Block references: [[Page#^block-id]] or [[#^block-id]]
+            //
+            // Detection: pulldown-cmark captures [[Example] as bytes 0..10, with trailing ] at byte 10
+            // We check: starts with "[[" AND the char after byte_end is "]"
+            if link_markdown.starts_with("[[")
+                && link_markdown.ends_with(']')
+                && ctx.content.as_bytes().get(link.byte_end) == Some(&b']')
             {
                 continue;
             }

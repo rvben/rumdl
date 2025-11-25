@@ -555,8 +555,8 @@ fn test_md042_nested_links() {
 
     // Test 10: Nested link-like structures
     // With ENABLE_WIKILINKS: [[text]] is parsed as a wiki-link
-    // [[Double brackets]](url) becomes a wiki-link with empty text pointing to "Double brackets"
-    // The trailing (url) is just plain text, not part of the link
+    // [[Double brackets]](url) becomes a wiki-link pointing to "Double brackets" followed by "(url)" as plain text
+    // Wiki-links with valid page names (even with spaces) are VALID and should not be flagged
     let content = "\
 [Link [with] brackets](url)
 [Link (with) parens](url)
@@ -566,15 +566,13 @@ fn test_md042_nested_links() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // With wiki-links enabled, we get 2 empty links:
-    // 1. [[Double brackets]] - wiki-link with empty text
-    // 2. [](url) - explicit empty link
+    // Only [](url) should be flagged - wiki-link [[Double brackets]] is valid
+    // Wiki-links derive their display text from the page name, so empty text is expected
     assert_eq!(
         result.len(),
-        2,
-        "Should detect empty text in wiki-link and regular empty link"
+        1,
+        "Should only flag [](url), not wiki-link [[Double brackets]]. Got: {result:?}"
     );
-    assert!(result.iter().any(|w| w.message.contains("[[Double brackets")));
     assert!(result.iter().any(|w| w.message.contains("[](url)")));
 }
 

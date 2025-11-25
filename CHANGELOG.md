@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.182] - 2025-11-25
+
+### Added
+
+- **cache clean command**
+  - Added `rumdl clean` command to clear the cache directory
+  - Useful for forcing re-linting of all files
+
+- **MD013 (line-length): Visual width mode for CJK and emoji**
+  - Added `visual-width` option that counts CJK characters as double-width
+  - Properly handles emoji and other wide characters for accurate line length checking
+  - Useful for East Asian language documentation
+
+- **MD013 (line-length): Custom abbreviation support**
+  - Added `abbreviations` config option for defining custom abbreviations
+  - Custom abbreviations are respected during sentence-per-line reflow
+  - Prevents unwanted line breaks after user-defined abbreviations
+
+- **Configuration file discovery: .config/rumdl.toml support**
+  - Added support for `.config/rumdl.toml` as a valid configuration location
+  - Follows XDG Base Directory-style pattern for project-level config
+  - Discovery order: `.rumdl.toml` → `.config/rumdl.toml` → `pyproject.toml`
+
+- **MD022 docs: Per-level configuration documentation**
+  - Added documentation for per-level `lines-above` and `lines-below` arrays
+  - Shows how to specify different spacing requirements for each heading level (h1-h6)
+
+### Fixed
+
+- **MD042 (no-empty-links): Wiki-style links no longer flagged as empty (fixes discussion #153)**
+  - Wiki-style links like `[[Page Name]]`, `[[Folder/Page]]`, and `[[Page|Display Text]]` are now recognized
+  - Prevents false positives for Obsidian/Notion-style wiki link syntax
+  - Block references like `[[#^block-id]]` are also handled correctly
+
+- **MD056 (table-column-count): Handle escaped pipes correctly in GFM tables (fixes #163)**
+  - GFM table parsing now correctly handles backslash-escaped pipes (`\|`)
+  - Inline code spans do NOT protect pipes from being cell delimiters (per GFM spec)
+  - Only `\|` is treated as literal pipe content
+
+- **MD060 (table-format): Accept tables that are already aligned (fixes #164)**
+  - Tables with consistent column widths across all rows are now accepted as aligned
+  - Short separator rows (e.g., `:--` instead of `:---`) no longer trigger reformatting
+  - Reduces false positives for manually aligned tables
+
+### Changed
+
+- **Documentation: Corrected timestamps in CHANGELOG for versions 0.0.172-0.0.178**
+
 ## [0.0.181] - 2025-11-20
 
 ### Added

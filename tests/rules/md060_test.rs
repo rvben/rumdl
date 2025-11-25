@@ -1261,17 +1261,18 @@ fn test_md060_many_rows_stress() {
 fn test_md060_deeply_nested_inline_code() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
-    // Multiple levels of inline code with pipes
-    let content =
-        "| Code | Description |\n|---|---|\n| `a|b` | Simple |\n| `x|y|z` | Multiple |\n| `{a|b}|{c|d}` | Complex |";
+    // Per GFM spec, inline code does NOT protect pipes from being cell delimiters.
+    // To have literal pipes in table cells, use backslash-escaped pipes (\|).
+    // This test verifies escaped pipes inside inline code are preserved during formatting.
+    let content = "| Code | Description |\n|---|---|\n| `a\\|b` | Simple |\n| `x\\|y\\|z` | Multiple |\n| `{a\\|b}\\|{c\\|d}` | Complex |";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard);
 
     let fixed = rule.fix(&ctx).unwrap();
 
-    // All inline code with pipes should be preserved
-    assert!(fixed.contains("`a|b`"));
-    assert!(fixed.contains("`x|y|z`"));
-    assert!(fixed.contains("`{a|b}|{c|d}`"));
+    // Escaped pipes inside inline code should be preserved
+    assert!(fixed.contains("`a\\|b`"));
+    assert!(fixed.contains("`x\\|y\\|z`"));
+    assert!(fixed.contains("`{a\\|b}\\|{c\\|d}`"));
 
     let lines: Vec<&str> = fixed.lines().collect();
     assert_eq!(lines[0].len(), lines[1].len());

@@ -532,13 +532,73 @@ fn test_obsidian_block_references() {
 
     // Note: [[]] (empty wiki-link) is NOT parsed as a link by pulldown-cmark, so we skip this test case
 
-    // Test wiki-link with heading but not block reference (regular anchor)
+    // Wiki-links with heading anchors are valid - they link to a heading in another page
+    // [[Note#heading]] is valid wiki syntax and should NOT be flagged
     let content = "Regular anchor: [[Note#heading]]";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Should flag wiki-links with regular headings (no ^) as empty if text is empty"
+    assert!(
+        result.is_empty(),
+        "Wiki-links with heading anchors [[Note#heading]] are valid and should not be flagged. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_wiki_style_links_not_flagged() {
+    // Discussion #153: Wiki-style links [[Page Name]] should not be flagged as empty links
+    let rule = MD042NoEmptyLinks::new();
+
+    // Basic wiki link
+    let content = "[[Example]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag wiki-style links [[Example]]. Got: {result:?}"
+    );
+
+    // Wiki link with spaces in page name
+    let content = "[[Page Name]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag wiki-style links with spaces [[Page Name]]. Got: {result:?}"
+    );
+
+    // Wiki link with path
+    let content = "[[Folder/Page]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag wiki-style links with paths [[Folder/Page]]. Got: {result:?}"
+    );
+
+    // Wiki link with display text (Obsidian/Notion syntax)
+    let content = "[[Page|Display Text]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag wiki-style links with display text [[Page|Display Text]]. Got: {result:?}"
+    );
+
+    // Multiple wiki links in paragraph
+    let content = "Check out [[Page One]] and [[Page Two]] for details.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag multiple wiki-style links. Got: {result:?}"
+    );
+
+    // Wiki link with block reference
+    let content = "[[#^block-id]]";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should not flag wiki-style block references. Got: {result:?}"
     );
 }
