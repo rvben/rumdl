@@ -208,14 +208,34 @@ impl MD060TableFormat {
         masked.trim().width()
     }
 
+    /// Parse a table row into cells using Standard flavor (default behavior).
+    /// Used for tests and backward compatibility.
+    #[cfg(test)]
     fn parse_table_row(line: &str) -> Vec<String> {
+        Self::parse_table_row_with_flavor(line, crate::config::MarkdownFlavor::Standard)
+    }
+
+    /// Parse a table row into cells, respecting flavor-specific behavior.
+    ///
+    /// For MkDocs flavor, pipes inside inline code are NOT cell delimiters.
+    /// For Standard/GFM flavor, all pipes (except escaped) are cell delimiters.
+    fn parse_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
         let trimmed = line.trim();
+
+        // First, mask escaped pipes (same for all flavors)
         let masked = TableUtils::mask_pipes_for_table_parsing(trimmed);
 
-        let has_leading = masked.starts_with('|');
-        let has_trailing = masked.ends_with('|');
+        // For MkDocs flavor, also mask pipes inside inline code
+        let final_masked = if flavor == crate::config::MarkdownFlavor::MkDocs {
+            TableUtils::mask_pipes_in_inline_code(&masked)
+        } else {
+            masked
+        };
 
-        let mut masked_content = masked.as_str();
+        let has_leading = final_masked.starts_with('|');
+        let has_trailing = final_masked.ends_with('|');
+
+        let mut masked_content = final_masked.as_str();
         let mut orig_content = trimmed;
 
         if has_leading {
@@ -276,12 +296,12 @@ impl MD060TableFormat {
             .collect()
     }
 
-    fn calculate_column_widths(table_lines: &[&str]) -> Vec<usize> {
+    fn calculate_column_widths(table_lines: &[&str], flavor: crate::config::MarkdownFlavor) -> Vec<usize> {
         let mut column_widths = Vec::new();
         let mut delimiter_cells: Option<Vec<String>> = None;
 
         for line in table_lines {
-            let cells = Self::parse_table_row(line);
+            let cells = Self::parse_table_row_with_flavor(line, flavor);
 
             // Save delimiter row for later processing, but don't use it for width calculation
             if Self::is_delimiter_row(&cells) {
@@ -408,7 +428,7 @@ impl MD060TableFormat {
     /// 1. All rows have the same display length
     /// 2. Each column has consistent cell width across all rows
     /// 3. The delimiter row has valid minimum widths (at least 3 chars per cell)
-    fn is_table_already_aligned(table_lines: &[&str]) -> bool {
+    fn is_table_already_aligned(table_lines: &[&str], flavor: crate::config::MarkdownFlavor) -> bool {
         if table_lines.len() < 2 {
             return false;
         }
@@ -420,7 +440,10 @@ impl MD060TableFormat {
         }
 
         // Parse all rows and check column count consistency
-        let parsed: Vec<Vec<String>> = table_lines.iter().map(|line| Self::parse_table_row(line)).collect();
+        let parsed: Vec<Vec<String>> = table_lines
+            .iter()
+            .map(|line| Self::parse_table_row_with_flavor(line, flavor))
+            .collect();
 
         if parsed.is_empty() {
             return false;
@@ -468,7 +491,7 @@ impl MD060TableFormat {
         true
     }
 
-    fn detect_table_style(table_lines: &[&str]) -> Option<String> {
+    fn detect_table_style(table_lines: &[&str], flavor: crate::config::MarkdownFlavor) -> Option<String> {
         if table_lines.is_empty() {
             return None;
         }
@@ -479,7 +502,7 @@ impl MD060TableFormat {
         let mut is_compact = true;
 
         for line in table_lines {
-            let cells = Self::parse_table_row(line);
+            let cells = Self::parse_table_row_with_flavor(line, flavor);
 
             if cells.is_empty() {
                 continue;
@@ -529,6 +552,7 @@ impl MD060TableFormat {
         &self,
         lines: &[&str],
         table_block: &crate::utils::table_utils::TableBlock,
+        flavor: crate::config::MarkdownFlavor,
     ) -> TableFormatResult {
         let mut result = Vec::new();
         let mut auto_compacted = false;
@@ -551,7 +575,7 @@ impl MD060TableFormat {
 
         match style {
             "any" => {
-                let detected_style = Self::detect_table_style(&table_lines);
+                let detected_style = Self::detect_table_style(&table_lines, flavor);
                 if detected_style.is_none() {
                     return TableFormatResult {
                         lines: table_lines.iter().map(|s| s.to_string()).collect(),
@@ -563,16 +587,16 @@ impl MD060TableFormat {
                 let target_style = detected_style.unwrap();
 
                 // Parse column alignments from delimiter row (always at index 1)
-                let delimiter_cells = Self::parse_table_row(table_lines[1]);
+                let delimiter_cells = Self::parse_table_row_with_flavor(table_lines[1], flavor);
                 let column_alignments = Self::parse_column_alignments(&delimiter_cells);
 
                 for line in &table_lines {
-                    let cells = Self::parse_table_row(line);
+                    let cells = Self::parse_table_row_with_flavor(line, flavor);
                     match target_style.as_str() {
                         "tight" => result.push(Self::format_table_tight(&cells)),
                         "compact" => result.push(Self::format_table_compact(&cells)),
                         _ => {
-                            let column_widths = Self::calculate_column_widths(&table_lines);
+                            let column_widths = Self::calculate_column_widths(&table_lines, flavor);
                             let is_delimiter = Self::is_delimiter_row(&cells);
                             result.push(Self::format_table_row(
                                 &cells,
@@ -586,20 +610,20 @@ impl MD060TableFormat {
             }
             "compact" => {
                 for line in table_lines {
-                    let cells = Self::parse_table_row(line);
+                    let cells = Self::parse_table_row_with_flavor(line, flavor);
                     result.push(Self::format_table_compact(&cells));
                 }
             }
             "tight" => {
                 for line in table_lines {
-                    let cells = Self::parse_table_row(line);
+                    let cells = Self::parse_table_row_with_flavor(line, flavor);
                     result.push(Self::format_table_tight(&cells));
                 }
             }
             "aligned" => {
                 // If the table is already aligned with consistent column widths,
                 // preserve it as-is rather than forcing our preferred minimum widths
-                if Self::is_table_already_aligned(&table_lines) {
+                if Self::is_table_already_aligned(&table_lines, flavor) {
                     return TableFormatResult {
                         lines: table_lines.iter().map(|s| s.to_string()).collect(),
                         auto_compacted: false,
@@ -607,7 +631,7 @@ impl MD060TableFormat {
                     };
                 }
 
-                let column_widths = Self::calculate_column_widths(&table_lines);
+                let column_widths = Self::calculate_column_widths(&table_lines, flavor);
 
                 // Calculate aligned table width: 1 (leading pipe) + num_columns * 3 (| cell |) + sum(column_widths)
                 let num_columns = column_widths.len();
@@ -618,16 +642,16 @@ impl MD060TableFormat {
                 if calc_aligned_width > self.effective_max_width() {
                     auto_compacted = true;
                     for line in table_lines {
-                        let cells = Self::parse_table_row(line);
+                        let cells = Self::parse_table_row_with_flavor(line, flavor);
                         result.push(Self::format_table_compact(&cells));
                     }
                 } else {
                     // Parse column alignments from delimiter row (always at index 1)
-                    let delimiter_cells = Self::parse_table_row(table_lines[1]);
+                    let delimiter_cells = Self::parse_table_row_with_flavor(table_lines[1], flavor);
                     let column_alignments = Self::parse_column_alignments(&delimiter_cells);
 
                     for line in table_lines {
-                        let cells = Self::parse_table_row(line);
+                        let cells = Self::parse_table_row_with_flavor(line, flavor);
                         let is_delimiter = Self::is_delimiter_row(&cells);
                         result.push(Self::format_table_row(
                             &cells,
@@ -681,7 +705,7 @@ impl Rule for MD060TableFormat {
         let table_blocks = &ctx.table_blocks;
 
         for table_block in table_blocks {
-            let format_result = self.fix_table_block(&lines, table_block);
+            let format_result = self.fix_table_block(&lines, table_block, ctx.flavor);
 
             let table_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
@@ -745,7 +769,7 @@ impl Rule for MD060TableFormat {
         let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
         for table_block in table_blocks {
-            let format_result = self.fix_table_block(&lines, table_block);
+            let format_result = self.fix_table_block(&lines, table_block, ctx.flavor);
 
             let table_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))

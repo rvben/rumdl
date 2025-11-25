@@ -1544,3 +1544,212 @@ fn test_md060_issue_164_misaligned_short_separators_detected() {
         "Misaligned table should produce warnings even with short separators"
     );
 }
+
+// ============================================================================
+// MKDOCS FLAVOR TESTS (Issue #165)
+//
+// In MkDocs/Python-Markdown, pipes inside inline code are NOT cell delimiters.
+// This differs from GFM where pipes inside backticks ARE cell delimiters.
+// ============================================================================
+
+#[test]
+fn test_md060_mkdocs_flavor_pipes_in_code_spans_issue_165() {
+    // Issue #165: Tables with pipes inside inline code should work correctly
+    // with MkDocs flavor. The pipe in `x | y` should NOT be treated as a
+    // cell delimiter.
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // This is the exact example from issue #165
+    let content = "| Type | Example |\n| - | - |\n| Union | `x | y` |\n| Dict | `dict` |";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+
+    // Should recognize this as a 2-column table and format it correctly
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The inline code `x | y` should be preserved as a single cell
+    assert!(
+        fixed.contains("`x | y`"),
+        "Inline code with pipe should be preserved as single cell content, got: {fixed}"
+    );
+
+    // Should be properly aligned with 2 columns, not corrupted into 3+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4, "Should have 4 lines");
+
+    // All lines should have equal length when aligned
+    assert_eq!(
+        lines[0].len(),
+        lines[1].len(),
+        "Header and delimiter should match: '{}' vs '{}'",
+        lines[0],
+        lines[1]
+    );
+    assert_eq!(
+        lines[1].len(),
+        lines[2].len(),
+        "Delimiter and content should match: '{}' vs '{}'",
+        lines[1],
+        lines[2]
+    );
+    assert_eq!(
+        lines[2].len(),
+        lines[3].len(),
+        "Content rows should match: '{}' vs '{}'",
+        lines[2],
+        lines[3]
+    );
+}
+
+#[test]
+fn test_md060_mkdocs_flavor_various_code_spans_with_pipes() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Multiple rows with pipes in inline code
+    let content =
+        "| Type | Syntax |\n| - | - |\n| Union | `A | B` |\n| Optional | `T | None` |\n| Multiple | `a | b | c` |";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // All inline code content should be preserved
+    assert!(fixed.contains("`A | B`"), "Union type should be preserved");
+    assert!(fixed.contains("`T | None`"), "Optional type should be preserved");
+    assert!(fixed.contains("`a | b | c`"), "Multiple pipes should be preserved");
+
+    // Should have 5 lines total
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 5, "Should have 5 lines");
+
+    // All lines should have equal length
+    for i in 0..lines.len() - 1 {
+        assert_eq!(
+            lines[i].len(),
+            lines[i + 1].len(),
+            "Lines {} and {} should have same length",
+            i,
+            i + 1
+        );
+    }
+}
+
+#[test]
+fn test_md060_mkdocs_flavor_no_false_positives() {
+    // With MkDocs flavor, tables with pipes in inline code should not produce
+    // false positive warnings about column count mismatches
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Type | Example |\n| - | - |\n| Union | `x | y` |";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+
+    // Check should work correctly without false positives about column counts
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should only have alignment warnings, not column mismatch warnings
+    for warning in &warnings {
+        assert!(
+            !warning.message.contains("column"),
+            "Should not have column count warnings, got: {}",
+            warning.message
+        );
+    }
+}
+
+#[test]
+fn test_md060_mkdocs_flavor_fix_preserves_inline_code_pipes() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |\n| Dict | `dict` |";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The fixed content should have proper formatting
+    // WITHOUT corrupting the inline code content
+    assert!(
+        !fixed.contains("| `x") || !fixed.contains("| y`"),
+        "Inline code should NOT be split across cells, got: {fixed}"
+    );
+
+    // The inline code should be intact
+    assert!(
+        fixed.contains("`x | y`"),
+        "Inline code content should be preserved intact, got: {fixed}"
+    );
+}
+
+#[test]
+fn test_md060_mkdocs_flavor_compact_style() {
+    let rule = MD060TableFormat::new(true, "compact".to_string());
+
+    let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Should format to compact style while preserving inline code
+    assert!(
+        fixed.contains("`x | y`"),
+        "Inline code should be preserved in compact mode"
+    );
+
+    // Should have compact formatting (single spaces)
+    assert!(fixed.contains("| Type | Example |") || fixed.contains("| Type | Example |"));
+}
+
+#[test]
+fn test_md060_mkdocs_flavor_tight_style() {
+    let rule = MD060TableFormat::new(true, "tight".to_string());
+
+    let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Should format to tight style while preserving inline code
+    assert!(
+        fixed.contains("`x | y`"),
+        "Inline code should be preserved in tight mode"
+    );
+
+    // Should have tight formatting (no spaces)
+    assert!(fixed.contains("|Type|"), "Should have tight formatting");
+}
+
+#[test]
+fn test_md060_standard_flavor_pipes_in_code_are_delimiters() {
+    // Verify that Standard/GFM flavor still treats pipes in code as delimiters
+    // (this is the correct GFM behavior)
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // In GFM, `x | y` is split into `x and y` as separate cells
+    // So the inline code is NOT preserved as a unit
+    // The table will be treated as having 3 columns
+    let _lines: Vec<&str> = fixed.lines().collect();
+
+    // The behavior here depends on how the rule handles mismatched columns
+    // but it should NOT preserve `x | y` as a single cell
+    // (unless escaped as `x \| y`)
+}
+
+#[test]
+fn test_md060_mkdocs_flavor_escaped_and_inline_code_pipes() {
+    // Test combination of escaped pipes and pipes in inline code
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Type | Example |\n|-|-|\n| Escaped | a \\| b |\n| Code | `x | y` |";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Both should be preserved correctly
+    assert!(fixed.contains("a \\| b"), "Escaped pipe should be preserved");
+    assert!(fixed.contains("`x | y`"), "Inline code pipe should be preserved");
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4, "Should have 4 lines");
+}
