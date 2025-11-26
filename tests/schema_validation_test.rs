@@ -32,7 +32,7 @@ fn validate_toml_config(toml_str: &str) -> Result<(), String> {
 #[test]
 fn test_schema_exists() {
     let schema = load_schema();
-    assert_eq!(schema["$schema"], "http://json-schema.org/draft-07/schema#");
+    assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
     assert_eq!(schema["title"], "Config");
 }
 
@@ -214,24 +214,26 @@ disable = "MD013"  # Should be an array, not a string
 
 #[test]
 fn test_invalid_type_for_line_length() {
+    // Use kebab-case since that's what the JSON schema uses
     let toml = r#"
 [global]
-line_length = "100"  # Should be a number, not a string
+line-length = "100"  # Should be a number, not a string
 "#;
     let result = validate_toml_config(toml);
-    assert!(result.is_err(), "Wrong type for line_length should fail validation");
+    assert!(result.is_err(), "Wrong type for line-length should fail validation");
 }
 
 #[test]
 fn test_invalid_type_for_respect_gitignore() {
+    // Use kebab-case since that's what the JSON schema uses
     let toml = r#"
 [global]
-respect_gitignore = "true"  # Should be boolean, not string
+respect-gitignore = "true"  # Should be boolean, not string
 "#;
     let result = validate_toml_config(toml);
     assert!(
         result.is_err(),
-        "Wrong type for respect_gitignore should fail validation"
+        "Wrong type for respect-gitignore should fail validation"
     );
 }
 

@@ -1634,28 +1634,28 @@ fn test_md060_mkdocs_flavor_various_code_spans_with_pipes() {
 
 #[test]
 fn test_md060_mkdocs_flavor_no_false_positives() {
-    // With MkDocs flavor, tables with pipes in inline code should not produce
-    // false positive warnings about column count mismatches
+    // With MkDocs flavor, tables with pipes in inline code should be parsed correctly
+    // as 2 columns, not 3 columns. The pipe in `x | y` is NOT a cell delimiter.
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
-    let content = "| Type | Example |\n| - | - |\n| Union | `x | y` |";
+    // Use a table that would be already aligned if parsed correctly as 2 columns
+    let content = "| Type  | Example  |\n| ----- | -------- |\n| Union | `x | y`  |";
     let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
 
-    // Check should work correctly without false positives about column counts
+    // Check should produce no warnings because table is aligned with consistent columns
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should only have alignment warnings, not column mismatch warnings
-    for warning in &warnings {
-        assert!(
-            !warning.message.contains("column"),
-            "Should not have column count warnings, got: {}",
-            warning.message
-        );
-    }
+    // Should have no warnings for a well-formatted 2-column table
+    assert!(
+        warnings.is_empty(),
+        "Should have no warnings for aligned 2-column table with MkDocs flavor, got: {:?}",
+        warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
 }
 
 #[test]
 fn test_md060_mkdocs_flavor_fix_preserves_inline_code_pipes() {
+    // With MkDocs flavor, fixing a table should preserve pipes inside inline code
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |\n| Dict | `dict` |";
@@ -1663,17 +1663,22 @@ fn test_md060_mkdocs_flavor_fix_preserves_inline_code_pipes() {
 
     let fixed = rule.fix(&ctx).unwrap();
 
-    // The fixed content should have proper formatting
-    // WITHOUT corrupting the inline code content
-    assert!(
-        !fixed.contains("| `x") || !fixed.contains("| y`"),
-        "Inline code should NOT be split across cells, got: {fixed}"
-    );
-
-    // The inline code should be intact
+    // The inline code content must be preserved intact (not split into separate cells)
     assert!(
         fixed.contains("`x | y`"),
         "Inline code content should be preserved intact, got: {fixed}"
+    );
+
+    // Verify the table structure: Each data row should have 2 content columns
+    // If the pipe in `x | y` was wrongly treated as a delimiter, we'd see corrupted rows
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4, "Table should have 4 lines");
+
+    // The Union row should contain the intact inline code
+    let union_row = lines[2];
+    assert!(
+        union_row.contains("`x | y`"),
+        "Union row should contain intact inline code, got: {union_row}"
     );
 }
 
