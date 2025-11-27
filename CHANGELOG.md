@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.183] - 2025-11-27
+
+### Fixed
+
+- **MD056 (table-column-count): Respect MkDocs flavor for pipes in inline code (fixes #165)**
+  - In MkDocs/Python-Markdown flavor, pipes inside backticks are NOT cell delimiters
+  - Tables with inline code containing pipes (e.g., `` `x | y` ``) no longer trigger false positives
+  - GFM flavor behavior unchanged (pipes in code ARE delimiters per spec)
+
+- **MD060 (table-format): Respect MkDocs flavor for pipes in inline code**
+  - Consistent with MD056 fix for MkDocs flavor support
+  - Table formatting now correctly handles inline code with pipes in MkDocs mode
+
+- **Schema: Use kebab-case for GlobalConfig properties**
+  - JSON schema now uses kebab-case (e.g., `line-length`) matching config file conventions
+  - Improves IDE auto-completion and validation for configuration files
+
+### Changed
+
+- **Refactor: Consolidate table row parsing into TableUtils**
+  - Unified table parsing logic into shared utility module
+  - Reduces code duplication between MD056 and MD060
+
+- **Refactor: Decompose MD013 into module structure**
+  - Split large `md013_line_length.rs` into separate files:
+    - `mod.rs`: Main rule implementation
+    - `helpers.rs`: Helper functions
+    - `tests.rs`: Unit tests
+  - Improves code organization and maintainability
+
 ## [0.0.182] - 2025-11-25
 
 ### Added
