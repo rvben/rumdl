@@ -1,0 +1,20 @@
+name: "rumdl-action"
+description: "Lint Markdown files with rumdl"
+
+inputs:
+  report-type:
+    description: |
+      How this action should report results.
+      Possible values : workflow-logs (default), workflow-annotations
+
+    required: false
+    default: "workflow-logs"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Lint Markdown files with rumdl
+      shell: bash
+      run: $GITHUB_ACTION_PATH/scripts/rumdl-action.sh
+      env:
+        GHA_RUMDL_REPORT_TYPE: ${{ inputs.report-type }}
