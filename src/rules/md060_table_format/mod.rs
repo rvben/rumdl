@@ -670,6 +670,25 @@ impl Rule for MD060TableFormat {
                 .chain(table_block.content_lines.iter().copied())
                 .collect();
 
+            // Build the whole-table fix once for all warnings in this table
+            // This ensures that applying Quick Fix on any row fixes the entire table
+            let table_start_line = table_block.start_line + 1; // Convert to 1-indexed
+            let table_end_line = table_block.end_line + 1; // Convert to 1-indexed
+
+            // Build the complete fixed table content
+            let mut fixed_table_lines: Vec<String> = Vec::with_capacity(table_line_indices.len());
+            for (i, &line_idx) in table_line_indices.iter().enumerate() {
+                let fixed_line = &format_result.lines[i];
+                // Add newline for all lines except the last if the original didn't have one
+                if line_idx < lines.len() - 1 {
+                    fixed_table_lines.push(format!("{fixed_line}\n"));
+                } else {
+                    fixed_table_lines.push(fixed_line.clone());
+                }
+            }
+            let table_replacement = fixed_table_lines.concat();
+            let table_range = line_index.multi_line_range(table_start_line, table_end_line);
+
             for (i, &line_idx) in table_line_indices.iter().enumerate() {
                 let original = lines[line_idx];
                 let fixed = &format_result.lines[i];
@@ -691,6 +710,8 @@ impl Rule for MD060TableFormat {
                         "Table columns should be aligned".to_string()
                     };
 
+                    // Each warning uses the same whole-table fix
+                    // This ensures Quick Fix on any row aligns the entire table
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         severity: Severity::Warning,
@@ -700,12 +721,8 @@ impl Rule for MD060TableFormat {
                         end_line,
                         end_column: end_col,
                         fix: Some(crate::rule::Fix {
-                            range: line_index.whole_line_range(line_idx + 1),
-                            replacement: if line_idx < lines.len() - 1 {
-                                format!("{fixed}\n")
-                            } else {
-                                fixed.clone()
-                            },
+                            range: table_range.clone(),
+                            replacement: table_replacement.clone(),
                         }),
                     });
                 }

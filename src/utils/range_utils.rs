@@ -136,6 +136,17 @@ impl<'a> LineIndex<'a> {
         start..end
     }
 
+    /// Calculate byte range spanning multiple lines (from start_line to end_line inclusive)
+    /// Both lines are 1-indexed. This is useful for replacing entire blocks like tables.
+    pub fn multi_line_range(&self, start_line: usize, end_line: usize) -> Range<usize> {
+        let start_idx = start_line.saturating_sub(1);
+        let end_idx = end_line.saturating_sub(1);
+
+        let start = *self.line_starts.get(start_idx).unwrap_or(&self.content.len());
+        let end = self.line_starts.get(end_idx + 1).copied().unwrap_or(self.content.len());
+        start..end
+    }
+
     /// Calculate byte range for text within a line (excluding newline)
     /// Useful for replacing specific parts of a line
     ///

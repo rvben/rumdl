@@ -147,21 +147,44 @@ impl Rule for MD056TableColumnCount {
                 continue; // Skip invalid tables
             }
 
-            // Check all rows in the table
-            let all_lines = std::iter::once(table_block.header_line)
+            // Collect all table lines for building the whole-table fix
+            let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
-                .chain(table_block.content_lines.iter().copied());
+                .chain(table_block.content_lines.iter().copied())
+                .collect();
 
-            for line_idx in all_lines {
+            // Build the whole-table fix once for all warnings in this table
+            // This ensures that applying Quick Fix on any row fixes the entire table
+            let table_start_line = table_block.start_line + 1; // Convert to 1-indexed
+            let table_end_line = table_block.end_line + 1; // Convert to 1-indexed
+
+            // Build the complete fixed table content
+            let mut fixed_table_lines: Vec<String> = Vec::with_capacity(all_line_indices.len());
+            for &line_idx in &all_line_indices {
+                let line = lines[line_idx];
+                let fixed_line = self
+                    .fix_table_row(line, expected_count, flavor)
+                    .unwrap_or_else(|| line.to_string());
+                if line_idx < lines.len() - 1 {
+                    fixed_table_lines.push(format!("{fixed_line}\n"));
+                } else {
+                    fixed_table_lines.push(fixed_line);
+                }
+            }
+            let table_replacement = fixed_table_lines.concat();
+            let table_range = ctx.line_index.multi_line_range(table_start_line, table_end_line);
+
+            // Check all rows in the table
+            for &line_idx in &all_line_indices {
                 let line = lines[line_idx];
                 let count = TableUtils::count_cells_with_flavor(line, flavor);
 
                 if count > 0 && count != expected_count {
-                    let fix_result = self.fix_table_row(line, expected_count, flavor);
-
                     // Calculate precise character range for the entire table row
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
 
+                    // Each warning uses the same whole-table fix
+                    // This ensures Quick Fix on any row fixes the entire table
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         message: format!("Table row has {count} cells, but expected {expected_count}"),
@@ -170,9 +193,9 @@ impl Rule for MD056TableColumnCount {
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
-                        fix: fix_result.map(|fixed_row| Fix {
-                            range: ctx.line_index.line_col_to_byte_range(line_idx + 1, 1),
-                            replacement: fixed_row,
+                        fix: Some(Fix {
+                            range: table_range.clone(),
+                            replacement: table_replacement.clone(),
                         }),
                     });
                 }
@@ -184,36 +207,40 @@ impl Rule for MD056TableColumnCount {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let warnings = self.check(ctx)?;
-        if warnings.is_empty() {
-            return Ok(content.to_string());
-        }
-
-        // Build HashMap for O(1) lookup instead of O(n) linear search per line
-        let warning_by_line: std::collections::HashMap<usize, &LintWarning> = warnings
-            .iter()
-            .filter_map(|w| w.fix.as_ref().map(|_| (w.line, w)))
-            .collect();
-
+        let flavor = ctx.flavor;
         let lines: Vec<&str> = content.lines().collect();
-        let mut result = Vec::new();
+        let table_blocks = &ctx.table_blocks;
 
-        for (i, line) in lines.iter().enumerate() {
-            if let Some(warning) = warning_by_line.get(&(i + 1))
-                && let Some(fix) = &warning.fix
-            {
-                result.push(fix.replacement.clone());
-                continue;
+        let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
+
+        for table_block in table_blocks {
+            // Determine expected column count from header row
+            let expected_count = TableUtils::count_cells_with_flavor(lines[table_block.header_line], flavor);
+
+            if expected_count == 0 {
+                continue; // Skip invalid tables
             }
-            result.push(line.to_string());
+
+            // Fix all rows in the table
+            let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
+                .chain(std::iter::once(table_block.delimiter_line))
+                .chain(table_block.content_lines.iter().copied())
+                .collect();
+
+            for &line_idx in &all_line_indices {
+                let line = lines[line_idx];
+                if let Some(fixed_line) = self.fix_table_row(line, expected_count, flavor) {
+                    result_lines[line_idx] = fixed_line;
+                }
+            }
         }
 
-        // Preserve the original line endings
-        if content.ends_with('\n') {
-            Ok(result.join("\n") + "\n")
-        } else {
-            Ok(result.join("\n"))
+        let mut fixed = result_lines.join("\n");
+        // Preserve trailing newline if original content had one
+        if content.ends_with('\n') && !fixed.ends_with('\n') {
+            fixed.push('\n');
         }
+        Ok(fixed)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

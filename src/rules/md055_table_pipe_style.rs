@@ -283,12 +283,33 @@ impl Rule for MD055TablePipeStyle {
                 configured_style
             };
 
-            // Check all rows in the table
-            let all_lines = std::iter::once(table_block.header_line)
+            // Collect all table lines for building the whole-table fix
+            let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
-                .chain(table_block.content_lines.iter().copied());
+                .chain(table_block.content_lines.iter().copied())
+                .collect();
 
-            for line_idx in all_lines {
+            // Build the whole-table fix once for all warnings in this table
+            // This ensures that applying Quick Fix on any row fixes the entire table
+            let table_start_line = table_block.start_line + 1; // Convert to 1-indexed
+            let table_end_line = table_block.end_line + 1; // Convert to 1-indexed
+
+            // Build the complete fixed table content
+            let mut fixed_table_lines: Vec<String> = Vec::with_capacity(all_line_indices.len());
+            for &line_idx in &all_line_indices {
+                let line = lines[line_idx];
+                let fixed_line = self.fix_table_row(line, target_style);
+                if line_idx < lines.len() - 1 {
+                    fixed_table_lines.push(format!("{fixed_line}\n"));
+                } else {
+                    fixed_table_lines.push(fixed_line);
+                }
+            }
+            let table_replacement = fixed_table_lines.concat();
+            let table_range = line_index.multi_line_range(table_start_line, table_end_line);
+
+            // Check all rows in the table
+            for &line_idx in &all_line_indices {
                 let line = lines[line_idx];
                 if let Some(current_style) = TableUtils::determine_pipe_style(line) {
                     // Only flag lines with actual style mismatches
@@ -308,7 +329,8 @@ impl Rule for MD055TablePipeStyle {
                             }
                         );
 
-                        let fixed_line = self.fix_table_row(line, target_style);
+                        // Each warning uses the same whole-table fix
+                        // This ensures Quick Fix on any row fixes the entire table
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             severity: Severity::Warning,
@@ -318,12 +340,8 @@ impl Rule for MD055TablePipeStyle {
                             end_line,
                             end_column: end_col,
                             fix: Some(crate::rule::Fix {
-                                range: line_index.whole_line_range(line_idx + 1),
-                                replacement: if line_idx < lines.len() - 1 {
-                                    format!("{fixed_line}\n")
-                                } else {
-                                    fixed_line
-                                },
+                                range: table_range.clone(),
+                                replacement: table_replacement.clone(),
                             }),
                         });
                     }
