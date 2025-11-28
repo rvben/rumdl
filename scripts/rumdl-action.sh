@@ -14,16 +14,16 @@ echo "Linting markdown with rumdl"
 rumdl_output_format=""
 
 case "$GHA_RUMDL_REPORT_TYPE" in
-*"workflow-logs"*)
+*"logs"*)
     rumdl_output_format="full"
     ;;
-*"workflow-annotations"*)
+*"annotations"*)
     rumdl_output_format="github"
     ;;
 *)
     echo
     echo "::error:: invalid report type : $GHA_RUMDL_REPORT_TYPE"
-    echo "report type should be one of : workflow-logs, workflow-annotations"
+    echo "report type should be one of : logs, annotations"
     exit 1
     ;;
 esac
@@ -35,11 +35,11 @@ if [ $? -eq 0 ]; then
     exit 0
 else
     case "$GHA_RUMDL_REPORT_TYPE" in
-    *"workflow-logs"*)
+    *"logs"*)
         echo "$results"
         exit 1
         ;;
-    *"workflow-annotations"*)
+    *"annotations"*)
         # print each line of as github actions runtime annotation
         echo "$results" | grep '::' | xargs -0 -n1 echo
 

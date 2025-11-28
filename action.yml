@@ -5,10 +5,10 @@ inputs:
   report-type:
     description: |
       How this action should report results.
-      Possible values : workflow-logs (default), workflow-annotations
+      Possible values : logs (default), annotations
 
     required: false
-    default: "workflow-logs"
+    default: "logs"
 
 runs:
   using: "composite"
