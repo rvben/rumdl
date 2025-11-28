@@ -54,6 +54,7 @@ mod md056_table_column_count;
 mod md058_blanks_around_tables;
 mod md059_link_text;
 mod md060_table_format;
+mod md061_forbidden_terms;
 
 pub use md001_heading_increment::MD001HeadingIncrement;
 pub use md003_heading_style::MD003HeadingStyle;
@@ -102,6 +103,7 @@ pub use md056_table_column_count::MD056TableColumnCount;
 pub use md058_blanks_around_tables::MD058BlanksAroundTables;
 pub use md059_link_text::MD059LinkText;
 pub use md060_table_format::MD060TableFormat;
+pub use md061_forbidden_terms::MD061ForbiddenTerms;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -187,6 +189,7 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD058", MD058BlanksAroundTables::from_config),
         ("MD059", MD059LinkText::from_config),
         ("MD060", MD060TableFormat::from_config),
+        ("MD061", MD061ForbiddenTerms::from_config),
     ];
     RULES.iter().map(|(_, ctor)| ctor(config)).collect()
 }
