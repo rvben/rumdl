@@ -35,6 +35,55 @@ impl CodeBlockUtils {
             pos += line.len() + 1; // +1 for newline
         }
 
+        // Pre-compute list context for each line to properly handle fence indentation
+        // Inside list items, fences can have more absolute indentation (relative indent still <= 3)
+        let mut list_context_indent: Vec<usize> = vec![0; lines.len()];
+        {
+            let mut in_list = false;
+            let mut continuation_indent: usize = 0;
+
+            for (i, line) in lines.iter().enumerate() {
+                let mut line_no_bq = line.to_string();
+                while BlockquoteUtils::is_blockquote(&line_no_bq) {
+                    line_no_bq = BlockquoteUtils::extract_content(&line_no_bq);
+                }
+
+                let indent_level = line_no_bq.len() - line_no_bq.trim_start().len();
+                let trimmed = line_no_bq.trim_start();
+
+                // Check if this is a list item
+                let is_ordered = {
+                    let first_char = trimmed.chars().next();
+                    first_char.is_some_and(|c| c.is_numeric())
+                        && trimmed.chars().position(|c| c == '.' || c == ')').is_some_and(|pos| {
+                            pos > 0
+                                && trimmed[..pos].chars().all(|c| c.is_numeric())
+                                && trimmed.chars().nth(pos + 1).is_some_and(|c| c == ' ' || c == '\t')
+                        })
+                };
+                let is_list_item =
+                    trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") || is_ordered;
+
+                if is_list_item {
+                    in_list = true;
+                    let marker_width =
+                        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+                            1
+                        } else {
+                            trimmed.chars().take_while(|c| c.is_numeric()).count() + 1
+                        };
+                    let after_marker = &trimmed[marker_width..];
+                    let spaces_after = after_marker.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+                    continuation_indent = indent_level + marker_width + spaces_after;
+                } else if in_list && !line_no_bq.trim().is_empty() && indent_level < continuation_indent {
+                    in_list = false;
+                    continuation_indent = 0;
+                }
+
+                list_context_indent[i] = if in_list { continuation_indent } else { 0 };
+            }
+        }
+
         // Find fenced code blocks
         for (i, line) in lines.iter().enumerate() {
             let line_start = line_positions[i];
@@ -51,8 +100,10 @@ impl CodeBlockUtils {
             let trimmed = line_without_blockquote.trim_start();
 
             // Check if this line could be a code fence
-            // CommonMark: fences must have at most 3 spaces of indentation
-            if indent <= 3 && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
+            // CommonMark: fences must have at most 3 spaces of indentation RELATIVE to container
+            // Inside list items, the container is the list content, not the document edge
+            let effective_indent = indent.saturating_sub(list_context_indent[i]);
+            if effective_indent <= 3 && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
                 let fence_char = trimmed.chars().next().unwrap();
                 let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
 

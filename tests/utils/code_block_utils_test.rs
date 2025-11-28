@@ -244,3 +244,61 @@ fn test_edge_case_single_digit_lists() {
         "All numbered list formats should be recognized"
     );
 }
+
+#[test]
+fn test_fence_indentation_document_level() {
+    // Per CommonMark spec, fences at document level must have at most 3 spaces of indentation
+
+    // 0 spaces - should be recognized as fence
+    let content = "Text\n\n```\ncode\n```\n\nMore text";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    assert!(
+        !ctx.code_blocks.is_empty(),
+        "0-space indented fence should be recognized"
+    );
+
+    // 3 spaces - should be recognized as fence
+    let content = "Text\n\n   ```\n   code\n   ```\n\nMore text";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    assert!(
+        !ctx.code_blocks.is_empty(),
+        "3-space indented fence should be recognized"
+    );
+}
+
+#[test]
+fn test_fence_indentation_in_list_context() {
+    // Inside list items, fences can have more absolute indentation because
+    // the indentation is relative to the list content, not the document edge
+
+    // 4-space indented fence inside a list item (valid - 1 space relative to list content)
+    let content = "1. List item\n\n    ```rust\n    fn code() {}\n    ```\n\n2. Next";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    assert!(
+        !ctx.code_blocks.is_empty(),
+        "4-space indented fence inside list should be recognized"
+    );
+
+    // Verify the code block contains the expected content
+    let has_rust_fence = ctx.code_blocks.iter().any(|(start, end)| {
+        let block = &content[*start..*end];
+        block.contains("```rust") && block.contains("fn code()")
+    });
+    assert!(has_rust_fence, "Should find the rust fenced code block in list");
+}
+
+#[test]
+fn test_fence_indentation_nested_list() {
+    // Deeply nested list with fence
+    let content = r#"1. First level
+   - Second level
+     - Third level
+
+       ```python
+       print("nested")
+       ```
+
+2. Back to first"#;
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    assert!(!ctx.code_blocks.is_empty(), "Fence in nested list should be recognized");
+}

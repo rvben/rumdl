@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.184] - 2025-11-28
+
+### Added
+
+- **MD061 (forbidden-terms): New rule to flag forbidden terms in documents**
+  - Configurable list of forbidden terms with case-sensitivity options
+  - Useful for style guides, compliance, and consistency enforcement
+
+### Fixed
+
+- **Code blocks: Respect CommonMark fence indentation limit (0-3 spaces)**
+  - CommonMark spec limits fenced code block indentation to 0-3 spaces relative to container
+  - Document-level fences must have at most 3 spaces of indentation
+  - Fences inside list items are correctly recognized (indentation is relative to list content)
+  - Prevents false negatives when checking content inside deeply nested structures
+
+- **LSP: Use whole-table fixes for table rules (MD055, MD056, MD058, MD060)**
+  - Table rule fixes now replace the entire table instead of individual cells
+  - Prevents fix corruption when multiple cells need adjustment
+  - Improves reliability of auto-fix in IDEs
+
 ## [0.0.183] - 2025-11-27
 
 ### Fixed
