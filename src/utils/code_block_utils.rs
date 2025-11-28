@@ -46,10 +46,13 @@ impl CodeBlockUtils {
                 line_without_blockquote = BlockquoteUtils::extract_content(&line_without_blockquote);
             }
 
+            // Calculate indentation before trimming
+            let indent = line_without_blockquote.len() - line_without_blockquote.trim_start().len();
             let trimmed = line_without_blockquote.trim_start();
 
             // Check if this line could be a code fence
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            // CommonMark: fences must have at most 3 spaces of indentation
+            if indent <= 3 && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
                 let fence_char = trimmed.chars().next().unwrap();
                 let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
 

@@ -96,6 +96,34 @@ impl MD031BlanksAroundFences {
         false
     }
 
+    /// Calculate indentation (number of leading spaces)
+    fn get_indentation(line: &str) -> usize {
+        line.chars().take_while(|c| *c == ' ').count()
+    }
+
+    /// Check if a line has a valid fence marker (CommonMark: 0-3 spaces max indentation)
+    fn get_fence_marker(line: &str) -> Option<String> {
+        let indent = Self::get_indentation(line);
+        // CommonMark: fences must have at most 3 spaces of indentation
+        if indent > 3 {
+            return None;
+        }
+
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
+            if backtick_count >= 3 {
+                return Some("`".repeat(backtick_count));
+            }
+        } else if trimmed.starts_with("~~~") {
+            let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
+            if tilde_count >= 3 {
+                return Some("~".repeat(tilde_count));
+            }
+        }
+        None
+    }
+
     /// Check if blank line should be required based on configuration
     fn should_require_blank_line(&self, line_index: usize, lines: &[&str]) -> bool {
         if self.config.list_items {
@@ -196,24 +224,8 @@ impl Rule for MD031BlanksAroundFences {
                 }
             }
 
-            // Determine fence marker if this is a fence line
-            let fence_marker = if trimmed.starts_with("```") {
-                let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
-                if backtick_count >= 3 {
-                    Some("`".repeat(backtick_count))
-                } else {
-                    None
-                }
-            } else if trimmed.starts_with("~~~") {
-                let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
-                if tilde_count >= 3 {
-                    Some("~".repeat(tilde_count))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            // Determine fence marker if this is a fence line (respects CommonMark 0-3 space limit)
+            let fence_marker = Self::get_fence_marker(line);
 
             if let Some(fence_marker) = fence_marker {
                 if in_code_block {
@@ -315,24 +327,8 @@ impl Rule for MD031BlanksAroundFences {
             let line = lines[i];
             let trimmed = line.trim_start();
 
-            // Determine fence marker if this is a fence line
-            let fence_marker = if trimmed.starts_with("```") {
-                let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
-                if backtick_count >= 3 {
-                    Some("`".repeat(backtick_count))
-                } else {
-                    None
-                }
-            } else if trimmed.starts_with("~~~") {
-                let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
-                if tilde_count >= 3 {
-                    Some("~".repeat(tilde_count))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            // Determine fence marker if this is a fence line (respects CommonMark 0-3 space limit)
+            let fence_marker = Self::get_fence_marker(line);
 
             if let Some(fence_marker) = fence_marker {
                 if in_code_block {
