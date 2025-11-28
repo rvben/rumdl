@@ -226,8 +226,8 @@ MD060: false
     let ml_config = MarkdownlintConfig(config_map);
     let fragment = ml_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
 
-    // Check that all disabled rules (except MD060 which doesn't exist in rumdl) are in the disable list
-    let expected_disabled = vec!["MD013", "MD014", "MD033", "MD041", "MD046"];
+    // Check that all disabled rules are in the disable list
+    let expected_disabled = vec!["MD013", "MD014", "MD033", "MD041", "MD046", "MD060"];
     let disabled = &fragment.global.disable.value;
 
     // Sort both for easier comparison

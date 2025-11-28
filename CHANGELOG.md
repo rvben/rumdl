@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.185] - 2025-11-28
+
+### Added
+
+- **Inline config: Support rule aliases in inline configuration comments**
+  - Use human-readable aliases like `line-length` instead of `MD013` in inline comments
+  - Example: `<!-- rumdl-disable line-length -->` now works alongside `<!-- rumdl-disable MD013 -->`
+  - All rules now document their aliases in the rule documentation
+
+### Fixed
+
+- **MD061 (forbidden-terms): Register rule in mod.rs**
+  - MD061 was added in v0.0.184 but was never registered, causing "Unknown rule" errors
+  - The rule now works correctly for detecting forbidden terms like TODO, FIXME, etc.
+
 ## [0.0.184] - 2025-11-28
 
 ### Added
