@@ -166,6 +166,12 @@ update-cargo-version:
 	@echo "Updating Cargo.lock..."
 	@cargo update
 
+update-github-action-version:
+	@echo "Updating the companion Github Action to use $(NEW_TAG)..."
+	@perl -i.bak -pe 's/^rumdl_version="[0-9]+\.[0-9]+\.[0-9]+"/rumdl_version="$(NEW_TAG)"/g' scripts/rumdl-action.sh
+	@rm -f scripts/rumdl-action.sh.bak 2>/dev/null || true
+	@echo "Companion Github Action updated to rev $(NEW_TAG)"
+
 update-readme-version:
 	@echo "Updating README.md pre-commit rev to $(NEW_TAG)..."
 	@perl -i.bak -0777 -pe 's{(repo: https://github.com/rvben/rumdl\s+rev: )v\d+\.\d+\.\d+}{$$1$(NEW_TAG)}g' README.md
@@ -229,6 +235,7 @@ version-major:
 	$(eval VERSION_NO_V := $(NEW_MAJOR).0.0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
+	@$(MAKE) update-github-action-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
 	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md
@@ -246,6 +253,7 @@ version-minor:
 	$(eval VERSION_NO_V := $(MAJOR).$(NEW_MINOR).0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
+	@$(MAKE) update-github-action-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
 	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md
@@ -264,6 +272,7 @@ version-patch:
 	$(eval VERSION_NO_V := $(MAJOR).$(MINOR).$(NEW_PATCH))
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
+	@$(MAKE) update-github-action-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
 	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md

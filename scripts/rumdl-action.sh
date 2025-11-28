@@ -2,7 +2,7 @@
 
 set -ou pipefail
 
-readonly rumdl_version="0.0.183"
+rumdl_version="0.0.183"
 
 echo
 echo "Instaling rumdl (v$rumdl_version)"
