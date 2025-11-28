@@ -325,3 +325,121 @@ fn test_md009_simple() {
         md009_warnings.len()
     );
 }
+
+#[test]
+fn test_inline_config_with_alias_disable_enable() {
+    // Test that aliases work in inline comments (e.g., line-length instead of MD013)
+    let content = r#"# Test Document
+
+<!-- rumdl-disable line-length -->
+This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled using the alias line-length
+
+<!-- rumdl-enable line-length -->
+This is another very long line that exceeds 80 characters and should trigger MD013 because it was re-enabled
+"#;
+
+    let rules = all_rules(&Config::default());
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+
+    let md013_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
+        .collect();
+
+    // Should have exactly one MD013 warning (line 7)
+    assert_eq!(
+        md013_warnings.len(),
+        1,
+        "Expected 1 MD013 warning but got {}: {:?}",
+        md013_warnings.len(),
+        md013_warnings
+    );
+    assert_eq!(md013_warnings[0].line, 7);
+}
+
+#[test]
+fn test_inline_config_with_alias_disable_next_line() {
+    // Test that aliases work with disable-next-line
+    let content = r#"# Test Document
+
+<!-- rumdl-disable-next-line line-length -->
+This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled using the alias
+
+This is another very long line that exceeds 80 characters and should trigger MD013 because it's not disabled
+"#;
+
+    let rules = all_rules(&Config::default());
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+
+    let md013_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
+        .collect();
+
+    // Should have exactly one MD013 warning (line 6, not line 4)
+    assert_eq!(md013_warnings.len(), 1);
+    assert_eq!(md013_warnings[0].line, 6);
+}
+
+#[test]
+fn test_inline_config_with_mixed_alias_and_rule_id() {
+    // Test that mixing aliases and rule IDs works in the same comment
+    // Note: Line 8 has trailing spaces at the end to trigger MD009
+    let content = "# Test Document\n\n<!-- rumdl-disable line-length MD009 -->\nThis is a very long line that exceeds 80 characters and would normally trigger MD013\nLine with trailing spaces that would trigger MD009\n\n<!-- rumdl-enable MD013 no-trailing-spaces -->\nThis is another very long line that exceeds 80 characters and should trigger MD013   \n";
+
+    let rules = all_rules(&Config::default());
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+
+    let md013_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
+        .collect();
+
+    let md009_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD009"))
+        .collect();
+
+    // MD013 should only trigger on line 8 (after re-enable)
+    assert_eq!(
+        md013_warnings.len(),
+        1,
+        "Expected 1 MD013 warning but got {}",
+        md013_warnings.len()
+    );
+    assert_eq!(md013_warnings[0].line, 8);
+
+    // MD009 should only trigger on line 8 (after re-enable using alias no-trailing-spaces)
+    assert_eq!(
+        md009_warnings.len(),
+        1,
+        "Expected 1 MD009 warning but got {}",
+        md009_warnings.len()
+    );
+    assert_eq!(md009_warnings[0].line, 8);
+}
+
+#[test]
+fn test_inline_config_alias_case_insensitive() {
+    // Test that aliases are case-insensitive
+    let content = r#"# Test Document
+
+<!-- rumdl-disable LINE-LENGTH -->
+This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled using uppercase alias
+
+<!-- rumdl-enable Line-Length -->
+This is another very long line that exceeds 80 characters and should trigger MD013 because it was re-enabled
+"#;
+
+    let rules = all_rules(&Config::default());
+    let warnings = lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+
+    let md013_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_ref().is_some_and(|n| *n == "MD013"))
+        .collect();
+
+    // Should have exactly one MD013 warning (line 7)
+    assert_eq!(md013_warnings.len(), 1);
+    assert_eq!(md013_warnings[0].line, 7);
+}

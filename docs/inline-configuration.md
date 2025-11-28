@@ -203,7 +203,23 @@ Continue with regular Markdown content.
 
 ## Rule Names Reference
 
-When specifying rules in inline comments, use the rule ID (e.g., MD013, MD033). See the [Rules Reference](RULES.md) for a complete list of available rules.
+When specifying rules in inline comments, you can use either:
+
+- **Rule IDs**: `MD001`, `MD013`, `MD033`, etc.
+- **Aliases**: `heading-increment`, `line-length`, `no-inline-html`, etc.
+
+Both formats are case-insensitive and work identically:
+
+```markdown
+<!-- These are equivalent -->
+<!-- rumdl-disable MD013 -->
+<!-- rumdl-disable line-length -->
+
+<!-- Multiple rules with mixed formats -->
+<!-- rumdl-disable MD001 line-length no-inline-html -->
+```
+
+Each rule's alias is listed at the top of its documentation page. See the [Rules Reference](RULES.md) for a complete list of available rules and their aliases.
 
 ## Comparison with Global Configuration
 

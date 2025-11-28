@@ -27,7 +27,9 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
 }
 
 /// Mapping table from markdownlint rule keys/aliases to rumdl rule keys
-fn markdownlint_to_rumdl_rule_key(key: &str) -> Option<&'static str> {
+/// Convert a rule name (which may be an alias like "line-length") to the canonical rule ID (like "MD013").
+/// Returns None if the rule name is not recognized.
+pub fn markdownlint_to_rumdl_rule_key(key: &str) -> Option<&'static str> {
     // Convert key to uppercase and replace underscores with hyphens for normalization
     let normalized_key = key.to_ascii_uppercase().replace('_', "-");
     match normalized_key.as_str() {
@@ -85,6 +87,9 @@ fn markdownlint_to_rumdl_rule_key(key: &str) -> Option<&'static str> {
         "MD056" | "TABLE-COLUMN-COUNT" => Some("MD056"),
         "MD057" | "EXISTING-RELATIVE-LINKS" => Some("MD057"),
         "MD058" | "BLANKS-AROUND-TABLES" => Some("MD058"),
+        "MD059" | "TABLE-CELL-ALIGNMENT" => Some("MD059"),
+        "MD060" | "TABLE-FORMAT" => Some("MD060"),
+        "MD061" | "FORBIDDEN-TERMS" => Some("MD061"),
         _ => None,
     }
 }
@@ -809,6 +814,9 @@ ul-style:
             ("table-column-count", "MD056"),
             ("existing-relative-links", "MD057"),
             ("blanks-around-tables", "MD058"),
+            ("table-cell-alignment", "MD059"),
+            ("table-format", "MD060"),
+            ("forbidden-terms", "MD061"),
         ];
 
         for (alias, expected) in aliases {

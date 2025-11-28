@@ -18,9 +18,18 @@
 //!
 //! Also supports rumdl-specific syntax with same semantics.
 
+use crate::markdownlint_config::markdownlint_to_rumdl_rule_key;
 use crate::utils::code_block_utils::CodeBlockUtils;
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
+
+/// Normalize a rule name to its canonical form (e.g., "line-length" -> "MD013").
+/// If the rule name is not recognized, returns it uppercase (for forward compatibility).
+fn normalize_rule_name(rule: &str) -> String {
+    markdownlint_to_rumdl_rule_key(rule)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| rule.to_uppercase())
+}
 
 #[derive(Debug, Clone)]
 pub struct InlineConfig {
@@ -110,12 +119,12 @@ impl InlineConfig {
                     if config.file_disabled_rules.contains("*") {
                         // All rules are disabled, so remove from enabled list
                         for rule in rules {
-                            config.file_enabled_rules.remove(rule);
+                            config.file_enabled_rules.remove(&normalize_rule_name(rule));
                         }
                     } else {
                         // Normal case: add to disabled list
                         for rule in rules {
-                            config.file_disabled_rules.insert(rule.to_string());
+                            config.file_disabled_rules.insert(normalize_rule_name(rule));
                         }
                     }
                 }
@@ -132,12 +141,12 @@ impl InlineConfig {
                     if config.file_disabled_rules.contains("*") {
                         // All rules are disabled, so add to enabled list
                         for rule in rules {
-                            config.file_enabled_rules.insert(rule.to_string());
+                            config.file_enabled_rules.insert(normalize_rule_name(rule));
                         }
                     } else {
                         // Normal case: remove from disabled list
                         for rule in rules {
-                            config.file_disabled_rules.remove(rule);
+                            config.file_disabled_rules.remove(&normalize_rule_name(rule));
                         }
                     }
                 }
@@ -165,7 +174,7 @@ impl InlineConfig {
                     line_rules.insert("*".to_string());
                 } else {
                     for rule in rules {
-                        line_rules.insert(rule.to_string());
+                        line_rules.insert(normalize_rule_name(rule));
                     }
                 }
             }
@@ -185,7 +194,7 @@ impl InlineConfig {
                     line_rules.insert("*".to_string());
                 } else {
                     for rule in rules {
-                        line_rules.insert(rule.to_string());
+                        line_rules.insert(normalize_rule_name(rule));
                     }
                 }
             }
@@ -250,12 +259,12 @@ impl InlineConfig {
                                 if currently_disabled.contains("*") {
                                     // All rules are disabled, so remove from enabled list
                                     for rule in rules {
-                                        currently_enabled.remove(rule);
+                                        currently_enabled.remove(&normalize_rule_name(rule));
                                     }
                                 } else {
                                     // Normal case: add to disabled list
                                     for rule in rules {
-                                        currently_disabled.insert(rule.to_string());
+                                        currently_disabled.insert(normalize_rule_name(rule));
                                     }
                                 }
                             }
@@ -272,12 +281,12 @@ impl InlineConfig {
                                 if currently_disabled.contains("*") {
                                     // All rules are disabled, so add to enabled list
                                     for rule in rules {
-                                        currently_enabled.insert(rule.to_string());
+                                        currently_enabled.insert(normalize_rule_name(rule));
                                     }
                                 } else {
                                     // Normal case: remove from disabled list
                                     for rule in rules {
-                                        currently_disabled.remove(rule);
+                                        currently_disabled.remove(&normalize_rule_name(rule));
                                     }
                                 }
                             }
