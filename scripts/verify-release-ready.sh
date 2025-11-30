@@ -26,14 +26,14 @@ else
     ((ERRORS++))
 fi
 
-# Check 2: Verify no uncommitted changes
+# Check 2: Verify no uncommitted changes to tracked files
 echo -n "Checking for uncommitted changes... "
-if [[ -z $(git status --porcelain) ]]; then
+if [[ -z $(git status --porcelain -uno) ]]; then
     echo -e "${GREEN}✓${NC}"
 else
     echo -e "${RED}✗${NC}"
-    echo -e "${RED}ERROR: There are uncommitted changes${NC}"
-    git status --short
+    echo -e "${RED}ERROR: There are uncommitted changes to tracked files${NC}"
+    git status --short -uno
     ((ERRORS++))
 fi
 
@@ -62,7 +62,33 @@ else
     echo "Consider adding a CHANGELOG entry before releasing"
 fi
 
-# Check 5: Verify we're on main branch
+# Check 5: Verify README.md has correct pre-commit version
+echo -n "Checking README.md pre-commit version... "
+README_VERSIONS=$(grep -o "rev: v[0-9.]*" README.md | sort -u)
+EXPECTED_REV="rev: v$CARGO_VERSION"
+if echo "$README_VERSIONS" | grep -q "^$EXPECTED_REV$"; then
+    # Check all occurrences match
+    MISMATCHED=$(grep "rev: v[0-9.]*" README.md | grep -v "$EXPECTED_REV" || true)
+    if [[ -z "$MISMATCHED" ]]; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        echo -e "${RED}ERROR: README.md has inconsistent pre-commit versions${NC}"
+        echo "Expected: $EXPECTED_REV"
+        echo "Found mismatches:"
+        echo "$MISMATCHED"
+        ((ERRORS++))
+    fi
+else
+    echo -e "${RED}✗${NC}"
+    echo -e "${RED}ERROR: README.md pre-commit version not updated${NC}"
+    echo "Expected: $EXPECTED_REV"
+    echo "Found: $README_VERSIONS"
+    echo "Run: sed -i '' 's/rev: v[0-9.]*/rev: v$CARGO_VERSION/' README.md"
+    ((ERRORS++))
+fi
+
+# Check 6: Verify we're on main branch
 echo -n "Checking current branch... "
 CURRENT_BRANCH=$(git branch --show-current)
 if [[ "$CURRENT_BRANCH" == "main" ]]; then
@@ -72,7 +98,7 @@ else
     echo -e "${YELLOW}WARNING: Not on main branch (currently on: $CURRENT_BRANCH)${NC}"
 fi
 
-# Check 6: Verify tag doesn't already exist
+# Check 7: Verify tag doesn't already exist
 echo -n "Checking if tag v$CARGO_VERSION exists... "
 if git rev-parse "v$CARGO_VERSION" &>/dev/null; then
     echo -e "${RED}✗${NC}"

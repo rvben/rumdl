@@ -299,7 +299,7 @@ For editor integration, use stdin/stdout mode with the `--quiet` flag to suppres
 
 ## Pre-commit Integration
 
-You can use `rumdl` as a pre-commit hook to check and fix your Markdown files.
+You can use `rumdl` as a pre-commit hook to check and format your Markdown files.
 
 The recommended way is to use the official pre-commit hook repository:
 
@@ -310,17 +310,16 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.0.99  # Use the latest release tag
+    rev: v0.0.185
     hooks:
-      - id: rumdl
-        # To only check (default):
-        # args: []
-        # To automatically fix issues:
-        # args: [--fix]
+      - id: rumdl      # Lint only (fails on issues)
+      - id: rumdl-fmt  # Auto-format (fixes what it can)
 ```
 
-- By default, the hook will only check for issues.
-- To automatically fix issues, add `args: [--fix]` to the hook configuration.
+Two hooks are available:
+
+- **`rumdl`** — Lints files and fails if any issues are found (ideal for CI)
+- **`rumdl-fmt`** — Auto-formats files (fixes what it can, always succeeds)
 
 When you run `pre-commit install` or `pre-commit run`, pre-commit will automatically install `rumdl` in an isolated Python environment using pip. You do **not** need to install rumdl manually.
 
@@ -345,7 +344,7 @@ However, for pre-commit workflows where you want to exclude certain files even w
    ```yaml
    repos:
      - repo: https://github.com/rvben/rumdl-pre-commit
-       rev: v0.0.99
+       rev: v0.0.185
        hooks:
          - id: rumdl
            args: [--force-exclude]  # Respect exclude patterns from config
