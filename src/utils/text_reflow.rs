@@ -6,7 +6,8 @@
 use crate::utils::is_definition_list_item;
 use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
-    INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX, REF_IMAGE_REGEX, REF_LINK_REGEX,
+    INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX, LINKED_IMAGE_INLINE_INLINE,
+    LINKED_IMAGE_INLINE_REF, LINKED_IMAGE_REF_INLINE, LINKED_IMAGE_REF_REF, REF_IMAGE_REGEX, REF_LINK_REGEX,
     SHORTCUT_REF_REGEX, STRIKETHROUGH_FANCY_REGEX, WIKI_LINK_REGEX,
 };
 use std::collections::HashSet;
@@ -316,6 +317,24 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     reflow_elements(&elements, options)
 }
 
+/// Image source in a linked image structure
+#[derive(Debug, Clone)]
+enum LinkedImageSource {
+    /// Inline image URL: ![alt](url)
+    Inline(String),
+    /// Reference image: ![alt][ref]
+    Reference(String),
+}
+
+/// Link target in a linked image structure
+#[derive(Debug, Clone)]
+enum LinkedImageTarget {
+    /// Inline link URL: ](url)
+    Inline(String),
+    /// Reference link: ][ref]
+    Reference(String),
+}
+
 /// Represents a piece of content in the markdown
 #[derive(Debug, Clone)]
 enum Element {
@@ -335,6 +354,16 @@ enum Element {
     ReferenceImage { alt: String, reference: String },
     /// A complete markdown empty reference image ![alt][]
     EmptyReferenceImage { alt: String },
+    /// A clickable image badge in any of 4 forms:
+    /// - [![alt](img-url)](link-url)
+    /// - [![alt][img-ref]](link-url)
+    /// - [![alt](img-url)][link-ref]
+    /// - [![alt][img-ref]][link-ref]
+    LinkedImage {
+        alt: String,
+        img_source: LinkedImageSource,
+        link_target: LinkedImageTarget,
+    },
     /// Footnote reference [^note]
     FootnoteReference { note: String },
     /// Strikethrough text ~~text~~
@@ -370,6 +399,22 @@ impl std::fmt::Display for Element {
             Element::InlineImage { alt, url } => write!(f, "![{alt}]({url})"),
             Element::ReferenceImage { alt, reference } => write!(f, "![{alt}][{reference}]"),
             Element::EmptyReferenceImage { alt } => write!(f, "![{alt}][]"),
+            Element::LinkedImage {
+                alt,
+                img_source,
+                link_target,
+            } => {
+                // Build the image part: ![alt](url) or ![alt][ref]
+                let img_part = match img_source {
+                    LinkedImageSource::Inline(url) => format!("![{alt}]({url})"),
+                    LinkedImageSource::Reference(r) => format!("![{alt}][{r}]"),
+                };
+                // Build the link part: (url) or [ref]
+                match link_target {
+                    LinkedImageTarget::Inline(url) => write!(f, "[{img_part}]({url})"),
+                    LinkedImageTarget::Reference(r) => write!(f, "[{img_part}][{r}]"),
+                }
+            }
             Element::FootnoteReference { note } => write!(f, "[^{note}]"),
             Element::Strikethrough(s) => write!(f, "~~{s}~~"),
             Element::WikiLink(s) => write!(f, "[[{s}]]"),
@@ -396,6 +441,26 @@ impl Element {
             Element::InlineImage { alt, url } => alt.chars().count() + url.chars().count() + 5, // ![alt](url)
             Element::ReferenceImage { alt, reference } => alt.chars().count() + reference.chars().count() + 5, // ![alt][ref]
             Element::EmptyReferenceImage { alt } => alt.chars().count() + 5, // ![alt][]
+            Element::LinkedImage {
+                alt,
+                img_source,
+                link_target,
+            } => {
+                // Calculate length based on variant
+                // Base: [ + ![alt] + ] = 4 chars for outer brackets and !
+                let alt_len = alt.chars().count();
+                let img_len = match img_source {
+                    LinkedImageSource::Inline(url) => url.chars().count() + 2, // (url)
+                    LinkedImageSource::Reference(r) => r.chars().count() + 2,  // [ref]
+                };
+                let link_len = match link_target {
+                    LinkedImageTarget::Inline(url) => url.chars().count() + 2, // (url)
+                    LinkedImageTarget::Reference(r) => r.chars().count() + 2,  // [ref]
+                };
+                // [![alt](img)](link) = [ + ! + [ + alt + ] + (img) + ] + (link)
+                //                     = 1 + 1 + 1 + alt + 1 + img_len + 1 + link_len = 5 + alt + img + link
+                5 + alt_len + img_len + link_len
+            }
             Element::FootnoteReference { note } => note.chars().count() + 3, // [^note]
             Element::Strikethrough(s) => s.chars().count() + 4,              // ~~text~~
             Element::WikiLink(s) => s.chars().count() + 4,                   // [[wiki]]
@@ -414,11 +479,13 @@ impl Element {
 /// Parse markdown elements from text preserving the raw syntax
 ///
 /// Detection order is critical:
-/// 1. Inline links [text](url) - must be detected first to avoid conflicts
-/// 2. Reference links [text][ref] - detected before shortcut references
-/// 3. Empty reference links [text][] - a special case of reference links
-/// 4. Shortcut reference links [ref] - detected last to avoid false positives
-/// 5. Other elements (code, bold, italic) - processed normally
+/// 1. Linked images [![alt](img)](link) - must be detected first as atomic units
+/// 2. Inline images ![alt](url) - before links to handle ! prefix
+/// 3. Reference images ![alt][ref] - before reference links
+/// 4. Inline links [text](url) - before reference links
+/// 5. Reference links [text][ref] - before shortcut references
+/// 6. Shortcut reference links [ref] - detected last to avoid false positives
+/// 7. Other elements (code, bold, italic, etc.) - processed normally
 fn parse_markdown_elements(text: &str) -> Vec<Element> {
     let mut elements = Vec::new();
     let mut remaining = text;
@@ -427,7 +494,40 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
         // Find the earliest occurrence of any markdown pattern
         let mut earliest_match: Option<(usize, &str, fancy_regex::Match)> = None;
 
-        // Check for images first (they start with ! so should be detected before links)
+        // Check for linked images FIRST (all 4 variants)
+        // Quick literal check: only run expensive regexes if we might have a linked image
+        // Pattern starts with "[!" so check for that first
+        if remaining.contains("[!") {
+            // Pattern 1: [![alt](img)](link) - inline image in inline link
+            if let Ok(Some(m)) = LINKED_IMAGE_INLINE_INLINE.find(remaining)
+                && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+            {
+                earliest_match = Some((m.start(), "linked_image_ii", m));
+            }
+
+            // Pattern 2: [![alt][ref]](link) - reference image in inline link
+            if let Ok(Some(m)) = LINKED_IMAGE_REF_INLINE.find(remaining)
+                && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+            {
+                earliest_match = Some((m.start(), "linked_image_ri", m));
+            }
+
+            // Pattern 3: [![alt](img)][ref] - inline image in reference link
+            if let Ok(Some(m)) = LINKED_IMAGE_INLINE_REF.find(remaining)
+                && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+            {
+                earliest_match = Some((m.start(), "linked_image_ir", m));
+            }
+
+            // Pattern 4: [![alt][ref]][ref] - reference image in reference link
+            if let Ok(Some(m)) = LINKED_IMAGE_REF_REF.find(remaining)
+                && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+            {
+                earliest_match = Some((m.start(), "linked_image_rr", m));
+            }
+        }
+
+        // Check for images (they start with ! so should be detected before links)
         // Inline images - ![alt](url)
         if let Ok(Some(m)) = INLINE_IMAGE_FANCY_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
@@ -572,6 +672,74 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
 
             // Process the matched pattern
             match pattern_type {
+                // Pattern 1: [![alt](img)](link) - inline image in inline link
+                "linked_image_ii" => {
+                    if let Ok(Some(caps)) = LINKED_IMAGE_INLINE_INLINE.captures(remaining) {
+                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let img_url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        let link_url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::LinkedImage {
+                            alt: alt.to_string(),
+                            img_source: LinkedImageSource::Inline(img_url.to_string()),
+                            link_target: LinkedImageTarget::Inline(link_url.to_string()),
+                        });
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("[".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                // Pattern 2: [![alt][ref]](link) - reference image in inline link
+                "linked_image_ri" => {
+                    if let Ok(Some(caps)) = LINKED_IMAGE_REF_INLINE.captures(remaining) {
+                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let img_ref = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        let link_url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::LinkedImage {
+                            alt: alt.to_string(),
+                            img_source: LinkedImageSource::Reference(img_ref.to_string()),
+                            link_target: LinkedImageTarget::Inline(link_url.to_string()),
+                        });
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("[".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                // Pattern 3: [![alt](img)][ref] - inline image in reference link
+                "linked_image_ir" => {
+                    if let Ok(Some(caps)) = LINKED_IMAGE_INLINE_REF.captures(remaining) {
+                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let img_url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        let link_ref = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::LinkedImage {
+                            alt: alt.to_string(),
+                            img_source: LinkedImageSource::Inline(img_url.to_string()),
+                            link_target: LinkedImageTarget::Reference(link_ref.to_string()),
+                        });
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("[".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                // Pattern 4: [![alt][ref]][ref] - reference image in reference link
+                "linked_image_rr" => {
+                    if let Ok(Some(caps)) = LINKED_IMAGE_REF_REF.captures(remaining) {
+                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let img_ref = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        let link_ref = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+                        elements.push(Element::LinkedImage {
+                            alt: alt.to_string(),
+                            img_source: LinkedImageSource::Reference(img_ref.to_string()),
+                            link_target: LinkedImageTarget::Reference(link_ref.to_string()),
+                        });
+                        remaining = &remaining[match_obj.end()..];
+                    } else {
+                        elements.push(Element::Text("[".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
                 "inline_image" => {
                     if let Ok(Some(caps)) = INLINE_IMAGE_FANCY_REGEX.captures(remaining) {
                         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");

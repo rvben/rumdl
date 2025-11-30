@@ -1133,3 +1133,274 @@ fn test_reflow_complex_punctuation_case() {
         "No space after opening paren before backtick: {result:?}"
     );
 }
+
+/// Issue #170: Comprehensive tests for all 4 linked image variants
+/// These patterns represent clickable image badges that must be treated as atomic units.
+/// Breaking between `]` and `(` or `]` and `[` produces invalid markdown.
+mod issue_170_nested_link_image {
+    use super::*;
+
+    // ============================================================
+    // Pattern 1: Inline image in inline link - [![alt](img)](link)
+    // ============================================================
+
+    #[test]
+    fn test_pattern1_inline_inline_simple() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![Badge](https://img.shields.io/badge)](https://example.com) some text here";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Linked image should not be broken: {result:?}"
+        );
+        assert!(
+            result.contains("[![Badge](https://img.shields.io/badge)](https://example.com)"),
+            "Full structure should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_pattern1_inline_inline_long_url() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![GitHub Actions](https://img.shields.io/github/actions/workflow/status/user/repo/release.yaml)](https://github.com/user/repo/actions) text";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Long linked image should not be broken: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_pattern1_inline_inline_with_text() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "prefix: [![Crates.io](https://img.shields.io/crates/v/mypackage)](https://crates.io/crates/mypackage) This is descriptive text that continues after";
+        let result = reflow_markdown(input, &options);
+
+        assert!(!result.contains("]\n("), "Badge should not be broken: {result:?}");
+        assert!(
+            result.contains(
+                "[![Crates.io](https://img.shields.io/crates/v/mypackage)](https://crates.io/crates/mypackage)"
+            ),
+            "Full badge structure should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_pattern1_multiple_badges() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![B1](https://img1.io)](https://l1.com) [![B2](https://img2.io)](https://l2.com) [![B3](https://img3.io)](https://l3.com)";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n("),
+            "Badge structures should not be broken: {result:?}"
+        );
+    }
+
+    // ============================================================
+    // Pattern 2: Reference image in inline link - [![alt][ref]](link)
+    // ============================================================
+
+    #[test]
+    fn test_pattern2_ref_inline_simple() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![Badge][badge-img]](https://example.com) some text here that might wrap";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Linked image with ref should not be broken: {result:?}"
+        );
+        assert!(
+            result.contains("[![Badge][badge-img]](https://example.com)"),
+            "Full structure should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_pattern2_ref_inline_long() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![GitHub Actions Status][github-actions-badge]](https://github.com/user/repo/actions/workflows/ci.yml) text after";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Long ref-inline linked image should not be broken: {result:?}"
+        );
+    }
+
+    // ============================================================
+    // Pattern 3: Inline image in reference link - [![alt](img)][ref]
+    // ============================================================
+
+    #[test]
+    fn test_pattern3_inline_ref_simple() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![Badge](https://img.shields.io/badge)][link-ref] some text here to wrap";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Linked image with ref link should not be broken: {result:?}"
+        );
+        assert!(
+            result.contains("[![Badge](https://img.shields.io/badge)][link-ref]"),
+            "Full structure should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_pattern3_inline_ref_long() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![Build Status](https://github.com/user/repo/actions/workflows/ci.yml/badge.svg)][ci-link] text";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Long inline-ref linked image should not be broken: {result:?}"
+        );
+    }
+
+    // ============================================================
+    // Pattern 4: Reference image in reference link - [![alt][ref]][ref]
+    // ============================================================
+
+    #[test]
+    fn test_pattern4_ref_ref_simple() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![Badge][badge-img]][badge-link] some text here that might need to wrap";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Double-ref linked image should not be broken: {result:?}"
+        );
+        assert!(
+            result.contains("[![Badge][badge-img]][badge-link]"),
+            "Full structure should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_pattern4_ref_ref_long() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![GitHub Actions Badge][github-actions-img]][github-actions-link] text after the badge";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Long double-ref linked image should not be broken: {result:?}"
+        );
+    }
+
+    // ============================================================
+    // Edge cases
+    // ============================================================
+
+    #[test]
+    fn test_url_with_parentheses() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![Wiki](https://img.io/badge)](https://en.wikipedia.org/wiki/Rust_(language)) text";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n("),
+            "URL with parentheses should not break badge: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_empty_alt_text() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![](https://img.shields.io/badge)](https://example.com) text after";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n("),
+            "Empty alt text badge should not be broken: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_special_chars_in_alt() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "[![Build: passing!](https://img.io/badge)](https://example.com) text";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n("),
+            "Special chars in alt should not break badge: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mixed_patterns_on_line() {
+        let options = ReflowOptions {
+            line_length: 120,
+            ..Default::default()
+        };
+
+        // Mix of pattern 1 and pattern 3
+        let input = "[![A](https://img1.io)](https://l1.com) [![B](https://img2.io)][ref] more text here";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            !result.contains("]\n(") && !result.contains("]\n["),
+            "Mixed patterns should all be preserved: {result:?}"
+        );
+    }
+}

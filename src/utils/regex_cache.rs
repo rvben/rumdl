@@ -310,6 +310,28 @@ pub static INLINE_LINK_FANCY_REGEX: LazyLock<FancyRegex> =
 pub static INLINE_IMAGE_FANCY_REGEX: LazyLock<FancyRegex> =
     LazyLock::new(|| FancyRegex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap());
 
+// Linked images (clickable badges) - all 4 variants
+// Must be detected before inline_image and inline_link to treat as atomic units
+//
+// Limitation: Alt text containing brackets like [![[v1.0]](img)](link) is not supported.
+// The [^\]]* pattern cannot match nested brackets. This is rare in practice.
+//
+// Pattern 1: Inline image in inline link - [![alt](img-url)](link-url)
+pub static LINKED_IMAGE_INLINE_INLINE: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)").unwrap());
+
+// Pattern 2: Reference image in inline link - [![alt][img-ref]](link-url)
+pub static LINKED_IMAGE_REF_INLINE: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\[!\[([^\]]*)\]\[([^\]]*)\]\]\(([^)]+)\)").unwrap());
+
+// Pattern 3: Inline image in reference link - [![alt](img-url)][link-ref]
+pub static LINKED_IMAGE_INLINE_REF: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\[!\[([^\]]*)\]\(([^)]+)\)\]\[([^\]]*)\]").unwrap());
+
+// Pattern 4: Reference image in reference link - [![alt][img-ref]][link-ref]
+pub static LINKED_IMAGE_REF_REF: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\[!\[([^\]]*)\]\[([^\]]*)\]\]\[([^\]]*)\]").unwrap());
+
 // Reference image: ![alt][ref] or ![alt][]
 pub static REF_IMAGE_REGEX: LazyLock<FancyRegex> =
     LazyLock::new(|| FancyRegex::new(r"!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap());
