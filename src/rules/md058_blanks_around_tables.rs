@@ -139,8 +139,9 @@ impl Rule for MD058BlanksAroundTables {
                         end_column: 2,
                         severity: Severity::Warning,
                         fix: Some(Fix {
+                            // Insert blank lines at the start of the table line
                             range: _line_index.line_col_to_byte_range(table_block.start_line + 1, 1),
-                            replacement: format!("{}{}", "\n".repeat(needed), lines[table_block.start_line]),
+                            replacement: "\n".repeat(needed),
                         }),
                     });
                 }
@@ -175,11 +176,12 @@ impl Rule for MD058BlanksAroundTables {
                             end_column: lines[table_block.end_line].len() + 2,
                             severity: Severity::Warning,
                             fix: Some(Fix {
+                                // Insert blank lines at the end of the table's last line
                                 range: _line_index.line_col_to_byte_range(
                                     table_block.end_line + 1,
                                     lines[table_block.end_line].len() + 1,
                                 ),
-                                replacement: format!("{}{}", lines[table_block.end_line], "\n".repeat(needed)),
+                                replacement: "\n".repeat(needed),
                             }),
                         });
                     }
