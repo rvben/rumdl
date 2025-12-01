@@ -22,6 +22,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_npm:
+        description: 'Skip publishing to npm (if already published)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -209,6 +214,37 @@ jobs:
           path: target/wheels/*.tar.gz
           name: sdist
 
+  build-wasm:
+    name: Build WASM
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@wasm-pack
+
+      - name: Build WASM
+        run: wasm-pack build --target web --no-default-features --features wasm
+
+      - name: Prepare package
+        run: |
+          cp wasm-pkg/README.md pkg/
+          cp LICENSE pkg/
+          jq -s '.[0] * .[1]' pkg/package.json wasm-pkg/package.json.tmpl > pkg/package.json.new
+          mv pkg/package.json.new pkg/package.json
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: pkg/
+
   test-python-package:
     name: Test Python Package (${{ matrix.os }})
     needs: build
@@ -293,7 +329,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [build, sdist, test-python-package]
+    needs: [build, sdist, test-python-package, build-wasm]
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
@@ -343,6 +379,37 @@ jobs:
       - name: Skip PyPI publishing
         if: ${{ inputs.skip_pypi == true }}
         run: echo "⏭️ Skipping PyPI publishing as requested"
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: wasm-pkg
+
+      - name: Setup Node.js
+        if: ${{ inputs.skip_npm != true }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish to npm
+        if: ${{ inputs.dry_run != true && inputs.skip_npm != true }}
+        run: |
+          cd wasm-pkg
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Test npm publish (dry run)
+        if: ${{ inputs.dry_run == true && inputs.skip_npm != true }}
+        run: |
+          echo "DRY RUN: Would publish to npm:"
+          cat wasm-pkg/package.json | jq '{name, version}'
+
+      - name: Skip npm publishing
+        if: ${{ inputs.skip_npm == true }}
+        run: echo "⏭️ Skipping npm publishing as requested"
 
       - name: Extract release notes
         run: |

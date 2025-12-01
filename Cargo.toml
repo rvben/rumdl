@@ -16,7 +16,10 @@ exclude = [".github/", ".gitignore", "*.bak"]
 
 [lib]
 name = "rumdl_lib"
-crate-type = ["rlib"]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
 
 [[bin]]
 name = "rumdl"
@@ -36,7 +39,7 @@ opt-level = 3        # Maximum optimization for realistic performance
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-colored = "3.0.0"
+colored = { version = "3.0.0", optional = true }
 fancy-regex = "0.16.2"
 ignore = "0.4.25"
 itertools = "0.14"
@@ -58,24 +61,44 @@ unicode-normalization = "0.1"
 memmap2 = "0.9"
 schemars = "1.1"
 unicode-width = "0.2"
-memory-stats = "1.2.0"
+memory-stats = { version = "1.2.0", optional = true }
 
-# LSP dependencies
-tower-lsp = "0.20"
-tokio = { version = "1.0", features = ["full"] }
-tokio-util = "0.7"
-tower = "0.5.2"
-tower-service = "0.3"
-env_logger = "0.11"
-chrono = { version = "0.4", features = ["serde"] }
-notify = "8.2"
-etcetera = "0.11"
-blake3 = "1.5"
+# LSP dependencies (native only)
+tower-lsp = { version = "0.20", optional = true }
+tokio = { version = "1.0", features = ["full"], optional = true }
+tokio-util = { version = "0.7", optional = true }
+tower = { version = "0.5.2", optional = true }
+tower-service = { version = "0.3", optional = true }
+env_logger = { version = "0.11", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+notify = { version = "8.2", optional = true }
+etcetera = { version = "0.11", optional = true }
+blake3 = { version = "1.5", optional = true }
+
+# WASM dependencies
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+js-sys = { version = "0.3", optional = true }
 
 [features]
-default = ["parallel"]
+default = ["parallel", "native"]
 parallel = ["rayon"]
 profiling = []
+native = [
+    "tower-lsp",
+    "tokio",
+    "tokio-util",
+    "tower",
+    "tower-service",
+    "env_logger",
+    "chrono",
+    "notify",
+    "etcetera",
+    "blake3",
+    "colored",
+    "memory-stats",
+]
+wasm = ["wasm-bindgen", "console_error_panic_hook", "js-sys"]
 
 [dev-dependencies]
 assert_cmd = "2.0.17"
@@ -90,10 +113,10 @@ serial_test = "3.2"
 jsonschema = "0.33"
 ureq = "2.12"
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
+[target.'cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))'.dependencies]
 tikv-jemallocator = "0.6"
 
-[target.'cfg(target_env = "msvc")'.dependencies]
+[target.'cfg(all(target_env = "msvc", not(target_arch = "wasm32")))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
 
 [[bench]]

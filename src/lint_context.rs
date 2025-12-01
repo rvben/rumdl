@@ -6,6 +6,24 @@ use regex::Regex;
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
+/// Macro for profiling sections - only active in non-WASM builds
+#[cfg(not(target_arch = "wasm32"))]
+macro_rules! profile_section {
+    ($name:expr, $profile:expr, $code:expr) => {{
+        let start = std::time::Instant::now();
+        let result = $code;
+        if $profile {
+            eprintln!("[PROFILE] {}: {:?}", $name, start.elapsed());
+        }
+        result
+    }};
+}
+
+#[cfg(target_arch = "wasm32")]
+macro_rules! profile_section {
+    ($name:expr, $profile:expr, $code:expr) => {{ $code }};
+}
+
 // Comprehensive link pattern that captures both inline and reference links
 // Use (?s) flag to make . match newlines
 static LINK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -455,145 +473,119 @@ fn parse_blockquote_detailed(line: &str) -> Option<BlockquoteComponents<'_>> {
 
 impl<'a> LintContext<'a> {
     pub fn new(content: &'a str, flavor: MarkdownFlavor) -> Self {
-        use std::time::Instant;
+        #[cfg(not(target_arch = "wasm32"))]
         let profile = std::env::var("RUMDL_PROFILE_QUADRATIC").is_ok();
+        #[cfg(target_arch = "wasm32")]
+        let profile = false;
 
-        let start = Instant::now();
-        let mut line_offsets = vec![0];
-        for (i, c) in content.char_indices() {
-            if c == '\n' {
-                line_offsets.push(i + 1);
+        let line_offsets = profile_section!("Line offsets", profile, {
+            let mut offsets = vec![0];
+            for (i, c) in content.char_indices() {
+                if c == '\n' {
+                    offsets.push(i + 1);
+                }
             }
-        }
-        if profile {
-            eprintln!("[PROFILE] Line offsets: {:?}", start.elapsed());
-        }
+            offsets
+        });
 
         // Detect code blocks once and cache them
-        let start = Instant::now();
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-        if profile {
-            eprintln!("[PROFILE] Code blocks: {:?}", start.elapsed());
-        }
+        let code_blocks = profile_section!("Code blocks", profile, CodeBlockUtils::detect_code_blocks(content));
 
         // Pre-compute HTML comment ranges ONCE for all operations
-        let start = Instant::now();
-        let html_comment_ranges = crate::utils::skip_context::compute_html_comment_ranges(content);
-        if profile {
-            eprintln!("[PROFILE] HTML comment ranges: {:?}", start.elapsed());
-        }
+        let html_comment_ranges = profile_section!(
+            "HTML comment ranges",
+            profile,
+            crate::utils::skip_context::compute_html_comment_ranges(content)
+        );
 
         // Pre-compute autodoc block ranges for MkDocs flavor (avoids O(n²) scaling)
-        let start = Instant::now();
-        let autodoc_ranges = if flavor == MarkdownFlavor::MkDocs {
-            crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content)
-        } else {
-            Vec::new()
-        };
-        if profile {
-            eprintln!("[PROFILE] Autodoc block ranges: {:?}", start.elapsed());
-        }
+        let autodoc_ranges = profile_section!("Autodoc block ranges", profile, {
+            if flavor == MarkdownFlavor::MkDocs {
+                crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content)
+            } else {
+                Vec::new()
+            }
+        });
 
         // Pre-compute line information (without headings/blockquotes yet)
-        let start = Instant::now();
-        let mut lines = Self::compute_basic_line_info(
-            content,
-            &line_offsets,
-            &code_blocks,
-            flavor,
-            &html_comment_ranges,
-            &autodoc_ranges,
+        let mut lines = profile_section!(
+            "Basic line info",
+            profile,
+            Self::compute_basic_line_info(
+                content,
+                &line_offsets,
+                &code_blocks,
+                flavor,
+                &html_comment_ranges,
+                &autodoc_ranges,
+            )
         );
-        if profile {
-            eprintln!("[PROFILE] Basic line info: {:?}", start.elapsed());
-        }
 
         // Detect HTML blocks BEFORE heading detection
-        let start = Instant::now();
-        Self::detect_html_blocks(content, &mut lines);
-        if profile {
-            eprintln!("[PROFILE] HTML blocks: {:?}", start.elapsed());
-        }
+        profile_section!("HTML blocks", profile, Self::detect_html_blocks(content, &mut lines));
 
         // Detect ESM import/export blocks in MDX files BEFORE heading detection
-        let start = Instant::now();
-        Self::detect_esm_blocks(content, &mut lines, flavor);
-        if profile {
-            eprintln!("[PROFILE] ESM blocks: {:?}", start.elapsed());
-        }
+        profile_section!(
+            "ESM blocks",
+            profile,
+            Self::detect_esm_blocks(content, &mut lines, flavor)
+        );
 
         // Now detect headings and blockquotes
-        let start = Instant::now();
-        Self::detect_headings_and_blockquotes(content, &mut lines, flavor, &html_comment_ranges);
-        if profile {
-            eprintln!("[PROFILE] Headings & blockquotes: {:?}", start.elapsed());
-        }
+        profile_section!(
+            "Headings & blockquotes",
+            profile,
+            Self::detect_headings_and_blockquotes(content, &mut lines, flavor, &html_comment_ranges)
+        );
 
         // Parse code spans early so we can exclude them from link/image parsing
-        let start = Instant::now();
-        let code_spans = Self::parse_code_spans(content, &lines);
-        if profile {
-            eprintln!("[PROFILE] Code spans: {:?}", start.elapsed());
-        }
+        let code_spans = profile_section!("Code spans", profile, Self::parse_code_spans(content, &lines));
 
         // Parse links, images, references, and list blocks
-        let start = Instant::now();
-        let (links, broken_links) =
-            Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges);
-        if profile {
-            eprintln!("[PROFILE] Links: {:?}", start.elapsed());
-        }
+        let (links, broken_links) = profile_section!(
+            "Links",
+            profile,
+            Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges)
+        );
 
-        let start = Instant::now();
-        let images = Self::parse_images(content, &lines, &code_blocks, &code_spans, &html_comment_ranges);
-        if profile {
-            eprintln!("[PROFILE] Images: {:?}", start.elapsed());
-        }
+        let images = profile_section!(
+            "Images",
+            profile,
+            Self::parse_images(content, &lines, &code_blocks, &code_spans, &html_comment_ranges)
+        );
 
-        let start = Instant::now();
-        let reference_defs = Self::parse_reference_defs(content, &lines);
-        if profile {
-            eprintln!("[PROFILE] Reference defs: {:?}", start.elapsed());
-        }
+        let reference_defs = profile_section!("Reference defs", profile, Self::parse_reference_defs(content, &lines));
 
-        let start = Instant::now();
-        let list_blocks = Self::parse_list_blocks(content, &lines);
-        if profile {
-            eprintln!("[PROFILE] List blocks: {:?}", start.elapsed());
-        }
+        let list_blocks = profile_section!("List blocks", profile, Self::parse_list_blocks(content, &lines));
 
         // Compute character frequency for fast content analysis
-        let start = Instant::now();
-        let char_frequency = Self::compute_char_frequency(content);
-        if profile {
-            eprintln!("[PROFILE] Char frequency: {:?}", start.elapsed());
-        }
+        let char_frequency = profile_section!("Char frequency", profile, Self::compute_char_frequency(content));
 
         // Pre-compute table blocks for rules that need them (MD013, MD055, MD056, MD058, MD060)
-        let start = Instant::now();
-        let table_blocks = crate::utils::table_utils::TableUtils::find_table_blocks_with_code_info(
-            content,
-            &code_blocks,
-            &code_spans,
-            &html_comment_ranges,
+        let table_blocks = profile_section!(
+            "Table blocks",
+            profile,
+            crate::utils::table_utils::TableUtils::find_table_blocks_with_code_info(
+                content,
+                &code_blocks,
+                &code_spans,
+                &html_comment_ranges,
+            )
         );
-        if profile {
-            eprintln!("[PROFILE] Table blocks: {:?}", start.elapsed());
-        }
 
         // Pre-compute LineIndex once for all rules (eliminates 46x content cloning)
-        let start = Instant::now();
-        let line_index = crate::utils::range_utils::LineIndex::new(content);
-        if profile {
-            eprintln!("[PROFILE] Line index: {:?}", start.elapsed());
-        }
+        let line_index = profile_section!(
+            "Line index",
+            profile,
+            crate::utils::range_utils::LineIndex::new(content)
+        );
 
         // Pre-compute Jinja template ranges once for all rules (eliminates O(n×m) in MD011)
-        let start = Instant::now();
-        let jinja_ranges = crate::utils::jinja_utils::find_jinja_ranges(content);
-        if profile {
-            eprintln!("[PROFILE] Jinja ranges: {:?}", start.elapsed());
-        }
+        let jinja_ranges = profile_section!(
+            "Jinja ranges",
+            profile,
+            crate::utils::jinja_utils::find_jinja_ranges(content)
+        );
 
         Self {
             content,

@@ -4,13 +4,10 @@ pub mod filtered_lines;
 pub mod fix_coordinator;
 pub mod inline_config;
 pub mod lint_context;
-pub mod lsp;
 pub mod markdownlint_config;
-pub mod output;
-pub mod parallel;
-pub mod performance;
 pub mod profiling;
 pub mod rule;
+#[cfg(feature = "native")]
 pub mod vscode;
 #[macro_use]
 pub mod rule_config;
@@ -20,11 +17,26 @@ pub mod rules;
 pub mod types;
 pub mod utils;
 
+// Native-only modules (require tokio, tower-lsp, etc.)
+#[cfg(feature = "native")]
+pub mod lsp;
+#[cfg(feature = "native")]
+pub mod output;
+#[cfg(feature = "native")]
+pub mod parallel;
+#[cfg(feature = "native")]
+pub mod performance;
+
+// WASM module
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+pub mod wasm;
+
 pub use rules::heading_utils::{Heading, HeadingStyle};
 pub use rules::*;
 
 pub use crate::lint_context::{LineInfo, LintContext, ListItemInfo};
 use crate::rule::{LintResult, Rule, RuleCategory};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 /// Content characteristics for efficient rule filtering
@@ -127,6 +139,7 @@ pub fn lint(
     flavor: crate::config::MarkdownFlavor,
 ) -> LintResult {
     let mut warnings = Vec::new();
+    #[cfg(not(target_arch = "wasm32"))]
     let _overall_start = Instant::now();
 
     // Early return for empty content
@@ -153,9 +166,13 @@ pub fn lint(
     // Parse LintContext once with the provided flavor
     let lint_ctx = crate::lint_context::LintContext::new(content, flavor);
 
+    #[cfg(not(target_arch = "wasm32"))]
     let profile_rules = std::env::var("RUMDL_PROFILE_RULES").is_ok();
+    #[cfg(target_arch = "wasm32")]
+    let profile_rules = false;
 
     for rule in applicable_rules {
+        #[cfg(not(target_arch = "wasm32"))]
         let _rule_start = Instant::now();
 
         let result = rule.check(&lint_ctx);
@@ -190,14 +207,17 @@ pub fn lint(
             }
         }
 
-        let rule_duration = _rule_start.elapsed();
-        if profile_rules {
-            eprintln!("[RULE] {:6} {:?}", rule.name(), rule_duration);
-        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let rule_duration = _rule_start.elapsed();
+            if profile_rules {
+                eprintln!("[RULE] {:6} {:?}", rule.name(), rule_duration);
+            }
 
-        #[cfg(not(test))]
-        if _verbose && rule_duration.as_millis() > 500 {
-            log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
+            #[cfg(not(test))]
+            if _verbose && rule_duration.as_millis() > 500 {
+                log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
+            }
         }
     }
 

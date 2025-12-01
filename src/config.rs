@@ -1980,6 +1980,7 @@ impl SourcedConfig {
 
     /// Discover user-level configuration file from platform-specific config directory.
     /// Returns the first configuration file found in the user config directory.
+    #[cfg(feature = "native")]
     fn user_configuration_path() -> Option<std::path::PathBuf> {
         use etcetera::{BaseStrategy, choose_base_strategy};
 
@@ -1993,6 +1994,12 @@ impl SourcedConfig {
                 None
             }
         }
+    }
+
+    /// Stub for WASM builds - user config not supported
+    #[cfg(not(feature = "native"))]
+    fn user_configuration_path() -> Option<std::path::PathBuf> {
+        None
     }
 
     /// Internal implementation that accepts user config directory for testing
