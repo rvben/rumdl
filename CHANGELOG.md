@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.186] - 2025-12-01
+
+### Added
+
+- **WebAssembly support: Build and publish rumdl as npm package**
+  - Use rumdl in browsers and Node.js via `@anthropic/rumdl` npm package
+  - Includes `lint()` function for linting markdown content
+  - Automated npm publishing via GitHub Actions
+
+### Fixed
+
+- **MD058 (blanks-around-tables): Fix duplicating table content during auto-fix**
+  - Auto-fix no longer duplicates table content when adding blank lines
+  - Correctly handles tables at various positions in the document
+
+- **MD013 (line-length): Preserve nested linked images during text reflow**
+  - Markdown images inside links like `[![alt](img.png)](url)` now preserved during line wrapping
+  - Previously, the reflow logic could break such nested constructs
+
+### Changed
+
+- **Docs: Document rumdl-fmt pre-commit hook with version check**
+  - Added documentation for the `rumdl-fmt` hook in pre-commit configuration
+  - Includes version compatibility information
+
 ## [0.0.185] - 2025-11-28
 
 ### Added
