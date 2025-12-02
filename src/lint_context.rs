@@ -168,6 +168,19 @@ pub struct BrokenLinkInfo {
     pub span: std::ops::Range<usize>,
 }
 
+/// Parsed footnote reference (e.g., [^1], [^note])
+#[derive(Debug, Clone)]
+pub struct FootnoteRef {
+    /// The footnote ID (without the ^ prefix)
+    pub id: String,
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+}
+
 /// Parsed image information
 #[derive(Debug, Clone)]
 pub struct ParsedImage<'a> {
@@ -411,6 +424,7 @@ pub struct LintContext<'a> {
     pub links: Vec<ParsedLink<'a>>,       // Pre-parsed links
     pub images: Vec<ParsedImage<'a>>,     // Pre-parsed images
     pub broken_links: Vec<BrokenLinkInfo>, // Broken/undefined references
+    pub footnote_refs: Vec<FootnoteRef>,  // Pre-parsed footnote references
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
     code_spans_cache: Mutex<Option<Arc<Vec<CodeSpan>>>>, // Lazy-loaded inline code spans
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
@@ -542,7 +556,7 @@ impl<'a> LintContext<'a> {
         let code_spans = profile_section!("Code spans", profile, Self::parse_code_spans(content, &lines));
 
         // Parse links, images, references, and list blocks
-        let (links, broken_links) = profile_section!(
+        let (links, broken_links, footnote_refs) = profile_section!(
             "Links",
             profile,
             Self::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges)
@@ -595,6 +609,7 @@ impl<'a> LintContext<'a> {
             links,
             images,
             broken_links,
+            footnote_refs,
             reference_defs,
             code_spans_cache: Mutex::new(Some(Arc::new(code_spans))),
             list_blocks,
@@ -965,12 +980,13 @@ impl<'a> LintContext<'a> {
         code_spans: &[CodeSpan],
         flavor: MarkdownFlavor,
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-    ) -> (Vec<ParsedLink<'a>>, Vec<BrokenLinkInfo>) {
+    ) -> (Vec<ParsedLink<'a>>, Vec<BrokenLinkInfo>, Vec<FootnoteRef>) {
         use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
         use std::collections::HashSet;
 
         let mut links = Vec::with_capacity(content.len() / 500);
         let mut broken_links = Vec::new();
+        let mut footnote_refs = Vec::new();
 
         // Track byte positions of links found by pulldown-cmark
         let mut found_positions = HashSet::new();
@@ -986,6 +1002,7 @@ impl<'a> LintContext<'a> {
         // - Wiki-links (enabled via ENABLE_WIKILINKS)
         let mut options = Options::empty();
         options.insert(Options::ENABLE_WIKILINKS);
+        options.insert(Options::ENABLE_FOOTNOTES);
 
         let parser = Parser::new_with_broken_link_callback(
             content,
@@ -1152,6 +1169,21 @@ impl<'a> LintContext<'a> {
                         text_chunks.clear();
                     }
                 }
+                Event::FootnoteReference(footnote_id) => {
+                    // Capture footnote references like [^1], [^note]
+                    // Skip if in HTML comment
+                    if is_in_html_comment_ranges(html_comment_ranges, range.start) {
+                        continue;
+                    }
+
+                    let (_, line_num, _) = Self::find_line_for_offset(lines, range.start);
+                    footnote_refs.push(FootnoteRef {
+                        id: footnote_id.to_string(),
+                        line: line_num,
+                        byte_offset: range.start,
+                        byte_end: range.end,
+                    });
+                }
                 _ => {}
             }
         }
@@ -1231,7 +1263,7 @@ impl<'a> LintContext<'a> {
             }
         }
 
-        (links, broken_links)
+        (links, broken_links, footnote_refs)
     }
 
     /// Parse all images in the content

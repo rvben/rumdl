@@ -313,7 +313,18 @@ impl MD053LinkImageReferenceDefinitions {
             }
         }
 
-        // 3. Find shortcut references [ref] not already handled by DocumentStructure.links
+        // 3. Add usages from footnote references (e.g., [^1], [^note])
+        // pulldown-cmark returns the id without the ^ prefix, but definitions have it
+        for footnote_ref in &ctx.footnote_refs {
+            // Ensure the footnote reference is not inside a code block line
+            if !ctx.line_info(footnote_ref.line).is_some_and(|info| info.in_code_block) {
+                // Add ^ prefix to match definition format
+                let ref_id = format!("^{}", footnote_ref.id);
+                usages.insert(ref_id.to_lowercase());
+            }
+        }
+
+        // 4. Find shortcut references [ref] not already handled by DocumentStructure.links
         //    and ensure they are not within code spans or code blocks.
         // Cache code spans once before the loop
         let code_spans = ctx.code_spans();

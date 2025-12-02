@@ -432,6 +432,20 @@ impl Rule for MD034NoBareUrls {
                 })
             });
 
+            // Filter out warnings where the URL is inside a parsed link
+            // This handles cases like [text]( https://url ) where the URL has leading whitespace
+            // pulldown-cmark correctly parses these as valid links even though our regex misses them
+            line_warnings.retain(|warning| {
+                if let Some(fix) = &warning.fix {
+                    // Check if the fix range falls inside any parsed link's byte range
+                    !ctx.links.iter().any(|link| {
+                        fix.range.start >= link.byte_offset && fix.range.end <= link.byte_end
+                    })
+                } else {
+                    true
+                }
+            });
+
             warnings.extend(line_warnings);
         }
 
