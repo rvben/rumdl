@@ -1,7 +1,14 @@
 //!
 //! Utility functions for detecting and handling code blocks and code spans in Markdown for rumdl.
+//!
+//! Code block detection is delegated to pulldown-cmark, which correctly implements the
+//! CommonMark specification. This handles edge cases like:
+//! - Backtick fences with backticks in the info string (invalid per spec)
+//! - Nested fences (longer fence contains shorter fence as content)
+//! - Mixed fence types (tilde fence contains backticks as content)
+//! - Indented code blocks with proper list context handling
 
-use crate::rules::blockquote_utils::BlockquoteUtils;
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// Classification of code blocks relative to list contexts
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,280 +26,46 @@ pub struct CodeBlockUtils;
 
 impl CodeBlockUtils {
     /// Detect all code blocks in the content (NOT including inline code spans)
+    ///
+    /// Uses pulldown-cmark for spec-compliant CommonMark parsing. This correctly handles:
+    /// - Fenced code blocks (``` and ~~~)
+    /// - Indented code blocks (4 spaces or tab)
+    /// - Code blocks inside lists, blockquotes, and other containers
+    /// - Edge cases like backticks in info strings (which invalidate the fence)
+    ///
+    /// Returns a sorted vector of (start, end) byte offset tuples.
     pub fn detect_code_blocks(content: &str) -> Vec<(usize, usize)> {
         let mut blocks = Vec::new();
-        let mut in_code_block = false;
-        let mut code_block_start = 0;
-        let mut opening_fence_char = ' ';
-        let mut opening_fence_len = 0;
+        let mut code_block_start: Option<usize> = None;
 
-        // Pre-compute line positions for efficient offset calculation
-        let lines: Vec<&str> = content.lines().collect();
-        let mut line_positions = Vec::with_capacity(lines.len());
-        let mut pos = 0;
-        for line in &lines {
-            line_positions.push(pos);
-            pos += line.len() + 1; // +1 for newline
-        }
+        // Use pulldown-cmark with all extensions for maximum compatibility
+        let options = Options::all();
+        let parser = Parser::new_ext(content, options).into_offset_iter();
 
-        // Pre-compute list context for each line to properly handle fence indentation
-        // Inside list items, fences can have more absolute indentation (relative indent still <= 3)
-        let mut list_context_indent: Vec<usize> = vec![0; lines.len()];
-        {
-            let mut in_list = false;
-            let mut continuation_indent: usize = 0;
-
-            for (i, line) in lines.iter().enumerate() {
-                let mut line_no_bq = line.to_string();
-                while BlockquoteUtils::is_blockquote(&line_no_bq) {
-                    line_no_bq = BlockquoteUtils::extract_content(&line_no_bq);
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::CodeBlock(_)) => {
+                    // Record start position of code block
+                    code_block_start = Some(range.start);
                 }
-
-                let indent_level = line_no_bq.len() - line_no_bq.trim_start().len();
-                let trimmed = line_no_bq.trim_start();
-
-                // Check if this is a list item
-                let is_ordered = {
-                    let first_char = trimmed.chars().next();
-                    first_char.is_some_and(|c| c.is_numeric())
-                        && trimmed.chars().position(|c| c == '.' || c == ')').is_some_and(|pos| {
-                            pos > 0
-                                && trimmed[..pos].chars().all(|c| c.is_numeric())
-                                && trimmed.chars().nth(pos + 1).is_some_and(|c| c == ' ' || c == '\t')
-                        })
-                };
-                let is_list_item =
-                    trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") || is_ordered;
-
-                if is_list_item {
-                    in_list = true;
-                    let marker_width =
-                        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
-                            1
-                        } else {
-                            trimmed.chars().take_while(|c| c.is_numeric()).count() + 1
-                        };
-                    let after_marker = &trimmed[marker_width..];
-                    let spaces_after = after_marker.chars().take_while(|c| *c == ' ' || *c == '\t').count();
-                    continuation_indent = indent_level + marker_width + spaces_after;
-                } else if in_list && !line_no_bq.trim().is_empty() && indent_level < continuation_indent {
-                    in_list = false;
-                    continuation_indent = 0;
-                }
-
-                list_context_indent[i] = if in_list { continuation_indent } else { 0 };
-            }
-        }
-
-        // Find fenced code blocks
-        for (i, line) in lines.iter().enumerate() {
-            let line_start = line_positions[i];
-
-            // Strip ALL blockquote prefixes to properly detect fenced code blocks inside blockquotes
-            // This handles nested blockquotes by recursively stripping '>' markers
-            let mut line_without_blockquote = line.to_string();
-            while BlockquoteUtils::is_blockquote(&line_without_blockquote) {
-                line_without_blockquote = BlockquoteUtils::extract_content(&line_without_blockquote);
-            }
-
-            // Calculate indentation before trimming
-            let indent = line_without_blockquote.len() - line_without_blockquote.trim_start().len();
-            let trimmed = line_without_blockquote.trim_start();
-
-            // Check if this line could be a code fence
-            // CommonMark: fences must have at most 3 spaces of indentation RELATIVE to container
-            // Inside list items, the container is the list content, not the document edge
-            let effective_indent = indent.saturating_sub(list_context_indent[i]);
-            if effective_indent <= 3 && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
-                let fence_char = trimmed.chars().next().unwrap();
-                let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
-
-                if !in_code_block && fence_len >= 3 {
-                    // Opening fence
-                    code_block_start = line_start;
-                    in_code_block = true;
-                    opening_fence_char = fence_char;
-                    opening_fence_len = fence_len;
-                } else if in_code_block && fence_char == opening_fence_char && fence_len >= opening_fence_len {
-                    // Closing fence - must match opening fence character and be at least as long
-                    let code_block_end = line_start + line.len();
-                    blocks.push((code_block_start, code_block_end));
-                    in_code_block = false;
-                    opening_fence_char = ' ';
-                    opening_fence_len = 0;
-                }
-                // If we're in a code block but the fence doesn't match, it's just content
-            }
-        }
-
-        // Handle unclosed code blocks
-        if in_code_block {
-            blocks.push((code_block_start, content.len()));
-        }
-
-        // Find indented code blocks (4+ spaces or tab at start of line)
-        // According to CommonMark, indented code blocks must be preceded by a blank line
-        // (unless they're at the start of the document or after a block-level element)
-        //
-        // IMPORTANT: We must handle list contexts correctly:
-        // - At document level: 4 spaces + blank line before = code block
-        // - In a list context: 4 spaces = continuation paragraph (NOT a code block)
-        // - In a list context: 8+ spaces (depending on list marker) = code block
-        let mut in_indented_block = false;
-        let mut indented_block_start = 0;
-        let mut in_list_context = false;
-        let mut list_continuation_indent: usize = 0;
-
-        for (line_idx, line) in lines.iter().enumerate() {
-            let line_start = if line_idx < line_positions.len() {
-                line_positions[line_idx]
-            } else {
-                0
-            };
-
-            // Strip ALL blockquote prefixes to properly detect indented code blocks inside blockquotes
-            let mut line_without_blockquote = line.to_string();
-            while BlockquoteUtils::is_blockquote(&line_without_blockquote) {
-                line_without_blockquote = BlockquoteUtils::extract_content(&line_without_blockquote);
-            }
-
-            // Calculate the indent level
-            let indent_level = line_without_blockquote.len() - line_without_blockquote.trim_start().len();
-            let is_indented = line_without_blockquote.starts_with("    ") || line_without_blockquote.starts_with("\t");
-
-            // Check if this looks like a list item (has list marker after indentation)
-            let trimmed = line_without_blockquote.trim_start();
-
-            // Check for ordered list marker: 1-9 digits followed by . or )
-            // Must be followed by at least one space
-            let is_ordered_list = {
-                let mut chars = trimmed.chars();
-                let first_char = chars.next();
-                if !first_char.is_some_and(|c| c.is_numeric()) {
-                    false
-                } else {
-                    // Find delimiter position (. or ))
-                    let delimiter_char_pos = trimmed.chars().position(|c| c == '.' || c == ')');
-                    match delimiter_char_pos {
-                        Some(char_pos) if char_pos > 0 => {
-                            // Convert character position to byte position for slicing
-                            let byte_pos = trimmed.char_indices().nth(char_pos).map(|(i, _)| i);
-                            if let Some(byte_pos) = byte_pos {
-                                // All chars before delimiter must be digits
-                                let all_digits = trimmed[..byte_pos].chars().all(|c| c.is_numeric());
-                                // Must be followed by space or tab
-                                let has_space =
-                                    trimmed.chars().nth(char_pos + 1).is_some_and(|c| c == ' ' || c == '\t');
-                                all_digits && has_space
-                            } else {
-                                false
-                            }
-                        }
-                        _ => false,
+                Event::End(TagEnd::CodeBlock) => {
+                    // Complete the code block range
+                    if let Some(start) = code_block_start.take() {
+                        blocks.push((start, range.end));
                     }
                 }
-            };
-
-            let is_list_item =
-                trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") || is_ordered_list;
-
-            // Check if previous line was blank (after stripping blockquote markers)
-            let prev_line_without_blockquote = if line_idx > 0 {
-                let mut prev = lines[line_idx - 1].to_string();
-                while BlockquoteUtils::is_blockquote(&prev) {
-                    prev = BlockquoteUtils::extract_content(&prev);
-                }
-                prev
-            } else {
-                String::new()
-            };
-            let prev_blank = line_idx > 0 && prev_line_without_blockquote.trim().is_empty();
-
-            // Update list context tracking
-            if is_list_item {
-                // We're starting or continuing a list
-                in_list_context = true;
-
-                // Calculate continuation indent per CommonMark spec:
-                // "The spaces of indentation after the list marker determine how much
-                // relative indentation is needed. The first continuation block must be
-                // indented to the column of the first character other than a space after the marker."
-
-                let marker_column = indent_level;
-                let marker_width =
-                    if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
-                        1 // Single character marker (-, *, +)
-                    } else {
-                        // Ordered list marker: count digits + delimiter (. or ))
-                        trimmed.chars().take_while(|c| c.is_numeric()).count() + 1
-                    };
-
-                // Count actual spaces/tabs after marker (CommonMark allows 1-4 spaces)
-                // Find the first non-space character after the marker
-                let after_marker = &trimmed[marker_width..];
-                let spaces_after_marker = after_marker.chars().take_while(|c| *c == ' ' || *c == '\t').count();
-
-                // Continuation indent = marker column + marker width + actual spaces
-                // This is the column where the first content character appears
-                list_continuation_indent = marker_column + marker_width + spaces_after_marker;
-            } else if in_list_context
-                && !line_without_blockquote.trim().is_empty()
-                && indent_level < list_continuation_indent
-            {
-                // Outdented non-empty line ends the list context
-                in_list_context = false;
-                list_continuation_indent = 0;
-            }
-
-            // Determine if this indented line is:
-            // 1. A list continuation paragraph (indent >= continuation_indent, < continuation_indent + 4)
-            // 2. A code block within a list (indent >= continuation_indent + 4)
-            // 3. A document-level code block (not in list context)
-
-            let is_list_continuation_paragraph = in_list_context
-                && indent_level >= list_continuation_indent
-                && indent_level < (list_continuation_indent + 4);
-
-            let is_code_block_in_list = in_list_context && indent_level >= (list_continuation_indent + 4);
-
-            // Handle indented code blocks
-            if is_indented && !line_without_blockquote.trim().is_empty() && !is_list_item {
-                if is_code_block_in_list {
-                    // Code block within list (CommonMark Example 270, 273, 274)
-                    // Requires continuation_indent + 4 spaces, and must have blank line before
-                    if !in_indented_block && prev_blank {
-                        in_indented_block = true;
-                        indented_block_start = line_start;
-                    }
-                } else if !is_list_continuation_paragraph {
-                    // Document-level indented code block (not in list)
-                    if !in_indented_block && prev_blank {
-                        in_indented_block = true;
-                        indented_block_start = line_start;
-                    }
-                }
-                // If is_list_continuation_paragraph, don't treat as code block
-            } else if in_indented_block {
-                // End of indented code block
-                let block_end = if line_idx > 0 && line_idx - 1 < line_positions.len() {
-                    line_positions[line_idx - 1] + lines[line_idx - 1].len()
-                } else {
-                    line_start
-                };
-                blocks.push((indented_block_start, block_end));
-                in_indented_block = false;
+                _ => {}
             }
         }
 
-        // Handle indented block that goes to end of file
-        if in_indented_block {
-            blocks.push((indented_block_start, content.len()));
+        // Handle edge case: unclosed code block at end of content
+        // pulldown-cmark should handle this, but be defensive
+        if let Some(start) = code_block_start {
+            blocks.push((start, content.len()));
         }
 
-        // Note: We DO NOT include inline code spans here - they are not code blocks!
-        // Inline code spans are handled separately by the code span parser.
-
-        blocks.sort_by(|a, b| a.0.cmp(&b.0));
+        // Sort by start position (should already be sorted, but ensure consistency)
+        blocks.sort_by_key(|&(start, _)| start);
         blocks
     }
 
@@ -495,14 +268,30 @@ mod tests {
     }
 
     #[test]
-    fn test_list_items_not_code_blocks() {
-        // List items should not be detected as code blocks
+    fn test_indented_content_with_list_markers_is_code_block() {
+        // Per CommonMark spec: 4-space indented content after blank line IS a code block,
+        // even if the content looks like list markers. The indentation takes precedence.
+        // Verified with: echo 'List:\n\n    - Item 1' | npx commonmark
+        // Output: <pre><code>- Item 1</code></pre>
         let content = "List:\n\n    - Item 1\n    - Item 2\n    * Item 3\n    + Item 4";
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+        assert_eq!(blocks.len(), 1); // This IS a code block per spec
+
+        // Same for numbered list markers
+        let content = "List:\n\n    1. First\n    2. Second";
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+        assert_eq!(blocks.len(), 1); // This IS a code block per spec
+    }
+
+    #[test]
+    fn test_actual_list_items_not_code_blocks() {
+        // Actual list items (no preceding blank line + 4 spaces) are NOT code blocks
+        let content = "- Item 1\n- Item 2\n* Item 3";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
         assert_eq!(blocks.len(), 0);
 
-        // Numbered lists
-        let content = "List:\n\n    1. First\n    2. Second\n    1) Also first";
+        // Nested list items
+        let content = "- Item 1\n  - Nested item\n- Item 2";
         let blocks = CodeBlockUtils::detect_code_blocks(content);
         assert_eq!(blocks.len(), 0);
     }
@@ -650,5 +439,59 @@ mod tests {
         let blocks = CodeBlockUtils::detect_code_blocks(content);
         // Only 1 fenced block (indented fences still work)
         assert_eq!(blocks.len(), 1);
+    }
+
+    // Issue #175: Backticks in info string invalidate the fence
+    #[test]
+    fn test_backticks_in_info_string_not_code_block() {
+        // Per CommonMark spec: "If the info string comes after a backtick fence,
+        // it may not contain any backtick characters."
+        // So ```something``` is NOT a valid fence - the backticks are treated as inline code.
+        // Verified with: echo '```something```' | npx commonmark
+        // Output: <p><code>something</code></p>
+        let content = "```something```\n\n```bash\n# comment\n```";
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+        // Should find only the valid ```bash block, NOT the invalid ```something```
+        assert_eq!(blocks.len(), 1);
+        // The valid block should contain "# comment"
+        assert!(content[blocks[0].0..blocks[0].1].contains("# comment"));
+    }
+
+    #[test]
+    fn test_issue_175_reproduction() {
+        // Full reproduction of issue #175
+        let content = "```something```\n\n```bash\n# Have a parrot\necho \"🦜\"\n```";
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+        // Only the bash block is a code block
+        assert_eq!(blocks.len(), 1);
+        assert!(content[blocks[0].0..blocks[0].1].contains("Have a parrot"));
+    }
+
+    #[test]
+    fn test_tilde_fence_allows_tildes_in_info_string() {
+        // Tilde fences CAN have tildes in info string (only backtick restriction exists)
+        // ~~~abc~~~ opens an unclosed code block with info string "abc~~~"
+        let content = "~~~abc~~~\ncode content\n~~~";
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+        // This is a valid tilde fence that opens and closes
+        assert_eq!(blocks.len(), 1);
+    }
+
+    #[test]
+    fn test_nested_longer_fence_contains_shorter() {
+        // Longer fence (````) can contain shorter fence (```) as content
+        let content = "````\n```\nnested content\n```\n````";
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+        assert_eq!(blocks.len(), 1);
+        assert!(content[blocks[0].0..blocks[0].1].contains("nested content"));
+    }
+
+    #[test]
+    fn test_mixed_fence_types() {
+        // Tilde fence contains backtick markers as content
+        let content = "~~~\n```\nmixed content\n~~~";
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+        assert_eq!(blocks.len(), 1);
+        assert!(content[blocks[0].0..blocks[0].1].contains("mixed content"));
     }
 }

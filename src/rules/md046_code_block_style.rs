@@ -308,6 +308,13 @@ impl MD046CodeBlockStyle {
                 // Check what comes after the fence characters
                 let after_fence = &trimmed[fence_length..];
 
+                // CommonMark spec: "If the info string comes after a backtick fence,
+                // it may not contain any backtick characters."
+                // This means ```something``` is NOT a valid fence - the backticks are inline code.
+                if fence_char == '`' && after_fence.contains('`') {
+                    continue;
+                }
+
                 // Check if this is a valid fence pattern
                 // Valid markdown code fence syntax:
                 // - ``` or ~~~ (just fence)

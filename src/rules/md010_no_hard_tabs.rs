@@ -106,6 +106,39 @@ impl MD010NoHardTabs {
 
         groups
     }
+
+    /// Find lines that are inside fenced code blocks (``` or ~~~)
+    /// Returns a Vec<bool> where index i indicates if line i is inside a fenced code block
+    fn find_fenced_code_block_lines(lines: &[&str]) -> Vec<bool> {
+        let mut in_fenced_block = false;
+        let mut fence_char: Option<char> = None;
+        let mut result = vec![false; lines.len()];
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+
+            if !in_fenced_block {
+                // Check for opening fence (``` or ~~~)
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    in_fenced_block = true;
+                    fence_char = Some(trimmed.chars().next().unwrap());
+                    result[i] = true; // Mark the fence line itself as "in fenced block"
+                }
+            } else {
+                result[i] = true;
+                // Check for closing fence (must match opening fence char)
+                if let Some(fc) = fence_char {
+                    let fence_str: String = std::iter::repeat_n(fc, 3).collect();
+                    if trimmed.starts_with(&fence_str) && trimmed.trim() == fence_str {
+                        in_fenced_block = false;
+                        fence_char = None;
+                    }
+                }
+            }
+        }
+
+        result
+    }
 }
 
 impl Rule for MD010NoHardTabs {
@@ -127,16 +160,20 @@ impl Rule for MD010NoHardTabs {
         // Pre-compute which lines are part of HTML comments
         let html_comment_lines = Self::find_html_comment_lines(&lines);
 
+        // Pre-compute which lines are inside fenced code blocks (``` or ~~~)
+        // We only skip fenced code blocks - code has its own formatting rules
+        // (e.g., Makefiles require tabs, Go uses tabs by convention)
+        // We still flag tab-indented content because it might be accidental
+        let fenced_code_block_lines = Self::find_fenced_code_block_lines(&lines);
+
         for (line_num, &line) in lines.iter().enumerate() {
             // Skip if in HTML comment
             if html_comment_lines[line_num] {
                 continue;
             }
 
-            // Always skip code blocks
-            if let Some(line_info) = ctx.line_info(line_num + 1)
-                && line_info.in_code_block
-            {
+            // Skip if in fenced code block - code has its own formatting rules
+            if fenced_code_block_lines[line_num] {
                 continue;
             }
 
@@ -203,7 +240,6 @@ impl Rule for MD010NoHardTabs {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let line_index = &ctx.line_index;
 
         let mut result = String::new();
         let lines: Vec<&str> = content.lines().collect();
@@ -211,21 +247,21 @@ impl Rule for MD010NoHardTabs {
         // Pre-compute which lines are part of HTML comments
         let html_comment_lines = Self::find_html_comment_lines(&lines);
 
-        // Pre-compute line positions for code block detection
-        let mut line_positions = Vec::with_capacity(lines.len());
-        for i in 0..lines.len() {
-            line_positions.push(line_index.get_line_start_byte(i + 1).unwrap_or(0));
-        }
+        // Pre-compute which lines are inside fenced code blocks
+        // Only skip fenced code blocks - code has its own formatting rules
+        // (e.g., Makefiles require tabs, Go uses tabs by convention)
+        let fenced_code_block_lines = Self::find_fenced_code_block_lines(&lines);
 
         for (i, line) in lines.iter().enumerate() {
             if html_comment_lines[i] {
                 // Preserve HTML comments as they are
                 result.push_str(line);
-            } else if ctx.is_in_code_block_or_span(line_positions[i]) {
-                // Always preserve code blocks as-is
+            } else if fenced_code_block_lines[i] {
+                // Preserve fenced code blocks as-is - code has its own formatting rules
                 result.push_str(line);
             } else {
-                // Replace tabs with spaces
+                // Replace tabs with spaces in regular markdown content
+                // (including tab-indented content which might be accidental)
                 result.push_str(&line.replace('\t', &" ".repeat(self.config.spaces_per_tab.get())));
             }
 
@@ -340,7 +376,7 @@ mod tests {
         let content = "Normal\tline\n```\nCode\twith\ttab\n```\nAnother\tline";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Should only flag tabs outside code blocks
+        // Should only flag tabs outside code blocks - code has its own formatting rules
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 5);
@@ -355,7 +391,8 @@ mod tests {
         let content = "```\nCode\twith\ttab\n```";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Should never flag tabs in code blocks
+        // Should never flag tabs in code blocks - code has its own formatting rules
+        // (e.g., Makefiles require tabs, Go uses tabs by convention)
         assert_eq!(result.len(), 0);
     }
 
@@ -515,7 +552,8 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // Should always preserve tabs in all code blocks
+        // Tabs in code blocks are preserved - code has its own formatting rules
+        // (e.g., Makefiles require tabs, Go uses tabs by convention)
         let expected = "Text    with    tab\n```makefile\ntarget:\n\tcommand\n\tanother\n```\nMore    tabs";
         assert_eq!(fixed, expected);
     }
