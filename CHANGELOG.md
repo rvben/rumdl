@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.187] - 2025-12-02
+
+### Added
+
+- **WASM: Implement Linter class API with configuration support**
+  - New `Linter` class provides object-oriented API for WebAssembly builds
+  - Supports configuration options for customizing lint behavior
+  - Enables more flexible integration in JavaScript/TypeScript projects
+
+### Fixed
+
+- **MD053 (link-image-reference-definitions): Fix false positives for adjacent footnotes (fixes #177)**
+  - Footnote references like `[^1][^2]` no longer trigger "unused reference" warnings
+  - Uses pulldown-cmark for proper footnote parsing instead of regex
+
+- **MD034 (no-bare-urls): Use pulldown-cmark for proper link parsing**
+  - Bare URL detection now correctly identifies URLs already inside links
+  - Prevents false positives for URLs that are properly formatted
+
+- **MD010 (no-hard-tabs): Skip tabs in fenced code blocks**
+  - Tabs inside fenced code blocks are no longer flagged
+  - Preserves intentional tab characters in code examples
+
+- **MD052 (reference-links-images): Disable shortcut reference checking by default**
+  - Shortcut references like `[text]` without a following `[]` no longer trigger warnings
+  - Reduces false positives in documents using shortcut reference style
+
+- **MD025/MD023: Fix false positives after single-line code blocks (fixes #175)**
+  - Comments like `# text` inside code blocks after single-line code blocks no longer flagged
+  - Code block parsing now correctly handles edge cases
+
+- **MD013/MD039: Fix reflow oscillation causing unstable output (fixes #170)**
+  - Running `rumdl fmt` multiple times now produces stable output
+  - Link formatting no longer conflicts with line length reflow
+
+### Changed
+
+- **Tests: Align test expectations with CommonMark spec and markdownlint reference**
+  - Test suite updated to match authoritative behavior
+  - Ensures compatibility with CommonMark specification
+
 ## [0.0.186] - 2025-12-01
 
 ### Added
