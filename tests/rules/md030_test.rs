@@ -164,18 +164,15 @@ mod tests {
 
     #[test]
     fn test_real_world_tab_after_marker() {
+        // MD030 only checks for multiple spaces, not tabs
+        // Tabs are handled by MD010 (no-hard-tabs), matching markdownlint behavior
         let rule = MD030ListMarkerSpace::default();
         let content =
-            "*	[benjamingr](https://github.com/benjamingr) -\n    **Benjamin Gruenbaum** <<benjamingr@gmail.com>>";
+            "*\t[benjamingr](https://github.com/benjamingr) -\n    **Benjamin Gruenbaum** <<benjamingr@gmail.com>>";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert!(
-            result[0].message.starts_with("Spaces after list markers (Expected:")
-                && result[0].message.contains("Actual:"),
-            "Warning message should include expected and actual values, got: '{}'",
-            result[0].message
-        );
+        // Tabs should NOT be flagged by MD030 - that's MD010's job
+        assert_eq!(result.len(), 0, "MD030 should not flag tabs");
     }
 
     #[test]
@@ -256,22 +253,28 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_tabs_after_markers() {
+    fn test_tabs_after_markers_not_modified() {
+        // MD030 only handles multiple SPACES after list markers, not tabs
+        // Tabs are handled by MD010 (no-hard-tabs)
+        // This matches markdownlint reference behavior
         let rule = MD030ListMarkerSpace::default();
+
+        // Content with tabs should not be modified by MD030
         let content = "*\tItem with tab\n-\t\tItem with two tabs\n1.\tOrdered with tab";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Item with tab\n- Item with two tabs\n1. Ordered with tab";
-        assert_eq!(fixed, expected);
+        // Tabs should remain unchanged - MD010 handles those
+        assert_eq!(fixed, content, "MD030 should not modify tabs");
     }
 
     #[test]
-    fn test_fix_mixed_spaces_and_tabs() {
+    fn test_multiple_spaces_after_markers() {
+        // MD030 flags multiple SPACES, not tabs
         let rule = MD030ListMarkerSpace::default();
-        let content = "* \tMixed space and tab\n- \t Item with space-tab-space\n1. \t\tOrdered mixed";
+        let content = "*  Two spaces\n-   Three spaces\n1.  Ordered two spaces";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Mixed space and tab\n- Item with space-tab-space\n1. Ordered mixed";
+        let expected = "* Two spaces\n- Three spaces\n1. Ordered two spaces";
         assert_eq!(fixed, expected);
     }
 

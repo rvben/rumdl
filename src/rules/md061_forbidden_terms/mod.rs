@@ -342,12 +342,13 @@ mod tests {
     #[test]
     fn test_column_positions() {
         let rule = MD061ForbiddenTerms::new(vec!["TODO".to_string()], false);
-        let content = "    TODO: indented\n";
+        // Use 2 spaces, not 4 (4 spaces creates a code block)
+        let content = "  TODO: indented\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].column, 5); // 1-based column
-        assert_eq!(result[0].end_column, 9);
+        assert_eq!(result[0].column, 3); // 1-based column, TODO starts at col 3
+        assert_eq!(result[0].end_column, 7);
     }
 
     #[test]

@@ -168,7 +168,7 @@ pub struct BrokenLinkInfo {
     pub span: std::ops::Range<usize>,
 }
 
-/// Parsed footnote reference (e.g., [^1], [^note])
+/// Parsed footnote reference (e.g., `[^1]`, `[^note]`)
 #[derive(Debug, Clone)]
 pub struct FootnoteRef {
     /// The footnote ID (without the ^ prefix)
@@ -1640,7 +1640,12 @@ impl<'a> LintContext<'a> {
             // Use binary search to find the first and last line indices
             // line_offsets is sorted, so we can use partition_point for O(log n) lookup
             // Use safe_start/safe_end (UTF-8 boundaries) for consistent line mapping
-            let first_line = line_offsets.partition_point(|&offset| offset < safe_start);
+            //
+            // Find the line that CONTAINS safe_start: the line with the largest
+            // start offset that is <= safe_start. partition_point gives us the
+            // first line that starts AFTER safe_start, so we subtract 1.
+            let first_line_after = line_offsets.partition_point(|&offset| offset <= safe_start);
+            let first_line = first_line_after.saturating_sub(1);
             let last_line = line_offsets.partition_point(|&offset| offset < safe_end);
 
             // Mark all lines in the range at once
@@ -1824,8 +1829,9 @@ impl<'a> LintContext<'a> {
 
                 // Check for various blockquote issues
                 let has_no_space = bq.spaces_after.is_empty() && !bq.content.is_empty();
-                // Consider tabs as multiple spaces, or actual multiple spaces
-                let has_multiple_spaces = bq.spaces_after.len() > 1 || bq.spaces_after.contains('\t');
+                // Only flag multiple literal spaces, not tabs
+                // Tabs are handled by MD010 (no-hard-tabs), matching markdownlint behavior
+                let has_multiple_spaces = bq.spaces_after.chars().filter(|&c| c == ' ').count() > 1;
 
                 // Check if needs MD028 fix (empty blockquote line without proper spacing)
                 // MD028 flags empty blockquote lines that don't have a single space after the marker

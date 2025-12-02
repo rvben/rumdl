@@ -260,7 +260,9 @@ mod tests {
     fn test_md023_various_indentations() {
         let rule = MD023HeadingStartLeft;
 
-        let test_cases = vec![("  # H1", "# H1"), ("    ## H2", "## H2"), ("\t### H3", "### H3")];
+        // Note: 4+ spaces create code blocks per CommonMark, so test with max 3 spaces
+        // Tab before heading is handled by MD010, not MD023 (per markdownlint-cli)
+        let test_cases = vec![("  # H1", "# H1"), ("   ## H2", "## H2")];
 
         for (input, expected) in test_cases {
             let result = simulate_vscode_fix(input, &rule).unwrap();

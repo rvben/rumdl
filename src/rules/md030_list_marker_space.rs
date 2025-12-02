@@ -113,19 +113,10 @@ impl Rule for MD030ListMarkerSpace {
                 let is_multi_line = self.is_multi_line_list_item(ctx, line_num, &lines);
                 let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
 
-                // Check for tabs in the spacing
-                let line_content = &line[list_info.marker_column..];
-                let spacing_content = if line_content.len() > list_info.marker.len() {
-                    let after_marker_start = list_info.marker.len();
-                    let after_marker_end = after_marker_start + actual_spaces;
-                    &line_content[after_marker_start..after_marker_end.min(line_content.len())]
-                } else {
-                    ""
-                };
-                let has_tabs = spacing_content.contains('\t');
-
-                // Check if spacing is incorrect or contains tabs
-                if actual_spaces != expected_spaces || has_tabs {
+                // MD030 only checks for incorrect number of spaces, not tabs
+                // Tabs are handled by MD010 (no-hard-tabs), matching markdownlint behavior
+                // Check if spacing is incorrect
+                if actual_spaces != expected_spaces {
                     // Calculate precise character range for the problematic spacing
                     let whitespace_start_pos = marker_end;
                     let whitespace_len = actual_spaces;
@@ -329,12 +320,16 @@ impl MD030ListMarkerSpace {
         is_multi_line: bool,
         is_ordered: bool,
     ) -> Option<String> {
-        // Fix if there are tabs, multiple spaces, or mixed whitespace
-        if after_marker.starts_with('\t')
-            || after_marker.starts_with("  ")
-            || (after_marker.starts_with(' ') && after_marker.as_bytes().get(1) == Some(&b'\t'))
-        {
-            let content = after_marker.trim_start();
+        // MD030 only fixes multiple spaces, not tabs
+        // Tabs are handled by MD010 (no-hard-tabs), matching markdownlint behavior
+        // Skip if the spacing starts with a tab
+        if after_marker.starts_with('\t') {
+            return None;
+        }
+
+        // Fix if there are multiple spaces
+        if after_marker.starts_with("  ") {
+            let content = after_marker.trim_start_matches(' ');
             if !content.is_empty() {
                 // Use appropriate configuration based on list type and whether it's multi-line
                 let spaces = if is_ordered {

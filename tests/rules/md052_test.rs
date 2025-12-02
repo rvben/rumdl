@@ -147,11 +147,13 @@ fn test_shortcut_reference() {
 
 #[test]
 fn test_invalid_shortcut_reference() {
+    // Shortcut references like [example] are NOT checked by default (shortcut_syntax: false)
+    // This test verifies that default behavior matches markdownlint
     let rule = MD052ReferenceLinkImages::new();
     let content = "[example]\n\n[other]: http://example.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 0, "Shortcut references are not checked by default");
 }
 
 #[test]
@@ -234,12 +236,12 @@ fn test_escaped_brackets_with_undefined_ref() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
-    // However, a separate [undefined] should still be detected
+    // A separate [undefined] is a shortcut reference - NOT checked by default
+    // (shortcut_syntax is false by default)
     let content2 = r#"This is \[escaped] and [undefined] but undefined is not defined."#;
     let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
     let result2 = rule.check(&ctx2).unwrap();
-    assert_eq!(result2.len(), 1);
-    assert_eq!(result2[0].message, "Reference 'undefined' not found");
+    assert_eq!(result2.len(), 0, "Shortcut references are not checked by default");
 }
 
 #[test]
@@ -819,7 +821,8 @@ let x = vec![1, 2, 3];
 
 #[test]
 fn test_actual_reference_in_quote_outside_code() {
-    // Make sure we still catch actual undefined references in blockquotes
+    // Make sure we don't flag code block content like #[derive(Debug)]
+    // Note: [reference] is a shortcut reference which is NOT checked by default
     let rule = MD052ReferenceLinkImages::new();
 
     let content = r#"> This is a [reference] in a blockquote
@@ -833,11 +836,11 @@ fn test_actual_reference_in_quote_outside_code() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag [reference] but not [derive(Debug)]
+    // With shortcut_syntax: false (default), [reference] is not checked
+    // Only ensure we don't flag code block content like [derive(Debug)]
     assert_eq!(
         result.len(),
-        1,
-        "Should flag [reference] but not code block content. Got: {result:?}"
+        0,
+        "Shortcut references are not checked by default, and code block content should be ignored. Got: {result:?}"
     );
-    assert!(result[0].message.contains("reference"));
 }

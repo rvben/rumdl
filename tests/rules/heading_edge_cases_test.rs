@@ -78,14 +78,21 @@ Setext Level 1
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect skip from Setext h1 to ATX h4");
 
-    // Test 7: Indented headings (should be ignored as they're not valid headings)
+    // Test 7: Indented headings (should be ignored as they're code blocks)
+    // Per CommonMark, 4-space indented line is a code block, not a heading
+    // So we have h1 -> (code block, not h2) -> h3, which is a skip
+    // Verified with: npx markdownlint-cli (flags MD001 on line 3)
     let content = "\
 # Normal heading
     ## This is indented 4 spaces (code block)
 ### Next heading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "Indented headings should be ignored");
+    assert_eq!(
+        result.len(),
+        1,
+        "Should detect h1 to h3 skip (h2 is a code block, not a heading)"
+    );
 
     // Test 8: Unicode in headings
     let content = "\
@@ -272,6 +279,16 @@ fn test_md023_edge_cases() {
     let rule = MD023HeadingStartLeft;
 
     // Test 1: Various indentation levels
+    // Per CommonMark spec, 4-space indented lines are code blocks, not headings
+    // markdownlint correctly skips this line, verified with:
+    // cat > /tmp/t.md << 'EOF'
+    // # No indent
+    //  # One space
+    //   ## Two spaces
+    //    ### Three spaces
+    //     #### Four spaces (code block)
+    // EOF
+    // npx markdownlint-cli /tmp/t.md
     let content = "\
 # No indent
  # One space
@@ -282,8 +299,8 @@ fn test_md023_edge_cases() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
-        4,
-        "Should flag all indented headings (MD023 checks headings regardless of code block context)"
+        3,
+        "Should flag 3 indented headings (4-space line is a code block per CommonMark)"
     );
 
     // Test 2: Setext headings with indented underline
@@ -299,6 +316,8 @@ Setext Heading
     );
 
     // Test 3: Mixed indentation
+    // 4-space indented line is a code block per CommonMark, not a heading
+    // Verified with: npx markdownlint-cli (only flags line 2)
     let content = "\
 # Correct
   ## Indented
@@ -309,8 +328,8 @@ Setext Heading
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
-        2,
-        "Should flag both indented headings (2 spaces and 4 spaces)"
+        1,
+        "Should flag 1 indented heading (4-space line is a code block)"
     );
 
     // Test 4: Empty document
@@ -320,12 +339,14 @@ Setext Heading
     assert!(result.is_empty(), "Empty document should have no issues");
 
     // Test 5: Tab indentation
+    // Per markdownlint-cli, tabs are handled by MD010, not MD023.
+    // A tab before a heading does not trigger MD023.
     let content = "\
 # Normal
 \t# Tab indented";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Should flag tab-indented heading");
+    assert!(result.is_empty(), "Tab before heading is MD010's domain, not MD023");
 
     // Test 6: Setext with only text indented
     let content = "\

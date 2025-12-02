@@ -124,9 +124,10 @@ fn test_md052_skips_math_contexts() {
     let rule = MD052ReferenceLinkImages::new();
 
     // Test that reference-like patterns in math are not flagged
+    // Using full reference syntax [text][ref] since shortcut_syntax is false by default
     let content = r#"# Test MD052 with Math
 
-Regular [undefined] reference that should be flagged.
+Regular [text][undefined_ref] reference that should be flagged.
 
 $$
 This is a math block with array notation [0] and [1] that should NOT be flagged.
@@ -137,7 +138,7 @@ Inline math with array $a[0]$ and matrix $M[i][j]$ should not be flagged.
 
 Double dollar inline $$f[x]$$ should not be flagged.
 
-But this [missing] reference outside math should be flagged."#;
+But this [link][missing_ref] reference outside math should be flagged."#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -148,10 +149,13 @@ But this [missing] reference outside math should be flagged."#;
     // Verify the correct references are flagged
     let messages: Vec<String> = result.iter().map(|w| w.message.clone()).collect();
     assert!(
-        messages.iter().any(|m| m.contains("undefined")),
-        "Should flag 'undefined'"
+        messages.iter().any(|m| m.contains("undefined_ref")),
+        "Should flag 'undefined_ref'"
     );
-    assert!(messages.iter().any(|m| m.contains("missing")), "Should flag 'missing'");
+    assert!(
+        messages.iter().any(|m| m.contains("missing_ref")),
+        "Should flag 'missing_ref'"
+    );
 }
 
 #[test]
@@ -159,23 +163,24 @@ fn test_md052_skips_tables() {
     let rule = MD052ReferenceLinkImages::new();
 
     // Test that reference-like patterns in tables are not flagged
+    // Using full reference syntax [text][ref] since shortcut_syntax is false by default
     let content = r#"# Test MD052 with Tables
 
-Regular [undefined] reference that should be flagged.
+Regular [link][undefined_ref] reference that should be flagged.
 
 | Header | Column |
 |--------|--------|
-| Cell with [ref1] | Another [ref2] |
-| More [ref3] data | Final [ref4] cell |
+| Cell with [ref1][x] | Another [ref2][y] |
+| More [ref3][z] data | Final [ref4][w] cell |
 
-This [missing] reference outside the table should be flagged.
+This [link2][missing_ref] reference outside the table should be flagged.
 
 Another table:
 | Col 1 | Col 2 | Col 3 |
 |-------|-------|-------|
-| [a] | [b] | [c] |
+| [a][x1] | [b][x2] | [c][x3] |
 
-Final [broken] reference should be flagged."#;
+Final [link3][broken_ref] reference should be flagged."#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
@@ -189,11 +194,17 @@ Final [broken] reference should be flagged."#;
     // Verify the correct references are flagged
     let messages: Vec<String> = result.iter().map(|w| w.message.clone()).collect();
     assert!(
-        messages.iter().any(|m| m.contains("undefined")),
-        "Should flag 'undefined'"
+        messages.iter().any(|m| m.contains("undefined_ref")),
+        "Should flag 'undefined_ref'"
     );
-    assert!(messages.iter().any(|m| m.contains("missing")), "Should flag 'missing'");
-    assert!(messages.iter().any(|m| m.contains("broken")), "Should flag 'broken'");
+    assert!(
+        messages.iter().any(|m| m.contains("missing_ref")),
+        "Should flag 'missing_ref'"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("broken_ref")),
+        "Should flag 'broken_ref'"
+    );
 }
 
 #[test]
@@ -313,6 +324,7 @@ Another (https://test.com)[reversed] link should be flagged."#;
 #[test]
 fn test_combined_skip_contexts() {
     // Test that multiple skip contexts work together correctly
+    // Using full reference syntax [text][ref] since shortcut_syntax is false by default
     let content = r#"---
 frontmatter: "with (pattern)[like] this"
 ---
@@ -321,7 +333,7 @@ frontmatter: "with (pattern)[like] this"
 
 Regular * emphasis with spaces * should be flagged.
 
-<!-- HTML comment with * spaces * and [undefined] reference -->
+<!-- HTML comment with * spaces * and [link][undefined] reference -->
 
 $$
 Math block with * asterisks * and [array][notation]
@@ -331,9 +343,9 @@ Inline math $f(x) * g(x)$ and $a[i]$ should be skipped.
 
 | Table | Header |
 |-------|--------|
-| * spaces * | [ref] |
+| * spaces * | [ref][x] |
 
-Outside contexts: * spaced * emphasis and [missing] reference and (https://example.com)[reversed] link."#;
+Outside contexts: * spaced * emphasis and [link][missing_ref] reference and (https://example.com)[reversed] link."#;
 
     // Test MD037
     let md037 = MD037NoSpaceInEmphasis;
@@ -344,7 +356,7 @@ Outside contexts: * spaced * emphasis and [missing] reference and (https://examp
     // Test MD052
     let md052 = MD052ReferenceLinkImages::new();
     let result = md052.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "MD052: Expected 1 warning for 'missing' reference");
+    assert_eq!(result.len(), 1, "MD052: Expected 1 warning for 'missing_ref' reference");
 
     // Test MD011
     let md011 = MD011NoReversedLinks;

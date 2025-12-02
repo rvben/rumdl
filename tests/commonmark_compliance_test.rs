@@ -40,15 +40,12 @@ fn test_commonmark_example_273_multiple_code_blocks_in_list() {
     let content = "1.     indented code\n\n   paragraph\n\n       more code";
     let blocks = CodeBlockUtils::detect_code_blocks(content);
 
-    // Marker "1." at column 0 (width 2) + 5 spaces = continuation at column 7
-    // "indented code" at column 7 + blank line = start of code block in list
-    // "paragraph" at column 3 < continuation, ends the list
-    // "more code" at column 7: only 7 spaces, but after "paragraph" ends list context
-    // So "more code" would need 4 spaces at document level for code block
-    // 7 spaces > 4, so it IS a code block, but we only detect the one in the list
-    // Our implementation currently detects 1 code block (the one in the list)
-    // This is acceptable behavior - the second one is debatable based on context
-    assert_eq!(blocks.len(), 1, "Example 273: one code block detected (in list)");
+    // Per CommonMark spec (verified with cmark reference implementation):
+    // - "indented code" is a code block within the list item
+    // - "paragraph" is a paragraph within the list item
+    // - "more code" is ALSO a code block within the list item
+    // Both "indented code" and "more code" are wrapped in <pre><code> per cmark
+    assert_eq!(blocks.len(), 2, "Example 273: two code blocks detected (in list)");
 }
 
 /// Test CommonMark Example 257 - Insufficient continuation indent
@@ -115,12 +112,13 @@ fn test_ordered_list_multiple_spaces() {
     let content = "1.     First\n\n       continuation";
     let blocks = CodeBlockUtils::detect_code_blocks(content);
 
-    // Marker "1." at column 0 (width 2) + 5 spaces = continuation at column 7
-    // "continuation" at column 7 = continuation paragraph
+    // Per CommonMark: 5 spaces after "1." creates an indented code block
+    // within the list item. Both "First" and "continuation" are code.
+    // Verified with cmark: <ol><li><pre><code>First\n\ncontinuation</code></pre></li></ol>
     assert_eq!(
         blocks.len(),
-        0,
-        "Ordered list continuation with multiple spaces should not be code block"
+        1,
+        "5 spaces after ordered list marker creates code block (verified with cmark)"
     );
 }
 

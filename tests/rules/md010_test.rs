@@ -52,10 +52,12 @@ fn test_empty_line_tabs() {
     let content = "Normal line\n\t\t\n\tMore text";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // Line 3 starts with tab after blank line, so it's an indented code block and is skipped
-    assert_eq!(result.len(), 1); // Only the empty line with tabs
+    // Tab-indented content is flagged (might be accidental)
+    assert_eq!(result.len(), 2); // Empty line with tabs + tab on line 3
     assert_eq!(result[0].line, 2);
     assert_eq!(result[0].message, "Empty line contains 2 tabs");
+    assert_eq!(result[1].line, 3);
+    assert_eq!(result[1].message, "Found leading tab, use 4 spaces instead");
 }
 
 #[test]
@@ -164,13 +166,16 @@ fn test_md010_tabs_in_nested_code_blocks() {
 fn test_md010_tabs_in_indented_code() {
     let rule = MD010NoHardTabs::new(4);
 
+    // Tab-indented content is flagged as it might be accidental
+    // (even if it looks like an indented code block)
     let content = "Text\n\n\t\tCode with tabs\n\t\tMore code\n\nText\twith\ttab";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let fixed = rule.fix(&ctx).unwrap();
 
+    // Tab-indented content is converted to spaces (8 spaces = 2 tabs * 4 spaces)
     assert!(
-        fixed.contains("\t\tCode with tabs"),
-        "Tabs in indented code should be preserved"
+        fixed.contains("        Code with tabs"),
+        "Tabs in tab-indented content should be replaced"
     );
     assert!(
         fixed.contains("Text    with    tab"),
@@ -367,14 +372,17 @@ fn test_fix_preserves_content_structure() {
 
     // Verify structure is preserved
     assert!(fixed.contains("# Header"), "Headers preserved");
-    // After blank line, tab-indented line is treated as indented code block and preserved
-    assert!(fixed.contains("\tIndented paragraph"), "Indented code block preserved");
+    // Tab-indented content is converted to spaces (might be accidental)
+    assert!(
+        fixed.contains("    Indented paragraph"),
+        "Tab-indented content converted"
+    );
     assert!(fixed.contains("    - Nested"), "List indentation converted");
     assert!(
         fixed.contains("        - Double nested"),
         "Double indentation converted"
     );
-    // Code blocks are always preserved now
+    // Fenced code blocks are preserved
     assert!(fixed.contains("\tCode block"), "Code block tabs preserved");
     assert!(fixed.contains(">     With tab"), "Quote tab converted");
     assert!(fixed.contains("| Col1    | Col2    |"), "Table tabs converted");

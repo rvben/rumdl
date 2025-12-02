@@ -549,59 +549,56 @@ mod tests {
     }
 
     #[test]
-    fn test_tabs_after_marker() {
+    fn test_tabs_after_marker_not_flagged() {
+        // MD027 only flags multiple SPACES, not tabs
+        // Tabs after blockquote markers are handled by MD010 (no-hard-tabs)
+        // This matches markdownlint reference behavior
         let rule = MD027MultipleSpacesBlockquote;
-        // Tab after marker - should be flagged as multiple spaces
+
+        // Tab after marker - NOT flagged by MD027 (that's MD010's job)
         let content = ">\tTab after marker";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Tab after marker should be flagged");
-        assert_eq!(result[0].message, "Multiple spaces after quote marker (>)");
+        assert_eq!(result.len(), 0, "Single tab should not be flagged by MD027");
 
-        // Tab and space after marker
-        let content2 = ">\t Space then tab";
+        // Two tabs after marker - NOT flagged by MD027
+        let content2 = ">\t\tTwo tabs";
         let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
-        assert_eq!(result2.len(), 1, "Tab and space should be flagged");
-
-        // Two tabs after marker
-        let content3 = ">\t\tTwo tabs";
-        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard);
-        let result3 = rule.check(&ctx3).unwrap();
-        assert_eq!(result3.len(), 1, "Two tabs should be flagged");
+        assert_eq!(result2.len(), 0, "Tabs should not be flagged by MD027");
     }
 
     #[test]
     fn test_mixed_spaces_and_tabs() {
         let rule = MD027MultipleSpacesBlockquote;
-        // Space then tab
-        let content = "> \tSpace then tab";
+        // Space then tab - only flags if there are multiple spaces
+        // The tab itself is MD010's domain
+        let content = ">  Space Space";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].column, 3); // Points to the tab
+        assert_eq!(result[0].column, 3); // Points to the extra space
 
-        // Tab then space
-        let content2 = ">\t Tab then space";
+        // Three spaces should be flagged
+        let content2 = ">   Three spaces";
         let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let result2 = rule.check(&ctx2).unwrap();
         assert_eq!(result2.len(), 1);
-        assert_eq!(result2[0].column, 3); // Points to the space after tab
     }
 
     #[test]
-    fn test_fix_tabs() {
+    fn test_fix_multiple_spaces_various() {
         let rule = MD027MultipleSpacesBlockquote;
-        // Fix should remove extra tabs
-        let content = ">\t\tTwo tabs";
+        // Fix should remove extra spaces
+        let content = ">   Three spaces";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "> Two tabs");
+        assert_eq!(fixed, "> Three spaces");
 
-        // Fix mixed spaces and tabs
-        let content2 = "> \t Mixed";
+        // Fix multiple spaces
+        let content2 = ">    Four spaces";
         let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
         let fixed2 = rule.fix(&ctx2).unwrap();
-        assert_eq!(fixed2, "> Mixed");
+        assert_eq!(fixed2, "> Four spaces");
     }
 }

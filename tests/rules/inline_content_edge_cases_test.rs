@@ -478,6 +478,8 @@ Missing: [text][MISSING], [text][missing]
 
 #[test]
 fn test_md052_shortcut_references() {
+    // By default, shortcut_syntax is false (matches markdownlint behavior)
+    // so shortcut references like [text] are not checked
     let rule = MD052ReferenceLinkImages::new();
 
     // Test 3: Shortcut reference syntax
@@ -499,7 +501,9 @@ Mixed with [normal][ref] syntax
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2, "Should detect undefined shortcut references");
+    // Shortcut references are NOT checked by default (shortcut_syntax: false)
+    // Only full reference syntax [text][ref] is checked
+    assert_eq!(result.len(), 0, "Shortcut references are not checked by default");
 }
 
 #[test]

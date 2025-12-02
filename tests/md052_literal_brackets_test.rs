@@ -25,7 +25,7 @@ fn test_md052_literal_brackets_not_reference() {
 #[test]
 fn test_md052_javascript_literals_not_flagged() {
     // Test for JavaScript/JSON literals that should not be flagged as references
-    // Note: [undefined] is excluded because it's too ambiguous (common English word)
+    // Note: Uses full reference syntax [text][label] since shortcut-syntax is disabled by default
     let content = r#"### Eval output
 (kind: ok) ["null"]
 [null]
@@ -35,7 +35,7 @@ fn test_md052_javascript_literals_not_flagged() {
 [Infinity]
 [object Object]
 
-But this [actual-reference] should be flagged."#;
+But this [link text][actual-reference] should be flagged."#;
 
     let config = Config::default();
     let all_rules = rules::all_rules(&config);
@@ -43,7 +43,7 @@ But this [actual-reference] should be flagged."#;
 
     let warnings = rumdl_lib::lint(content, &md052_rules, false, MarkdownFlavor::Standard).unwrap();
 
-    // Should only flag [actual-reference], not the JavaScript literals
+    // Should only flag [link text][actual-reference], not the JavaScript literals
     assert_eq!(
         warnings.len(),
         1,

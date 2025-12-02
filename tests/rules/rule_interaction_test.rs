@@ -133,8 +133,8 @@ fn test_md023_md009_heading_indentation_and_trailing_spaces() {
     let md023 = MD023HeadingStartLeft;
     let md009 = MD009TrailingSpaces::default();
 
-    // Indented heading with trailing spaces
-    let content = "  # Heading  \n    ## Another heading  ";
+    // Indented heading with trailing spaces (use max 3 spaces - 4 creates code block)
+    let content = "  # Heading  \n   ## Another heading  ";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
 
     // MD023 removes leading spaces from headings

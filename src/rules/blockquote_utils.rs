@@ -14,7 +14,9 @@ static NESTED_EMPTY_BLOCKQUOTE_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::n
 static BLOCKQUOTE_NO_SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>([^\s].*)$").unwrap());
 
 // Pattern to match blockquote lines with multiple spaces after >
-static BLOCKQUOTE_MULTIPLE_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>(\s{2,})(.*)$").unwrap());
+// Only matches literal spaces (not tabs) to match markdownlint behavior
+// Tabs are handled by MD010 (no-hard-tabs)
+static BLOCKQUOTE_MULTIPLE_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>([ ]{2,})(.*)$").unwrap());
 
 // Pattern to match nested blockquotes
 static NESTED_BLOCKQUOTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)>((?:\s*>)+)(\s*.*)$").unwrap());
