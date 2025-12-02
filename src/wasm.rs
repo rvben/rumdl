@@ -1,8 +1,30 @@
 //! WebAssembly bindings for rumdl
 //!
-//! This module provides WASM-compatible functions for linting markdown content
-//! in browser environments.
+//! This module provides a `Linter` class for linting markdown content
+//! in browser environments, with full configuration support.
+//!
+//! # Usage
+//!
+//! ```javascript
+//! import init, { Linter, get_version, get_available_rules } from 'rumdl-wasm';
+//!
+//! await init();
+//!
+//! // Create a linter with configuration
+//! const linter = new Linter({
+//!   disable: ["MD041"],       // Disable specific rules
+//!   "line-length": 120,       // Set line length limit
+//!   flavor: "mkdocs"          // Use MkDocs markdown flavor
+//! });
+//!
+//! // Check for issues
+//! const warnings = JSON.parse(linter.check(content));
+//!
+//! // Apply all fixes
+//! const fixed = linter.fix(content);
+//! ```
 
+use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
 use crate::config::{Config, MarkdownFlavor};
@@ -15,76 +37,155 @@ pub fn init() {
     console_error_panic_hook::set_once();
 }
 
-/// Lint markdown content and return warnings as JSON
+/// Configuration options for the Linter
 ///
-/// Returns a JSON array of warnings, each with:
-/// - `rule`: Rule name (e.g., "MD001")
-/// - `message`: Warning message
-/// - `line`: 1-indexed line number
-/// - `column`: 1-indexed column number
-/// - `end_line`: 1-indexed end line
-/// - `end_column`: 1-indexed end column
-/// - `severity`: "Error" or "Warning"
-/// - `fix`: Optional fix object with `start`, `end`, `replacement`
-#[wasm_bindgen]
-pub fn lint_markdown(content: &str) -> String {
-    let config = Config::default();
-    let all = all_rules(&config);
-    let rules = filter_rules(&all, &config.global);
+/// All fields are optional. If not specified, defaults are used.
+#[derive(Deserialize, Default, Debug)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct LinterConfig {
+    /// Rules to disable (e.g., ["MD041", "MD013"])
+    pub disable: Option<Vec<String>>,
 
-    match crate::lint(content, &rules, false, MarkdownFlavor::Standard) {
-        Ok(warnings) => serde_json::to_string(&warnings).unwrap_or_else(|_| "[]".to_string()),
-        Err(e) => format!(r#"[{{"error": "{}"}}]"#, e),
-    }
+    /// Rules to enable (if empty, all rules enabled except disabled)
+    pub enable: Option<Vec<String>>,
+
+    /// Line length limit (default: 80)
+    pub line_length: Option<u64>,
+
+    /// Markdown flavor: "standard", "mkdocs", "mdx", or "quarto"
+    pub flavor: Option<String>,
 }
 
-/// Apply all auto-fixes to the content and return the fixed content
-///
-/// Returns the content with all available fixes applied.
-/// Uses the same fix coordinator as the CLI for consistent behavior.
-#[wasm_bindgen]
-pub fn apply_all_fixes(content: &str) -> String {
-    let config = Config::default();
-    let all = all_rules(&config);
-    let rules = filter_rules(&all, &config.global);
+impl LinterConfig {
+    /// Convert to internal Config
+    fn to_config(&self) -> Config {
+        let mut config = Config::default();
 
-    let warnings = match crate::lint(content, &rules, false, MarkdownFlavor::Standard) {
-        Ok(w) => w,
-        Err(_) => return content.to_string(),
-    };
-
-    // Use the fix coordinator for consistent behavior with CLI
-    let coordinator = FixCoordinator::new();
-    let mut fixed_content = content.to_string();
-
-    match coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed_content, &config, 10) {
-        Ok(_) => fixed_content,
-        Err(_) => content.to_string(),
-    }
-}
-
-/// Apply a single fix to the content
-///
-/// Takes a JSON-encoded fix object with `start`, `end`, `replacement` fields.
-/// Returns the content with the fix applied.
-#[wasm_bindgen]
-pub fn apply_fix(content: &str, fix_json: &str) -> String {
-    #[derive(serde::Deserialize)]
-    struct JsFix {
-        start: usize,
-        end: usize,
-        replacement: String,
-    }
-
-    match serde_json::from_str::<JsFix>(fix_json) {
-        Ok(fix) => {
-            let mut result = content.to_string();
-            if fix.start <= fix.end && fix.end <= content.len() {
-                result.replace_range(fix.start..fix.end, &fix.replacement);
-            }
-            result
+        // Apply disabled rules
+        if let Some(ref disable) = self.disable {
+            config.global.disable = disable.clone();
         }
-        Err(_) => content.to_string(),
+
+        // Apply enabled rules
+        if let Some(ref enable) = self.enable {
+            config.global.enable = enable.clone();
+        }
+
+        // Apply line length
+        if let Some(line_length) = self.line_length {
+            config.global.line_length = line_length;
+        }
+
+        // Apply flavor
+        config.global.flavor = self.markdown_flavor();
+
+        config
+    }
+
+    /// Parse markdown flavor from config
+    fn markdown_flavor(&self) -> MarkdownFlavor {
+        match self.flavor.as_deref() {
+            Some("mkdocs") => MarkdownFlavor::MkDocs,
+            Some("mdx") => MarkdownFlavor::MDX,
+            Some("quarto") => MarkdownFlavor::Quarto,
+            _ => MarkdownFlavor::Standard,
+        }
+    }
+}
+
+/// A markdown linter with configuration
+///
+/// Create a new `Linter` with a configuration object, then use
+/// `check()` to lint content and `fix()` to auto-fix issues.
+#[wasm_bindgen]
+pub struct Linter {
+    config: Config,
+    flavor: MarkdownFlavor,
+}
+
+#[wasm_bindgen]
+impl Linter {
+    /// Create a new Linter with the given configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Configuration object (see LinterConfig)
+    ///
+    /// # Example
+    ///
+    /// ```javascript
+    /// const linter = new Linter({
+    ///   disable: ["MD041"],
+    ///   "line-length": 120
+    /// });
+    /// ```
+    #[wasm_bindgen(constructor)]
+    pub fn new(options: JsValue) -> Result<Linter, JsValue> {
+        let linter_config: LinterConfig = if options.is_undefined() || options.is_null() {
+            LinterConfig::default()
+        } else {
+            serde_wasm_bindgen::from_value(options).map_err(|e| JsValue::from_str(&format!("Invalid config: {}", e)))?
+        };
+
+        Ok(Linter {
+            config: linter_config.to_config(),
+            flavor: linter_config.markdown_flavor(),
+        })
+    }
+
+    /// Lint markdown content and return warnings as JSON
+    ///
+    /// Returns a JSON array of warnings, each with:
+    /// - `rule_name`: Rule name (e.g., "MD001")
+    /// - `message`: Warning message
+    /// - `line`: 1-indexed line number
+    /// - `column`: 1-indexed column number
+    /// - `fix`: Optional fix object with `range.start`, `range.end`, `replacement`
+    pub fn check(&self, content: &str) -> String {
+        let all = all_rules(&self.config);
+        let rules = filter_rules(&all, &self.config.global);
+
+        match crate::lint(content, &rules, false, self.flavor) {
+            Ok(warnings) => serde_json::to_string(&warnings).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => format!(r#"[{{"error": "{}"}}]"#, e),
+        }
+    }
+
+    /// Apply all auto-fixes to the content and return the fixed content
+    ///
+    /// Uses the same fix coordinator as the CLI for consistent behavior.
+    pub fn fix(&self, content: &str) -> String {
+        let all = all_rules(&self.config);
+        let rules = filter_rules(&all, &self.config.global);
+
+        let warnings = match crate::lint(content, &rules, false, self.flavor) {
+            Ok(w) => w,
+            Err(_) => return content.to_string(),
+        };
+
+        let coordinator = FixCoordinator::new();
+        let mut fixed_content = content.to_string();
+
+        match coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed_content, &self.config, 10) {
+            Ok(_) => fixed_content,
+            Err(_) => content.to_string(),
+        }
+    }
+
+    /// Get the current configuration as JSON
+    pub fn get_config(&self) -> String {
+        serde_json::json!({
+            "disable": self.config.global.disable,
+            "enable": self.config.global.enable,
+            "line_length": self.config.global.line_length,
+            "flavor": match self.flavor {
+                MarkdownFlavor::Standard => "standard",
+                MarkdownFlavor::MkDocs => "mkdocs",
+                MarkdownFlavor::MDX => "mdx",
+                MarkdownFlavor::Quarto => "quarto",
+            }
+        })
+        .to_string()
     }
 }
 
@@ -133,97 +234,175 @@ mod tests {
         let rules: Vec<serde_json::Value> = serde_json::from_str(&rules_json).unwrap();
         assert!(!rules.is_empty());
 
-        // Check that MD001 is in the list
         let has_md001 = rules.iter().any(|r| r["name"] == "MD001");
         assert!(has_md001);
     }
 
     #[test]
-    fn test_lint_markdown_empty() {
-        let result = lint_markdown("");
+    fn test_linter_default_config() {
+        let config = LinterConfig::default();
+        assert!(config.disable.is_none());
+        assert!(config.enable.is_none());
+        assert!(config.line_length.is_none());
+        assert!(config.flavor.is_none());
+    }
+
+    #[test]
+    fn test_linter_config_to_config() {
+        let config = LinterConfig {
+            disable: Some(vec!["MD041".to_string()]),
+            enable: None,
+            line_length: Some(100),
+            flavor: Some("mkdocs".to_string()),
+        };
+
+        let internal = config.to_config();
+        assert!(internal.global.disable.contains(&"MD041".to_string()));
+        assert_eq!(internal.global.line_length, 100);
+    }
+
+    #[test]
+    fn test_linter_config_flavor() {
+        assert_eq!(
+            LinterConfig {
+                flavor: Some("standard".to_string()),
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::Standard
+        );
+        assert_eq!(
+            LinterConfig {
+                flavor: Some("mkdocs".to_string()),
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::MkDocs
+        );
+        assert_eq!(
+            LinterConfig {
+                flavor: Some("mdx".to_string()),
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::MDX
+        );
+        assert_eq!(
+            LinterConfig {
+                flavor: Some("quarto".to_string()),
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::Quarto
+        );
+        assert_eq!(
+            LinterConfig {
+                flavor: None,
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::Standard
+        );
+    }
+
+    #[test]
+    fn test_linter_check_empty() {
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        let result = linter.check("");
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
         assert!(warnings.is_empty());
     }
 
     #[test]
-    fn test_lint_markdown_with_issue() {
+    fn test_linter_check_with_issue() {
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
         // Heading increment violation: ## followed by ####
         let content = "## Level 2\n\n#### Level 4";
-        let result = lint_markdown(content);
+        let result = linter.check(content);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
         assert!(!warnings.is_empty());
     }
 
     #[test]
-    fn test_apply_fix() {
-        let content = "Hello World";
-        let fix = r#"{"start": 6, "end": 11, "replacement": "Rust"}"#;
-        let result = apply_fix(content, fix);
-        assert_eq!(result, "Hello Rust");
+    fn test_linter_check_with_disabled_rule() {
+        let config = LinterConfig {
+            disable: Some(vec!["MD001".to_string()]),
+            ..Default::default()
+        };
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        // This would normally trigger MD001 (heading increment)
+        let content = "## Level 2\n\n#### Level 4";
+        let result = linter.check(content);
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+
+        // MD001 should be disabled
+        let has_md001 = warnings.iter().any(|w| w["rule_name"] == "MD001");
+        assert!(!has_md001, "MD001 should be disabled");
     }
 
     #[test]
-    fn test_apply_fix_invalid_json() {
-        let content = "Hello World";
-        let fix = "invalid json";
-        let result = apply_fix(content, fix);
-        assert_eq!(result, "Hello World"); // Returns original on error
-    }
+    fn test_linter_fix() {
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
 
-    #[test]
-    fn test_apply_all_fixes() {
         // Content with trailing spaces that MD009 will fix
         let content = "Hello   \nWorld";
-        let result = apply_all_fixes(content);
-        // Should have trailing spaces removed
+        let result = linter.fix(content);
         assert!(!result.contains("   \n"));
     }
 
     #[test]
-    fn test_apply_all_fixes_adjacent_blocks() {
-        // Code block followed by table - both need blank lines around them
-        // MD031: blanks around fenced code blocks
-        // MD058: blanks around tables
+    fn test_linter_fix_adjacent_blocks() {
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
         let content = "# Heading\n```code\nblock\n```\n| Header |\n|--------|\n| Cell   |";
-        let result = apply_all_fixes(content);
+        let result = linter.fix(content);
 
-        // Print for debugging
-        eprintln!("=== Original ===\n{}", content);
-        eprintln!("=== Fixed ===\n{}", result);
-        eprintln!("=== Lines ===");
-        for (i, line) in result.lines().enumerate() {
-            if line.is_empty() {
-                eprintln!("{}: [BLANK]", i + 1);
-            } else {
-                eprintln!("{}: {}", i + 1, line);
-            }
-        }
+        // Should NOT have double blank lines
+        assert!(!result.contains("\n\n\n"), "Should not have double blank lines");
+    }
 
-        // Should NOT have double blank lines (two consecutive empty lines)
+    #[test]
+    fn test_linter_get_config() {
+        let config = LinterConfig {
+            disable: Some(vec!["MD041".to_string()]),
+            flavor: Some("mkdocs".to_string()),
+            ..Default::default()
+        };
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        let result = linter.get_config();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["flavor"], "mkdocs");
         assert!(
-            !result.contains("\n\n\n"),
-            "Should not have double blank lines (3 consecutive newlines)"
-        );
-
-        // Should have exactly one blank line between code block and table
-        // Expected: # Heading\n\n```code\nblock\n```\n\n| Header |...
-        let lines: Vec<&str> = result.lines().collect();
-        let mut blank_count = 0;
-        let mut max_consecutive_blanks = 0;
-        for line in &lines {
-            if line.is_empty() {
-                blank_count += 1;
-                if blank_count > max_consecutive_blanks {
-                    max_consecutive_blanks = blank_count;
-                }
-            } else {
-                blank_count = 0;
-            }
-        }
-        assert!(
-            max_consecutive_blanks <= 1,
-            "Should have at most 1 consecutive blank line, found {}",
-            max_consecutive_blanks
+            parsed["disable"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::Value::String("MD041".to_string()))
         );
     }
 }
