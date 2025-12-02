@@ -7,6 +7,9 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
+mod md052_config;
+use md052_config::MD052Config;
+
 // Pattern to match reference definitions [ref]: url
 // Note: \S* instead of \S+ to allow empty definitions like [ref]:
 // The capturing group handles nested brackets to support cases like [`union[t, none]`]:
@@ -45,12 +48,27 @@ static URL_WITH_BRACKETS: LazyLock<Regex> =
 /// See [docs/md052.md](../../docs/md052.md) for full documentation, configuration, and examples.
 ///
 /// This rule is triggered when a reference link or image uses a reference that isn't defined.
+///
+/// ## Configuration
+///
+/// - `shortcut-syntax`: Whether to check shortcut reference syntax `[text]` (default: false)
+///
+/// By default, only full (`[text][ref]`) and collapsed (`[text][]`) reference syntax is checked.
+/// Shortcut syntax is ambiguous because `[text]` could be a reference link OR just text in brackets.
 #[derive(Clone, Default)]
-pub struct MD052ReferenceLinkImages {}
+pub struct MD052ReferenceLinkImages {
+    config: MD052Config,
+}
 
 impl MD052ReferenceLinkImages {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            config: MD052Config::default(),
+        }
+    }
+
+    pub fn from_config_struct(config: MD052Config) -> Self {
+        Self { config }
     }
 
     /// Strip surrounding backticks from a string
@@ -557,7 +575,14 @@ impl MD052ReferenceLinkImages {
         covered_ranges.sort_by_key(|&(start, _)| start);
 
         // Handle shortcut references [text] which aren't captured in ctx.links
-        // Need to use regex for these
+        // Only check these if shortcut_syntax is enabled (default: false)
+        // Shortcut syntax is ambiguous because [text] could be a reference link
+        // OR just text in brackets (like spec notation in quotes)
+        if !self.config.shortcut_syntax {
+            return undefined;
+        }
+
+        // Need to use regex for shortcut references
         let lines: Vec<&str> = content.lines().collect();
         in_example_section = false; // Reset for line-by-line processing
 
@@ -932,12 +957,12 @@ impl Rule for MD052ReferenceLinkImages {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        // Flavor is now accessed from LintContext during check
-        Box::new(MD052ReferenceLinkImages::new())
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD052Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 
@@ -1009,14 +1034,28 @@ mod tests {
     }
 
     #[test]
-    fn test_shortcut_reference_undefined() {
-        let rule = MD052ReferenceLinkImages::new();
+    fn test_shortcut_reference_undefined_with_shortcut_syntax_enabled() {
+        // Shortcut syntax checking is disabled by default
+        // Enable it to test undefined shortcut references
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
         let content = "[undefined]";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Reference 'undefined' not found"));
+    }
+
+    #[test]
+    fn test_shortcut_reference_not_checked_by_default() {
+        // By default, shortcut references are NOT checked (matches markdownlint behavior)
+        let rule = MD052ReferenceLinkImages::new();
+        let content = "[undefined]";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should be 0 because shortcut_syntax is false by default
+        assert_eq!(result.len(), 0);
     }
 
     #[test]
@@ -1062,7 +1101,8 @@ mod tests {
 
     #[test]
     fn test_comprehensive_inline_code_detection() {
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test comprehensive detection
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
         let content = r#"# Test
 
 This `[inside]` should be ignored.
@@ -1158,7 +1198,8 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
 
     #[test]
     fn test_output_example_section_ignored() {
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test example section handling
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
         let content = "## Output\n\n[undefined]\n\n## Normal Section\n\n[missing]";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
@@ -1239,7 +1280,8 @@ Want to fill out this form?
 
     #[test]
     fn test_inline_code_not_flagged() {
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test inline code detection
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
 
         // Test that arrays in inline code are not flagged as references
         let content = r#"# Test
@@ -1263,7 +1305,8 @@ And this `[inline code]` should not be flagged.
 
     #[test]
     fn test_code_block_references_ignored() {
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test code block handling
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
 
         let content = r#"# Test
 
@@ -1345,7 +1388,8 @@ Valid [link][ref]
     #[test]
     fn test_frontmatter_ignored() {
         // Test for issue #24 - MD052 should not flag content inside frontmatter
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test frontmatter handling
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
 
         // Test YAML frontmatter with arrays and references
         let content = r#"---
@@ -1399,7 +1443,8 @@ tags = ["example", "test"]
     #[test]
     fn test_mkdocs_snippet_markers_not_flagged() {
         // Test for issue #68 - MkDocs snippet selection markers should not be flagged as undefined references
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test snippet marker handling
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
 
         // Test snippet section markers
         let content = r#"# Document with MkDocs Snippets
@@ -1466,7 +1511,8 @@ Regular [undefined] reference outside snippet markers."#;
     #[test]
     fn test_pandoc_citations_not_flagged() {
         // Test that Pandoc/RMarkdown/Quarto citation syntax is not flagged
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test citation handling
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
 
         let content = r#"# Research Paper
 
@@ -1492,7 +1538,8 @@ Regular [undefined] reference should still be flagged.
     #[test]
     fn test_pandoc_inline_footnotes_not_flagged() {
         // Test that Pandoc inline footnote syntax is not flagged
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test inline footnote handling
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
 
         let content = r#"# Math Document
 
@@ -1517,7 +1564,8 @@ But this [reference] without ^ should be flagged.
     #[test]
     fn test_github_alerts_not_flagged() {
         // Test for issue #60 - GitHub alerts should not be flagged as undefined references
-        let rule = MD052ReferenceLinkImages::new();
+        // Enable shortcut_syntax to test GitHub alert handling
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
 
         // Test various GitHub alert types
         let content = r#"# Document with GitHub Alerts
