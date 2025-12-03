@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.188] - 2025-12-03
+
+### Added
+
+- **MD062 (link-destination-whitespace): New rule for detecting whitespace in link destinations**
+  - Flags links with leading/trailing whitespace in destinations like `[text]( url )`
+  - Supports auto-fix to trim the whitespace
+  - Works in both CLI and LSP environments
+
+- **Cross-file analysis infrastructure: Foundation for multi-file linting**
+  - New `WorkspaceIndex` for indexing headings and anchors across files
+  - Background index worker for LSP with debouncing and progress reporting
+  - Reverse dependency tracking for efficient re-linting when files change
+  - MD051 now validates cross-file link fragments against the workspace index
+
+### Fixed
+
+- **MD051 (link-fragments): Fix false positives for cross-file links without fragments**
+  - Links like `[text](file.md)` no longer incorrectly flagged for empty fragments
+  - Only validates fragments when explicitly provided (e.g., `[text](file.md#anchor)`)
+
 ## [0.0.187] - 2025-12-02
 
 ### Added
