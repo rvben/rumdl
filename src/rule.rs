@@ -88,6 +88,19 @@ pub enum FixCapability {
     Unfixable,
 }
 
+/// Declares what cross-file data a rule needs
+///
+/// Most rules only need single-file context and should use `None` (the default).
+/// Rules that need to validate references across files (like MD051) should use `Workspace`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CrossFileScope {
+    /// Single-file only - no cross-file analysis needed (default for 99% of rules)
+    #[default]
+    None,
+    /// Needs workspace-wide index for cross-file validation
+    Workspace,
+}
+
 /// Remove marker /// TRAIT_MARKER_V1
 pub trait Rule: DynClone + Send + Sync {
     fn name(&self) -> &'static str;
@@ -128,6 +141,51 @@ pub trait Rule: DynClone + Send + Sync {
     /// Declares the fix capability of this rule
     fn fix_capability(&self) -> FixCapability {
         FixCapability::FullyFixable // Safe default for backward compatibility
+    }
+
+    /// Declares cross-file analysis requirements for this rule
+    ///
+    /// Returns `CrossFileScope::None` by default, meaning the rule only needs
+    /// single-file context. Rules that need workspace-wide data should override
+    /// this to return `CrossFileScope::Workspace`.
+    fn cross_file_scope(&self) -> CrossFileScope {
+        CrossFileScope::None
+    }
+
+    /// Contribute data to the workspace index during linting
+    ///
+    /// Called during the single-file linting phase for rules that return
+    /// `CrossFileScope::Workspace`. Rules should extract headings, links,
+    /// and other data needed for cross-file validation.
+    ///
+    /// This is called as a side effect of linting, so LintContext is already
+    /// created - no duplicate parsing required.
+    fn contribute_to_index(&self, _ctx: &LintContext, _file_index: &mut crate::workspace_index::FileIndex) {
+        // Default: no contribution
+    }
+
+    /// Perform cross-file validation after all files have been linted
+    ///
+    /// Called once per file after the entire workspace has been indexed.
+    /// Rules receive the file_index (from contribute_to_index) and the full
+    /// workspace_index for cross-file lookups.
+    ///
+    /// Note: This receives the FileIndex instead of LintContext to avoid re-parsing
+    /// each file. The FileIndex was already populated during contribute_to_index.
+    ///
+    /// Rules can use workspace_index methods for cross-file validation:
+    /// - `get_file(path)` - to look up headings in target files (for MD051)
+    /// - `files()` - to iterate all indexed files
+    ///
+    /// Returns additional warnings for cross-file issues. These are appended
+    /// to the single-file warnings.
+    fn cross_file_check(
+        &self,
+        _file_path: &std::path::Path,
+        _file_index: &crate::workspace_index::FileIndex,
+        _workspace_index: &crate::workspace_index::WorkspaceIndex,
+    ) -> LintResult {
+        Ok(Vec::new()) // Default: no cross-file warnings
     }
 
     /// Factory: create a rule from config (if present), or use defaults.

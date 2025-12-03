@@ -9,6 +9,7 @@ pub mod profiling;
 pub mod rule;
 #[cfg(feature = "native")]
 pub mod vscode;
+pub mod workspace_index;
 #[macro_use]
 pub mod rule_config;
 #[macro_use]
@@ -129,22 +130,96 @@ impl ContentCharacteristics {
     }
 }
 
+/// Compute content hash for incremental indexing change detection
+///
+/// Uses blake3 for native builds (fast, cryptographic-strength hash)
+/// Falls back to std::hash for WASM builds
+#[cfg(feature = "native")]
+fn compute_content_hash(content: &str) -> String {
+    blake3::hash(content.as_bytes()).to_hex().to_string()
+}
+
+/// Compute content hash for WASM builds using std::hash
+#[cfg(not(feature = "native"))]
+fn compute_content_hash(content: &str) -> String {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 /// Lint a file against the given rules with intelligent rule filtering
 /// Assumes the provided `rules` vector contains the final,
 /// configured, and filtered set of rules to be executed.
 pub fn lint(
     content: &str,
     rules: &[Box<dyn Rule>],
-    _verbose: bool,
+    verbose: bool,
     flavor: crate::config::MarkdownFlavor,
 ) -> LintResult {
+    // Use lint_and_index but discard the FileIndex for backward compatibility
+    let (result, _file_index) = lint_and_index(content, rules, verbose, flavor);
+    result
+}
+
+/// Build FileIndex only (no linting) for cross-file analysis on cache hits
+///
+/// This is a lightweight function that only builds the FileIndex without running
+/// any rules. Used when we have a cache hit but still need the FileIndex for
+/// cross-file validation.
+///
+/// This avoids the overhead of re-running all rules when only the index data is needed.
+pub fn build_file_index_only(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    flavor: crate::config::MarkdownFlavor,
+) -> crate::workspace_index::FileIndex {
+    // Compute content hash for change detection
+    let content_hash = compute_content_hash(content);
+    let mut file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
+
+    // Early return for empty content
+    if content.is_empty() {
+        return file_index;
+    }
+
+    // Parse LintContext once with the provided flavor
+    let lint_ctx = crate::lint_context::LintContext::new(content, flavor);
+
+    // Only call contribute_to_index for cross-file rules (no rule checking!)
+    for rule in rules {
+        if rule.cross_file_scope() == crate::rule::CrossFileScope::Workspace {
+            rule.contribute_to_index(&lint_ctx, &mut file_index);
+        }
+    }
+
+    file_index
+}
+
+/// Lint a file and contribute to workspace index for cross-file analysis
+///
+/// This variant performs linting and optionally populates a `FileIndex` with data
+/// needed for cross-file validation. The FileIndex is populated during linting,
+/// avoiding duplicate parsing.
+///
+/// Returns: (warnings, FileIndex) - the FileIndex contains headings/links for cross-file rules
+pub fn lint_and_index(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    _verbose: bool,
+    flavor: crate::config::MarkdownFlavor,
+) -> (LintResult, crate::workspace_index::FileIndex) {
     let mut warnings = Vec::new();
+    // Compute content hash for change detection
+    let content_hash = compute_content_hash(content);
+    let mut file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
+
     #[cfg(not(target_arch = "wasm32"))]
     let _overall_start = Instant::now();
 
     // Early return for empty content
     if content.is_empty() {
-        return Ok(warnings);
+        return (Ok(warnings), file_index);
     }
 
     // Parse inline configuration comments once
@@ -171,10 +246,11 @@ pub fn lint(
     #[cfg(target_arch = "wasm32")]
     let profile_rules = false;
 
-    for rule in applicable_rules {
+    for rule in &applicable_rules {
         #[cfg(not(target_arch = "wasm32"))]
         let _rule_start = Instant::now();
 
+        // Run single-file check
         let result = rule.check(&lint_ctx);
 
         match result {
@@ -203,7 +279,7 @@ pub fn lint(
             }
             Err(e) => {
                 log::error!("Error checking rule {}: {}", rule.name(), e);
-                return Err(e);
+                return (Err(e), file_index);
             }
         }
 
@@ -221,11 +297,68 @@ pub fn lint(
         }
     }
 
+    // Contribute to index for cross-file rules (done after all rules checked)
+    // NOTE: We iterate over ALL rules (not just applicable_rules) because cross-file
+    // rules need to extract data from every file in the workspace, regardless of whether
+    // that file has content that would trigger the rule. For example, MD051 needs to
+    // index headings from files that have no links (like target.md) so that links
+    // FROM other files TO those headings can be validated.
+    for rule in rules {
+        if rule.cross_file_scope() == crate::rule::CrossFileScope::Workspace {
+            rule.contribute_to_index(&lint_ctx, &mut file_index);
+        }
+    }
+
     #[cfg(not(test))]
     if _verbose {
         let skipped_rules = _total_rules - _applicable_count;
         if skipped_rules > 0 {
             log::debug!("Skipped {skipped_rules} of {_total_rules} rules based on content analysis");
+        }
+    }
+
+    (Ok(warnings), file_index)
+}
+
+/// Run cross-file checks for rules that need workspace-wide validation
+///
+/// This should be called after all files have been linted and the WorkspaceIndex
+/// has been built from the accumulated FileIndex data.
+///
+/// Note: This takes the FileIndex instead of content to avoid re-parsing each file.
+/// The FileIndex was already populated during contribute_to_index in the linting phase.
+///
+/// Rules can use workspace_index methods for cross-file validation:
+/// - `get_file(path)` - to look up headings in target files (for MD051)
+///
+/// Returns additional warnings from cross-file validation.
+pub fn run_cross_file_checks(
+    file_path: &std::path::Path,
+    file_index: &crate::workspace_index::FileIndex,
+    rules: &[Box<dyn Rule>],
+    workspace_index: &crate::workspace_index::WorkspaceIndex,
+) -> LintResult {
+    use crate::rule::CrossFileScope;
+
+    let mut warnings = Vec::new();
+
+    // Only check rules that need cross-file analysis
+    for rule in rules {
+        if rule.cross_file_scope() != CrossFileScope::Workspace {
+            continue;
+        }
+
+        match rule.cross_file_check(file_path, file_index, workspace_index) {
+            Ok(rule_warnings) => {
+                // Note: Inline config filtering is not applied to cross-file warnings
+                // since we don't have content here (by design, to avoid re-parsing).
+                // Users can disable cross-file rules via config if needed.
+                warnings.extend(rule_warnings);
+            }
+            Err(e) => {
+                log::error!("Error in cross-file check for rule {}: {}", rule.name(), e);
+                return Err(e);
+            }
         }
     }
 

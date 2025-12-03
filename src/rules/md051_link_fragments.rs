@@ -1,13 +1,30 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{CrossFileScope, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::anchor_styles::AnchorStyle;
+use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
 use pulldown_cmark::LinkType;
 use regex::Regex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 // HTML tags with id or name attributes (supports any HTML element, not just <a>)
 // This pattern only captures the first id/name attribute in a tag
 static HTML_ANCHOR_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\b(?:id|name)\s*=\s*["']([^"']+)["']"#).unwrap());
+
+/// Normalize a path by resolving . and .. components
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {} // Skip .
+            Component::ParentDir => {
+                result.pop(); // Go up one level for ..
+            }
+            c => result.push(c.as_os_str()),
+        }
+    }
+    result
+}
 
 /// Rule MD051: Link fragments
 ///
@@ -353,6 +370,132 @@ impl Rule for MD051LinkFragments {
         Box::new(MD051LinkFragments::with_anchor_style(anchor_style))
     }
 
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
+    }
+
+    fn cross_file_scope(&self) -> CrossFileScope {
+        CrossFileScope::Workspace
+    }
+
+    fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, file_index: &mut FileIndex) {
+        let mut fragment_counts = HashMap::new();
+
+        // Extract headings (for other files to reference)
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            if line_info.in_front_matter {
+                continue;
+            }
+
+            if let Some(heading) = &line_info.heading {
+                let fragment = self.anchor_style.generate_fragment(&heading.text);
+
+                if !fragment.is_empty() {
+                    // Handle duplicate headings
+                    let final_fragment = if let Some(count) = fragment_counts.get_mut(&fragment) {
+                        let suffix = *count;
+                        *count += 1;
+                        format!("{fragment}-{suffix}")
+                    } else {
+                        fragment_counts.insert(fragment.clone(), 1);
+                        fragment
+                    };
+
+                    file_index.add_heading(HeadingIndex {
+                        text: heading.text.clone(),
+                        auto_anchor: final_fragment,
+                        custom_anchor: heading.custom_id.clone(),
+                        line: line_idx + 1, // 1-indexed
+                    });
+                }
+            }
+        }
+
+        // Extract cross-file links (for validation against other files)
+        for link in &ctx.links {
+            if link.is_reference {
+                continue;
+            }
+
+            let url = &link.url;
+
+            // Skip external URLs
+            if Self::is_external_url_fast(url) {
+                continue;
+            }
+
+            // Only process cross-file links with fragments
+            if Self::is_cross_file_link(url)
+                && let Some(fragment_pos) = url.find('#')
+            {
+                let path_part = &url[..fragment_pos];
+                let fragment = &url[fragment_pos + 1..];
+
+                // Skip empty fragments or template syntax
+                if fragment.is_empty() || fragment.contains("{{") || fragment.contains("{%") {
+                    continue;
+                }
+
+                file_index.add_cross_file_link(CrossFileLinkIndex {
+                    target_path: path_part.to_string(),
+                    fragment: fragment.to_string(),
+                    line: link.line,
+                    column: link.start_col + 1,
+                });
+            }
+        }
+    }
+
+    fn cross_file_check(
+        &self,
+        file_path: &Path,
+        file_index: &FileIndex,
+        workspace_index: &crate::workspace_index::WorkspaceIndex,
+    ) -> LintResult {
+        let mut warnings = Vec::new();
+
+        // Check each cross-file link in this file
+        for cross_link in &file_index.cross_file_links {
+            // Skip cross-file links without fragments - nothing to validate
+            if cross_link.fragment.is_empty() {
+                continue;
+            }
+
+            // Resolve the target file path relative to the current file
+            let target_path = if let Some(parent) = file_path.parent() {
+                parent.join(&cross_link.target_path)
+            } else {
+                Path::new(&cross_link.target_path).to_path_buf()
+            };
+
+            // Normalize the path (remove . and ..)
+            let target_path = normalize_path(&target_path);
+
+            // Look up the target file in the workspace index
+            if let Some(target_file_index) = workspace_index.get_file(&target_path) {
+                // Check if the fragment matches any heading in the target file (O(1) lookup)
+                if !target_file_index.has_anchor(&cross_link.fragment) {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: cross_link.line,
+                        column: cross_link.column,
+                        end_line: cross_link.line,
+                        end_column: cross_link.column + cross_link.target_path.len() + 1 + cross_link.fragment.len(),
+                        message: format!(
+                            "Link fragment '{}' not found in '{}'",
+                            cross_link.fragment, cross_link.target_path
+                        ),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
+                }
+            }
+            // If target file not in index, skip (could be external file or not in workspace)
+        }
+
+        Ok(warnings)
+    }
+
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let value: toml::Value = toml::from_str(
             r#"
@@ -411,5 +554,178 @@ See [link](#nonexistent) for details."#;
         let ctx_invalid = LintContext::new(content_invalid, crate::config::MarkdownFlavor::Quarto);
         let result_invalid = rule.check(&ctx_invalid).unwrap();
         assert_eq!(result_invalid.len(), 1, "Invalid anchor should still trigger warning");
+    }
+
+    // Cross-file validation tests
+    #[test]
+    fn test_cross_file_scope() {
+        let rule = MD051LinkFragments::new();
+        assert_eq!(rule.cross_file_scope(), CrossFileScope::Workspace);
+    }
+
+    #[test]
+    fn test_contribute_to_index_extracts_headings() {
+        let rule = MD051LinkFragments::new();
+        let content = "# First Heading\n\n# Second { #custom }\n\n## Third";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let mut file_index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut file_index);
+
+        assert_eq!(file_index.headings.len(), 3);
+        assert_eq!(file_index.headings[0].text, "First Heading");
+        assert_eq!(file_index.headings[0].auto_anchor, "first-heading");
+        assert!(file_index.headings[0].custom_anchor.is_none());
+
+        assert_eq!(file_index.headings[1].text, "Second");
+        assert_eq!(file_index.headings[1].custom_anchor, Some("custom".to_string()));
+
+        assert_eq!(file_index.headings[2].text, "Third");
+    }
+
+    #[test]
+    fn test_contribute_to_index_extracts_cross_file_links() {
+        let rule = MD051LinkFragments::new();
+        let content = "See [docs](other.md#installation) and [more](../guide.md#getting-started)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+
+        let mut file_index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut file_index);
+
+        assert_eq!(file_index.cross_file_links.len(), 2);
+        assert_eq!(file_index.cross_file_links[0].target_path, "other.md");
+        assert_eq!(file_index.cross_file_links[0].fragment, "installation");
+        assert_eq!(file_index.cross_file_links[1].target_path, "../guide.md");
+        assert_eq!(file_index.cross_file_links[1].fragment, "getting-started");
+    }
+
+    #[test]
+    fn test_cross_file_check_valid_fragment() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD051LinkFragments::new();
+
+        // Build workspace index with target file
+        let mut workspace_index = WorkspaceIndex::new();
+        let mut target_file_index = FileIndex::new();
+        target_file_index.add_heading(HeadingIndex {
+            text: "Installation Guide".to_string(),
+            auto_anchor: "installation-guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
+
+        // Create a FileIndex for the file being checked
+        let mut current_file_index = FileIndex::new();
+        current_file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "install.md".to_string(),
+            fragment: "installation-guide".to_string(),
+            line: 3,
+            column: 5,
+        });
+
+        let warnings = rule
+            .cross_file_check(Path::new("docs/readme.md"), &current_file_index, &workspace_index)
+            .unwrap();
+
+        // Should find no warnings since fragment exists
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_cross_file_check_invalid_fragment() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD051LinkFragments::new();
+
+        // Build workspace index with target file
+        let mut workspace_index = WorkspaceIndex::new();
+        let mut target_file_index = FileIndex::new();
+        target_file_index.add_heading(HeadingIndex {
+            text: "Installation Guide".to_string(),
+            auto_anchor: "installation-guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
+
+        // Create a FileIndex with a cross-file link pointing to non-existent fragment
+        let mut current_file_index = FileIndex::new();
+        current_file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "install.md".to_string(),
+            fragment: "nonexistent".to_string(),
+            line: 3,
+            column: 5,
+        });
+
+        let warnings = rule
+            .cross_file_check(Path::new("docs/readme.md"), &current_file_index, &workspace_index)
+            .unwrap();
+
+        // Should find one warning since fragment doesn't exist
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("nonexistent"));
+        assert!(warnings[0].message.contains("install.md"));
+    }
+
+    #[test]
+    fn test_cross_file_check_custom_anchor_match() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD051LinkFragments::new();
+
+        // Build workspace index with target file that has custom anchor
+        let mut workspace_index = WorkspaceIndex::new();
+        let mut target_file_index = FileIndex::new();
+        target_file_index.add_heading(HeadingIndex {
+            text: "Installation Guide".to_string(),
+            auto_anchor: "installation-guide".to_string(),
+            custom_anchor: Some("install".to_string()),
+            line: 1,
+        });
+        workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
+
+        // Link uses custom anchor
+        let mut current_file_index = FileIndex::new();
+        current_file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "install.md".to_string(),
+            fragment: "install".to_string(),
+            line: 3,
+            column: 5,
+        });
+
+        let warnings = rule
+            .cross_file_check(Path::new("docs/readme.md"), &current_file_index, &workspace_index)
+            .unwrap();
+
+        // Should find no warnings since custom anchor matches
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_cross_file_check_target_not_in_workspace() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD051LinkFragments::new();
+
+        // Empty workspace index
+        let workspace_index = WorkspaceIndex::new();
+
+        // Link to file not in workspace
+        let mut current_file_index = FileIndex::new();
+        current_file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "external.md".to_string(),
+            fragment: "heading".to_string(),
+            line: 3,
+            column: 5,
+        });
+
+        let warnings = rule
+            .cross_file_check(Path::new("docs/readme.md"), &current_file_index, &workspace_index)
+            .unwrap();
+
+        // Should not warn about files not in workspace
+        assert!(warnings.is_empty());
     }
 }

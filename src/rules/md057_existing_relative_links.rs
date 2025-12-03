@@ -3,8 +3,9 @@
 //!
 //! See [docs/md057.md](../../docs/md057.md) for full documentation, configuration, and examples.
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{CrossFileScope, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::element_cache::ElementCache;
+use crate::workspace_index::{CrossFileLinkIndex, FileIndex};
 use regex::Regex;
 use std::collections::HashMap;
 use std::env;
@@ -53,6 +54,26 @@ static MEDIA_FILE_REGEX: LazyLock<Regex> =
 
 // Current working directory
 static CURRENT_DIR: LazyLock<PathBuf> = LazyLock::new(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+/// Supported markdown file extensions
+const MARKDOWN_EXTENSIONS: &[&str] = &[
+    ".md",
+    ".markdown",
+    ".mdx",
+    ".mkd",
+    ".mkdn",
+    ".mdown",
+    ".mdwn",
+    ".qmd",
+    ".rmd",
+];
+
+/// Check if a path has a markdown extension (case-insensitive)
+#[inline]
+fn is_markdown_file(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    MARKDOWN_EXTENSIONS.iter().any(|ext| path_lower.ends_with(ext))
+}
 
 /// Rule MD057: Existing relative links should point to valid files or directories.
 #[derive(Debug, Default, Clone)]
@@ -335,6 +356,152 @@ impl Rule for MD057ExistingRelativeLinks {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD057Config>(config);
         Box::new(Self::from_config_struct(rule_config))
     }
+
+    fn cross_file_scope(&self) -> CrossFileScope {
+        CrossFileScope::Workspace
+    }
+
+    fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, index: &mut FileIndex) {
+        let content = ctx.content;
+
+        // Early returns for performance
+        if content.is_empty() || !content.contains("](") {
+            return;
+        }
+
+        // Pre-collect lines to avoid repeated line iteration
+        let lines: Vec<&str> = content.lines().collect();
+        let element_cache = ElementCache::new(content);
+        let line_index = &ctx.line_index;
+
+        for link in &ctx.links {
+            let line_idx = link.line - 1;
+            if line_idx >= lines.len() {
+                continue;
+            }
+
+            let line = lines[line_idx];
+            if !line.contains("](") {
+                continue;
+            }
+
+            // Find all links in this line
+            for link_match in LINK_START_REGEX.find_iter(line) {
+                let start_pos = link_match.start();
+                let end_pos = link_match.end();
+
+                // Calculate absolute position for code span detection
+                let line_start_byte = line_index.get_line_start_byte(line_idx + 1).unwrap_or(0);
+                let absolute_start_pos = line_start_byte + start_pos;
+
+                // Skip if in code span
+                if element_cache.is_in_code_span(absolute_start_pos) {
+                    continue;
+                }
+
+                // Extract the URL (group 1) and fragment (group 2)
+                // The regex separates URL and fragment: group 1 excludes #, group 2 captures #fragment
+                if let Some(caps) = URL_EXTRACT_REGEX.captures_at(line, end_pos - 1)
+                    && let Some(url_group) = caps.get(1)
+                {
+                    let file_path = url_group.as_str().trim();
+
+                    // Skip empty, external, or fragment-only URLs
+                    if file_path.is_empty()
+                        || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
+                        || file_path.starts_with("www.")
+                        || file_path.starts_with('#')
+                    {
+                        continue;
+                    }
+
+                    // Get fragment from capture group 2 (includes # prefix)
+                    let fragment = caps.get(2).map(|m| m.as_str().trim_start_matches('#')).unwrap_or("");
+
+                    // Only index links to markdown files
+                    if is_markdown_file(file_path) {
+                        index.add_cross_file_link(CrossFileLinkIndex {
+                            target_path: file_path.to_string(),
+                            fragment: fragment.to_string(),
+                            line: link.line,
+                            column: start_pos + 1,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fn cross_file_check(
+        &self,
+        file_path: &Path,
+        file_index: &FileIndex,
+        workspace_index: &crate::workspace_index::WorkspaceIndex,
+    ) -> LintResult {
+        let mut warnings = Vec::new();
+
+        // Get the directory containing this file for resolving relative links
+        let file_dir = file_path.parent();
+
+        for cross_link in &file_index.cross_file_links {
+            // Resolve the relative path
+            let target_path = if let Some(dir) = file_dir {
+                dir.join(&cross_link.target_path)
+            } else {
+                Path::new(&cross_link.target_path).to_path_buf()
+            };
+
+            // Normalize the path (handle .., ., etc.)
+            let target_path = normalize_path(&target_path);
+
+            // Check if the target file exists in the workspace index
+            if !workspace_index.contains_file(&target_path) {
+                // File not in index - it might not exist or might not be a markdown file
+                // For markdown files, if they're not indexed, they don't exist in the workspace
+                if cross_link.target_path.ends_with(".md") || cross_link.target_path.ends_with(".markdown") {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: cross_link.line,
+                        column: cross_link.column,
+                        end_line: cross_link.line,
+                        end_column: cross_link.column + cross_link.target_path.len(),
+                        message: format!(
+                            "Relative link '{}' does not exist in the workspace",
+                            cross_link.target_path
+                        ),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
+                }
+            }
+        }
+
+        Ok(warnings)
+    }
+}
+
+/// Normalize a path by resolving . and .. components
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                // Go up one level if possible
+                if !components.is_empty() {
+                    components.pop();
+                }
+            }
+            std::path::Component::CurDir => {
+                // Skip current directory markers
+            }
+            _ => {
+                components.push(component);
+            }
+        }
+    }
+
+    components.iter().collect()
 }
 
 #[cfg(test)]
@@ -603,5 +770,172 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             !result.iter().any(|w| w.message.contains("yet-another-missing.md")),
             "Should not warn about link in inline code"
         );
+    }
+
+    // Cross-file validation tests
+    #[test]
+    fn test_cross_file_scope() {
+        let rule = MD057ExistingRelativeLinks::new();
+        assert_eq!(rule.cross_file_scope(), CrossFileScope::Workspace);
+    }
+
+    #[test]
+    fn test_contribute_to_index_extracts_markdown_links() {
+        let rule = MD057ExistingRelativeLinks::new();
+        let content = r#"
+# Document
+
+[Link to docs](./docs/guide.md)
+[Link with fragment](./other.md#section)
+[External link](https://example.com)
+[Image link](image.png)
+[Media file](video.mp4)
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let mut index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut index);
+
+        // Should only index markdown file links
+        assert_eq!(index.cross_file_links.len(), 2);
+
+        // Check first link
+        assert_eq!(index.cross_file_links[0].target_path, "./docs/guide.md");
+        assert_eq!(index.cross_file_links[0].fragment, "");
+
+        // Check second link (with fragment)
+        assert_eq!(index.cross_file_links[1].target_path, "./other.md");
+        assert_eq!(index.cross_file_links[1].fragment, "section");
+    }
+
+    #[test]
+    fn test_contribute_to_index_skips_external_and_anchors() {
+        let rule = MD057ExistingRelativeLinks::new();
+        let content = r#"
+# Document
+
+[External](https://example.com)
+[Another external](http://example.org)
+[Fragment only](#section)
+[FTP link](ftp://files.example.com)
+[Mail link](mailto:test@example.com)
+[WWW link](www.example.com)
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let mut index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut index);
+
+        // Should not index any of these
+        assert_eq!(index.cross_file_links.len(), 0);
+    }
+
+    #[test]
+    fn test_cross_file_check_valid_link() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD057ExistingRelativeLinks::new();
+
+        // Create a workspace index with the target file
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(PathBuf::from("docs/guide.md"), FileIndex::new());
+
+        // Create file index with a link to an existing file
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "".to_string(),
+            line: 5,
+            column: 1,
+        });
+
+        // Run cross-file check from docs/index.md
+        let warnings = rule
+            .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
+            .unwrap();
+
+        // Should have no warnings - file exists
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_cross_file_check_missing_link() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD057ExistingRelativeLinks::new();
+
+        // Create an empty workspace index
+        let workspace_index = WorkspaceIndex::new();
+
+        // Create file index with a link to a missing file
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "missing.md".to_string(),
+            fragment: "".to_string(),
+            line: 5,
+            column: 1,
+        });
+
+        // Run cross-file check
+        let warnings = rule
+            .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
+            .unwrap();
+
+        // Should have one warning for the missing file
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("missing.md"));
+        assert!(warnings[0].message.contains("does not exist"));
+    }
+
+    #[test]
+    fn test_cross_file_check_parent_path() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD057ExistingRelativeLinks::new();
+
+        // Create a workspace index with the target file at the root
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(PathBuf::from("readme.md"), FileIndex::new());
+
+        // Create file index with a parent path link
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "../readme.md".to_string(),
+            fragment: "".to_string(),
+            line: 5,
+            column: 1,
+        });
+
+        // Run cross-file check from docs/guide.md
+        let warnings = rule
+            .cross_file_check(Path::new("docs/guide.md"), &file_index, &workspace_index)
+            .unwrap();
+
+        // Should have no warnings - file exists at normalized path
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_path_function() {
+        // Test simple cases
+        assert_eq!(
+            normalize_path(Path::new("docs/guide.md")),
+            PathBuf::from("docs/guide.md")
+        );
+
+        // Test current directory removal
+        assert_eq!(
+            normalize_path(Path::new("./docs/guide.md")),
+            PathBuf::from("docs/guide.md")
+        );
+
+        // Test parent directory resolution
+        assert_eq!(
+            normalize_path(Path::new("docs/sub/../guide.md")),
+            PathBuf::from("docs/guide.md")
+        );
+
+        // Test multiple parent directories
+        assert_eq!(normalize_path(Path::new("a/b/c/../../d.md")), PathBuf::from("a/d.md"));
     }
 }

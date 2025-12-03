@@ -489,15 +489,22 @@ pub fn process_file_with_formatter(
     output_writer: &rumdl_lib::output::OutputWriter,
     config: &rumdl_config::Config,
     cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
-) -> (bool, usize, usize, usize, Vec<rumdl_lib::rule::LintWarning>) {
+) -> (
+    bool,
+    usize,
+    usize,
+    usize,
+    Vec<rumdl_lib::rule::LintWarning>,
+    rumdl_lib::workspace_index::FileIndex,
+) {
     let formatter = output_format.create_formatter();
 
-    // Call the original process_file_inner to get warnings and original line ending
-    let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending) =
+    // Call the original process_file_inner to get warnings, original line ending, and FileIndex
+    let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending, file_index) =
         process_file_inner(file_path, rules, verbose, quiet, silent, config, cache);
 
     if total_warnings == 0 {
-        return (false, 0, 0, 0, Vec::new());
+        return (false, 0, 0, 0, Vec::new(), file_index);
     }
 
     // Format and output warnings (show diagnostics unless silent)
@@ -540,7 +547,14 @@ pub fn process_file_with_formatter(
         }
 
         // Don't actually write the file in diff mode
-        return (total_warnings > 0, total_warnings, 0, fixable_warnings, all_warnings);
+        return (
+            total_warnings > 0,
+            total_warnings,
+            0,
+            fixable_warnings,
+            all_warnings,
+            file_index,
+        );
     } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
         warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, silent, config);
@@ -625,8 +639,26 @@ pub fn process_file_with_formatter(
         }
     }
 
-    (true, total_warnings, warnings_fixed, fixable_warnings, all_warnings)
+    (
+        true,
+        total_warnings,
+        warnings_fixed,
+        fixable_warnings,
+        all_warnings,
+        file_index,
+    )
 }
+
+/// Result type for file processing that includes index data for cross-file analysis
+pub struct ProcessFileResult {
+    pub warnings: Vec<rumdl_lib::rule::LintWarning>,
+    pub content: String,
+    pub total_warnings: usize,
+    pub fixable_warnings: usize,
+    pub original_line_ending: rumdl_lib::utils::LineEnding,
+    pub file_index: rumdl_lib::workspace_index::FileIndex,
+}
+
 pub fn process_file_inner(
     file_path: &str,
     rules: &[Box<dyn Rule>],
@@ -641,13 +673,44 @@ pub fn process_file_inner(
     usize,
     usize,
     rumdl_lib::utils::LineEnding,
+    rumdl_lib::workspace_index::FileIndex,
 ) {
+    let result = process_file_with_index(file_path, rules, verbose, quiet, silent, config, cache);
+    (
+        result.warnings,
+        result.content,
+        result.total_warnings,
+        result.fixable_warnings,
+        result.original_line_ending,
+        result.file_index,
+    )
+}
+
+/// Process a file and return both warnings and FileIndex for cross-file aggregation
+pub fn process_file_with_index(
+    file_path: &str,
+    rules: &[Box<dyn Rule>],
+    verbose: bool,
+    quiet: bool,
+    silent: bool,
+    config: &rumdl_config::Config,
+    cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
+) -> ProcessFileResult {
     use std::time::Instant;
 
     let start_time = Instant::now();
     if verbose && !quiet {
         println!("Processing file: {file_path}");
     }
+
+    let empty_result = ProcessFileResult {
+        warnings: Vec::new(),
+        content: String::new(),
+        total_warnings: 0,
+        fixable_warnings: 0,
+        original_line_ending: rumdl_lib::utils::LineEnding::Lf,
+        file_index: rumdl_lib::workspace_index::FileIndex::new(),
+    };
 
     // Read file content efficiently
     let mut content = match crate::read_file_efficiently(Path::new(file_path)) {
@@ -656,7 +719,7 @@ pub fn process_file_inner(
             if !silent {
                 eprintln!("Error reading file {file_path}: {e}");
             }
-            return (Vec::new(), String::new(), 0, 0, rumdl_lib::utils::LineEnding::Lf);
+            return empty_result;
         }
     };
 
@@ -668,7 +731,10 @@ pub fn process_file_inner(
 
     // Early content analysis for ultra-fast skip decisions
     if content.is_empty() {
-        return (Vec::new(), String::new(), 0, 0, original_line_ending);
+        return ProcessFileResult {
+            original_line_ending,
+            ..empty_result
+        };
     }
 
     // Compute hashes for cache (Ruff-style: file content + config + enabled rules)
@@ -676,6 +742,7 @@ pub fn process_file_inner(
     let rules_hash = LintCache::hash_rules(rules);
 
     // Try to get from cache first (lock briefly for cache read)
+    // Note: Cache only stores single-file warnings; cross-file checks must run fresh
     if let Some(ref cache_arc) = cache {
         let mut cache_guard = cache_arc.lock().expect("Cache mutex poisoned");
         if let Some(cached_warnings) = cache_guard.get(&content, &config_hash, &rules_hash) {
@@ -695,13 +762,22 @@ pub fn process_file_inner(
                 })
                 .count();
 
-            return (
-                cached_warnings.clone(),
+            // Build FileIndex for cross-file analysis on cache hit (lightweight, no rule checking)
+            let flavor = if config.markdown_flavor() == rumdl_lib::config::MarkdownFlavor::Standard {
+                rumdl_lib::config::MarkdownFlavor::from_path(Path::new(file_path))
+            } else {
+                config.markdown_flavor()
+            };
+            let file_index = rumdl_lib::build_file_index_only(&content, rules, flavor);
+
+            return ProcessFileResult {
+                warnings: cached_warnings.clone(),
                 content,
-                cached_warnings.len(),
+                total_warnings: cached_warnings.len(),
                 fixable_warnings,
                 original_line_ending,
-            );
+                file_index,
+            };
         }
         // Unlock happens automatically when cache_guard goes out of scope
     }
@@ -734,8 +810,8 @@ pub fn process_file_inner(
         config.markdown_flavor()
     };
 
-    // Use the standard lint function with the determined flavor
-    let warnings_result = rumdl_lib::lint(&content, &filtered_rules, verbose, flavor);
+    // Use lint_and_index for single-file linting + index contribution
+    let (warnings_result, file_index) = rumdl_lib::lint_and_index(&content, &filtered_rules, verbose, flavor);
 
     // Clear the environment variable after processing
     unsafe {
@@ -786,13 +862,14 @@ pub fn process_file_inner(
         // Unlock happens automatically when cache_guard goes out of scope
     }
 
-    (
-        all_warnings,
+    ProcessFileResult {
+        warnings: all_warnings,
         content,
         total_warnings,
         fixable_warnings,
         original_line_ending,
-    )
+        file_index,
+    }
 }
 pub fn apply_fixes_coordinated(
     rules: &[Box<dyn Rule>],
@@ -851,18 +928,4 @@ pub fn apply_fixes_coordinated(
             0
         }
     }
-}
-pub fn process_file_collect_warnings(
-    file_path: &str,
-    rules: &[Box<dyn Rule>],
-    verbose: bool,
-    quiet: bool,
-    silent: bool,
-    config: &rumdl_config::Config,
-    cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
-) -> Vec<rumdl_lib::rule::LintWarning> {
-    // Simply use process_file_inner and extract warnings
-    // This unifies all linting logic and cache handling in one place
-    let (warnings, _, _, _, _) = process_file_inner(file_path, rules, verbose, quiet, silent, config, cache);
-    warnings
 }

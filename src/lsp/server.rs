@@ -8,16 +8,27 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::config::Config;
 use crate::lint;
-use crate::lsp::types::{RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
+use crate::lsp::index_worker::IndexWorker;
+use crate::lsp::types::{IndexState, IndexUpdate, RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
 use crate::rule::{FixCapability, Rule};
 use crate::rules;
+use crate::workspace_index::WorkspaceIndex;
+
+/// Supported markdown file extensions (without leading dot)
+const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"];
+
+/// Check if a file extension is a markdown extension
+#[inline]
+fn is_markdown_extension(ext: &str) -> bool {
+    MARKDOWN_EXTENSIONS.contains(&ext.to_lowercase().as_str())
+}
 
 /// Represents a document in the LSP server's cache
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +60,7 @@ pub(crate) struct ConfigCacheEntry {
 /// - Configuration management
 /// - Multi-file support
 /// - Multi-root workspace support with per-file config resolution
+/// - Cross-file analysis with workspace indexing
 #[derive(Clone)]
 pub struct RumdlLanguageServer {
     client: Client,
@@ -66,6 +78,12 @@ pub struct RumdlLanguageServer {
     /// Key is the directory where config search started (file's parent dir)
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) config_cache: Arc<RwLock<HashMap<PathBuf, ConfigCacheEntry>>>,
+    /// Workspace index for cross-file analysis (MD051)
+    workspace_index: Arc<RwLock<WorkspaceIndex>>,
+    /// Current state of the workspace index (building/ready/error)
+    index_state: Arc<RwLock<IndexState>>,
+    /// Channel to send updates to the background index worker
+    update_tx: mpsc::Sender<IndexUpdate>,
 }
 
 impl RumdlLanguageServer {
@@ -76,13 +94,36 @@ impl RumdlLanguageServer {
             initial_config.config_path = Some(path.to_string());
         }
 
+        // Create shared state for workspace indexing
+        let workspace_index = Arc::new(RwLock::new(WorkspaceIndex::new()));
+        let index_state = Arc::new(RwLock::new(IndexState::default()));
+        let workspace_roots = Arc::new(RwLock::new(Vec::new()));
+
+        // Create channels for index worker communication
+        let (update_tx, update_rx) = mpsc::channel::<IndexUpdate>(100);
+        let (relint_tx, _relint_rx) = mpsc::channel::<PathBuf>(100);
+
+        // Spawn the background index worker
+        let worker = IndexWorker::new(
+            update_rx,
+            workspace_index.clone(),
+            index_state.clone(),
+            client.clone(),
+            workspace_roots.clone(),
+            relint_tx,
+        );
+        tokio::spawn(worker.run());
+
         Self {
             client,
             config: Arc::new(RwLock::new(initial_config)),
             rumdl_config: Arc::new(RwLock::new(Config::default())),
             documents: Arc::new(RwLock::new(HashMap::new())),
-            workspace_roots: Arc::new(RwLock::new(Vec::new())),
+            workspace_roots,
             config_cache: Arc::new(RwLock::new(HashMap::new())),
+            workspace_index,
+            index_state,
+            update_tx,
         }
     }
 
@@ -222,8 +263,9 @@ impl RumdlLanguageServer {
         }
 
         // Resolve configuration for this specific file
-        let rumdl_config = if let Ok(file_path) = uri.to_file_path() {
-            self.resolve_config_for_file(&file_path).await
+        let file_path = uri.to_file_path().ok();
+        let rumdl_config = if let Some(ref path) = file_path {
+            self.resolve_config_for_file(path).await
         } else {
             // Fallback to global config for non-file URIs
             (*self.rumdl_config.read().await).clone()
@@ -239,16 +281,34 @@ impl RumdlLanguageServer {
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
         // Run rumdl linting with the configured flavor
-        match crate::lint(text, &filtered_rules, false, flavor) {
-            Ok(warnings) => {
-                let diagnostics = warnings.iter().map(warning_to_diagnostic).collect();
-                Ok(diagnostics)
-            }
+        let mut all_warnings = match crate::lint(text, &filtered_rules, false, flavor) {
+            Ok(warnings) => warnings,
             Err(e) => {
                 log::error!("Failed to lint document {uri}: {e}");
-                Ok(Vec::new())
+                return Ok(Vec::new());
+            }
+        };
+
+        // Run cross-file checks if workspace index is ready
+        if let Some(ref path) = file_path {
+            let index_state = self.index_state.read().await.clone();
+            if matches!(index_state, IndexState::Ready) {
+                let workspace_index = self.workspace_index.read().await;
+                if let Some(file_index) = workspace_index.get_file(path) {
+                    match crate::run_cross_file_checks(path, file_index, &filtered_rules, &workspace_index) {
+                        Ok(cross_file_warnings) => {
+                            all_warnings.extend(cross_file_warnings);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to run cross-file checks for {uri}: {e}");
+                        }
+                    }
+                }
             }
         }
+
+        let diagnostics = all_warnings.iter().map(warning_to_diagnostic).collect();
+        Ok(diagnostics)
     }
 
     /// Update diagnostics for a document
@@ -715,8 +775,8 @@ impl LanguageServer for RumdlLanguageServer {
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                     identifier: Some("rumdl".to_string()),
-                    inter_file_dependencies: false,
-                    workspace_diagnostics: false,
+                    inter_file_dependencies: true,
+                    workspace_diagnostics: true,
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 workspace: Some(WorkspaceServerCapabilities {
@@ -768,6 +828,46 @@ impl LanguageServer for RumdlLanguageServer {
         self.client
             .log_message(MessageType::INFO, format!("rumdl v{version} Language Server started"))
             .await;
+
+        // Trigger initial workspace indexing for cross-file analysis
+        if self.update_tx.send(IndexUpdate::FullRescan).await.is_err() {
+            log::warn!("Failed to trigger initial workspace indexing");
+        } else {
+            log::info!("Triggered initial workspace indexing for cross-file analysis");
+        }
+
+        // Register file watcher for markdown files to detect external changes
+        // Watch all supported markdown extensions
+        let markdown_patterns = [
+            "**/*.md",
+            "**/*.markdown",
+            "**/*.mdx",
+            "**/*.mkd",
+            "**/*.mkdn",
+            "**/*.mdown",
+            "**/*.mdwn",
+            "**/*.qmd",
+            "**/*.rmd",
+        ];
+        let watchers: Vec<_> = markdown_patterns
+            .iter()
+            .map(|pattern| FileSystemWatcher {
+                glob_pattern: GlobPattern::String((*pattern).to_string()),
+                kind: Some(WatchKind::all()),
+            })
+            .collect();
+
+        let registration = Registration {
+            id: "markdown-watcher".to_string(),
+            method: "workspace/didChangeWatchedFiles".to_string(),
+            register_options: Some(
+                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions { watchers }).unwrap(),
+            ),
+        };
+
+        if self.client.register_capability(vec![registration]).await.is_err() {
+            log::debug!("Client does not support file watching capability");
+        }
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
@@ -798,10 +898,19 @@ impl LanguageServer for RumdlLanguageServer {
 
         // Reload fallback configuration
         self.reload_configuration().await;
+
+        // Trigger full workspace rescan for cross-file index
+        if self.update_tx.send(IndexUpdate::FullRescan).await.is_err() {
+            log::warn!("Failed to trigger workspace rescan after folder change");
+        }
     }
 
     async fn shutdown(&self) -> JsonRpcResult<()> {
         log::info!("Shutting down rumdl Language Server");
+
+        // Signal the index worker to shut down
+        let _ = self.update_tx.send(IndexUpdate::Shutdown).await;
+
         Ok(())
     }
 
@@ -816,6 +925,17 @@ impl LanguageServer for RumdlLanguageServer {
             from_disk: false,
         };
         self.documents.write().await.insert(uri.clone(), entry);
+
+        // Send update to index worker for cross-file analysis
+        if let Ok(path) = uri.to_file_path() {
+            let _ = self
+                .update_tx
+                .send(IndexUpdate::FileChanged {
+                    path,
+                    content: text.clone(),
+                })
+                .await;
+        }
 
         self.update_diagnostics(uri, text).await;
     }
@@ -833,6 +953,17 @@ impl LanguageServer for RumdlLanguageServer {
                 from_disk: false,
             };
             self.documents.write().await.insert(uri.clone(), entry);
+
+            // Send update to index worker for cross-file analysis
+            if let Ok(path) = uri.to_file_path() {
+                let _ = self
+                    .update_tx
+                    .send(IndexUpdate::FileChanged {
+                        path,
+                        content: text.clone(),
+                    })
+                    .await;
+            }
 
             self.update_diagnostics(uri, text).await;
         }
@@ -895,43 +1026,77 @@ impl LanguageServer for RumdlLanguageServer {
         // Check if any of the changed files are config files
         const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml", ".markdownlint.json"];
 
+        let mut config_changed = false;
+
         for change in &params.changes {
-            if let Ok(path) = change.uri.to_file_path()
-                && let Some(file_name) = path.file_name().and_then(|f| f.to_str())
-                && CONFIG_FILES.contains(&file_name)
-            {
-                log::info!("Config file changed: {}, invalidating config cache", path.display());
+            if let Ok(path) = change.uri.to_file_path() {
+                let file_name = path.file_name().and_then(|f| f.to_str());
+                let extension = path.extension().and_then(|e| e.to_str());
 
-                // Invalidate all cache entries that were loaded from this config file
-                let mut cache = self.config_cache.write().await;
-                cache.retain(|_, entry| {
-                    if let Some(config_file) = &entry.config_file {
-                        config_file != &path
-                    } else {
-                        true
-                    }
-                });
+                // Handle config file changes
+                if let Some(name) = file_name
+                    && CONFIG_FILES.contains(&name)
+                    && !config_changed
+                {
+                    log::info!("Config file changed: {}, invalidating config cache", path.display());
 
-                // Also reload the global fallback configuration
-                drop(cache);
-                self.reload_configuration().await;
+                    // Invalidate all cache entries that were loaded from this config file
+                    let mut cache = self.config_cache.write().await;
+                    cache.retain(|_, entry| {
+                        if let Some(config_file) = &entry.config_file {
+                            config_file != &path
+                        } else {
+                            true
+                        }
+                    });
 
-                // Re-lint all open documents
-                // First collect URIs and content to avoid holding lock during async operations
-                let docs_to_update: Vec<(Url, String)> = {
-                    let docs = self.documents.read().await;
-                    docs.iter()
-                        .filter(|(_, entry)| !entry.from_disk)
-                        .map(|(uri, entry)| (uri.clone(), entry.content.clone()))
-                        .collect()
-                };
-
-                // Now update diagnostics without holding the lock
-                for (uri, text) in docs_to_update {
-                    self.update_diagnostics(uri, text).await;
+                    // Also reload the global fallback configuration
+                    drop(cache);
+                    self.reload_configuration().await;
+                    config_changed = true;
                 }
 
-                break;
+                // Handle markdown file changes for workspace index
+                if let Some(ext) = extension
+                    && is_markdown_extension(ext)
+                {
+                    match change.typ {
+                        FileChangeType::CREATED | FileChangeType::CHANGED => {
+                            // Read file content and update index
+                            if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                                let _ = self
+                                    .update_tx
+                                    .send(IndexUpdate::FileChanged {
+                                        path: path.clone(),
+                                        content,
+                                    })
+                                    .await;
+                            }
+                        }
+                        FileChangeType::DELETED => {
+                            let _ = self
+                                .update_tx
+                                .send(IndexUpdate::FileDeleted { path: path.clone() })
+                                .await;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Re-lint all open documents if config changed
+        if config_changed {
+            let docs_to_update: Vec<(Url, String)> = {
+                let docs = self.documents.read().await;
+                docs.iter()
+                    .filter(|(_, entry)| !entry.from_disk)
+                    .map(|(uri, entry)| (uri.clone(), entry.content.clone()))
+                    .collect()
+            };
+
+            for (uri, text) in docs_to_update {
+                self.update_diagnostics(uri, text).await;
             }
         }
     }

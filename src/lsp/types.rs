@@ -4,7 +4,49 @@
 //! following the Language Server Protocol specification.
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tower_lsp::lsp_types::*;
+
+/// State of the workspace index
+#[derive(Debug, Clone, PartialEq)]
+pub enum IndexState {
+    /// Index is being built
+    Building {
+        /// Progress percentage (0-100)
+        progress: f32,
+        /// Number of files indexed so far
+        files_indexed: usize,
+        /// Total number of files to index
+        total_files: usize,
+    },
+    /// Index is ready for use
+    Ready,
+    /// Index encountered an error
+    Error(String),
+}
+
+impl Default for IndexState {
+    fn default() -> Self {
+        Self::Building {
+            progress: 0.0,
+            files_indexed: 0,
+            total_files: 0,
+        }
+    }
+}
+
+/// Messages sent to the background index worker
+#[derive(Debug)]
+pub enum IndexUpdate {
+    /// A file was changed (content included for debouncing)
+    FileChanged { path: PathBuf, content: String },
+    /// A file was deleted
+    FileDeleted { path: PathBuf },
+    /// Request a full workspace rescan
+    FullRescan,
+    /// Shutdown the worker
+    Shutdown,
+}
 
 /// Configuration for the rumdl LSP server (from initialization options)
 ///

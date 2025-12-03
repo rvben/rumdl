@@ -6,6 +6,7 @@
 //! Following Ruff's approach, this is built directly into the main rumdl binary
 //! and can be started with `rumdl server`.
 
+pub mod index_worker;
 pub mod server;
 pub mod types;
 
@@ -134,8 +135,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_service_creation() {
+    #[tokio::test]
+    async fn test_service_creation() {
         // Test that we can create the LSP service
         let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
 

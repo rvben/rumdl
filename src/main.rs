@@ -910,6 +910,8 @@ build-backend = "setuptools.build_meta"
                     Box::new(MD058BlanksAroundTables::default()),
                     Box::new(MD059LinkText::default()),
                     Box::new(MD060TableFormat::default()),
+                    Box::new(MD061ForbiddenTerms::default()),
+                    Box::new(MD062LinkDestinationWhitespace::new()),
                 ];
                 if let Some(rule_query) = rule {
                     let rule_query = rule_query.to_ascii_uppercase();
@@ -1637,7 +1639,10 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         None
     };
 
-    let has_issues = watch::perform_check_run(args, &config, quiet, cache);
+    // Use the same cache directory for workspace index cache (when cache is enabled)
+    let workspace_cache_dir = if cache_enabled { Some(cache_dir.as_path()) } else { None };
+
+    let has_issues = watch::perform_check_run(args, &config, quiet, cache, workspace_cache_dir);
     if has_issues && args.fix_mode != FixMode::Format {
         exit::violations_found();
     }

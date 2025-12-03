@@ -2208,13 +2208,29 @@ impl<'a> LintContext<'a> {
                     .partition_point(|line| line.byte_offset <= start_pos)
                     .saturating_sub(1);
                 let line_num = line_idx + 1;
-                let col_start = start_pos - lines[line_idx].byte_offset;
+                let byte_col_start = start_pos - lines[line_idx].byte_offset;
 
                 // Find end column using binary search
                 let end_line_idx = lines
                     .partition_point(|line| line.byte_offset <= end_pos)
                     .saturating_sub(1);
-                let col_end = end_pos - lines[end_line_idx].byte_offset;
+                let byte_col_end = end_pos - lines[end_line_idx].byte_offset;
+
+                // Convert byte offsets to character positions for correct Unicode handling
+                // This ensures consistency with warning.column which uses character positions
+                let line_content = lines[line_idx].content(content);
+                let col_start = if byte_col_start <= line_content.len() {
+                    line_content[..byte_col_start].chars().count()
+                } else {
+                    line_content.chars().count()
+                };
+
+                let end_line_content = lines[end_line_idx].content(content);
+                let col_end = if byte_col_end <= end_line_content.len() {
+                    end_line_content[..byte_col_end].chars().count()
+                } else {
+                    end_line_content.chars().count()
+                };
 
                 code_spans.push(CodeSpan {
                     line: line_num,

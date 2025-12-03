@@ -6,8 +6,11 @@ use colored::*;
 use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
 use rumdl_lib::config as rumdl_config;
+use rumdl_lib::rule::CrossFileScope;
+use rumdl_lib::workspace_index::WorkspaceIndex;
+use std::collections::HashMap;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::mpsc::channel;
@@ -79,6 +82,7 @@ pub fn perform_check_run(
     config: &rumdl_config::Config,
     quiet: bool,
     cache: Option<Arc<std::sync::Mutex<crate::cache::LintCache>>>,
+    workspace_cache_dir: Option<&Path>,
 ) -> bool {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
 
@@ -130,6 +134,11 @@ pub fn perform_check_run(
         return false;
     }
 
+    // Check if any enabled rule needs cross-file analysis
+    let needs_cross_file = enabled_rules
+        .iter()
+        .any(|r| r.cross_file_scope() != CrossFileScope::None);
+
     // For formats that need to collect all warnings first
     let needs_collection = matches!(
         output_format,
@@ -143,8 +152,11 @@ pub fn perform_check_run(
         let mut _files_with_issues = 0;
         let mut _total_issues = 0;
 
+        // Phase 1: Lint all files and collect FileIndex data (no second pass needed)
+        let mut file_indices: HashMap<PathBuf, rumdl_lib::workspace_index::FileIndex> = HashMap::new();
+
         for file_path in &file_paths {
-            let warnings = crate::file_processor::process_file_collect_warnings(
+            let result = crate::file_processor::process_file_with_index(
                 file_path,
                 &enabled_rules,
                 args.verbose && !args.silent,
@@ -154,11 +166,97 @@ pub fn perform_check_run(
                 cache.as_ref().map(Arc::clone),
             );
 
-            if !warnings.is_empty() {
+            if !result.warnings.is_empty() {
                 has_issues = true;
                 _files_with_issues += 1;
-                _total_issues += warnings.len();
-                all_file_warnings.push((file_path.clone(), warnings));
+                _total_issues += result.warnings.len();
+                all_file_warnings.push((file_path.clone(), result.warnings));
+            }
+
+            // Store FileIndex for cross-file analysis (extracted from single linting pass)
+            if needs_cross_file {
+                // Canonicalize path for consistent cache key matching
+                let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+                file_indices.insert(canonical, result.file_index);
+            }
+        }
+
+        // Phase 2: Run cross-file checks if needed
+        if needs_cross_file && !file_indices.is_empty() {
+            let index_start = Instant::now();
+
+            // Load workspace index from cache if available, otherwise start fresh
+            let mut workspace_index = workspace_cache_dir
+                .and_then(WorkspaceIndex::load_from_cache)
+                .unwrap_or_default();
+
+            let loaded_from_cache = workspace_index.file_count() > 0;
+            if args.verbose && !args.silent && loaded_from_cache {
+                eprintln!(
+                    "Loaded workspace index from cache with {} files",
+                    workspace_index.file_count()
+                );
+            }
+
+            // Incremental update: only update files that have changed (stale)
+            let mut updated_count = 0;
+            let mut skipped_count = 0;
+            for (path, file_index) in file_indices {
+                if workspace_index.is_file_stale(&path, &file_index.content_hash) {
+                    workspace_index.update_file(&path, file_index);
+                    updated_count += 1;
+                } else {
+                    skipped_count += 1;
+                }
+            }
+
+            // Prune deleted files from workspace index (use canonical paths for matching)
+            let current_files: std::collections::HashSet<PathBuf> = file_paths
+                .iter()
+                .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p)))
+                .collect();
+            let pruned_count = workspace_index.retain_only(&current_files);
+
+            if args.verbose && !args.silent {
+                eprintln!(
+                    "Workspace index: {} updated, {} unchanged, {} pruned ({} total) in {:?}",
+                    updated_count,
+                    skipped_count,
+                    pruned_count,
+                    workspace_index.file_count(),
+                    index_start.elapsed()
+                );
+            }
+
+            // Run cross-file checks for each file using the FileIndex (no re-parsing needed)
+            for (file_path, file_index) in workspace_index.files() {
+                if let Ok(cross_file_warnings) =
+                    rumdl_lib::run_cross_file_checks(file_path, file_index, &enabled_rules, &workspace_index)
+                    && !cross_file_warnings.is_empty()
+                {
+                    let file_path_str = file_path.to_string_lossy().to_string();
+                    // Find existing entry or create new one
+                    if let Some((_, warnings)) = all_file_warnings.iter_mut().find(|(p, _)| p == &file_path_str) {
+                        warnings.extend(cross_file_warnings);
+                    } else {
+                        has_issues = true;
+                        _files_with_issues += 1;
+                        _total_issues += cross_file_warnings.len();
+                        all_file_warnings.push((file_path_str, cross_file_warnings));
+                    }
+                }
+            }
+
+            // Save workspace index to cache
+            if let Some(cache_dir) = workspace_cache_dir {
+                if let Err(e) = workspace_index.save_to_cache(cache_dir) {
+                    log::warn!("Failed to save workspace index cache: {e}");
+                } else if args.verbose && !args.silent {
+                    eprintln!(
+                        "Saved workspace index cache with {} files",
+                        workspace_index.file_count()
+                    );
+                }
             }
         }
 
@@ -193,113 +291,227 @@ pub fn perform_check_run(
     // Collect all warnings for statistics if requested
     let mut all_warnings_for_stats = Vec::new();
 
-    let (has_issues, files_with_issues, total_issues, total_issues_fixed, total_fixable_issues, total_files_processed) =
-        if use_parallel {
-            // Parallel processing for multiple files with thread-safe cache
-            // Each worker locks the mutex ONLY for brief cache get/set operations
-            let enabled_rules_arc = Arc::new(enabled_rules);
+    // For cross-file analysis, we collect FileIndex data during linting (no second pass needed)
+    let mut file_indices: HashMap<PathBuf, rumdl_lib::workspace_index::FileIndex> = HashMap::new();
 
-            let results: Vec<_> = file_paths
-                .par_iter()
-                .map(|file_path| {
-                    // Clone Arc (cheap - just increments reference count)
-                    // process_file_with_formatter locks mutex briefly for cache operations
-                    crate::file_processor::process_file_with_formatter(
-                        file_path,
-                        &enabled_rules_arc,
-                        args.fix_mode,
-                        args.diff,
-                        args.verbose && !args.silent,
-                        quiet,
-                        args.silent,
-                        &output_format,
-                        &output_writer,
-                        config,
-                        cache.as_ref().map(Arc::clone),
-                    )
-                })
-                .collect();
+    let (
+        mut has_issues,
+        mut files_with_issues,
+        mut total_issues,
+        total_issues_fixed,
+        total_fixable_issues,
+        total_files_processed,
+    ) = if use_parallel {
+        // Parallel processing for multiple files with thread-safe cache
+        // Each worker locks the mutex ONLY for brief cache get/set operations
+        let enabled_rules_arc = Arc::new(enabled_rules.clone());
 
-            // Aggregate results
-            let mut has_issues = false;
-            let mut files_with_issues = 0;
-            let mut total_issues = 0;
-            let mut total_issues_fixed = 0;
-            let mut total_fixable_issues = 0;
-            let total_files_processed = results.len();
+        // Process files in parallel - now includes FileIndex in the result (no second pass needed)
+        let results: Vec<_> = file_paths
+            .par_iter()
+            .map(|file_path| {
+                // Clone Arc (cheap - just increments reference count)
+                // process_file_with_formatter locks mutex briefly for cache operations
+                let result = crate::file_processor::process_file_with_formatter(
+                    file_path,
+                    &enabled_rules_arc,
+                    args.fix_mode,
+                    args.diff,
+                    args.verbose && !args.silent,
+                    quiet,
+                    args.silent,
+                    &output_format,
+                    &output_writer,
+                    config,
+                    cache.as_ref().map(Arc::clone),
+                );
+                (file_path.clone(), result)
+            })
+            .collect();
 
-            for (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings) in results {
-                total_issues_fixed += issues_fixed;
-                total_fixable_issues += fixable_issues;
+        // Aggregate results and extract FileIndex for cross-file analysis
+        let mut has_issues = false;
+        let mut files_with_issues = 0;
+        let mut total_issues = 0;
+        let mut total_issues_fixed = 0;
+        let mut total_fixable_issues = 0;
+        let total_files_processed = results.len();
 
-                if file_has_issues {
-                    has_issues = true;
-                    files_with_issues += 1;
-                    total_issues += issues_found;
+        for (file_path, (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, file_index)) in results
+        {
+            total_issues_fixed += issues_fixed;
+            total_fixable_issues += fixable_issues;
+
+            if file_has_issues {
+                has_issues = true;
+                files_with_issues += 1;
+                total_issues += issues_found;
+            }
+
+            if args.statistics {
+                all_warnings_for_stats.extend(warnings);
+            }
+
+            // Store FileIndex for cross-file analysis (no second pass needed!)
+            if needs_cross_file {
+                // Canonicalize path for consistent cache key matching
+                let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| PathBuf::from(&file_path));
+                file_indices.insert(canonical, file_index);
+            }
+        }
+
+        (
+            has_issues,
+            files_with_issues,
+            total_issues,
+            total_issues_fixed,
+            total_fixable_issues,
+            total_files_processed,
+        )
+    } else {
+        // Sequential processing for single files or when fixing
+        let mut has_issues = false;
+        let mut files_with_issues = 0;
+        let mut total_issues = 0;
+        let mut total_issues_fixed = 0;
+        let mut total_fixable_issues = 0;
+        let mut total_files_processed = 0;
+
+        for file_path in &file_paths {
+            // process_file_with_formatter now returns FileIndex (no second pass needed)
+            let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, file_index) =
+                crate::file_processor::process_file_with_formatter(
+                    file_path,
+                    &enabled_rules,
+                    args.fix_mode,
+                    args.diff,
+                    args.verbose && !args.silent,
+                    quiet,
+                    args.silent,
+                    &output_format,
+                    &output_writer,
+                    config,
+                    cache.as_ref().map(Arc::clone),
+                );
+
+            // Store FileIndex for cross-file analysis (extracted from first pass)
+            if needs_cross_file {
+                // Canonicalize path for consistent cache key matching
+                let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+                file_indices.insert(canonical, file_index);
+            }
+
+            total_files_processed += 1;
+            total_issues_fixed += issues_fixed;
+            total_fixable_issues += fixable_issues;
+
+            if file_has_issues {
+                has_issues = true;
+                files_with_issues += 1;
+                total_issues += issues_found;
+            }
+
+            if args.statistics {
+                all_warnings_for_stats.extend(warnings);
+            }
+        }
+
+        (
+            has_issues,
+            files_with_issues,
+            total_issues,
+            total_issues_fixed,
+            total_fixable_issues,
+            total_files_processed,
+        )
+    };
+
+    // Phase 2: Run cross-file checks if needed
+    if needs_cross_file && !file_indices.is_empty() {
+        let index_start = Instant::now();
+
+        // Load workspace index from cache if available, otherwise start fresh
+        let mut workspace_index = workspace_cache_dir
+            .and_then(WorkspaceIndex::load_from_cache)
+            .unwrap_or_default();
+
+        let loaded_from_cache = workspace_index.file_count() > 0;
+        if args.verbose && !args.silent && loaded_from_cache {
+            eprintln!(
+                "Loaded workspace index from cache with {} files",
+                workspace_index.file_count()
+            );
+        }
+
+        // Incremental update: only update files that have changed (stale)
+        let mut updated_count = 0;
+        let mut skipped_count = 0;
+        for (path, file_index) in file_indices {
+            if workspace_index.is_file_stale(&path, &file_index.content_hash) {
+                workspace_index.update_file(&path, file_index);
+                updated_count += 1;
+            } else {
+                skipped_count += 1;
+            }
+        }
+
+        // Prune deleted files from workspace index (use canonical paths for matching)
+        let current_files: std::collections::HashSet<PathBuf> = file_paths
+            .iter()
+            .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p)))
+            .collect();
+        let pruned_count = workspace_index.retain_only(&current_files);
+
+        if args.verbose && !args.silent {
+            eprintln!(
+                "Workspace index: {} updated, {} unchanged, {} pruned ({} total) in {:?}",
+                updated_count,
+                skipped_count,
+                pruned_count,
+                workspace_index.file_count(),
+                index_start.elapsed()
+            );
+        }
+
+        // Run cross-file checks using FileIndex (no re-parsing needed)
+        let formatter = output_format.create_formatter();
+        for (file_path, file_index) in workspace_index.files() {
+            if let Ok(cross_file_warnings) =
+                rumdl_lib::run_cross_file_checks(file_path, file_index, &enabled_rules, &workspace_index)
+                && !cross_file_warnings.is_empty()
+            {
+                has_issues = true;
+                files_with_issues += 1;
+                total_issues += cross_file_warnings.len();
+
+                // Output cross-file warnings
+                if !args.silent {
+                    let formatted = formatter.format_warnings(&cross_file_warnings, &file_path.to_string_lossy());
+                    if !formatted.is_empty() {
+                        output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                            eprintln!("Error writing output: {e}");
+                        });
+                    }
                 }
 
                 if args.statistics {
-                    all_warnings_for_stats.extend(warnings);
+                    all_warnings_for_stats.extend(cross_file_warnings);
                 }
             }
+        }
 
-            (
-                has_issues,
-                files_with_issues,
-                total_issues,
-                total_issues_fixed,
-                total_fixable_issues,
-                total_files_processed,
-            )
-        } else {
-            // Sequential processing for single files or when fixing
-            let mut has_issues = false;
-            let mut files_with_issues = 0;
-            let mut total_issues = 0;
-            let mut total_issues_fixed = 0;
-            let mut total_fixable_issues = 0;
-            let mut total_files_processed = 0;
-
-            for file_path in &file_paths {
-                let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings) =
-                    crate::file_processor::process_file_with_formatter(
-                        file_path,
-                        &enabled_rules,
-                        args.fix_mode,
-                        args.diff,
-                        args.verbose && !args.silent,
-                        quiet,
-                        args.silent,
-                        &output_format,
-                        &output_writer,
-                        config,
-                        cache.as_ref().map(Arc::clone),
-                    );
-
-                total_files_processed += 1;
-                total_issues_fixed += issues_fixed;
-                total_fixable_issues += fixable_issues;
-
-                if file_has_issues {
-                    has_issues = true;
-                    files_with_issues += 1;
-                    total_issues += issues_found;
-                }
-
-                if args.statistics {
-                    all_warnings_for_stats.extend(warnings);
-                }
+        // Save workspace index to cache
+        if let Some(cache_dir) = workspace_cache_dir {
+            if let Err(e) = workspace_index.save_to_cache(cache_dir) {
+                log::warn!("Failed to save workspace index cache: {e}");
+            } else if args.verbose && !args.silent {
+                eprintln!(
+                    "Saved workspace index cache with {} files",
+                    workspace_index.file_count()
+                );
             }
-
-            (
-                has_issues,
-                files_with_issues,
-                total_issues,
-                total_issues_fixed,
-                total_fixable_issues,
-                total_files_processed,
-            )
-        };
+        }
+    }
 
     let duration = start_time.elapsed();
     let duration_ms = duration.as_secs() * 1000 + duration.subsec_millis() as u64;
@@ -401,7 +613,7 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
     println!("{}", "Press Ctrl-C to exit".cyan());
     println!();
 
-    let _has_issues = perform_check_run(args, &config, quiet, None);
+    let _has_issues = perform_check_run(args, &config, quiet, None, None);
     if !quiet {
         println!("\n{}", "Watching for file changes...".cyan());
     }
@@ -474,7 +686,7 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
                         let _ = io::stdout().flush();
 
                         // Re-run the check
-                        let _has_issues = perform_check_run(args, &config, quiet, None);
+                        let _has_issues = perform_check_run(args, &config, quiet, None, None);
                         if !quiet {
                             println!("\n{}", "Watching for file changes...".cyan());
                         }

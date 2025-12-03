@@ -195,6 +195,9 @@ impl LintCache {
     }
 
     /// Initialize cache directory structure
+    ///
+    /// This also prunes cache directories from old rumdl versions to prevent
+    /// unbounded cache growth across version upgrades.
     pub fn init(&self) -> std::io::Result<()> {
         if !self.enabled {
             return Ok(());
@@ -203,6 +206,9 @@ impl LintCache {
         // Create version-specific directory
         let version_dir = self.cache_dir.join(VERSION);
         fs::create_dir_all(&version_dir)?;
+
+        // Prune old version directories
+        self.prune_old_versions()?;
 
         // Create .gitignore if it doesn't exist
         let gitignore_path = self.cache_dir.join(".gitignore");
@@ -217,6 +223,45 @@ impl LintCache {
                 cachedir_tag,
                 "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag created by rumdl.\n",
             )?;
+        }
+
+        Ok(())
+    }
+
+    /// Remove cache directories from old rumdl versions
+    ///
+    /// Scans the cache directory for version subdirectories and removes any
+    /// that don't match the current version. This handles version upgrades
+    /// gracefully without manual intervention.
+    fn prune_old_versions(&self) -> std::io::Result<()> {
+        if !self.cache_dir.exists() {
+            return Ok(());
+        }
+
+        let entries = fs::read_dir(&self.cache_dir)?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+
+            // Skip non-directories and special files
+            if !path.is_dir() {
+                continue;
+            }
+
+            // Check if this is a version directory (matches semver pattern)
+            if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                // Skip current version
+                if dir_name == VERSION {
+                    continue;
+                }
+
+                // Check if it looks like a version directory (starts with digit)
+                if dir_name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                    log::info!("Pruning old cache version: {dir_name}");
+                    if let Err(e) = fs::remove_dir_all(&path) {
+                        log::warn!("Failed to prune old cache {dir_name}: {e}");
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -375,5 +420,36 @@ mod tests {
 
         // Cache directory should be gone
         assert!(!cache.cache_dir.exists());
+    }
+
+    #[test]
+    fn test_prune_old_versions() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().to_path_buf();
+
+        // Create some fake old version directories
+        fs::create_dir_all(cache_dir.join("0.0.1")).unwrap();
+        fs::create_dir_all(cache_dir.join("0.0.50")).unwrap();
+        fs::create_dir_all(cache_dir.join("0.0.100")).unwrap();
+        fs::write(cache_dir.join("0.0.1").join("test.json"), "{}").unwrap();
+        fs::write(cache_dir.join("0.0.50").join("test.json"), "{}").unwrap();
+
+        // Create a non-version directory (should not be pruned)
+        fs::create_dir_all(cache_dir.join("some_other_dir")).unwrap();
+
+        // Initialize cache (should prune old versions)
+        let cache = LintCache::new(cache_dir.clone(), true);
+        cache.init().unwrap();
+
+        // Current version directory should exist
+        assert!(cache_dir.join(VERSION).exists());
+
+        // Old version directories should be removed
+        assert!(!cache_dir.join("0.0.1").exists());
+        assert!(!cache_dir.join("0.0.50").exists());
+        assert!(!cache_dir.join("0.0.100").exists());
+
+        // Non-version directory should still exist
+        assert!(cache_dir.join("some_other_dir").exists());
     }
 }

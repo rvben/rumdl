@@ -884,3 +884,53 @@ Outside HTML: https://example.com/should-flag.html"#;
     assert_eq!(result.len(), 1, "Only bare URL outside HTML block should be flagged");
     assert_eq!(result[0].line, 7);
 }
+
+/// Regression test for issue #178: Multi-byte Unicode characters before code spans
+/// caused byte-vs-character position mismatch, leading to false positives
+#[test]
+fn test_issue_178_unicode_before_inline_code_url() {
+    let rule = MD034NoBareUrls;
+
+    // Curly apostrophe (U+2019) is 3 bytes in UTF-8, causing byte offset mismatch
+    let content = "- Some code\u{2019}s example `https://example.com` containing a URL";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "URL in inline code after curly apostrophe should NOT be flagged, got {result:?}"
+    );
+
+    // Multiple lines with curly apostrophe
+    let content2 = "- [Some normal URL](https://example.com)\n- Some code\u{2019}s example `https://example.com` containing an URL\n- Some code\u{2019}s repro example `https://example.com`";
+    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result2 = rule.check(&ctx2).unwrap();
+    assert!(
+        result2.is_empty(),
+        "URLs in inline code should NOT be flagged, got {result2:?}"
+    );
+}
+
+/// Test various multi-byte Unicode characters before inline code with URLs
+#[test]
+fn test_unicode_multibyte_chars_before_inline_code_url() {
+    let rule = MD034NoBareUrls;
+
+    // Various multi-byte characters
+    let test_cases = [
+        ("Left curly quote", "Text \u{2018}quoted\u{2019} `https://example.com`"),
+        ("Em dash", "Text\u{2014}dash `https://example.com`"),
+        ("Euro sign", "Price 100\u{20AC} `https://example.com`"),
+        ("Japanese", "\u{3042}\u{3044}\u{3046} `https://example.com`"),
+        ("Emoji", "\u{1F600} happy `https://example.com`"),
+        ("Chinese", "\u{4E2D}\u{6587} `https://example.com`"),
+    ];
+
+    for (name, content) in test_cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "{name}: URL in inline code after multi-byte chars should NOT be flagged, got {result:?}"
+        );
+    }
+}
