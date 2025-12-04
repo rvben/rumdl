@@ -179,6 +179,24 @@ pkg install tur-repo
 pkg install rumdl
 ```
 
+### Using Archlinux User Repository
+
+[![rumdl on AUR](https://img.shields.io/aur/version/rumdl?label=rumdl)](https://aur.archlinux.org/packages/rumdl/)
+[![rumdl-bin on AUR](https://img.shields.io/aur/version/rumdl-bin?label=rumdl-bin)](https://aur.archlinux.org/packages/rumdl-bin/)
+
+rumdl is available on the [AUR](https://wiki.archlinux.org/index.php/Arch_User_Repository):
+
+- [rumdl](https://aur.archlinux.org/packages/rumdl/) (release package)
+- [rumdl-bin](https://aur.archlinux.org/packages/rumdl-bin/) (binary package)
+
+You can install it using your [AUR helper](https://wiki.archlinux.org/index.php/AUR_helpers) of choice.
+
+```bash
+yay -Sy rumdl
+# OR
+yay -Sy rumdl-bin
+```
+
 ### Download binary
 
 ```bash
