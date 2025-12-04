@@ -797,9 +797,35 @@ impl<'a> LintContext<'a> {
         // Convert col to 0-indexed for comparison
         let col_0indexed = if col > 0 { col - 1 } else { 0 };
         let code_spans = self.code_spans();
+        code_spans.iter().any(|span| {
+            // Check if line is within the span's line range
+            if line_num < span.line || line_num > span.end_line {
+                return false;
+            }
+
+            if span.line == span.end_line {
+                // Single-line span: check column bounds
+                col_0indexed >= span.start_col && col_0indexed < span.end_col
+            } else if line_num == span.line {
+                // First line of multi-line span: anything after start_col is in span
+                col_0indexed >= span.start_col
+            } else if line_num == span.end_line {
+                // Last line of multi-line span: anything before end_col is in span
+                col_0indexed < span.end_col
+            } else {
+                // Middle line of multi-line span: entire line is in span
+                true
+            }
+        })
+    }
+
+    /// Check if a byte offset is within a code span
+    #[inline]
+    pub fn is_byte_offset_in_code_span(&self, byte_offset: usize) -> bool {
+        let code_spans = self.code_spans();
         code_spans
             .iter()
-            .any(|span| span.line == line_num && col_0indexed >= span.start_col && col_0indexed < span.end_col)
+            .any(|span| byte_offset >= span.byte_offset && byte_offset < span.byte_end)
     }
 
     /// Check if a byte position is within a reference definition

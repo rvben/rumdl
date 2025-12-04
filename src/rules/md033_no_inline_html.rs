@@ -325,9 +325,8 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
-            // Skip tags inside code spans
-            let tag_start_col = html_tag.start_col + 1; // Convert to 1-indexed
-            if ctx.is_in_code_span(line_num, tag_start_col) {
+            // Skip tags inside code spans (use byte offset for reliable multi-line span detection)
+            if ctx.is_byte_offset_in_code_span(tag_byte_start) {
                 continue;
             }
 
