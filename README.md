@@ -72,6 +72,8 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
     - [Using pip (Python)](#using-pip-python)
     - [Using uv](#using-uv)
     - [Using Nix (macOS/Linux)](#using-nix-macoslinux)
+    - [Using Termux User Repository (TUR) (Android)](#using-termux-user-repository-tur-android)
+    - [Using Archlinux User Repository](#using-archlinux-user-repository)
     - [Download binary](#download-binary)
     - [VS Code Extension](#vs-code-extension)
   - [Usage](#usage)
