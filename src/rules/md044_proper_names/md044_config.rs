@@ -36,7 +36,7 @@ fn default_html_elements() -> bool {
 }
 
 fn default_html_comments() -> bool {
-    true
+    false
 }
 
 impl RuleConfig for MD044Config {
@@ -92,6 +92,6 @@ mod tests {
         let config = MD044Config::default();
         assert!(config.names.is_empty());
         assert!(!config.code_blocks); // Default is false (skip code blocks)
-        assert!(config.html_comments);
+        assert!(!config.html_comments); // Default is false (skip HTML comments, matches markdownlint)
     }
 }
