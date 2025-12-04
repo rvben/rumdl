@@ -48,10 +48,6 @@ static URL_EXTRACT_REGEX: LazyLock<Regex> =
 static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(https?://|ftp://|mailto:|www\.)").unwrap());
 
-/// Regex to detect media file types
-static MEDIA_FILE_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\.(jpg|jpeg|png|gif|bmp|svg|webp|tiff|mp3|mp4|avi|mov|webm|wav|ogg|pdf)$").unwrap());
-
 // Current working directory
 static CURRENT_DIR: LazyLock<PathBuf> = LazyLock::new(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
@@ -80,8 +76,6 @@ fn is_markdown_file(path: &str) -> bool {
 pub struct MD057ExistingRelativeLinks {
     /// Base directory for resolving relative links
     base_path: Arc<Mutex<Option<PathBuf>>>,
-    /// Configuration
-    config: MD057Config,
 }
 
 impl MD057ExistingRelativeLinks {
@@ -103,17 +97,8 @@ impl MD057ExistingRelativeLinks {
         self
     }
 
-    /// Configure whether to skip checking media files
-    pub fn with_skip_media_files(mut self, skip_media_files: bool) -> Self {
-        self.config.skip_media_files = skip_media_files;
-        self
-    }
-
-    pub fn from_config_struct(config: MD057Config) -> Self {
-        Self {
-            base_path: Arc::new(Mutex::new(None)),
-            config,
-        }
+    pub fn from_config_struct(_config: MD057Config) -> Self {
+        Self::default()
     }
 
     /// Check if a URL is external (optimized version)
@@ -128,8 +113,8 @@ impl MD057ExistingRelativeLinks {
             return true;
         }
 
-        // More restrictive domain check using a simpler pattern
-        if !self.is_media_file(url) && url.ends_with(".com") {
+        // Bare domain check (e.g., "example.com")
+        if url.ends_with(".com") {
             return true;
         }
 
@@ -146,22 +131,6 @@ impl MD057ExistingRelativeLinks {
     #[inline]
     fn is_fragment_only_link(&self, url: &str) -> bool {
         url.starts_with('#')
-    }
-
-    /// Check if the URL has a media file extension (optimized with early returns)
-    #[inline]
-    fn is_media_file(&self, url: &str) -> bool {
-        // Quick check before using regex
-        if !url.contains('.') {
-            return false;
-        }
-        MEDIA_FILE_REGEX.is_match(url)
-    }
-
-    /// Determine if we should skip checking this media file
-    #[inline]
-    fn should_skip_media_file(&self, url: &str) -> bool {
-        self.config.skip_media_files && self.is_media_file(url)
     }
 
     /// Resolve a relative link against the base path
@@ -182,11 +151,6 @@ impl MD057ExistingRelativeLinks {
 
         // Skip external URLs and fragment-only links (optimized order)
         if self.is_external_url(url) || self.is_fragment_only_link(url) {
-            return;
-        }
-
-        // Skip media files if configured to do so
-        if self.should_skip_media_file(url) {
             return;
         }
 
@@ -342,11 +306,8 @@ impl Rule for MD057ExistingRelativeLinks {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let json_value = serde_json::to_value(&self.config).ok()?;
-        Some((
-            self.name().to_string(),
-            crate::rule_config_serde::json_to_toml_value(&json_value)?,
-        ))
+        // No configurable options for this rule
+        None
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
@@ -527,56 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn test_media_files() {
-        // Test with default settings (skip_media_files = true)
-        let rule_default = MD057ExistingRelativeLinks::new();
-
-        // Test media file identification
-        assert!(
-            rule_default.is_media_file("image.jpg"),
-            "image.jpg should be identified as a media file"
-        );
-        assert!(
-            rule_default.is_media_file("video.mp4"),
-            "video.mp4 should be identified as a media file"
-        );
-        assert!(
-            rule_default.is_media_file("document.pdf"),
-            "document.pdf should be identified as a media file"
-        );
-        assert!(
-            rule_default.is_media_file("path/to/audio.mp3"),
-            "path/to/audio.mp3 should be identified as a media file"
-        );
-
-        assert!(
-            !rule_default.is_media_file("document.md"),
-            "document.md should not be identified as a media file"
-        );
-        assert!(
-            !rule_default.is_media_file("code.rs"),
-            "code.rs should not be identified as a media file"
-        );
-
-        // Test media file skipping with default settings (skip_media_files = true)
-        assert!(
-            rule_default.should_skip_media_file("image.jpg"),
-            "image.jpg should be skipped with default settings"
-        );
-        assert!(
-            !rule_default.should_skip_media_file("document.md"),
-            "document.md should not be skipped"
-        );
-
-        // Test media file skipping with skip_media_files = false
-        let rule_no_skip = MD057ExistingRelativeLinks::new().with_skip_media_files(false);
-        assert!(
-            !rule_no_skip.should_skip_media_file("image.jpg"),
-            "image.jpg should not be skipped when skip_media_files is false"
-        );
-    }
-
-    #[test]
     fn test_no_warnings_without_base_path() {
         let rule = MD057ExistingRelativeLinks::new();
         let content = "[Link](missing.md)";
@@ -609,23 +520,18 @@ mod tests {
 [Media Link](image.jpg)
         "#;
 
-        // Initialize rule with the base path
+        // Initialize rule with the base path (default: check all files including media)
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
         // Test the rule
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // Should have one warning for the missing.md link but not for the media file
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("missing.md"));
-
-        // Test with check method
-        let result_with_structure = rule.check(&ctx).unwrap();
-
-        // Results should be the same
-        assert_eq!(result.len(), result_with_structure.len());
-        assert!(result_with_structure[0].message.contains("missing.md"));
+        // Should have two warnings: missing.md and image.jpg (both don't exist)
+        assert_eq!(result.len(), 2);
+        let messages: Vec<_> = result.iter().map(|w| w.message.as_str()).collect();
+        assert!(messages.iter().any(|m| m.contains("missing.md")));
+        assert!(messages.iter().any(|m| m.contains("image.jpg")));
     }
 
     #[test]
@@ -662,52 +568,26 @@ mod tests {
     }
 
     #[test]
-    fn test_media_file_handling() {
+    fn test_all_file_types_checked() {
         // Create a temporary directory for test files
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
 
-        // Explicitly check that image.jpg doesn't exist in the test directory
-        let image_path = base_path.join("image.jpg");
-        assert!(
-            !image_path.exists(),
-            "Test precondition failed: image.jpg should not exist"
-        );
+        // Create a test with various file types - all should be checked
+        let content = r#"
+[Image Link](image.jpg)
+[Video Link](video.mp4)
+[Markdown Link](document.md)
+[PDF Link](file.pdf)
+"#;
 
-        // Create a test content with a media link - make sure it's very explicit
-        let content = "[Media Link](image.jpg)";
-
-        // Test with skip_media_files = true (default)
-        let rule_skip_media = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result_skip = rule_skip_media.check(&ctx).unwrap();
+        let result = rule.check(&ctx).unwrap();
 
-        // Should have no warnings when media files are skipped
-        assert_eq!(
-            result_skip.len(),
-            0,
-            "Should have no warnings when skip_media_files is true"
-        );
-
-        // Test with skip_media_files = false
-        let rule_check_all = MD057ExistingRelativeLinks::new()
-            .with_path(base_path)
-            .with_skip_media_files(false);
-
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
-        let result_all = rule_check_all.check(&ctx).unwrap();
-
-        // Should warn about the missing media file
-        assert_eq!(
-            result_all.len(),
-            1,
-            "Should have one warning when skip_media_files is false"
-        );
-        assert!(
-            result_all[0].message.contains("image.jpg"),
-            "Warning should mention image.jpg"
-        );
+        // Should warn about all missing files regardless of extension
+        assert_eq!(result.len(), 4, "Should have warnings for all missing files");
     }
 
     #[test]
