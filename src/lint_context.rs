@@ -99,6 +99,8 @@ pub struct LineInfo {
     pub in_mkdocstrings: bool,
     /// Whether this line is part of an ESM import/export block (MDX only)
     pub in_esm_block: bool,
+    /// Whether this line is a continuation of a multi-line code span from a previous line
+    pub in_code_span_continuation: bool,
 }
 
 impl LineInfo {
@@ -226,8 +228,10 @@ pub struct ReferenceDef {
 /// Parsed code span information
 #[derive(Debug, Clone)]
 pub struct CodeSpan {
-    /// Line number (1-indexed)
+    /// Line number where the code span starts (1-indexed)
     pub line: usize,
+    /// Line number where the code span ends (1-indexed)
+    pub end_line: usize,
     /// Start column (0-indexed) in the line
     pub start_col: usize,
     /// End column (0-indexed) in the line
@@ -554,6 +558,19 @@ impl<'a> LintContext<'a> {
 
         // Parse code spans early so we can exclude them from link/image parsing
         let code_spans = profile_section!("Code spans", profile, Self::parse_code_spans(content, &lines));
+
+        // Mark lines that are continuations of multi-line code spans
+        // This is needed for parse_list_blocks to correctly handle list items with multi-line code spans
+        for span in &code_spans {
+            if span.end_line > span.line {
+                // Mark lines after the first line as continuations
+                for line_num in (span.line + 1)..=span.end_line {
+                    if let Some(line_info) = lines.get_mut(line_num - 1) {
+                        line_info.in_code_span_continuation = true;
+                    }
+                }
+            }
+        }
 
         // Parse links, images, references, and list blocks
         let (links, broken_links, footnote_refs) = profile_section!(
@@ -1777,6 +1794,7 @@ impl<'a> LintContext<'a> {
                 blockquote: None, // Will be populated after line creation
                 in_mkdocstrings,
                 in_esm_block: false, // Will be populated after line creation for MDX files
+                in_code_span_continuation: false, // Will be populated after code spans are parsed
             });
         }
 
@@ -2234,6 +2252,7 @@ impl<'a> LintContext<'a> {
 
                 code_spans.push(CodeSpan {
                     line: line_num,
+                    end_line: end_line_idx + 1,
                     start_col: col_start,
                     end_col: col_end,
                     byte_offset: start_pos,
@@ -2341,7 +2360,12 @@ impl<'a> LintContext<'a> {
             };
 
             // Track list-breaking content for non-list, non-blank lines (O(n) replacement for nested loop)
-            if current_block.is_some() && line_info.list_item.is_none() && !line_info.is_blank {
+            // Skip lines that are continuations of multi-line code spans - they're part of the previous list item
+            if current_block.is_some()
+                && line_info.list_item.is_none()
+                && !line_info.is_blank
+                && !line_info.in_code_span_continuation
+            {
                 let line_content = line_info.content(content).trim();
 
                 // Check for structural separators that break lists
@@ -2361,6 +2385,15 @@ impl<'a> LintContext<'a> {
                 if breaks_list {
                     has_list_breaking_content_since_last_item = true;
                 }
+            }
+
+            // If this line is a code span continuation within an active list block,
+            // extend the block's end_line to include this line (maintains list continuity)
+            if line_info.in_code_span_continuation
+                && line_info.list_item.is_none()
+                && let Some(ref mut block) = current_block
+            {
+                block.end_line = line_num;
             }
 
             // Check if this line is a list item
