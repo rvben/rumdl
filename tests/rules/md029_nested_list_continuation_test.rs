@@ -64,26 +64,29 @@ fn test_md029_nested_bullets_with_code_block() {
 }
 
 #[test]
-fn test_md029_under_indented_nested_bullets_still_continue() {
-    // Test that even under-indented bullets (2 spaces) don't break list continuity
-    // because they're still list items, just at a different nesting level
+fn test_md029_under_indented_bullets_break_list() {
+    // Under-indented bullets (2 spaces instead of 3) break list continuity per CommonMark.
+    // Verified with both pulldown-cmark and markdownlint-cli.
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. First item
 
 2. Second item:
-  - Bullet with 2 spaces (still a list item)
+  - Bullet with 2 spaces (starts new list)
 
 3. Third item"#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should NOT report MD029 error - bullets are list items regardless of indentation
+    // Should report MD029 error - under-indented bullet breaks list continuity
+    // "3. Third item" starts a new list and should be "1."
     assert_eq!(
         warnings.len(),
-        0,
-        "Should not break list continuity for nested bullets, even if under-indented"
+        1,
+        "Under-indented bullets break list continuity per CommonMark"
     );
+    assert_eq!(warnings[0].line, 6);
+    assert!(warnings[0].message.contains("expected 1"));
 }
 
 #[test]
@@ -206,13 +209,13 @@ fn test_md029_wider_marker_with_nested_list() {
 
 #[test]
 fn test_md029_wider_marker_with_under_indented_bullet() {
-    // Test that "10. " with a 3-space indented bullet still continues
-    // (bullets are list items regardless of exact indentation)
+    // Test that "10. " with a 3-space indented bullet breaks the list
+    // (3 spaces is insufficient for "10. " which requires 4+ spaces for continuation)
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. First item
 
 10. Item with wide marker:
-   - Bullet with 3 spaces (still a list item)
+   - Bullet with 3 spaces (breaks the list)
 
 11. This item continues"#;
 
@@ -220,16 +223,16 @@ fn test_md029_wider_marker_with_under_indented_bullet() {
     let warnings = rule.check(&ctx).unwrap();
 
     // Should report 2 errors:
-    // 1. "10." should be "2." (wrong initial number)
-    // 2. "11." should be "3." (continues from "10.")
-    // Note: Bullets are list items and allow continuation
-    assert_eq!(warnings.len(), 2, "Should report numbering errors but list continues");
+    // 1. "10." should be "2." (wrong number in first list)
+    // 2. "11." should be "1." (starts a new list after the bullet breaks continuity)
+    // Verified against markdownlint-cli which shows "11." as new list with expected 1
+    assert_eq!(warnings.len(), 2, "Should report numbering errors");
 
     assert_eq!(warnings[0].line, 3); // "10." should be "2."
     assert!(warnings[0].message.contains("expected 2"));
 
-    assert_eq!(warnings[1].line, 6); // "11." should be "3."
-    assert!(warnings[1].message.contains("expected 3"));
+    assert_eq!(warnings[1].line, 6); // "11." starts new list, should be "1."
+    assert!(warnings[1].message.contains("expected 1"));
 }
 
 #[test]
@@ -314,10 +317,11 @@ fn test_md029_commonmark_example_248() {
 }
 
 #[test]
-fn test_md029_lazy_continuation_breaks_list() {
-    // Test that lazy continuation (unindented text) breaks list continuity for MD029
-    // While lazy continuation is valid CommonMark, it's ambiguous for list numbering,
-    // so MD029 treats it conservatively as a list break
+fn test_md029_lazy_continuation_is_valid_commonmark() {
+    // Lazy continuation is valid CommonMark and should NOT break list continuity.
+    // Using pulldown-cmark as the authoritative source for list membership means
+    // we correctly handle lazy continuation as part of the list item.
+    // Verified against markdownlint-cli which also treats this as one list.
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. Item one
 
@@ -329,8 +333,7 @@ Lazy continuation (not indented)
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let warnings = rule.check(&ctx).unwrap();
 
-    // MD029 should treat lazy continuation conservatively and break list continuity
-    // This is a trade-off: lazy continuation is valid but ambiguous for numbering
+    // Lazy continuation should NOT break list - pulldown-cmark correctly parses it as one list
     let numbering_errors: Vec<_> = warnings
         .iter()
         .filter(|w| w.rule_name.as_deref() == Some("MD029"))
@@ -338,10 +341,7 @@ Lazy continuation (not indented)
 
     assert_eq!(
         numbering_errors.len(),
-        1,
-        "MD029 should break list continuity at lazy continuation (conservative behavior)"
+        0,
+        "Lazy continuation should not break list continuity - this is valid CommonMark"
     );
-
-    assert_eq!(numbering_errors[0].line, 6);
-    assert!(numbering_errors[0].message.contains("expected 1"));
 }

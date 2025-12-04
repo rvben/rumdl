@@ -4,6 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use toml;
 
 mod md029_config;
@@ -95,6 +96,218 @@ impl MD029OrderedListPrefix {
             ListStyle::Ordered
         }
     }
+
+    /// Build a map from line number to list ID using pulldown-cmark's AST.
+    /// This is the authoritative source of truth for list membership.
+    fn build_commonmark_list_membership(content: &str) -> std::collections::HashMap<usize, usize> {
+        let mut line_to_list: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+
+        // Pre-compute line start offsets for byte-to-line conversion
+        let line_starts: Vec<usize> = std::iter::once(0)
+            .chain(content.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+
+        let byte_to_line = |byte_offset: usize| -> usize {
+            line_starts
+                .iter()
+                .rposition(|&start| start <= byte_offset)
+                .map(|i| i + 1) // 1-indexed
+                .unwrap_or(1)
+        };
+
+        let options = Options::empty();
+        let parser = Parser::new_ext(content, options);
+
+        let mut list_stack: Vec<(usize, bool)> = Vec::new(); // (list_id, is_ordered)
+        let mut next_list_id = 0;
+
+        for (event, range) in parser.into_offset_iter() {
+            match event {
+                Event::Start(Tag::List(start_num)) => {
+                    let is_ordered = start_num.is_some();
+                    list_stack.push((next_list_id, is_ordered));
+                    next_list_id += 1;
+                }
+                Event::End(TagEnd::List(_)) => {
+                    list_stack.pop();
+                }
+                Event::Start(Tag::Item) => {
+                    // Record the line number of this item and its list ID
+                    if let Some(&(list_id, is_ordered)) = list_stack.last()
+                        && is_ordered
+                    {
+                        let line_num = byte_to_line(range.start);
+                        line_to_list.insert(line_num, list_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        line_to_list
+    }
+
+    /// Group ordered items by their CommonMark list membership.
+    /// Returns groups of (line_num, LineInfo, ListItemInfo) for each distinct list.
+    fn group_items_by_commonmark_list<'a>(
+        ctx: &'a crate::lint_context::LintContext,
+        line_to_list: &std::collections::HashMap<usize, usize>,
+    ) -> Vec<
+        Vec<(
+            usize,
+            &'a crate::lint_context::LineInfo,
+            &'a crate::lint_context::ListItemInfo,
+        )>,
+    > {
+        // Collect all ordered items with their list IDs
+        let mut items_with_list_id: Vec<(
+            usize,
+            usize,
+            &crate::lint_context::LineInfo,
+            &crate::lint_context::ListItemInfo,
+        )> = Vec::new();
+
+        for line_num in 1..=ctx.lines.len() {
+            if let Some(line_info) = ctx.line_info(line_num)
+                && let Some(list_item) = &line_info.list_item
+                && list_item.is_ordered
+            {
+                // Get the list ID from pulldown-cmark's grouping
+                if let Some(&list_id) = line_to_list.get(&line_num) {
+                    items_with_list_id.push((list_id, line_num, line_info, list_item));
+                }
+            }
+        }
+
+        // Group by list_id
+        let mut groups: std::collections::HashMap<
+            usize,
+            Vec<(
+                usize,
+                &crate::lint_context::LineInfo,
+                &crate::lint_context::ListItemInfo,
+            )>,
+        > = std::collections::HashMap::new();
+
+        for (list_id, line_num, line_info, list_item) in items_with_list_id {
+            groups
+                .entry(list_id)
+                .or_default()
+                .push((line_num, line_info, list_item));
+        }
+
+        // Convert to Vec, sort each group by line number, and sort groups by first line
+        let mut result: Vec<_> = groups.into_values().collect();
+        for group in &mut result {
+            group.sort_by_key(|(line_num, _, _)| *line_num);
+        }
+        // Sort groups by their first item's line number for deterministic output
+        result.sort_by_key(|group| group.first().map(|(ln, _, _)| *ln).unwrap_or(0));
+
+        result
+    }
+
+    /// Check a CommonMark-grouped list for correct ordering
+    fn check_commonmark_list_group(
+        &self,
+        _ctx: &crate::lint_context::LintContext,
+        group: &[(
+            usize,
+            &crate::lint_context::LineInfo,
+            &crate::lint_context::ListItemInfo,
+        )],
+        warnings: &mut Vec<LintWarning>,
+        document_wide_style: Option<ListStyle>,
+    ) {
+        if group.is_empty() {
+            return;
+        }
+
+        // Group items by indentation level (marker_column) to handle nested lists
+        type LevelGroups<'a> = std::collections::HashMap<
+            usize,
+            Vec<(
+                usize,
+                &'a crate::lint_context::LineInfo,
+                &'a crate::lint_context::ListItemInfo,
+            )>,
+        >;
+        let mut level_groups: LevelGroups = std::collections::HashMap::new();
+
+        for (line_num, line_info, list_item) in group {
+            level_groups
+                .entry(list_item.marker_column)
+                .or_default()
+                .push((*line_num, *line_info, *list_item));
+        }
+
+        // Process each indentation level in sorted order for deterministic output
+        let mut sorted_levels: Vec<_> = level_groups.into_iter().collect();
+        sorted_levels.sort_by_key(|(indent, _)| *indent);
+
+        for (_indent, mut items) in sorted_levels {
+            // Sort by line number
+            items.sort_by_key(|(line_num, _, _)| *line_num);
+
+            // Determine style for this group
+            let detected_style = if let Some(doc_style) = document_wide_style.clone() {
+                Some(doc_style)
+            } else if self.config.style == ListStyle::OneOrOrdered {
+                Some(Self::detect_list_style(&items))
+            } else {
+                None
+            };
+
+            // Check each item
+            for (idx, (line_num, line_info, list_item)) in items.iter().enumerate() {
+                if let Some(actual_num) = Self::parse_marker_number(&list_item.marker) {
+                    let expected_num = self.get_expected_number(idx, detected_style.clone());
+
+                    if actual_num != expected_num {
+                        let marker_start = line_info.byte_offset + list_item.marker_column;
+                        let number_len = if let Some(dot_pos) = list_item.marker.find('.') {
+                            dot_pos
+                        } else if let Some(paren_pos) = list_item.marker.find(')') {
+                            paren_pos
+                        } else {
+                            list_item.marker.len()
+                        };
+
+                        let style_name = match detected_style.as_ref().unwrap_or(&ListStyle::Ordered) {
+                            ListStyle::OneOne => "one",
+                            ListStyle::Ordered => "ordered",
+                            ListStyle::Ordered0 => "ordered0",
+                            _ => "ordered",
+                        };
+
+                        let style_context = match self.config.style {
+                            ListStyle::Consistent => format!("document style '{style_name}'"),
+                            ListStyle::OneOrOrdered => format!("list style '{style_name}'"),
+                            ListStyle::One | ListStyle::OneOne => "configured style 'one'".to_string(),
+                            ListStyle::Ordered => "configured style 'ordered'".to_string(),
+                            ListStyle::Ordered0 => "configured style 'ordered0'".to_string(),
+                        };
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            message: format!(
+                                "Ordered list item number {actual_num} does not match {style_context} (expected {expected_num})"
+                            ),
+                            line: *line_num,
+                            column: list_item.marker_column + 1,
+                            end_line: *line_num,
+                            end_column: list_item.marker_column + number_len + 1,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: marker_start..marker_start + number_len,
+                                replacement: expected_num.to_string(),
+                            }),
+                        });
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Rule for MD029OrderedListPrefix {
@@ -119,79 +332,22 @@ impl Rule for MD029OrderedListPrefix {
 
         let mut warnings = Vec::new();
 
-        // Collect all list blocks that contain ordered items (not just purely ordered blocks)
-        // This handles mixed lists where ordered items are nested within unordered lists
-        let blocks_with_ordered: Vec<_> = ctx
-            .list_blocks
-            .iter()
-            .filter(|block| {
-                // Check if this block contains any ordered items
-                block.item_lines.iter().any(|&line| {
-                    ctx.line_info(line)
-                        .and_then(|info| info.list_item.as_ref())
-                        .map(|item| item.is_ordered)
-                        .unwrap_or(false)
-                })
-            })
-            .collect();
+        // Use pulldown-cmark's AST for authoritative list membership.
+        // This fixes issues where heuristic-based grouping incorrectly splits lists.
+        let line_to_list = Self::build_commonmark_list_membership(ctx.content);
+        let list_groups = Self::group_items_by_commonmark_list(ctx, &line_to_list);
 
-        if blocks_with_ordered.is_empty() {
+        if list_groups.is_empty() {
             return Ok(Vec::new());
         }
-
-        // Group consecutive list blocks that should be treated as continuous
-        let mut block_groups = Vec::new();
-        let mut current_group = vec![blocks_with_ordered[0]];
-
-        for i in 1..blocks_with_ordered.len() {
-            let prev_block = blocks_with_ordered[i - 1];
-            let current_block = blocks_with_ordered[i];
-
-            // This catches the pattern: 1. item / - sub / 1. item (should be 2.)
-            let has_only_unindented_lists =
-                self.has_only_unindented_lists_between(ctx, prev_block.end_line, current_block.start_line);
-
-            // Be more conservative: only group if there are no structural separators
-            // Check specifically for headings between the blocks
-            let has_heading_between =
-                self.has_heading_between_blocks(ctx, prev_block.end_line, current_block.start_line);
-
-            // Check if there are only code blocks/fences between these list blocks
-            let between_content_is_code_only =
-                self.is_only_code_between_blocks(ctx, prev_block.end_line, current_block.start_line);
-
-            // Group blocks if:
-            // 1. They have only code between them, OR
-            // 2. They have only unindented list items between them (the new case!)
-            let should_group = (between_content_is_code_only || has_only_unindented_lists)
-                && self.blocks_are_logically_continuous(ctx, prev_block.end_line, current_block.start_line)
-                && !has_heading_between;
-
-            if should_group {
-                // Treat as continuation of the same logical list
-                current_group.push(current_block);
-            } else {
-                // Start a new list group
-                block_groups.push(current_group);
-                current_group = vec![current_block];
-            }
-        }
-        block_groups.push(current_group);
 
         // For Consistent style, detect document-wide prevalent style
         let document_wide_style = if self.config.style == ListStyle::Consistent {
             // Collect ALL ordered items from ALL groups
             let mut all_document_items = Vec::new();
-            for group in &block_groups {
-                for list_block in group {
-                    for &item_line in &list_block.item_lines {
-                        if let Some(line_info) = ctx.line_info(item_line)
-                            && let Some(list_item) = &line_info.list_item
-                            && list_item.is_ordered
-                        {
-                            all_document_items.push((item_line, line_info, list_item));
-                        }
-                    }
+            for group in &list_groups {
+                for (line_num, line_info, list_item) in group {
+                    all_document_items.push((*line_num, *line_info, *list_item));
                 }
             }
             // Detect style across entire document
@@ -204,10 +360,13 @@ impl Rule for MD029OrderedListPrefix {
             None
         };
 
-        // Process each group of blocks as a continuous list
-        for group in block_groups {
-            self.check_ordered_list_group(ctx, &group, &mut warnings, document_wide_style.clone());
+        // Process each CommonMark-defined list group
+        for group in list_groups {
+            self.check_commonmark_list_group(ctx, &group, &mut warnings, document_wide_style.clone());
         }
+
+        // Sort warnings by line number for deterministic output
+        warnings.sort_by_key(|w| (w.line, w.column));
 
         Ok(warnings)
     }
@@ -293,479 +452,6 @@ impl Rule for MD029OrderedListPrefix {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD029Config>(config);
         Box::new(MD029OrderedListPrefix::from_config_struct(rule_config))
-    }
-}
-
-impl MD029OrderedListPrefix {
-    /// Check for lazy continuation lines in a list block
-    fn check_for_lazy_continuation(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        list_block: &crate::lint_context::ListBlock,
-        warnings: &mut Vec<LintWarning>,
-    ) {
-        // Check all lines in the block for lazy continuation
-        for line_num in list_block.start_line..=list_block.end_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                // Skip list item lines themselves
-                if list_block.item_lines.contains(&line_num) {
-                    continue;
-                }
-
-                // Skip blank lines
-                if line_info.is_blank {
-                    continue;
-                }
-
-                // Skip lines that are in code blocks
-                if line_info.in_code_block {
-                    continue;
-                }
-
-                // Skip code fence lines
-                let trimmed = line_info.content(ctx.content).trim();
-                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    continue;
-                }
-
-                // Skip headings - they should never be treated as lazy continuation
-                if line_info.heading.is_some() {
-                    continue;
-                }
-
-                // Check if this is a lazy continuation (0-2 spaces)
-                if line_info.indent <= 2 && !line_info.content(ctx.content).trim().is_empty() {
-                    // This is a lazy continuation - add a style warning
-                    let col = line_info.indent + 1;
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        message: "List continuation should be indented (lazy continuation detected)".to_string(),
-                        line: line_num,
-                        column: col,
-                        end_line: line_num,
-                        end_column: col,
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_info.byte_offset..line_info.byte_offset,
-                            replacement: "   ".to_string(), // Add 3 spaces
-                        }),
-                    });
-                }
-            }
-        }
-    }
-
-    /// Check if blocks are separated only by list items or properly indented list continuation content
-    /// This helps detect the pattern: 1. item / - nested sub / 1. item (should be 2.)
-    /// Now also allows indented nested lists and content that's properly indented for list continuation
-    fn has_only_unindented_lists_between(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        end_line: usize,
-        start_line: usize,
-    ) -> bool {
-        if end_line >= start_line {
-            return false;
-        }
-
-        // Calculate minimum continuation indent from the previous block's last item
-        let min_continuation_indent =
-            if let Some(prev_block) = ctx.list_blocks.iter().find(|block| block.end_line == end_line) {
-                if let Some(&last_item_line) = prev_block.item_lines.last() {
-                    if let Some(line_info) = ctx.line_info(last_item_line) {
-                        if let Some(list_item) = &line_info.list_item {
-                            if list_item.is_ordered {
-                                list_item.marker.len() + 1 // Add 1 for space after ordered markers
-                            } else {
-                                2 // Unordered lists need at least 2 spaces
-                            }
-                        } else {
-                            3 // Fallback
-                        }
-                    } else {
-                        3 // Fallback
-                    }
-                } else {
-                    3 // Fallback
-                }
-            } else {
-                3 // Fallback
-            };
-
-        for line_num in (end_line + 1)..start_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                let trimmed = line_info.content(ctx.content).trim();
-
-                // Skip empty lines
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                // Allow any list item (both unindented and properly indented nested lists)
-                if line_info.list_item.is_some() {
-                    // Check if nested list has sufficient indentation to be continuation
-                    if line_info.indent >= min_continuation_indent {
-                        continue; // Properly indented nested list
-                    }
-                    // Unindented or under-indented list item breaks continuity
-                    return false;
-                }
-
-                // Allow fence markers that are properly indented
-                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    if line_info.indent >= min_continuation_indent {
-                        continue; // Properly indented fence marker
-                    }
-                    // Under-indented fence marker breaks continuity
-                    return false;
-                }
-
-                // Allow code blocks that are properly indented
-                if line_info.in_code_block {
-                    if line_info.indent >= min_continuation_indent {
-                        continue; // Properly indented code block
-                    }
-                    // Under-indented code block breaks continuity
-                    return false;
-                }
-
-                // Allow other indented text that's part of list continuation
-                if line_info.indent >= min_continuation_indent {
-                    continue;
-                }
-
-                // Any other content (unindented or under-indented) breaks continuity
-                return false;
-            }
-        }
-
-        true
-    }
-
-    /// Calculate the minimum indentation required for continuing a list block
-    fn calculate_min_continuation_indent(&self, ctx: &crate::lint_context::LintContext, end_line: usize) -> usize {
-        if let Some(prev_block) = ctx.list_blocks.iter().find(|block| block.end_line == end_line) {
-            if let Some(&last_item_line) = prev_block.item_lines.last() {
-                if let Some(line_info) = ctx.line_info(last_item_line) {
-                    if let Some(list_item) = &line_info.list_item {
-                        if list_item.is_ordered {
-                            list_item.marker.len() + 1 // Add 1 for space after ordered markers
-                        } else {
-                            2 // Unordered lists need at least 2 spaces
-                        }
-                    } else {
-                        3 // Fallback
-                    }
-                } else {
-                    3 // Fallback
-                }
-            } else {
-                3 // Fallback
-            }
-        } else {
-            3 // Fallback
-        }
-    }
-
-    /// Check if two list blocks are logically continuous (no major structural separators)
-    fn blocks_are_logically_continuous(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        end_line: usize,
-        start_line: usize,
-    ) -> bool {
-        if end_line >= start_line {
-            return false;
-        }
-
-        // Calculate minimum continuation indent from the previous block's last item
-        let min_continuation_indent = self.calculate_min_continuation_indent(ctx, end_line);
-
-        for line_num in (end_line + 1)..start_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                // Skip empty lines
-                if line_info.is_blank {
-                    continue;
-                }
-
-                // If there's any heading, the lists are not continuous
-                if line_info.heading.is_some() {
-                    return false;
-                }
-
-                let trimmed = line_info.content(ctx.content).trim();
-
-                // Allow list items if properly indented
-                if line_info.list_item.is_some() {
-                    if line_info.indent >= min_continuation_indent {
-                        continue; // Properly indented nested list
-                    }
-                    // Under-indented list breaks continuity
-                    return false;
-                }
-
-                // Allow fence markers if properly indented
-                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    if line_info.indent >= min_continuation_indent {
-                        continue; // Properly indented fence
-                    }
-                    // Under-indented fence breaks continuity
-                    return false;
-                }
-
-                // Allow code blocks if properly indented
-                if line_info.in_code_block {
-                    if line_info.indent >= min_continuation_indent {
-                        continue; // Properly indented code block
-                    }
-                    // Under-indented code block breaks continuity
-                    return false;
-                }
-
-                // Allow other indented text that's part of list continuation
-                if line_info.indent >= min_continuation_indent {
-                    continue;
-                }
-
-                // Any other unindented or under-indented content breaks continuity
-                if !trimmed.is_empty() {
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
-
-    fn is_only_code_between_blocks(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        end_line: usize,
-        start_line: usize,
-    ) -> bool {
-        if end_line >= start_line {
-            return false;
-        }
-
-        // Calculate minimum continuation indent from the previous block's last item
-        let min_continuation_indent = self.calculate_min_continuation_indent(ctx, end_line);
-
-        for line_num in (end_line + 1)..start_line {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                let trimmed = line_info.content(ctx.content).trim();
-
-                // Skip empty lines
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                // Enhanced code block analysis
-                if line_info.in_code_block || trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                    // Check if this is a standalone code block that should separate lists
-                    if line_info.in_code_block {
-                        // Use the new classification system to determine if this code block separates lists
-                        let context = crate::utils::code_block_utils::CodeBlockUtils::analyze_code_block_context(
-                            &ctx.lines,
-                            line_num - 1,
-                            min_continuation_indent,
-                        );
-
-                        // If it's a standalone code block, lists should be separated
-                        if matches!(context, crate::utils::code_block_utils::CodeBlockContext::Standalone) {
-                            return false; // Lists are separated, not continuous
-                        }
-                    }
-                    continue; // Other code block lines (indented/adjacent) don't break continuity
-                }
-
-                // If there's a heading, lists are definitely separated
-                if line_info.heading.is_some() {
-                    return false;
-                }
-
-                // Any other non-empty content means lists are truly separated
-                return false;
-            }
-        }
-
-        true
-    }
-
-    /// Check if there are any headings between two list blocks
-    fn has_heading_between_blocks(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        end_line: usize,
-        start_line: usize,
-    ) -> bool {
-        if end_line >= start_line {
-            return false;
-        }
-
-        for line_num in (end_line + 1)..start_line {
-            if let Some(line_info) = ctx.line_info(line_num)
-                && line_info.heading.is_some()
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    /// Find the closest parent list item for an ordered item (can be ordered or unordered)
-    /// Returns the line number of the parent, or 0 if no parent found
-    fn find_parent_list_item(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        ordered_line: usize,
-        ordered_indent: usize,
-    ) -> usize {
-        // Look backward from the ordered item to find its closest parent
-        for line_num in (1..ordered_line).rev() {
-            if let Some(line_info) = ctx.line_info(line_num) {
-                if let Some(list_item) = &line_info.list_item {
-                    // Found a list item - check if it could be the parent
-                    if list_item.marker_column < ordered_indent {
-                        // This list item is at a lower indentation, so it's the parent
-                        return line_num;
-                    }
-                }
-                // If we encounter non-blank, non-list content at column 0, stop looking
-                else if !line_info.is_blank && line_info.indent == 0 {
-                    break;
-                }
-            }
-        }
-        0 // No parent found
-    }
-
-    /// Check a group of ordered list blocks that should be treated as continuous
-    fn check_ordered_list_group(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        group: &[&crate::lint_context::ListBlock],
-        warnings: &mut Vec<LintWarning>,
-        document_wide_style: Option<ListStyle>,
-    ) {
-        // Collect all items from all blocks in the group
-        let mut all_items = Vec::new();
-
-        for list_block in group {
-            // First, check for lazy continuation in this block
-            self.check_for_lazy_continuation(ctx, list_block, warnings);
-
-            for &item_line in &list_block.item_lines {
-                if let Some(line_info) = ctx.line_info(item_line)
-                    && let Some(list_item) = &line_info.list_item
-                {
-                    // Skip unordered lists (safety check)
-                    if !list_item.is_ordered {
-                        continue;
-                    }
-                    all_items.push((item_line, line_info, list_item));
-                }
-            }
-        }
-
-        // Sort by line number to ensure correct order
-        all_items.sort_by_key(|(line_num, _, _)| *line_num);
-
-        // Group items by indentation level AND parent context
-        // Use (indent_level, parent_line) as the key to separate sequences under different parents
-        type LevelGroups<'a> = std::collections::HashMap<
-            (usize, usize),
-            Vec<(
-                usize,
-                &'a crate::lint_context::LineInfo,
-                &'a crate::lint_context::ListItemInfo,
-            )>,
-        >;
-        let mut level_groups: LevelGroups = std::collections::HashMap::new();
-
-        for (line_num, line_info, list_item) in all_items {
-            // Find the closest parent list item (ordered or unordered) for this ordered item
-            let parent_line = self.find_parent_list_item(ctx, line_num, list_item.marker_column);
-
-            // Group by both marker column (indentation level) and parent context
-            level_groups
-                .entry((list_item.marker_column, parent_line))
-                .or_default()
-                .push((line_num, line_info, list_item));
-        }
-
-        // Process each indentation level and parent context separately
-        for ((_indent, _parent), mut group) in level_groups {
-            // Sort by line number to ensure correct order
-            group.sort_by_key(|(line_num, _, _)| *line_num);
-
-            // Use document-wide style if provided (Consistent mode),
-            // otherwise detect per-group for OneOrOrdered, or use None for explicit styles
-            let detected_style = if let Some(doc_style) = document_wide_style.clone() {
-                // Consistent mode: use document-wide prevalent style
-                Some(doc_style)
-            } else if self.config.style == ListStyle::OneOrOrdered {
-                // OneOrOrdered mode: detect style per-group
-                Some(Self::detect_list_style(&group))
-            } else {
-                // Explicit style configuration
-                None
-            };
-
-            // Check each item in the group for correct sequence
-            for (idx, (line_num, line_info, list_item)) in group.iter().enumerate() {
-                // Parse the actual number from the marker (e.g., "1." -> 1)
-                if let Some(actual_num) = Self::parse_marker_number(&list_item.marker) {
-                    let expected_num = self.get_expected_number(idx, detected_style.clone());
-
-                    if actual_num != expected_num {
-                        // Calculate byte position for the fix
-                        let marker_start = line_info.byte_offset + list_item.marker_column;
-                        // Use the actual marker length (e.g., "05" is 2 chars, not 1)
-                        let number_len = if let Some(dot_pos) = list_item.marker.find('.') {
-                            dot_pos // Length up to the dot
-                        } else if let Some(paren_pos) = list_item.marker.find(')') {
-                            paren_pos // Length up to the paren
-                        } else {
-                            list_item.marker.len() // Fallback to full marker length
-                        };
-
-                        // Determine the style context for the warning message
-                        let style_name = match detected_style.as_ref().unwrap_or(&ListStyle::Ordered) {
-                            ListStyle::OneOne => "one",
-                            ListStyle::Ordered => "ordered",
-                            ListStyle::Ordered0 => "ordered0",
-                            _ => "ordered", // fallback
-                        };
-
-                        let style_context = match self.config.style {
-                            ListStyle::Consistent => format!("document style '{style_name}'"),
-                            ListStyle::OneOrOrdered => format!("list style '{style_name}'"),
-                            ListStyle::One | ListStyle::OneOne => "configured style 'one'".to_string(),
-                            ListStyle::Ordered => "configured style 'ordered'".to_string(),
-                            ListStyle::Ordered0 => "configured style 'ordered0'".to_string(),
-                        };
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: format!(
-                                "Ordered list item number {actual_num} does not match {style_context} (expected {expected_num})"
-                            ),
-                            line: *line_num,
-                            column: list_item.marker_column + 1,
-                            end_line: *line_num,
-                            end_column: list_item.marker_column + number_len + 1,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: marker_start..marker_start + number_len,
-                                replacement: expected_num.to_string(),
-                            }),
-                        });
-                    }
-                }
-            }
-        }
     }
 }
 

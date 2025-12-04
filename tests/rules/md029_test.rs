@@ -85,6 +85,8 @@ fn test_line_index() {
 fn test_md029_with_code_blocks() {
     let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered);
 
+    // Non-indented code blocks break the list per CommonMark. Each list item
+    // becomes its own list, so "2." and "3." should be "1." with ListStyle::Ordered.
     let content = r#"1. First step
 ```bash
 some code
@@ -100,23 +102,22 @@ final code
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "List items with code blocks between them should maintain sequence"
-    );
-
-    // Test that it doesn't generate false positives
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed, content,
-        "Content should remain unchanged as it's already correct"
-    );
+    // Code blocks at column 0 break the list. Each ordered list item becomes
+    // a separate list. With Ordered style, items 2 and 3 should be flagged.
+    assert_eq!(result.len(), 2, "Two lists start with wrong number");
+    assert_eq!(result[0].line, 5); // "2. Second step" should be "1."
+    assert!(result[0].message.contains("expected 1"));
+    assert_eq!(result[1].line, 9); // "3. Third step" should be "1."
+    assert!(result[1].message.contains("expected 1"));
 }
 
 #[test]
 fn test_md029_nested_with_code_blocks() {
     let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::Ordered);
 
+    // NOTE: The code block after "1. First substep" is NOT indented (column 0).
+    // This breaks the nested list per CommonMark. "2. Second substep" becomes
+    // a new list starting with "2." which should be "1." with Ordered style.
     let content = r#"1. First step
    ```bash
    some code
@@ -134,18 +135,12 @@ fn test_md029_nested_with_code_blocks() {
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    println!("Warnings: {result:?}");
-    assert!(
-        result.is_empty(),
-        "Nested lists with code blocks should maintain correct sequence"
-    );
 
-    // Test that it doesn't generate false positives
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed, content,
-        "Content should remain unchanged as it's already correct"
-    );
+    // The non-indented code block breaks the nested list. "2. Second substep"
+    // starts a new list that should begin with "1." per Ordered style.
+    assert_eq!(result.len(), 1, "One list starts with wrong number");
+    assert_eq!(result[0].line, 9); // "2. Second substep" should be "1."
+    assert!(result[0].message.contains("expected 1"));
 }
 
 #[test]
@@ -230,20 +225,23 @@ fn test_zero_padded_numbers() {
 #[test]
 fn test_lists_with_inline_html() {
     let rule = MD029OrderedListPrefix::default();
+    // Add blank line after HTML block so "4." becomes a new list item
+    // (without blank line, "4." is consumed by the HTML block per CommonMark)
     let content = "\
 1. First item with <strong>bold</strong> text
 2. Second item
 <div>Some HTML block</div>
+
 4. Wrong number after HTML";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // HTML should not interfere with numbering detection
-    assert!(!result.is_empty(), "Should detect wrong number despite HTML");
+    // HTML block separates the lists. "4." starts a new list that should be "1."
+    assert!(!result.is_empty(), "Should detect wrong number after HTML block");
     assert!(
-        result.iter().any(|w| w.message.contains("4")),
-        "Should detect that 4 should be 3"
+        result.iter().any(|w| w.line == 5 && w.message.contains("expected 1")),
+        "Should detect that 4 should be 1 (new list after HTML block)"
     );
 }
 
@@ -445,7 +443,7 @@ fn test_single_item_edge_cases() {
 fn test_md029_multiline_no_indent() {
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
 
-    // No indentation - should be treated as lazy continuation
+    // No indentation - lazy continuation per CommonMark
     let content = r#"1. First item first line
 second line of first item
 1. Second item first line
@@ -454,25 +452,11 @@ second line of second item"#;
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should have warnings for:
-    // 1. Lazy continuation on line 2
-    // 2. Wrong number on line 3
-    // 3. Lazy continuation on line 4
-    assert!(
-        result.len() >= 3,
-        "Should detect lazy continuations and wrong numbering"
-    );
-
-    // Check for lazy continuation warnings (by message content)
-    let lazy_warnings = result
-        .iter()
-        .filter(|w| w.message.contains("lazy continuation"))
-        .count();
-    assert_eq!(lazy_warnings, 2, "Should have 2 lazy continuation warnings");
-
-    // Check for numbering warning (by message content)
-    let numbering_warnings = result.iter().filter(|w| w.message.contains("does not match")).count();
-    assert_eq!(numbering_warnings, 1, "Should have 1 numbering warning");
+    // pulldown-cmark sees this as one list with two items via lazy continuation.
+    // With Ordered style, the second "1." should be "2.".
+    assert_eq!(result.len(), 1, "Should have 1 numbering warning");
+    assert_eq!(result[0].line, 3);
+    assert!(result[0].message.contains("expected 2"));
 }
 
 #[test]
@@ -515,7 +499,7 @@ fn test_md029_multiline_4_space_indent() {
 fn test_md029_multiline_2_space_indent() {
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
 
-    // 2-space indentation - edge case
+    // 2-space indentation with lazy continuation
     let content = r#"1. First item first line
   second line of first item
 1. Second item first line
@@ -524,16 +508,18 @@ fn test_md029_multiline_2_space_indent() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // 2 spaces is not enough for ordered list continuation (need 3)
-    // So these should be treated as separate lists
-    assert!(result.is_empty(), "2-space indentation breaks the list");
+    // According to CommonMark (verified with pulldown-cmark), lazy continuation makes this
+    // one list with two items. With ListStyle::Ordered, the second "1." should be "2.".
+    assert_eq!(result.len(), 1, "Second item should be numbered 2");
+    assert_eq!(result[0].line, 3);
+    assert!(result[0].message.contains("expected 2"));
 }
 
 #[test]
 fn test_md029_multiline_mixed_content() {
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
 
-    // Test with code blocks between items
+    // Code blocks between items break the list per CommonMark
     let content = r#"1. First item
    continuation line
 ```
@@ -544,7 +530,11 @@ code block
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "Code blocks should not break list numbering");
+    // pulldown-cmark sees two separate lists (code block breaks list)
+    // The second list's "2." should be "1." - verified with markdownlint-cli
+    assert_eq!(result.len(), 1, "Second list should start at 1");
+    assert_eq!(result[0].line, 6);
+    assert!(result[0].message.contains("expected 1"));
 }
 
 #[test]
@@ -593,7 +583,9 @@ fn test_md029_double_digit_marker_width() {
 fn test_md029_double_digit_insufficient_indent() {
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
 
-    // Test that insufficient indentation breaks the list
+    // Test list with double-digit markers and continuation lines.
+    // pulldown-cmark treats continuation indentation loosely (lazy continuation),
+    // so all items are part of the same list regardless of continuation indent.
     let content = r#"9. Ninth item
    continuation
 10. Tenth item
@@ -604,19 +596,13 @@ fn test_md029_double_digit_insufficient_indent() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Line 2 has 3 spaces (OK for "9. ")
-    // Line 4 has 3 spaces (NOT OK for "10. " which needs 4)
-    // Line 6 has 4 spaces (NOT OK for "11. " which needs 5)
-    // So item 10 and 11 should be separate lists
-
-    // Actually, we should have 3 warnings:
-    // - Item 9 should be 1 (first item in first list)
-    // - Item 10 should be 2 (continues first list because line 4 has 3 spaces which is OK for item 9)
-    // - Item 11 should be 1 (starts new list because line 6 has only 4 spaces which is not enough for item 10)
-    assert_eq!(result.len(), 3, "Should have 3 warnings");
+    // pulldown-cmark and markdownlint see this as ONE list with items 9, 10, 11.
+    // With ListStyle::Ordered, all three should be renumbered to 1, 2, 3.
+    // Verified with: npx markdownlint-cli -c '{"MD029": {"style": "ordered"}}' /tmp/test1.md
+    assert_eq!(result.len(), 3, "Should have 3 warnings for 9, 10, 11");
     assert!(result[0].message.contains("9") && result[0].message.contains("expected 1"));
     assert!(result[1].message.contains("10") && result[1].message.contains("expected 2"));
-    assert!(result[2].message.contains("11") && result[2].message.contains("expected 1"));
+    assert!(result[2].message.contains("11") && result[2].message.contains("expected 3"));
 }
 
 #[test]
@@ -691,7 +677,7 @@ fn test_md029_large_digit_insufficient_indent() {
 fn test_md029_simple_insufficient_indent() {
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
 
-    // Simple test case - second item has insufficient indentation
+    // Simple test case with lazy continuation per CommonMark
     let content = r#"10. Item ten
    not enough spaces
 10. Item ten again"#;
@@ -699,16 +685,13 @@ fn test_md029_simple_insufficient_indent() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Line 2 has 3 spaces but needs 4 for "10. "
-    // So item on line 3 should start a new list
-
-    // The list should be split into 2 blocks because line 2 doesn't have enough indentation
-    assert_eq!(ctx.list_blocks.len(), 2, "Should have 2 separate list blocks");
-
-    // And MD029 should flag both "10." items as starting with the wrong number
+    // pulldown-cmark sees this as 1 list with 2 items via lazy continuation.
+    // With Ordered style: first "10." should be "1.", second "10." should be "2."
     assert_eq!(result.len(), 2, "Both '10.' items should be flagged");
+    assert_eq!(result[0].line, 1);
     assert!(result[0].message.contains("10") && result[0].message.contains("expected 1"));
-    assert!(result[1].message.contains("10") && result[1].message.contains("expected 1"));
+    assert_eq!(result[1].line, 3);
+    assert!(result[1].message.contains("10") && result[1].message.contains("expected 2"));
 }
 
 #[test]
@@ -950,9 +933,12 @@ fn test_md029_lists_with_code_block_interruptions() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // Should find 1 error: the nested "1." that should be "2."
-    assert_eq!(result.len(), 1, "Should find 1 error for nested item after code block");
-    assert!(result[0].message.contains("1") && result[0].message.contains("expected 2"));
+    // pulldown-cmark sees this as 3 separate lists, each correctly numbered:
+    // - List 1: items 1 and 2 at lines 1 and 5 (correct sequence)
+    // - List 2: single item "1. Nested item" at line 6 (correct - starts at 1)
+    // - List 3: single item "1. Should be 2..." at line 10 (correct - starts at 1)
+    // Verified with markdownlint-cli: no MD029 errors with ordered style.
+    assert_eq!(result.len(), 0, "All lists are correctly numbered");
 }
 
 #[test]
@@ -1281,8 +1267,11 @@ mod nested_lists {
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // Treats unordered as separator, new ordered list starts
-        assert!(result.is_empty());
+        // Unordered list separates the two ordered lists. With ListStyle::Ordered,
+        // the second ordered list should start at 1, but it starts at 2.
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+        assert!(result[0].message.contains("expected 1"));
     }
 }
 
@@ -1298,12 +1287,13 @@ mod lazy_continuation {
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
 
-        // Should detect lazy continuation
-        let lazy_warnings = result
-            .iter()
-            .filter(|w| w.message.contains("lazy continuation"))
-            .count();
-        assert!(lazy_warnings > 0);
+        // With pulldown-cmark, lazy continuation makes this one list with two properly
+        // numbered items (1 and 2). No warnings expected - verified with markdownlint-cli.
+        assert_eq!(
+            result.len(),
+            0,
+            "Lazy continuation is valid CommonMark, no numbering error"
+        );
     }
 
     #[test]

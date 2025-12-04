@@ -65,11 +65,17 @@ fn test_unicode_nested_ordered_lists_invalid() {
 3. Wrong first level with ñáéíóú";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
+    // pulldown-cmark sees this as ONE top-level list with items at lines 1 and 4.
+    // Lines 2-3 (with "2." and "3.") are NOT nested list items - they're continuation
+    // text because 3-space indent is insufficient for a nested list.
+    // The only error is "3." at line 4 should be "2.".
+    // Verified with: npx markdownlint-cli -c '{"MD029": {"style": "ordered"}}' file.md
     assert_eq!(
         result.len(),
-        3,
-        "Unicode nested ordered lists with wrong numbering should trigger warnings"
+        1,
+        "Only top-level list item '3.' should trigger warning (should be 2)"
     );
+    assert_eq!(result[0].line, 4);
 }
 
 #[test]
@@ -85,10 +91,17 @@ console.log('emoji 🔥');
 3. Final item with مرحبا";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Unicode ordered lists with code blocks should maintain correct numbering"
+    // Code block at column 0 breaks the list. pulldown-cmark sees 2 lists:
+    // - List 1: item 1 at line 1
+    // - List 2: items 2 and 3 at lines 6 and 7 (should be 1 and 2)
+    // Verified with: npx markdownlint-cli -c '{"MD029": {"style": "ordered"}}' file.md
+    assert_eq!(
+        result.len(),
+        2,
+        "Code block breaks list, second list has wrong numbering"
     );
+    assert_eq!(result[0].line, 6);
+    assert_eq!(result[1].line, 7);
 }
 
 #[test]
