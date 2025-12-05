@@ -84,6 +84,9 @@ pub struct RumdlLanguageServer {
     index_state: Arc<RwLock<IndexState>>,
     /// Channel to send updates to the background index worker
     update_tx: mpsc::Sender<IndexUpdate>,
+    /// Whether the client supports pull diagnostics (textDocument/diagnostic)
+    /// When true, we skip pushing diagnostics to avoid duplicates
+    client_supports_pull_diagnostics: Arc<RwLock<bool>>,
 }
 
 impl RumdlLanguageServer {
@@ -124,6 +127,7 @@ impl RumdlLanguageServer {
             workspace_index,
             index_state,
             update_tx,
+            client_supports_pull_diagnostics: Arc::new(RwLock::new(false)),
         }
     }
 
@@ -312,7 +316,17 @@ impl RumdlLanguageServer {
     }
 
     /// Update diagnostics for a document
+    ///
+    /// This method pushes diagnostics to the client via publishDiagnostics.
+    /// When the client supports pull diagnostics (textDocument/diagnostic),
+    /// we skip pushing to avoid duplicate diagnostics.
     async fn update_diagnostics(&self, uri: Url, text: String) {
+        // Skip pushing if client supports pull diagnostics to avoid duplicates
+        if *self.client_supports_pull_diagnostics.read().await {
+            log::debug!("Skipping push diagnostics for {uri} - client supports pull model");
+            return;
+        }
+
         // Get the document version if available
         let version = {
             let docs = self.documents.read().await;
@@ -739,6 +753,22 @@ impl LanguageServer for RumdlLanguageServer {
             *self.config.write().await = config;
         }
 
+        // Detect if client supports pull diagnostics (textDocument/diagnostic)
+        // When the client supports pull, we avoid pushing to prevent duplicate diagnostics
+        let supports_pull = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.diagnostic.as_ref())
+            .is_some();
+
+        if supports_pull {
+            log::info!("Client supports pull diagnostics - disabling push to avoid duplicates");
+            *self.client_supports_pull_diagnostics.write().await = true;
+        } else {
+            log::info!("Client does not support pull diagnostics - using push model");
+        }
+
         // Extract and store workspace roots
         let mut roots = Vec::new();
         if let Some(workspace_folders) = params.workspace_folders {
@@ -1016,7 +1046,8 @@ impl LanguageServer for RumdlLanguageServer {
         // Remove document from storage
         self.documents.write().await.remove(&params.text_document.uri);
 
-        // Clear diagnostics
+        // Always clear diagnostics on close to ensure cleanup
+        // (Ruff does this unconditionally as a defensive measure)
         self.client
             .publish_diagnostics(params.text_document.uri, Vec::new(), None)
             .await;
@@ -2242,6 +2273,35 @@ disable = ["MD022"]
         assert!(
             cache_entry.config_file.as_ref().unwrap().ends_with("pyproject.toml"),
             "Should have loaded pyproject.toml"
+        );
+    }
+
+    /// Test for issue #182: Client pull diagnostics capability detection
+    ///
+    /// When a client supports pull diagnostics (textDocument/diagnostic), the server
+    /// should skip pushing diagnostics via publishDiagnostics to avoid duplicates.
+    #[tokio::test]
+    async fn test_issue_182_pull_diagnostics_capability_default() {
+        let server = create_test_server();
+
+        // By default, client_supports_pull_diagnostics should be false
+        assert!(
+            !*server.client_supports_pull_diagnostics.read().await,
+            "Default should be false - push diagnostics by default"
+        );
+    }
+
+    /// Test that we can set the pull diagnostics flag
+    #[tokio::test]
+    async fn test_issue_182_pull_diagnostics_flag_update() {
+        let server = create_test_server();
+
+        // Simulate detecting pull capability
+        *server.client_supports_pull_diagnostics.write().await = true;
+
+        assert!(
+            *server.client_supports_pull_diagnostics.read().await,
+            "Flag should be settable to true"
         );
     }
 }
