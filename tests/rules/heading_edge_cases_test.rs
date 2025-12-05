@@ -253,6 +253,8 @@ Content after";
     );
 
     // Test 7: Front matter handling
+    // Frontmatter is transparent for MD022 - heading can appear immediately after
+    // Verified with markdownlint: no MD022 warning for heading after frontmatter
     let content = "\
 ---
 title: Test
@@ -260,11 +262,9 @@ title: Test
 # First heading";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
-    // MD022 requires a blank line after front matter
-    assert_eq!(
-        result.len(),
-        1,
-        "MD022 requires blank line after front matter before heading"
+    assert!(
+        result.is_empty(),
+        "Frontmatter is transparent - heading can appear immediately after"
     );
 
     // Test 8: CRLF line endings

@@ -378,8 +378,7 @@ impl Rule for MD022BlanksAroundHeadings {
                     let trimmed = line_content.trim();
                     if ctx.lines[j].is_blank {
                         blank_lines_above += 1;
-                    } else if ctx.lines[j].in_html_comment
-                        || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+                    } else if ctx.lines[j].in_html_comment || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
                     {
                         // Skip HTML comments - they are transparent for blank line counting
                         continue;
@@ -1042,6 +1041,67 @@ Final content.";
         assert!(
             fixed.starts_with("# H1\nParagraph\n\n## H2"),
             "H1 should remain unchanged"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_transparency() {
+        // HTML comments are transparent for blank line counting
+        // A heading following a blank line + HTML comment should be valid
+        // Verified with markdownlint: no MD022 warning for this pattern
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // Pattern: content, blank line, HTML comment, heading
+        // The blank line before the HTML comment counts for the heading
+        let content = "Some content\n\n<!-- markdownlint-disable-next-line MD001 -->\n#### Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "HTML comment is transparent - blank line above it counts for heading"
+        );
+
+        // Multi-line HTML comment is also transparent
+        let content_multiline = "Some content\n\n<!-- This is a\nmulti-line comment -->\n#### Heading";
+        let ctx_multiline = LintContext::new(content_multiline, crate::config::MarkdownFlavor::Standard);
+        let warnings_multiline = rule.check(&ctx_multiline).unwrap();
+        assert!(
+            warnings_multiline.is_empty(),
+            "Multi-line HTML comment is also transparent"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_transparency() {
+        // Frontmatter is transparent for MD022 - heading can appear immediately after
+        // Verified with markdownlint: no MD022 warning for heading after frontmatter
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // Heading immediately after frontmatter closing ---
+        let content = "---\ntitle: Test\n---\n# First heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Frontmatter is transparent - heading can appear immediately after"
+        );
+
+        // Heading with blank line after frontmatter is also valid
+        let content_with_blank = "---\ntitle: Test\n---\n\n# First heading";
+        let ctx_with_blank = LintContext::new(content_with_blank, crate::config::MarkdownFlavor::Standard);
+        let warnings_with_blank = rule.check(&ctx_with_blank).unwrap();
+        assert!(
+            warnings_with_blank.is_empty(),
+            "Heading with blank line after frontmatter should also be valid"
+        );
+
+        // TOML frontmatter (+++...+++) is also transparent
+        let content_toml = "+++\ntitle = \"Test\"\n+++\n# First heading";
+        let ctx_toml = LintContext::new(content_toml, crate::config::MarkdownFlavor::Standard);
+        let warnings_toml = rule.check(&ctx_toml).unwrap();
+        assert!(
+            warnings_toml.is_empty(),
+            "TOML frontmatter is also transparent for MD022"
         );
     }
 }
