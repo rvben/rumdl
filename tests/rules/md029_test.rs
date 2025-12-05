@@ -293,14 +293,15 @@ fn test_deeply_nested_lists() {
     let rule = MD029OrderedListPrefix::default();
 
     // Generate a deeply nested list (6 levels)
+    // CommonMark requires 3+ space indent per level for proper nesting after "1. " markers
     let content = "\
 1. Level 1 item
-  1. Level 2 item
-    1. Level 3 item
-      1. Level 4 item
-        1. Level 5 item
-          1. Level 6 item
-          3. Wrong number at deep level";
+   1. Level 2 item
+      1. Level 3 item
+         1. Level 4 item
+            1. Level 5 item
+               1. Level 6 item
+               3. Wrong number at deep level";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
