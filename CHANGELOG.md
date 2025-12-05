@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.189] - 2025-12-05
+
+### Fixed
+
+- **MD061 (link-destination-exists): Default `case_sensitive` to `true` when loading from TOML**
+  - Configuration parsing now correctly defaults to case-sensitive path checking
+  - Aligns TOML config behavior with programmatic defaults
+
+- **MD022 (blanks-around-headings): Treat HTML comments and frontmatter as transparent**
+  - HTML comments between content and headings no longer trigger blank line warnings
+  - Frontmatter is now invisible to blank line checking around headings
+
+- **MD033 (no-inline-html): Skip code span content in multi-line span detection**
+  - HTML tags inside multi-line code spans are no longer flagged
+  - Prevents false positives for code examples containing HTML
+
+- **MD032 (blanks-around-lists): Handle multi-line code spans in list detection**
+  - Code spans spanning multiple lines no longer confuse list boundary detection
+  - Fixes false positives for lists near complex code span usage
+
+- **MD044 (proper-names): Skip HTML comments by default**
+  - Proper name checking now excludes HTML comment content
+  - Reduces noise from commented-out content
+
+- **MD029 (ol-prefix): Use pulldown-cmark for list membership detection**
+  - More accurate detection of which items belong to which ordered list
+  - Handles edge cases with code blocks and other interrupting elements
+
+### Changed
+
+- **MD057 (table-pipe-style): Remove unused `skip_media_files` config option**
+  - Simplifies configuration by removing non-functional option
+
 ## [0.0.188] - 2025-12-03
 
 ### Added
