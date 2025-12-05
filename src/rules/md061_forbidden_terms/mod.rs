@@ -371,6 +371,28 @@ mod tests {
     }
 
     #[test]
+    fn test_config_from_toml_case_sensitive_by_default() {
+        // Simulates user config: [MD061] terms = ["TODO"]
+        // Without explicitly setting case_sensitive, should default to true
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config.values.insert(
+            "terms".to_string(),
+            toml::Value::Array(vec![toml::Value::String("TODO".to_string())]),
+        );
+        config.rules.insert("MD061".to_string(), rule_config);
+
+        let rule = MD061ForbiddenTerms::from_config(&config);
+        let content = "todo: lowercase\nTODO: uppercase\nTodo: mixed\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only match "TODO" (uppercase), not "todo" or "Todo"
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
     fn test_skip_html_comment() {
         let rule = MD061ForbiddenTerms::new(vec!["TODO".to_string()], false);
         let content = "<!-- TODO: in html comment -->\nTODO: outside\n";
