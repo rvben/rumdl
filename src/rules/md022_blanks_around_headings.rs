@@ -150,12 +150,21 @@ impl MD022BlanksAroundHeadings {
                 let is_first_heading = Some(i) == heading_at_start_idx;
                 let heading_level = heading.level as usize;
 
-                // Count existing blank lines above in the result
+                // Count existing blank lines above in the result, skipping HTML comments
                 let mut blank_lines_above = 0;
                 let mut check_idx = result.len();
-                while check_idx > 0 && result[check_idx - 1].trim().is_empty() {
-                    blank_lines_above += 1;
-                    check_idx -= 1;
+                while check_idx > 0 {
+                    let prev_line = &result[check_idx - 1];
+                    let trimmed = prev_line.trim();
+                    if trimmed.is_empty() {
+                        blank_lines_above += 1;
+                        check_idx -= 1;
+                    } else if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+                        // Skip HTML comments - they are transparent for blank line counting
+                        check_idx -= 1;
+                    } else {
+                        break;
+                    }
                 }
 
                 // Determine how many blank lines we need above
@@ -363,15 +372,27 @@ impl Rule for MD022BlanksAroundHeadings {
                 required_above_count.is_some() && line_num > 0 && (!is_first_heading || !self.config.allowed_at_start);
             if should_check_above {
                 let mut blank_lines_above = 0;
+                let mut hit_frontmatter_end = false;
                 for j in (0..line_num).rev() {
+                    let line_content = ctx.lines[j].content(ctx.content);
+                    let trimmed = line_content.trim();
                     if ctx.lines[j].is_blank {
                         blank_lines_above += 1;
+                    } else if ctx.lines[j].in_html_comment
+                        || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+                    {
+                        // Skip HTML comments - they are transparent for blank line counting
+                        continue;
+                    } else if ctx.lines[j].in_front_matter || trimmed == "---" {
+                        // Skip frontmatter - first heading after frontmatter doesn't need blank line above
+                        hit_frontmatter_end = true;
+                        break;
                     } else {
                         break;
                     }
                 }
                 let required = required_above_count.unwrap();
-                if blank_lines_above < required {
+                if !hit_frontmatter_end && blank_lines_above < required {
                     let needed_blanks = required - blank_lines_above;
                     heading_violations.push((line_num, "above", needed_blanks, heading_level));
                 }
