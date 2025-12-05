@@ -654,7 +654,9 @@ fn test_md029_quadruple_digit_marker_width() {
 fn test_md029_large_digit_insufficient_indent() {
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
 
-    // Test that insufficient indentation breaks the list for large numbers
+    // With CommonMark lazy continuation, all items stay in one list regardless of
+    // insufficient indentation for continuation lines. pulldown-cmark correctly
+    // parses these as a single ordered list.
     let content = r#"99. Item ninety-nine
     continuation with 4 spaces
 100. Item one hundred
@@ -665,13 +667,12 @@ fn test_md029_large_digit_insufficient_indent() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
     let result = rule.check(&ctx).unwrap();
 
-    // We expect the list to be broken into multiple blocks
-    // Item 99 and 100 should be in one list (since 4 spaces is enough for "99. ")
-    // Item 1000 should start a new list (since 5 spaces is not enough for "100. ")
+    // All items are in one list due to CommonMark lazy continuation
+    // With ListStyle::Ordered, they should be numbered 1, 2, 3
     assert_eq!(result.len(), 3, "Should have 3 warnings");
     assert!(result[0].message.contains("99") && result[0].message.contains("expected 1"));
     assert!(result[1].message.contains("100") && result[1].message.contains("expected 2"));
-    assert!(result[2].message.contains("1000") && result[2].message.contains("expected 1")); // New list
+    assert!(result[2].message.contains("1000") && result[2].message.contains("expected 3"));
 }
 
 #[test]
