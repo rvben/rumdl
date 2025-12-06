@@ -420,19 +420,23 @@ impl Rule for MD057ExistingRelativeLinks {
                 // File not in index - it might not exist or might not be a markdown file
                 // For markdown files, if they're not indexed, they don't exist in the workspace
                 if cross_link.target_path.ends_with(".md") || cross_link.target_path.ends_with(".markdown") {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: cross_link.line,
-                        column: cross_link.column,
-                        end_line: cross_link.line,
-                        end_column: cross_link.column + cross_link.target_path.len(),
-                        message: format!(
-                            "Relative link '{}' does not exist in the workspace",
-                            cross_link.target_path
-                        ),
-                        severity: Severity::Warning,
-                        fix: None,
-                    });
+                    // Fallback: check the filesystem directly to handle case-insensitive
+                    // filesystems (macOS, Windows) where "README.pt-BR.md" matches "README.pt-br.md"
+                    if !target_path.exists() {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: cross_link.line,
+                            column: cross_link.column,
+                            end_line: cross_link.line,
+                            end_column: cross_link.column + cross_link.target_path.len(),
+                            message: format!(
+                                "Relative link '{}' does not exist in the workspace",
+                                cross_link.target_path
+                            ),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    }
                 }
             }
         }
