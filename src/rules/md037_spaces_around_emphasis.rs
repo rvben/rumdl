@@ -27,11 +27,11 @@ fn truncate_for_display(text: &str, max_len: usize) -> String {
     let prefix_len = max_len / 2 - 2; // -2 for "..."
     let suffix_len = max_len / 2 - 2;
 
-    format!(
-        "{}...{}",
-        &text[..prefix_len.min(text.len())],
-        &text[text.len().saturating_sub(suffix_len)..]
-    )
+    // Use floor_char_boundary to safely find UTF-8 character boundaries
+    let prefix_end = text.floor_char_boundary(prefix_len.min(text.len()));
+    let suffix_start = text.floor_char_boundary(text.len().saturating_sub(suffix_len));
+
+    format!("{}...{}", &text[..prefix_end], &text[suffix_start..])
 }
 
 /// Rule MD037: Spaces inside emphasis markers
@@ -502,5 +502,50 @@ This has * real spaced emphasis * that should be flagged."#;
         let result5 = rule.check(&ctx5).unwrap();
         assert!(!result5.is_empty(), "Should still flag actual spaces in emphasis");
         assert!(result5[0].message.contains("Spaces inside emphasis markers"));
+    }
+
+    #[test]
+    fn test_multibyte_utf8_no_panic() {
+        // Regression test: ensure multi-byte UTF-8 characters don't cause panics
+        // in the truncate_for_display function when handling long emphasis spans.
+        // These test cases include various scripts that could trigger boundary issues.
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Greek text with emphasis
+        let greek = "Αυτό είναι ένα * τεστ με ελληνικά * και πολύ μεγάλο κείμενο που θα πρέπει να περικοπεί σωστά.";
+        let ctx = LintContext::new(greek, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Greek text should not panic");
+
+        // Chinese text with emphasis
+        let chinese = "这是一个 * 测试文本 * 包含中文字符，需要正确处理多字节边界。";
+        let ctx = LintContext::new(chinese, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Chinese text should not panic");
+
+        // Cyrillic/Russian text with emphasis
+        let cyrillic = "Это * тест с кириллицей * и очень длинным текстом для проверки обрезки.";
+        let ctx = LintContext::new(cyrillic, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Cyrillic text should not panic");
+
+        // Mixed multi-byte characters in a long emphasis span that triggers truncation
+        let mixed =
+            "日本語と * 中文と한국어が混在する非常に長いテキストでtruncate_for_displayの境界処理をテスト * します。";
+        let ctx = LintContext::new(mixed, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Mixed CJK text should not panic");
+
+        // Arabic text (right-to-left) with emphasis
+        let arabic = "هذا * اختبار بالعربية * مع نص طويل جداً لاختبار معالجة حدود الأحرف.";
+        let ctx = LintContext::new(arabic, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Arabic text should not panic");
+
+        // Emoji with emphasis
+        let emoji = "This has * 🎉 party 🎊 celebration 🥳 emojis * that use multi-byte sequences.";
+        let ctx = LintContext::new(emoji, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Emoji text should not panic");
     }
 }

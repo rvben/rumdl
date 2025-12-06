@@ -68,11 +68,13 @@ impl MD038NoSpaceInCode {
             let end = current_span.start_col.max(other_span.start_col);
 
             if start < end && end <= line_content.len() {
-                let between = &line_content[start..end];
-                // If there's text containing "code" or similar patterns between spans,
-                // it's likely they're showing nested backticks
-                if between.contains("code") || between.contains("backtick") {
-                    return true;
+                // Use .get() to safely handle multi-byte UTF-8 characters
+                if let Some(between) = line_content.get(start..end) {
+                    // If there's text containing "code" or similar patterns between spans,
+                    // it's likely they're showing nested backticks
+                    if between.contains("code") || between.contains("backtick") {
+                        return true;
+                    }
                 }
             }
         }
@@ -383,6 +385,41 @@ mod tests {
             result_other.len(),
             1,
             "Quarto should still flag non-R code spans with improper spaces"
+        );
+    }
+
+    #[test]
+    fn test_multibyte_utf8_no_panic() {
+        // Regression test: ensure multi-byte UTF-8 characters don't cause panics
+        // when checking for nested backticks between code spans.
+        // These are real examples from the-art-of-command-line translations.
+        let rule = MD038NoSpaceInCode::new();
+
+        // Greek text with code spans
+        let greek = "- Χρήσιμα εργαλεία της γραμμής εντολών είναι τα `ping`,` ipconfig`, `traceroute` και `netstat`.";
+        let ctx = crate::lint_context::LintContext::new(greek, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Greek text should not panic");
+
+        // Chinese text with code spans
+        let chinese = "- 當你需要對文字檔案做集合交、並、差運算時，`sort`/`uniq` 很有幫助。";
+        let ctx = crate::lint_context::LintContext::new(chinese, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Chinese text should not panic");
+
+        // Cyrillic/Ukrainian text with code spans
+        let cyrillic = "- Основи роботи з файлами: `ls` і `ls -l`, `less`, `head`,` tail` і `tail -f`.";
+        let ctx = crate::lint_context::LintContext::new(cyrillic, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(result.is_ok(), "Cyrillic text should not panic");
+
+        // Mixed multi-byte with multiple code spans on same line
+        let mixed = "使用 `git` 命令和 `npm` 工具来管理项目，可以用 `docker` 容器化。";
+        let ctx = crate::lint_context::LintContext::new(mixed, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx);
+        assert!(
+            result.is_ok(),
+            "Mixed Chinese text with multiple code spans should not panic"
         );
     }
 }
