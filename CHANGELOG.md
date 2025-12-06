@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.190] - 2025-12-06
+
+### Added
+
+- **GitHub Action: New `rumdl-action` for CI integration**
+  - Supports `version`, `path`, and `config` inputs
+  - Enables easy integration of rumdl into GitHub workflows
+
+- **CLI: Add `--rules` as alias for `--enable`**
+  - More intuitive option name for specifying which rules to run
+  - Example: `rumdl check --rules MD001,MD003 file.md`
+
+### Fixed
+
+- **LSP: Detect client diagnostic capabilities to avoid duplicate diagnostics (fixes #182)**
+  - LSP server now checks if the client supports `textDocument/publishDiagnostics`
+  - Prevents duplicate diagnostics when client pulls diagnostics instead of receiving pushes
+
+- **MD005 (list-indent): Group sublists by parent content column**
+  - Correctly handles ordered lists where marker widths vary (e.g., "1. " vs "10. ")
+  - Sublists under parents with different content columns are now grouped separately
+  - Prevents false positives when indent differences are caused by marker width variation
+
+- **MD037/MD038: Handle multi-byte UTF-8 characters in emphasis detection**
+  - Emphasis detection now correctly handles characters like CJK and emoji
+  - Prevents false positives and incorrect column reporting for non-ASCII content
+
+- **MD057 (existing-relative-links): Handle absolute paths as workspace-relative**
+  - Absolute paths in markdown (e.g., `/CONTRIBUTING.md`) are now resolved relative to workspace root
+  - Fixes false positives for links that reference files from the repository root
+
+- **MD057 (existing-relative-links): Add filesystem fallback for case-sensitivity issues**
+  - Improves link validation on case-insensitive filesystems
+  - Reduces false positives on macOS and Windows
+
+- **CLI: Canonicalize config path before changing working directory**
+  - Config files specified with relative paths now work correctly
+  - Fixes issue where config was not found after directory change
+
 ## [0.0.189] - 2025-12-05
 
 ### Fixed
