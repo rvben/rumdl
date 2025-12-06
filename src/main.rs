@@ -395,7 +395,7 @@ pub struct CheckArgs {
     disable: Option<String>,
 
     /// Enable only specific rules (comma-separated)
-    #[arg(short, long)]
+    #[arg(short, long, visible_alias = "rules")]
     enable: Option<String>,
 
     /// Extend the list of enabled rules (additive with config)
