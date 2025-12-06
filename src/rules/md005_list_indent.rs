@@ -15,8 +15,6 @@ use toml;
 pub struct MD005ListIndent {
     /// Expected indentation for top-level lists (from MD007 config)
     top_level_indent: usize,
-    /// Expected indentation increment for nested lists (from MD007 config)
-    md007_indent: usize,
 }
 
 /// Cache for fast line information lookups to avoid O(n²) scanning
@@ -454,73 +452,15 @@ impl MD005ListIndent {
 
         // For each level, check consistency
         for (level, group) in level_groups {
-            // For level 1 (top-level), even single items should start at column 0
-            // For other levels, we need at least 2 items to check consistency
-            if level != 1 && group.len() < 2 {
-                continue;
-            }
-
             // Sort by line number
             let mut group = group;
             group.sort_by_key(|(line_num, _, _)| *line_num);
 
-            // Check if all items at this level have the same indentation
-            let indents: std::collections::HashSet<usize> = group.iter().map(|(_, indent, _)| *indent).collect();
-
-            // For level 1, check if any item doesn't match expected top-level indentation
-            // For other levels, check for inconsistent indentation
-            let has_issue = if level == 1 {
+            if level == 1 {
                 // Top-level items should have the configured indentation
-                indents.iter().any(|&indent| indent != self.top_level_indent)
-            } else {
-                // Other levels need consistency
-                indents.len() > 1
-            };
-
-            if has_issue {
-                // Inconsistent indentation at this level!
-                // Determine what the correct indentation should be
-
-                // For level 1, it should be the configured top-level indent
-                // For other levels, we need to look at parent alignment or use the most common indent
-                let expected_indent = if level == 1 {
-                    self.top_level_indent
-                } else {
-                    // For non-top-level items, determine the expected indent
-                    // If MD007 is configured with fixed indentation, use that
-                    if self.md007_indent > 0 {
-                        // When MD007 indent is configured, use fixed indentation
-                        // Each level should be indented by md007_indent * (level - 1)
-                        (level - 1) * self.md007_indent
-                    } else {
-                        // No MD007 config, determine based on existing patterns
-                        let mut indent_counts: HashMap<usize, usize> = HashMap::new();
-                        for (_, indent, _) in &group {
-                            *indent_counts.entry(*indent).or_insert(0) += 1;
-                        }
-
-                        if indent_counts.len() == 1 {
-                            // All items have the same indent already
-                            *indent_counts.keys().next().unwrap()
-                        } else {
-                            // Multiple indents - pick the most common one
-                            // When counts are equal, prefer the smaller indentation
-                            // This handles cases where one item has correct indentation and another is wrong
-                            indent_counts
-                                .iter()
-                                .max_by(|(indent_a, count_a), (indent_b, count_b)| {
-                                    // First compare by count, then by preferring smaller indent
-                                    count_a.cmp(count_b).then(indent_b.cmp(indent_a))
-                                })
-                                .map(|(indent, _)| *indent)
-                                .unwrap()
-                        }
-                    }
-                };
-
-                // Flag all items that don't match the expected indentation
                 for (line_num, indent, line_info) in &group {
-                    if *indent != expected_indent {
+                    if *indent != self.top_level_indent {
+                        let expected_indent = self.top_level_indent;
                         let message = format!(
                             "Expected indentation of {} {}, found {}",
                             expected_indent,
@@ -562,6 +502,111 @@ impl MD005ListIndent {
                                 replacement,
                             }),
                         });
+                    }
+                }
+            } else {
+                // For sublists (level > 1), group items by their semantic parent's content column.
+                // This correctly handles ordered lists where marker widths vary (e.g., "1. " vs "10. ")
+                // by NOT comparing items across parents with different content columns.
+                //
+                // Key insight:
+                // - Items under "1." to "9." have parent content column 3, so sublists should be at 3
+                // - Items under "10." have parent content column 4, so sublists should be at 4
+                // - We group by parent content column to avoid false positives when mixing these
+
+                // Find semantic parent (closest item at level-1) for each item
+                // This is different from parent_map which uses strict indentation hierarchy
+                let parent_level = level - 1;
+                let mut parent_content_groups: HashMap<usize, Vec<(usize, usize, &crate::lint_context::LineInfo)>> =
+                    HashMap::new();
+
+                for (line_num, indent, line_info) in &group {
+                    // Find the most recent item at parent_level before this line
+                    let mut parent_content_col: Option<usize> = None;
+
+                    for (prev_line, _, _, list_item) in all_list_items.iter().rev() {
+                        if *prev_line >= *line_num {
+                            continue;
+                        }
+                        if let Some(&prev_level) = level_map.get(prev_line)
+                            && prev_level == parent_level
+                        {
+                            parent_content_col = Some(list_item.content_column);
+                            break;
+                        }
+                    }
+
+                    if let Some(parent_col) = parent_content_col {
+                        parent_content_groups
+                            .entry(parent_col)
+                            .or_default()
+                            .push((*line_num, *indent, *line_info));
+                    }
+                }
+
+                // Check consistency within each parent content column group
+                for items in parent_content_groups.values() {
+                    if items.len() < 2 {
+                        continue;
+                    }
+
+                    // Sort items by line number to find first-established pattern
+                    let mut sorted_items: Vec<_> = items.iter().collect();
+                    sorted_items.sort_by_key(|(line_num, _, _)| *line_num);
+
+                    let indents: std::collections::HashSet<usize> =
+                        sorted_items.iter().map(|(_, indent, _)| *indent).collect();
+
+                    if indents.len() > 1 {
+                        // Items have inconsistent indentation
+                        // Use the first established indent as the expected value
+                        let expected_indent = sorted_items.first().map(|(_, i, _)| *i).unwrap_or(0);
+
+                        for (line_num, indent, line_info) in items {
+                            if *indent != expected_indent {
+                                let message = format!(
+                                    "Expected indentation of {} {}, found {}",
+                                    expected_indent,
+                                    if expected_indent == 1 { "space" } else { "spaces" },
+                                    indent
+                                );
+
+                                let (start_line, start_col, end_line, end_col) = if *indent > 0 {
+                                    calculate_match_range(*line_num, line_info.content(ctx.content), 0, *indent)
+                                } else {
+                                    calculate_match_range(*line_num, line_info.content(ctx.content), 0, 1)
+                                };
+
+                                let fix_range = if *indent > 0 {
+                                    let start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                                    let end_byte = start_byte + *indent;
+                                    start_byte..end_byte
+                                } else {
+                                    let byte_pos = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                                    byte_pos..byte_pos
+                                };
+
+                                let replacement = if expected_indent > 0 {
+                                    " ".repeat(expected_indent)
+                                } else {
+                                    String::new()
+                                };
+
+                                warnings.push(LintWarning {
+                                    rule_name: Some(self.name().to_string()),
+                                    line: start_line,
+                                    column: start_col,
+                                    end_line,
+                                    end_column: end_col,
+                                    message,
+                                    severity: Severity::Warning,
+                                    fix: Some(Fix {
+                                        range: fix_range,
+                                        replacement,
+                                    }),
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -660,9 +705,8 @@ impl Rule for MD005ListIndent {
     {
         // Check MD007 configuration to understand expected list indentation
         let mut top_level_indent = 0;
-        let mut md007_indent = 2; // Default to 2 if not specified
 
-        // Try to get MD007 configuration
+        // Try to get MD007 configuration for top-level indentation
         if let Some(md007_config) = config.rules.get("MD007") {
             // Check for start_indented setting
             if let Some(start_indented) = md007_config.values.get("start-indented")
@@ -679,19 +723,9 @@ impl Rule for MD005ListIndent {
                     top_level_indent = 2;
                 }
             }
-
-            // Also check 'indent' setting - this is the expected increment for nested lists
-            if let Some(indent) = md007_config.values.get("indent")
-                && let Some(indent_value) = indent.as_integer()
-            {
-                md007_indent = indent_value as usize;
-            }
         }
 
-        Box::new(MD005ListIndent {
-            top_level_indent,
-            md007_indent,
-        })
+        Box::new(MD005ListIndent { top_level_indent })
     }
 }
 
@@ -1092,13 +1126,15 @@ Even more text";
         let rule = MD005ListIndent::default();
         let content = "\
 * Item 1
-   * Three spaces - wrong
-  * Two spaces - correct";
+   * Three spaces - first establishes pattern
+  * Two spaces - inconsistent with established pattern";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
         let result = rule.check(&ctx).unwrap();
-        // Should flag the item with 3 spaces as inconsistent (2 spaces is correct)
+        // First-established indent (3) is the expected value
+        // Line 3 with 2 spaces is inconsistent with the pattern
+        // (Verified with markdownlint-cli: line 3 gets MD005, line 2 gets MD007)
         assert_eq!(result.len(), 1);
-        assert!(result.iter().any(|w| w.line == 2 && w.message.contains("found 3")));
+        assert!(result.iter().any(|w| w.line == 3 && w.message.contains("found 2")));
     }
 
     #[test]
@@ -1477,5 +1513,125 @@ Even more text";
             elapsed.as_secs() < 1,
             "Should complete in under 1 second, took {elapsed:?}"
         );
+    }
+
+    #[test]
+    fn test_ordered_list_variable_marker_width() {
+        // Ordered lists with items 1-9 (marker "N. " = 3 chars) and 10+
+        // (marker "NN. " = 4 chars) should have sublists aligned with parent content.
+        // Sublists under items 1-9 are at column 3, sublists under 10+ are at column 4.
+        // This should NOT trigger MD005 warnings.
+        let rule = MD005ListIndent::default();
+        let content = "\
+1. One
+   - One
+   - Two
+2. Two
+   - One
+3. Three
+   - One
+4. Four
+   - One
+5. Five
+   - One
+6. Six
+   - One
+7. Seven
+   - One
+8. Eight
+   - One
+9. Nine
+   - One
+10. Ten
+    - One";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for ordered list with variable marker widths, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_ordered_list_inconsistent_siblings() {
+        // MD005 checks that siblings (items under the same parent) have consistent indentation
+        let rule = MD005ListIndent::default();
+        let content = "\
+1. Item one
+   - First sublist at 3 spaces
+  - Second sublist at 2 spaces (inconsistent)
+   - Third sublist at 3 spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        // The item at column 2 should be flagged (inconsistent with siblings at column 3)
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected 1 warning for inconsistent sibling indent, got: {result:?}"
+        );
+        assert!(result[0].message.contains("Expected indentation of 3"));
+    }
+
+    #[test]
+    fn test_ordered_list_single_sublist_no_warning() {
+        // A single sublist item under a parent should not trigger MD005
+        // (nothing to compare for consistency)
+        let rule = MD005ListIndent::default();
+        let content = "\
+10. Item ten
+   - Only sublist at 3 spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        // No warning because there's only one sibling
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for single sublist item, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_sublists_grouped_by_parent_content_column() {
+        // Sublists should be grouped by parent content column.
+        // Items 9 and 10 have different marker widths (3 vs 4 chars), so their sublists
+        // are at different column positions. Each group should be checked independently.
+        let rule = MD005ListIndent::default();
+        let content = "\
+9. Item nine
+   - First sublist at 3 spaces
+   - Second sublist at 3 spaces
+   - Third sublist at 3 spaces
+10. Item ten
+    - First sublist at 4 spaces
+    - Second sublist at 4 spaces
+    - Third sublist at 4 spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        // No warnings: sublists under item 9 are at col 3 (consistent within group),
+        // sublists under item 10 are at col 4 (consistent within their group)
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for sublists grouped by parent, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_inconsistent_indent_within_parent_group() {
+        // Test that inconsistency WITHIN a parent group is still detected
+        let rule = MD005ListIndent::default();
+        let content = "\
+10. Item ten
+    - First sublist at 4 spaces
+   - Second sublist at 3 spaces (inconsistent!)
+    - Third sublist at 4 spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let result = rule.check(&ctx).unwrap();
+        // The item at 3 spaces should be flagged (inconsistent with siblings at 4 spaces)
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected 1 warning for inconsistent indent within parent group, got: {result:?}"
+        );
+        assert!(result[0].line == 3);
+        assert!(result[0].message.contains("Expected indentation of 4"));
     }
 }
