@@ -166,6 +166,12 @@ update-cargo-version:
 	@echo "Updating Cargo.lock..."
 	@cargo update
 
+update-github-action-version:
+	@echo "Updating the companion Github Action to use version $(VERSION_NO_V)..."
+	@perl -i.bak -pe 's/^rumdl_version="[0-9]+\.[0-9]+\.[0-9]+"/rumdl_version="$(VERSION_NO_V)"/g' scripts/rumdl-action.sh
+	@rm -f scripts/rumdl-action.sh.bak 2>/dev/null || true
+	@echo "Companion Github Action updated to version $(VERSION_NO_V)"
+
 update-readme-version:
 	@echo "Updating README.md pre-commit rev to $(NEW_TAG)..."
 	@perl -i.bak -0777 -pe 's{(repo: https://github.com/rvben/rumdl\s+rev: )v\d+\.\d+\.\d+}{$$1$(NEW_TAG)}g' README.md
@@ -229,9 +235,10 @@ version-major:
 	$(eval VERSION_NO_V := $(NEW_MAJOR).0.0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
+	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
-	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md
+	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
@@ -246,9 +253,10 @@ version-minor:
 	$(eval VERSION_NO_V := $(MAJOR).$(NEW_MINOR).0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
+	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
-	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md
+	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
@@ -264,9 +272,10 @@ version-patch:
 	$(eval VERSION_NO_V := $(MAJOR).$(MINOR).$(NEW_PATCH))
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
+	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
-	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md
+	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh
 	@git commit -m "Bump version to $(NEW_TAG)"
 	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."

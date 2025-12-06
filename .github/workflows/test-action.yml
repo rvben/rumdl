@@ -1,0 +1,86 @@
+name: Test Action
+on:
+  push:
+    branches: [main]
+    paths: ["action.yml", "scripts/rumdl-action.sh"]
+  pull_request:
+    paths: ["action.yml", "scripts/rumdl-action.sh"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-default:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./
+        with:
+          path: __tests__/fixtures/clean/
+
+  test-with-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./
+        with:
+          version: "0.0.189"
+          path: __tests__/fixtures/clean/
+
+  test-with-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./
+        with:
+          config: __tests__/fixtures/clean/.rumdl.toml
+          path: __tests__/fixtures/clean/
+
+  test-annotations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./
+        with:
+          report-type: annotations
+          path: __tests__/fixtures/clean/
+
+  test-expected-failure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action (should fail on malformed markdown)
+        id: should-fail
+        continue-on-error: true
+        uses: ./
+        with:
+          path: __tests__/fixtures/malformed/
+      - name: Verify action failed
+        run: |
+          if [ "${{ steps.should-fail.outcome }}" == "success" ]; then
+            echo "Expected failure but got success"
+            exit 1
+          fi
+
+  all-tests-passed:
+    runs-on: ubuntu-latest
+    needs:
+      - test-default
+      - test-with-version
+      - test-with-config
+      - test-annotations
+      - test-expected-failure
+    if: always()
+    steps:
+      - name: All tests passed
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]; then
+            echo "Some tests failed or were cancelled"
+            exit 1
+          fi
+          echo "All tests passed!"

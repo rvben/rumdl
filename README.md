@@ -374,14 +374,47 @@ However, for pre-commit workflows where you want to exclude certain files even w
 
 ### GitHub Actions
 
-rumdl can output annotations directly in GitHub Actions format, making issues appear inline in pull requests:
+We have a companion Action you can use to integrate rumdl directly in your workflow:
 
 ```yaml
-- name: Lint Markdown
-  run: rumdl check --output-format github .
+jobs:
+  rumdl-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rvben/rumdl@main
 ```
 
-This produces annotations that GitHub automatically displays in the PR's "Files changed" tab. Supports error/warning severity levels and precise issue locations.
+#### Inputs
+
+| Input         | Description                            | Default        |
+| ------------- | -------------------------------------- | -------------- |
+| `version`     | Version of rumdl to install            | latest         |
+| `path`        | Path to lint                           | workspace root |
+| `config`      | Path to config file                    | auto-detected  |
+| `report-type` | Output format: `logs` or `annotations` | `logs`         |
+
+#### Examples
+
+**Lint specific directory with pinned version:**
+
+```yaml
+- uses: rvben/rumdl@main
+  with:
+    version: "0.0.189"
+    path: docs/
+```
+
+**Use custom config and show annotations in PR:**
+
+```yaml
+- uses: rvben/rumdl@main
+  with:
+    config: .rumdl.toml
+    report-type: annotations
+```
+
+The `annotations` report type displays issues directly in the PR's "Files changed" tab with error/warning severity levels and precise locations.
 
 ## Rules
 

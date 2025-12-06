@@ -1,0 +1,34 @@
+name: "rumdl-action"
+description: "Lint Markdown files with rumdl"
+
+inputs:
+  version:
+    description: "Version of rumdl to install (default: latest)"
+    required: false
+    default: ""
+  path:
+    description: "Path to lint (default: workspace root)"
+    required: false
+    default: ""
+  config:
+    description: "Path to config file"
+    required: false
+    default: ""
+  report-type:
+    description: |
+      How this action should report results.
+      Possible values: logs (default), annotations
+    required: false
+    default: "logs"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Lint Markdown files with rumdl
+      shell: bash
+      run: $GITHUB_ACTION_PATH/scripts/rumdl-action.sh
+      env:
+        GHA_RUMDL_VERSION: ${{ inputs.version }}
+        GHA_RUMDL_PATH: ${{ inputs.path }}
+        GHA_RUMDL_CONFIG: ${{ inputs.config }}
+        GHA_RUMDL_REPORT_TYPE: ${{ inputs.report-type }}

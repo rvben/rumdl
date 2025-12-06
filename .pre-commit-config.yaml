@@ -76,7 +76,7 @@ repos:
         entry: cargo run --quiet -- check
         language: system
         files: \.md$
-        exclude: ^(test_tmp|benchmark/test-data|docs/temp|CHANGELOG\.md)
+        exclude: ^(test_tmp|benchmark/test-data|docs/temp|__tests__|CHANGELOG\.md)
         pass_filenames: true
         require_serial: true
 
