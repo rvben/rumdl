@@ -181,6 +181,22 @@ pub fn load_config_with_cli_error_handling_with_dir(
     discovery_dir: Option<&std::path::Path>,
 ) -> rumdl_config::SourcedConfig {
     let result = if let Some(dir) = discovery_dir {
+        // Canonicalize config path before changing directory
+        // Otherwise relative paths will be resolved from the wrong directory
+        let absolute_config_path = config_path.map(|p| {
+            let path = std::path::Path::new(p);
+            if path.is_absolute() {
+                p.to_string()
+            } else if let Ok(canonical) = std::fs::canonicalize(path) {
+                canonical.to_string_lossy().to_string()
+            } else {
+                // If file doesn't exist yet, make it absolute relative to current dir
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(p).to_string_lossy().to_string())
+                    .unwrap_or_else(|_| p.to_string())
+            }
+        });
+
         // Temporarily change working directory for config discovery
         let original_dir = std::env::current_dir().ok();
 
@@ -191,7 +207,8 @@ pub fn load_config_with_cli_error_handling_with_dir(
             let _ = std::env::set_current_dir(parent);
         }
 
-        let config_result = rumdl_config::SourcedConfig::load_with_discovery(config_path, None, isolated);
+        let config_result =
+            rumdl_config::SourcedConfig::load_with_discovery(absolute_config_path.as_deref(), None, isolated);
 
         // Restore original directory
         if let Some(orig) = original_dir {
