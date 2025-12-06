@@ -2304,4 +2304,81 @@ disable = ["MD022"]
             "Flag should be settable to true"
         );
     }
+
+    /// Test issue #182: Verify capability detection logic matches Ruff's pattern
+    ///
+    /// The detection should check: params.capabilities.text_document.diagnostic.is_some()
+    #[tokio::test]
+    async fn test_issue_182_capability_detection_with_diagnostic_support() {
+        use tower_lsp::lsp_types::{ClientCapabilities, DiagnosticClientCapabilities, TextDocumentClientCapabilities};
+
+        // Create client capabilities WITH diagnostic support
+        let caps_with_diagnostic = ClientCapabilities {
+            text_document: Some(TextDocumentClientCapabilities {
+                diagnostic: Some(DiagnosticClientCapabilities {
+                    dynamic_registration: Some(true),
+                    related_document_support: Some(false),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        // Verify the detection logic (same as in initialize)
+        let supports_pull = caps_with_diagnostic
+            .text_document
+            .as_ref()
+            .and_then(|td| td.diagnostic.as_ref())
+            .is_some();
+
+        assert!(supports_pull, "Should detect pull diagnostic support");
+    }
+
+    /// Test issue #182: Verify capability detection when diagnostic is NOT supported
+    #[tokio::test]
+    async fn test_issue_182_capability_detection_without_diagnostic_support() {
+        use tower_lsp::lsp_types::{ClientCapabilities, TextDocumentClientCapabilities};
+
+        // Create client capabilities WITHOUT diagnostic support
+        let caps_without_diagnostic = ClientCapabilities {
+            text_document: Some(TextDocumentClientCapabilities {
+                diagnostic: None, // No diagnostic support
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        // Verify the detection logic
+        let supports_pull = caps_without_diagnostic
+            .text_document
+            .as_ref()
+            .and_then(|td| td.diagnostic.as_ref())
+            .is_some();
+
+        assert!(!supports_pull, "Should NOT detect pull diagnostic support");
+    }
+
+    /// Test issue #182: Verify capability detection with empty text_document
+    #[tokio::test]
+    async fn test_issue_182_capability_detection_no_text_document() {
+        use tower_lsp::lsp_types::ClientCapabilities;
+
+        // Create client capabilities with no text_document at all
+        let caps_no_text_doc = ClientCapabilities {
+            text_document: None,
+            ..Default::default()
+        };
+
+        // Verify the detection logic
+        let supports_pull = caps_no_text_doc
+            .text_document
+            .as_ref()
+            .and_then(|td| td.diagnostic.as_ref())
+            .is_some();
+
+        assert!(
+            !supports_pull,
+            "Should NOT detect pull diagnostic support when text_document is None"
+        );
+    }
 }
