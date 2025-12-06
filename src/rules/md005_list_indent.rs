@@ -190,6 +190,134 @@ impl MD005ListIndent {
     /// Lists that are continuation content typically indent 2 spaces from parent content.
     const STANDARD_CONTINUATION_OFFSET: usize = 2;
 
+    /// Creates a warning for an indent mismatch.
+    fn create_indent_warning(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line_num: usize,
+        line_info: &crate::lint_context::LineInfo,
+        actual_indent: usize,
+        expected_indent: usize,
+    ) -> LintWarning {
+        let message = format!(
+            "Expected indentation of {} {}, found {}",
+            expected_indent,
+            if expected_indent == 1 { "space" } else { "spaces" },
+            actual_indent
+        );
+
+        let (start_line, start_col, end_line, end_col) = if actual_indent > 0 {
+            calculate_match_range(line_num, line_info.content(ctx.content), 0, actual_indent)
+        } else {
+            calculate_match_range(line_num, line_info.content(ctx.content), 0, 1)
+        };
+
+        let fix_range = if actual_indent > 0 {
+            let start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+            let end_byte = start_byte + actual_indent;
+            start_byte..end_byte
+        } else {
+            let byte_pos = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+            byte_pos..byte_pos
+        };
+
+        let replacement = if expected_indent > 0 {
+            " ".repeat(expected_indent)
+        } else {
+            String::new()
+        };
+
+        LintWarning {
+            rule_name: Some(self.name().to_string()),
+            line: start_line,
+            column: start_col,
+            end_line,
+            end_column: end_col,
+            message,
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: fix_range,
+                replacement,
+            }),
+        }
+    }
+
+    /// Checks consistency within a group of items and emits warnings.
+    /// Uses first-established indent as the expected value when inconsistencies are found.
+    fn check_indent_consistency(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        items: &[(usize, usize, &crate::lint_context::LineInfo)],
+        warnings: &mut Vec<LintWarning>,
+    ) {
+        if items.len() < 2 {
+            return;
+        }
+
+        // Sort items by line number to find first-established pattern
+        let mut sorted_items: Vec<_> = items.iter().collect();
+        sorted_items.sort_by_key(|(line_num, _, _)| *line_num);
+
+        let indents: std::collections::HashSet<usize> = sorted_items.iter().map(|(_, indent, _)| *indent).collect();
+
+        if indents.len() > 1 {
+            // Items have inconsistent indentation
+            // Use the first established indent as the expected value
+            let expected_indent = sorted_items.first().map(|(_, i, _)| *i).unwrap_or(0);
+
+            for (line_num, indent, line_info) in items {
+                if *indent != expected_indent {
+                    warnings.push(self.create_indent_warning(ctx, *line_num, line_info, *indent, expected_indent));
+                }
+            }
+        }
+    }
+
+    /// Groups items by their semantic parent's content column.
+    /// This correctly handles ordered lists where marker widths vary (e.g., "1. " vs "10. ").
+    fn group_by_parent_content_column<'a>(
+        &self,
+        level: usize,
+        group: &[(usize, usize, &'a crate::lint_context::LineInfo)],
+        all_list_items: &[(
+            usize,
+            usize,
+            &crate::lint_context::LineInfo,
+            &crate::lint_context::ListItemInfo,
+        )],
+        level_map: &HashMap<usize, usize>,
+    ) -> HashMap<usize, Vec<(usize, usize, &'a crate::lint_context::LineInfo)>> {
+        let parent_level = level - 1;
+        let mut parent_content_groups: HashMap<usize, Vec<(usize, usize, &'a crate::lint_context::LineInfo)>> =
+            HashMap::new();
+
+        for (line_num, indent, line_info) in group {
+            // Find the most recent item at parent_level before this line
+            let mut parent_content_col: Option<usize> = None;
+
+            for (prev_line, _, _, list_item) in all_list_items.iter().rev() {
+                if *prev_line >= *line_num {
+                    continue;
+                }
+                if let Some(&prev_level) = level_map.get(prev_line)
+                    && prev_level == parent_level
+                {
+                    parent_content_col = Some(list_item.content_column);
+                    break;
+                }
+            }
+
+            if let Some(parent_col) = parent_content_col {
+                parent_content_groups
+                    .entry(parent_col)
+                    .or_default()
+                    .push((*line_num, *indent, *line_info));
+            }
+        }
+
+        parent_content_groups
+    }
+
     /// Group related list blocks that should be treated as one logical list structure
     fn group_related_list_blocks<'a>(
         &self,
@@ -451,163 +579,31 @@ impl MD005ListIndent {
         }
 
         // For each level, check consistency
-        for (level, group) in level_groups {
-            // Sort by line number
-            let mut group = group;
+        for (level, mut group) in level_groups {
             group.sort_by_key(|(line_num, _, _)| *line_num);
 
             if level == 1 {
                 // Top-level items should have the configured indentation
                 for (line_num, indent, line_info) in &group {
                     if *indent != self.top_level_indent {
-                        let expected_indent = self.top_level_indent;
-                        let message = format!(
-                            "Expected indentation of {} {}, found {}",
-                            expected_indent,
-                            if expected_indent == 1 { "space" } else { "spaces" },
-                            indent
-                        );
-
-                        let (start_line, start_col, end_line, end_col) = if *indent > 0 {
-                            calculate_match_range(*line_num, line_info.content(ctx.content), 0, *indent)
-                        } else {
-                            calculate_match_range(*line_num, line_info.content(ctx.content), 0, 1)
-                        };
-
-                        let fix_range = if *indent > 0 {
-                            let start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                            let end_byte = start_byte + *indent;
-                            start_byte..end_byte
-                        } else {
-                            let byte_pos = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                            byte_pos..byte_pos
-                        };
-
-                        let replacement = if expected_indent > 0 {
-                            " ".repeat(expected_indent)
-                        } else {
-                            String::new()
-                        };
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message,
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: fix_range,
-                                replacement,
-                            }),
-                        });
+                        warnings.push(self.create_indent_warning(
+                            ctx,
+                            *line_num,
+                            line_info,
+                            *indent,
+                            self.top_level_indent,
+                        ));
                     }
                 }
             } else {
                 // For sublists (level > 1), group items by their semantic parent's content column.
-                // This correctly handles ordered lists where marker widths vary (e.g., "1. " vs "10. ")
-                // by NOT comparing items across parents with different content columns.
-                //
-                // Key insight:
-                // - Items under "1." to "9." have parent content column 3, so sublists should be at 3
-                // - Items under "10." have parent content column 4, so sublists should be at 4
-                // - We group by parent content column to avoid false positives when mixing these
-
-                // Find semantic parent (closest item at level-1) for each item
-                // This is different from parent_map which uses strict indentation hierarchy
-                let parent_level = level - 1;
-                let mut parent_content_groups: HashMap<usize, Vec<(usize, usize, &crate::lint_context::LineInfo)>> =
-                    HashMap::new();
-
-                for (line_num, indent, line_info) in &group {
-                    // Find the most recent item at parent_level before this line
-                    let mut parent_content_col: Option<usize> = None;
-
-                    for (prev_line, _, _, list_item) in all_list_items.iter().rev() {
-                        if *prev_line >= *line_num {
-                            continue;
-                        }
-                        if let Some(&prev_level) = level_map.get(prev_line)
-                            && prev_level == parent_level
-                        {
-                            parent_content_col = Some(list_item.content_column);
-                            break;
-                        }
-                    }
-
-                    if let Some(parent_col) = parent_content_col {
-                        parent_content_groups
-                            .entry(parent_col)
-                            .or_default()
-                            .push((*line_num, *indent, *line_info));
-                    }
-                }
+                // This handles ordered lists where marker widths vary (e.g., "1. " vs "10. ").
+                let parent_content_groups =
+                    self.group_by_parent_content_column(level, &group, &all_list_items, &level_map);
 
                 // Check consistency within each parent content column group
                 for items in parent_content_groups.values() {
-                    if items.len() < 2 {
-                        continue;
-                    }
-
-                    // Sort items by line number to find first-established pattern
-                    let mut sorted_items: Vec<_> = items.iter().collect();
-                    sorted_items.sort_by_key(|(line_num, _, _)| *line_num);
-
-                    let indents: std::collections::HashSet<usize> =
-                        sorted_items.iter().map(|(_, indent, _)| *indent).collect();
-
-                    if indents.len() > 1 {
-                        // Items have inconsistent indentation
-                        // Use the first established indent as the expected value
-                        let expected_indent = sorted_items.first().map(|(_, i, _)| *i).unwrap_or(0);
-
-                        for (line_num, indent, line_info) in items {
-                            if *indent != expected_indent {
-                                let message = format!(
-                                    "Expected indentation of {} {}, found {}",
-                                    expected_indent,
-                                    if expected_indent == 1 { "space" } else { "spaces" },
-                                    indent
-                                );
-
-                                let (start_line, start_col, end_line, end_col) = if *indent > 0 {
-                                    calculate_match_range(*line_num, line_info.content(ctx.content), 0, *indent)
-                                } else {
-                                    calculate_match_range(*line_num, line_info.content(ctx.content), 0, 1)
-                                };
-
-                                let fix_range = if *indent > 0 {
-                                    let start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                                    let end_byte = start_byte + *indent;
-                                    start_byte..end_byte
-                                } else {
-                                    let byte_pos = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                                    byte_pos..byte_pos
-                                };
-
-                                let replacement = if expected_indent > 0 {
-                                    " ".repeat(expected_indent)
-                                } else {
-                                    String::new()
-                                };
-
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name().to_string()),
-                                    line: start_line,
-                                    column: start_col,
-                                    end_line,
-                                    end_column: end_col,
-                                    message,
-                                    severity: Severity::Warning,
-                                    fix: Some(Fix {
-                                        range: fix_range,
-                                        replacement,
-                                    }),
-                                });
-                            }
-                        }
-                    }
+                    self.check_indent_consistency(ctx, items, warnings);
                 }
             }
         }
