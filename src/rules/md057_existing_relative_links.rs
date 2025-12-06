@@ -406,7 +406,12 @@ impl Rule for MD057ExistingRelativeLinks {
 
         for cross_link in &file_index.cross_file_links {
             // Resolve the relative path
-            let target_path = if let Some(dir) = file_dir {
+            let target_path = if cross_link.target_path.starts_with('/') {
+                // Absolute path from workspace root (e.g., "/CONTRIBUTING.md")
+                // Walk up from the current file's directory to find the workspace root
+                let stripped = cross_link.target_path.trim_start_matches('/');
+                resolve_absolute_link(file_path, stripped)
+            } else if let Some(dir) = file_dir {
                 dir.join(&cross_link.target_path)
             } else {
                 Path::new(&cross_link.target_path).to_path_buf()
@@ -467,6 +472,30 @@ fn normalize_path(path: &Path) -> PathBuf {
     }
 
     components.iter().collect()
+}
+
+/// Resolve an absolute link (e.g., "/CONTRIBUTING.md") relative to the workspace root.
+///
+/// Absolute paths in markdown (starting with "/") are relative to the workspace/repo root,
+/// not the filesystem root. This function walks up from the current file's directory
+/// to find where the target file exists.
+fn resolve_absolute_link(file_path: &Path, stripped_path: &str) -> PathBuf {
+    // Walk up from the file's directory, checking each ancestor for the target
+    let mut current = file_path.parent();
+    while let Some(dir) = current {
+        let candidate = dir.join(stripped_path);
+        if candidate.exists() {
+            return candidate;
+        }
+        current = dir.parent();
+    }
+
+    // If not found by walking up, return the path relative to the file's directory
+    // (this will likely fail the existence check later, which is correct behavior)
+    file_path
+        .parent()
+        .map(|d| d.join(stripped_path))
+        .unwrap_or_else(|| PathBuf::from(stripped_path))
 }
 
 #[cfg(test)]
@@ -821,5 +850,32 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
 
         // Test multiple parent directories
         assert_eq!(normalize_path(Path::new("a/b/c/../../d.md")), PathBuf::from("a/d.md"));
+    }
+
+    #[test]
+    fn test_resolve_absolute_link() {
+        // Create a temporary directory structure for testing
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let root = temp_dir.path();
+
+        // Create root-level file
+        let contributing = root.join("CONTRIBUTING.md");
+        File::create(&contributing).expect("Failed to create CONTRIBUTING.md");
+
+        // Create nested directory with a markdown file
+        let docs = root.join("docs");
+        std::fs::create_dir(&docs).expect("Failed to create docs dir");
+        let readme = docs.join("README.md");
+        File::create(&readme).expect("Failed to create README.md");
+
+        // Test: absolute link from nested file to root file
+        // From docs/README.md, link to /CONTRIBUTING.md should resolve to root/CONTRIBUTING.md
+        let resolved = resolve_absolute_link(&readme, "CONTRIBUTING.md");
+        assert!(resolved.exists(), "Should find CONTRIBUTING.md at workspace root");
+        assert_eq!(resolved, contributing);
+
+        // Test: file that doesn't exist should not resolve (returns path relative to file's dir)
+        let nonexistent = resolve_absolute_link(&readme, "NONEXISTENT.md");
+        assert!(!nonexistent.exists(), "Should not find nonexistent file");
     }
 }
