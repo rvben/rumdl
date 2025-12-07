@@ -1887,6 +1887,7 @@ dependencies = [
  "itertools 0.14.0",
  "js-sys",
  "jsonschema",
+ "libc",
  "log",
  "memmap2",
  "memory-stats",

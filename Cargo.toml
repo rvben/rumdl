@@ -122,6 +122,9 @@ tikv-jemallocator = "0.6"
 [target.'cfg(all(target_env = "msvc", not(target_arch = "wasm32")))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [[bench]]
 name = "link_parsing_manual"
 harness = false
