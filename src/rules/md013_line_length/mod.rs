@@ -422,10 +422,9 @@ impl Rule for MD013LineLength {
         Self: Sized,
     {
         let mut rule_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
-        // Special handling for line_length from global config
+        // Use global line_length if rule-specific config still has default value
         if rule_config.line_length.get() == 80 {
-            // default value
-            rule_config.line_length = crate::types::LineLength::new(config.global.line_length as usize);
+            rule_config.line_length = config.global.line_length;
         }
         Box::new(Self::from_config_struct(rule_config))
     }

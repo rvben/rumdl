@@ -1330,7 +1330,7 @@ build-backend = "setuptools.build_meta"
                             || !fragment.global.disable.value.is_empty()
                             || !fragment.global.exclude.value.is_empty()
                             || !fragment.global.include.value.is_empty()
-                            || fragment.global.line_length.value != 80
+                            || fragment.global.line_length.value.get() != 80
                         {
                             output.push_str(&format!("[{section_prefix}global]\n"));
                             if !fragment.global.enable.value.is_empty() {
@@ -1345,8 +1345,8 @@ build-backend = "setuptools.build_meta"
                             if !fragment.global.include.value.is_empty() {
                                 output.push_str(&format!("include = {:?}\n", fragment.global.include.value));
                             }
-                            if fragment.global.line_length.value != 80 {
-                                output.push_str(&format!("line_length = {}\n", fragment.global.line_length.value));
+                            if fragment.global.line_length.value.get() != 80 {
+                                output.push_str(&format!("line_length = {}\n", fragment.global.line_length.value.get()));
                             }
                             output.push('\n');
                         }
@@ -1408,7 +1408,7 @@ build-backend = "setuptools.build_meta"
                             || !fragment.global.disable.value.is_empty()
                             || !fragment.global.exclude.value.is_empty()
                             || !fragment.global.include.value.is_empty()
-                            || fragment.global.line_length.value != 80
+                            || fragment.global.line_length.value.get() != 80
                         {
                             let mut global = serde_json::Map::new();
                             if !fragment.global.enable.value.is_empty() {
@@ -1467,11 +1467,11 @@ build-backend = "setuptools.build_meta"
                                     ),
                                 );
                             }
-                            if fragment.global.line_length.value != 80 {
+                            if fragment.global.line_length.value.get() != 80 {
                                 global.insert(
                                     "line_length".to_string(),
                                     serde_json::Value::Number(serde_json::Number::from(
-                                        fragment.global.line_length.value,
+                                        fragment.global.line_length.value.get(),
                                     )),
                                 );
                             }

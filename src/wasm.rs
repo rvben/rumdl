@@ -30,6 +30,7 @@ use wasm_bindgen::prelude::*;
 use crate::config::{Config, MarkdownFlavor};
 use crate::fix_coordinator::FixCoordinator;
 use crate::rules::{all_rules, filter_rules};
+use crate::types::LineLength;
 
 /// Initialize the WASM module with better panic messages
 #[wasm_bindgen(start)]
@@ -73,7 +74,7 @@ impl LinterConfig {
 
         // Apply line length
         if let Some(line_length) = self.line_length {
-            config.global.line_length = line_length;
+            config.global.line_length = LineLength::new(line_length as usize);
         }
 
         // Apply flavor
@@ -177,7 +178,7 @@ impl Linter {
         serde_json::json!({
             "disable": self.config.global.disable,
             "enable": self.config.global.enable,
-            "line_length": self.config.global.line_length,
+            "line_length": self.config.global.line_length.get(),
             "flavor": match self.flavor {
                 MarkdownFlavor::Standard => "standard",
                 MarkdownFlavor::MkDocs => "mkdocs",
@@ -258,7 +259,7 @@ mod tests {
 
         let internal = config.to_config();
         assert!(internal.global.disable.contains(&"MD041".to_string()));
-        assert_eq!(internal.global.line_length, 100);
+        assert_eq!(internal.global.line_length.get(), 100);
     }
 
     #[test]

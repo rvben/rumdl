@@ -8,7 +8,8 @@ use std::fmt;
 /// - ≥1: Actual line length limit
 ///
 /// This type enforces those constraints at deserialization time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, schemars::JsonSchema)]
+#[schemars(transparent)]
 pub struct LineLength(Option<usize>);
 
 impl LineLength {

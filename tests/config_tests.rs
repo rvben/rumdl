@@ -937,7 +937,7 @@ indent = 4
 
     // Verify user config was loaded
     assert_eq!(
-        config.global.line_length, 88,
+        config.global.line_length.get(), 88,
         "Should load line-length from user config"
     );
     assert_eq!(
@@ -970,7 +970,7 @@ indent = 2
 
     // Verify project config takes precedence
     assert_eq!(
-        config_with_project.global.line_length, 100,
+        config_with_project.global.line_length.get(), 100,
         "Project config should override user config"
     );
     let project_indent = rumdl_lib::config::get_rule_config_value::<usize>(&config_with_project, "MD007", "indent");
@@ -1037,7 +1037,7 @@ line-length = 99"#,
 
     let config: Config = sourced.into();
     assert_eq!(
-        config.global.line_length, 77,
+        config.global.line_length.get(), 77,
         ".rumdl.toml should have highest precedence"
     );
 
@@ -1049,7 +1049,7 @@ line-length = 99"#,
 
     let config2: Config = sourced2.into();
     assert_eq!(
-        config2.global.line_length, 88,
+        config2.global.line_length.get(), 88,
         "rumdl.toml should be loaded when .rumdl.toml is absent"
     );
 
@@ -1061,7 +1061,7 @@ line-length = 99"#,
 
     let config3: Config = sourced3.into();
     assert_eq!(
-        config3.global.line_length, 99,
+        config3.global.line_length.get(), 99,
         "pyproject.toml should be loaded when other configs are absent"
     );
 
@@ -1328,7 +1328,7 @@ line-length = 42
         std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
         let config: rumdl_lib::config::Config = sourced.into();
-        assert_eq!(config.global.line_length, 42, ".config/rumdl.toml should be discovered");
+        assert_eq!(config.global.line_length.get(), 42, ".config/rumdl.toml should be discovered");
     }
 
     #[test]
@@ -1370,7 +1370,7 @@ line-length = 42
 
         let config: rumdl_lib::config::Config = sourced.into();
         assert_eq!(
-            config.global.line_length, 100,
+            config.global.line_length.get(), 100,
             ".rumdl.toml should take precedence over .config/rumdl.toml"
         );
     }

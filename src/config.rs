@@ -4,6 +4,7 @@
 
 use crate::rule::Rule;
 use crate::rules;
+use crate::types::LineLength;
 use log;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -263,8 +264,8 @@ pub struct GlobalConfig {
     pub respect_gitignore: bool,
 
     /// Global line length setting (used by MD013 and other rules if not overridden)
-    #[serde(default = "default_line_length", alias = "line_length")]
-    pub line_length: u64,
+    #[serde(default, alias = "line_length")]
+    pub line_length: LineLength,
 
     /// Output format for linting results (e.g., "text", "json", "pylint", etc.)
     #[serde(skip_serializing_if = "Option::is_none", alias = "output_format")]
@@ -303,10 +304,6 @@ fn default_respect_gitignore() -> bool {
     true
 }
 
-fn default_line_length() -> u64 {
-    80
-}
-
 // Add the Default impl
 impl Default for GlobalConfig {
     #[allow(deprecated)]
@@ -317,7 +314,7 @@ impl Default for GlobalConfig {
             exclude: Vec::new(),
             include: Vec::new(),
             respect_gitignore: true,
-            line_length: 80,
+            line_length: LineLength::default(),
             output_format: None,
             fixable: Vec::new(),
             unfixable: Vec::new(),
@@ -748,7 +745,7 @@ line-length = "not a number"
         let config: Config = sourced.into();
 
         // Should have default values
-        assert_eq!(config.global.line_length, 80);
+        assert_eq!(config.global.line_length.get(), 80);
         assert!(config.global.respect_gitignore);
         assert!(config.rules.is_empty());
     }
@@ -1581,7 +1578,7 @@ pub struct SourcedGlobalConfig {
     pub exclude: SourcedValue<Vec<String>>,
     pub include: SourcedValue<Vec<String>>,
     pub respect_gitignore: SourcedValue<bool>,
-    pub line_length: SourcedValue<u64>,
+    pub line_length: SourcedValue<LineLength>,
     pub output_format: Option<SourcedValue<String>>,
     pub fixable: SourcedValue<Vec<String>>,
     pub unfixable: SourcedValue<Vec<String>>,
@@ -1598,7 +1595,7 @@ impl Default for SourcedGlobalConfig {
             exclude: SourcedValue::new(Vec::new(), ConfigSource::Default),
             include: SourcedValue::new(Vec::new(), ConfigSource::Default),
             respect_gitignore: SourcedValue::new(true, ConfigSource::Default),
-            line_length: SourcedValue::new(80, ConfigSource::Default),
+            line_length: SourcedValue::new(LineLength::default(), ConfigSource::Default),
             output_format: None,
             fixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             unfixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
@@ -2704,7 +2701,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 fragment
                     .global
                     .line_length
-                    .push_override(value, source, file.clone(), None);
+                    .push_override(LineLength::new(value as usize), source, file.clone(), None);
 
                 // Also add to MD013 rule config for backward compatibility
                 let norm_md013_key = normalize_key("MD013");
@@ -3023,7 +3020,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                 "line_length" | "line-length" => {
                     // Handle both cases
                     if let Some(toml_edit::Value::Integer(formatted_int)) = value_item.as_value() {
-                        let val = *formatted_int.value() as u64;
+                        let val = LineLength::new(*formatted_int.value() as usize);
                         fragment
                             .global
                             .line_length

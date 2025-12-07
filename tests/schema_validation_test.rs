@@ -295,7 +295,7 @@ respect-gitignore = false
 force-exclude = true
 "#;
     let kebab_config: Config = toml::from_str(kebab_toml).expect("Kebab-case config should parse");
-    assert_eq!(kebab_config.global.line_length, 100);
+    assert_eq!(kebab_config.global.line_length.get(), 100);
     assert!(!kebab_config.global.respect_gitignore);
 
     // Snake_case (backward compatible)
@@ -307,7 +307,7 @@ force_exclude = true
 "#;
     let snake_config: Config =
         toml::from_str(snake_toml).expect("Snake_case config should parse for backward compatibility");
-    assert_eq!(snake_config.global.line_length, 100);
+    assert_eq!(snake_config.global.line_length.get(), 100);
     assert!(!snake_config.global.respect_gitignore);
 
     // Both should produce the same result

@@ -1992,7 +1992,7 @@ line_length = 110
 
         // Default global line_length is 80
         assert_eq!(
-            config.global.line_length, 80,
+            config.global.line_length.get(), 80,
             "Should fall back to default config when no config file found"
         );
     }
