@@ -755,6 +755,17 @@ fn handle_clean_command(cli: &Cli) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // Reset SIGPIPE to default behavior on Unix so piping to `head` etc. works correctly.
+    // Without this, Rust ignores SIGPIPE and `println!` panics on broken pipe.
+    #[cfg(unix)]
+    {
+        // SAFETY: Setting SIGPIPE to SIG_DFL is standard practice for CLI tools
+        // that produce output meant to be piped. This is safe and idiomatic.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+
     let cli = Cli::parse();
 
     // Set color override globally based on --color flag
