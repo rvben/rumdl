@@ -5,15 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.191] - 2025-12-08
 
 ### Fixed
+
+- **CLI: Handle broken pipe gracefully when piping to head (fixes #184)**
+  - Output to closed pipes (e.g., `rumdl check . | head`) no longer causes error messages
+  - SIGPIPE is now handled properly on Unix systems
 
 - **Config: Resolve exclude patterns relative to config file location (fixes #185)**
   - Exclude patterns like `docs/*` now resolve relative to the project root (config file directory)
   - Previously patterns resolved relative to the current working directory, causing them to fail when running from a different directory with `--config`
   - This matches the behavior of Biome, Black, and markdownlint-cli2
   - **Note:** Users running from the project root (the common case) are unaffected
+
+- **Docs: Correct build status badge to track release workflow**
 
 ## [0.0.190] - 2025-12-06
 
