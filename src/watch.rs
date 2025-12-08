@@ -83,6 +83,7 @@ pub fn perform_check_run(
     quiet: bool,
     cache: Option<Arc<std::sync::Mutex<crate::cache::LintCache>>>,
     workspace_cache_dir: Option<&Path>,
+    project_root: Option<&Path>,
 ) -> bool {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
 
@@ -118,7 +119,7 @@ pub fn perform_check_run(
     }
 
     // Find all markdown files to check
-    let file_paths = match crate::file_processor::find_markdown_files(&args.paths, args, config) {
+    let file_paths = match crate::file_processor::find_markdown_files(&args.paths, args, config, project_root) {
         Ok(paths) => paths,
         Err(e) => {
             if !args.silent {
@@ -569,6 +570,9 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
         }
     }
 
+    // Extract project_root before converting to Config (for exclude pattern resolution)
+    let mut project_root = sourced.project_root.clone();
+
     let mut config: rumdl_config::Config = sourced.clone().into();
 
     // Configure the file watcher
@@ -613,7 +617,7 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
     println!("{}", "Press Ctrl-C to exit".cyan());
     println!();
 
-    let _has_issues = perform_check_run(args, &config, quiet, None, None);
+    let _has_issues = perform_check_run(args, &config, quiet, None, None, project_root.as_deref());
     if !quiet {
         println!("\n{}", "Watching for file changes...".cyan());
     }
@@ -662,6 +666,8 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
                                 }
                             }
 
+                            // Update project_root from reloaded config
+                            project_root = sourced.project_root.clone();
                             config = sourced.clone().into();
                         }
 
@@ -686,7 +692,7 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
                         let _ = io::stdout().flush();
 
                         // Re-run the check
-                        let _has_issues = perform_check_run(args, &config, quiet, None, None);
+                        let _has_issues = perform_check_run(args, &config, quiet, None, None, project_root.as_deref());
                         if !quiet {
                             println!("\n{}", "Watching for file changes...".cyan());
                         }

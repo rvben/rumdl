@@ -1346,7 +1346,8 @@ build-backend = "setuptools.build_meta"
                                 output.push_str(&format!("include = {:?}\n", fragment.global.include.value));
                             }
                             if fragment.global.line_length.value.get() != 80 {
-                                output.push_str(&format!("line_length = {}\n", fragment.global.line_length.value.get()));
+                                output
+                                    .push_str(&format!("line_length = {}\n", fragment.global.line_length.value.get()));
                             }
                             output.push('\n');
                         }
@@ -1644,9 +1645,9 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     // If cache_dir is relative and we have a project root, resolve relative to project root
     // This ensures cache is created at project root, not CWD (fixes issue #159)
     if cache_dir.is_relative()
-        && let Some(root) = project_root
+        && let Some(ref root) = project_root
     {
-        cache_dir = root.join(cache_dir);
+        cache_dir = root.join(&cache_dir);
     }
 
     let cache = if cache_enabled {
@@ -1670,7 +1671,14 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     // Use the same cache directory for workspace index cache (when cache is enabled)
     let workspace_cache_dir = if cache_enabled { Some(cache_dir.as_path()) } else { None };
 
-    let has_issues = watch::perform_check_run(args, &config, quiet, cache, workspace_cache_dir);
+    let has_issues = watch::perform_check_run(
+        args,
+        &config,
+        quiet,
+        cache,
+        workspace_cache_dir,
+        project_root.as_deref(),
+    );
     if has_issues && args.fix_mode != FixMode::Format {
         exit::violations_found();
     }

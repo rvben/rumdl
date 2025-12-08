@@ -175,6 +175,7 @@ pub fn find_markdown_files(
     paths: &[String],
     args: &crate::CheckArgs,
     config: &rumdl_config::Config,
+    project_root: Option<&std::path::Path>,
 ) -> Result<Vec<String>, Box<dyn Error>> {
     let mut file_paths = Vec::new();
 
@@ -271,7 +272,10 @@ pub fn find_markdown_files(
 
     // Apply overrides using the determined patterns
     if !final_include_patterns.is_empty() || !final_exclude_patterns.is_empty() {
-        let mut override_builder = OverrideBuilder::new("."); // Root context
+        // Use project_root for pattern resolution (relative to config file location)
+        // This ensures exclude patterns like "docs/*" work regardless of CWD
+        let pattern_base = project_root.unwrap_or(Path::new("."));
+        let mut override_builder = OverrideBuilder::new(pattern_base);
 
         // Add includes (these act as positive filters)
         for pattern in &final_include_patterns {
