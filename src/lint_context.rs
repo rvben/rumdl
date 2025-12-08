@@ -2380,17 +2380,29 @@ impl<'a> LintContext<'a> {
             {
                 let line_content = line_info.content(content).trim();
 
+                // Count pipes outside of inline code spans (to avoid confusing `||` for table)
+                let pipes_outside_code = {
+                    let mut count = 0;
+                    let mut in_code = false;
+                    for ch in line_content.chars() {
+                        if ch == '`' {
+                            in_code = !in_code;
+                        } else if ch == '|' && !in_code {
+                            count += 1;
+                        }
+                    }
+                    count
+                };
+
                 // Check for structural separators that break lists
                 let breaks_list = line_info.heading.is_some()
                     || line_content.starts_with("---")
                     || line_content.starts_with("***")
                     || line_content.starts_with("___")
-                    || (line_content.contains('|')
+                    || (pipes_outside_code > 0
                         && !line_content.contains("](")
                         && !line_content.contains("http")
-                        && (line_content.matches('|').count() > 1
-                            || line_content.starts_with('|')
-                            || line_content.ends_with('|')))
+                        && (pipes_outside_code > 1 || line_content.starts_with('|') || line_content.ends_with('|')))
                     || line_content.starts_with(">")
                     || (line_info.indent < min_continuation_for_tracking);
 
@@ -2403,6 +2415,19 @@ impl<'a> LintContext<'a> {
             // extend the block's end_line to include this line (maintains list continuity)
             if line_info.in_code_span_continuation
                 && line_info.list_item.is_none()
+                && let Some(ref mut block) = current_block
+            {
+                block.end_line = line_num;
+            }
+
+            // Extend block.end_line for regular continuation lines (non-list-item, non-blank,
+            // properly indented lines within the list). This ensures the workaround at line 2448
+            // works correctly when there are multiple continuation lines before a nested list item.
+            if !line_info.in_code_span_continuation
+                && line_info.list_item.is_none()
+                && !line_info.is_blank
+                && !line_info.in_code_block
+                && line_info.indent >= min_continuation_for_tracking
                 && let Some(ref mut block) = current_block
             {
                 block.end_line = line_num;
@@ -2422,7 +2447,8 @@ impl<'a> LintContext<'a> {
                     let same_type =
                         (block.is_ordered && list_item.is_ordered) || (!block.is_ordered && !list_item.is_ordered);
                     let same_context = block.blockquote_prefix == blockquote_prefix;
-                    let reasonable_distance = line_num <= last_list_item_line + 2; // Allow one blank line
+                    // Allow one blank line after last item, or lines immediately after block content
+                    let reasonable_distance = line_num <= last_list_item_line + 2 || line_num == block.end_line + 1;
 
                     // For unordered lists, also check marker consistency
                     let marker_compatible =
