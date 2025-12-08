@@ -272,8 +272,9 @@ pub fn find_markdown_files(
 
     // Apply overrides using the determined patterns
     if !final_include_patterns.is_empty() || !final_exclude_patterns.is_empty() {
-        // Use project_root for pattern resolution (relative to config file location)
-        // This ensures exclude patterns like "docs/*" work regardless of CWD
+        // Use project_root as the pattern base for OverrideBuilder
+        // The walker paths are relative to the first_path, but the ignore crate
+        // handles the path matching internally when both are consistent directories
         let pattern_base = project_root.unwrap_or(Path::new("."));
         let mut override_builder = OverrideBuilder::new(pattern_base);
 
@@ -373,12 +374,33 @@ pub fn find_markdown_files(
                 // This is the default behavior to match user expectations and avoid
                 // duplication between rumdl config and pre-commit config (issue #99)
                 if !final_exclude_patterns.is_empty() {
+                    // Compute path relative to project_root for pattern matching
+                    // This ensures patterns like "subdir/file.md" work regardless of cwd
+                    let path_for_matching = if let Some(root) = project_root {
+                        if let Ok(canonical_path) = path.canonicalize() {
+                            if let Ok(canonical_root) = root.canonicalize() {
+                                if let Ok(relative) = canonical_path.strip_prefix(&canonical_root) {
+                                    relative.to_string_lossy().to_string()
+                                } else {
+                                    // Path is not under project_root, fall back to cleaned_path
+                                    cleaned_path.clone()
+                                }
+                            } else {
+                                cleaned_path.clone()
+                            }
+                        } else {
+                            cleaned_path.clone()
+                        }
+                    } else {
+                        cleaned_path.clone()
+                    };
+
                     let mut matching_pattern: Option<&str> = None;
                     for pattern in &final_exclude_patterns {
                         // Use globset for pattern matching
                         if let Ok(glob) = globset::Glob::new(pattern) {
                             let matcher = glob.compile_matcher();
-                            if matcher.is_match(&cleaned_path) {
+                            if matcher.is_match(&path_for_matching) {
                                 matching_pattern = Some(pattern);
                                 break;
                             }
@@ -440,6 +462,42 @@ pub fn find_markdown_files(
     // Remove duplicate paths if WalkBuilder might yield them (e.g. multiple input paths)
     file_paths.sort();
     file_paths.dedup();
+
+    // --- Post-walk exclude pattern filtering ---
+    // The ignore crate's overrides may not work correctly when the walker path prefix
+    // differs from the config file location. Apply exclude patterns manually here.
+    if !final_exclude_patterns.is_empty()
+        && let Some(root) = project_root
+    {
+        file_paths.retain(|file_path| {
+            let path = Path::new(file_path);
+            // Compute path relative to project_root for pattern matching
+            let path_for_matching = if let Ok(canonical_path) = path.canonicalize() {
+                if let Ok(canonical_root) = root.canonicalize() {
+                    if let Ok(relative) = canonical_path.strip_prefix(&canonical_root) {
+                        relative.to_string_lossy().to_string()
+                    } else {
+                        file_path.clone()
+                    }
+                } else {
+                    file_path.clone()
+                }
+            } else {
+                file_path.clone()
+            };
+
+            // Check if any exclude pattern matches
+            for pattern in &final_exclude_patterns {
+                if let Ok(glob) = globset::Glob::new(pattern) {
+                    let matcher = glob.compile_matcher();
+                    if matcher.is_match(&path_for_matching) {
+                        return false; // Exclude this file
+                    }
+                }
+            }
+            true // Keep this file
+        });
+    }
 
     // --- Final Explicit Markdown Filter ---
     // Only apply the extension filter if --include was NOT explicitly provided via CLI

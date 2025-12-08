@@ -200,10 +200,341 @@ exclude = ["excluded_by_external.md"]
     );
 }
 
-// NOTE: Glob patterns with path components (e.g., "docs/*", "docs/**/*.md") may not work
-// correctly when running from a different cwd. This is a known limitation.
-// Simple file patterns (e.g., "ignored.md") work correctly from any cwd.
-// See: https://github.com/rvben/rumdl/issues/185
+// =============================================================================
+// PATH-BASED EXCLUDE PATTERN TESTS
+// =============================================================================
+// These tests verify that exclude patterns with path components (e.g., "subdir/file.md",
+// "docs/*", "**/*.md") work correctly regardless of which directory rumdl is run from.
+// The patterns should be resolved relative to the config file location (project root),
+// not the current working directory.
+
+/// Create a project structure with subdirectories for path-based pattern testing:
+/// ```
+/// parent/
+///   project/
+///     .rumdl.toml (with path-based exclude patterns)
+///     root.md (should be linted)
+///     subdir/
+///       ignored.md (should be excluded by "subdir/ignored.md")
+///       other.md (should be linted)
+///     docs/
+///       api.md (should be excluded by "docs/*")
+///       guide.md (should be excluded by "docs/*")
+///     generated/
+///       deep/
+///         nested/
+///           file.md (should be excluded by "generated/**/*.md")
+/// ```
+fn setup_path_pattern_project() -> (TempDir, PathBuf, PathBuf) {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let parent = temp_dir.path().to_path_buf();
+    let project = parent.join("project");
+
+    // Create directory structure
+    fs::create_dir(&project).expect("Failed to create project dir");
+    fs::create_dir(project.join("subdir")).expect("Failed to create subdir");
+    fs::create_dir(project.join("docs")).expect("Failed to create docs dir");
+    fs::create_dir_all(project.join("generated/deep/nested")).expect("Failed to create nested dirs");
+
+    // Config with path-based exclude patterns
+    let config_content = r#"[global]
+exclude = [
+    "subdir/ignored.md",
+    "docs/*",
+    "generated/**/*.md"
+]
+"#;
+    fs::write(project.join(".rumdl.toml"), config_content).expect("Failed to write config");
+
+    // Content with lint violations (multiple blank lines - MD012)
+    let content = "# Test\n\n\n\n# Another heading\n";
+
+    // Files that should be linted
+    fs::write(project.join("root.md"), content).expect("Failed to write root.md");
+    fs::write(project.join("subdir/other.md"), content).expect("Failed to write other.md");
+
+    // Files that should be excluded
+    fs::write(project.join("subdir/ignored.md"), content).expect("Failed to write ignored.md");
+    fs::write(project.join("docs/api.md"), content).expect("Failed to write api.md");
+    fs::write(project.join("docs/guide.md"), content).expect("Failed to write guide.md");
+    fs::write(project.join("generated/deep/nested/file.md"), content).expect("Failed to write nested file");
+
+    (temp_dir, parent, project)
+}
+
+#[test]
+fn test_path_pattern_subdir_file_from_project_root() {
+    // Pattern "subdir/ignored.md" should work when running from project directory
+    let (_temp_dir, _parent, project) = setup_path_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg(".")
+        .arg("--no-cache")
+        .current_dir(&project)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // subdir/ignored.md should be excluded
+    assert!(
+        !stdout.contains("subdir/ignored.md") && !stdout.contains("ignored.md:"),
+        "subdir/ignored.md should be excluded. stdout: {stdout}"
+    );
+    // subdir/other.md should be linted
+    assert!(
+        stdout.contains("other.md"),
+        "subdir/other.md should be linted. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_path_pattern_subdir_file_from_parent_directory() {
+    // CRITICAL TEST: Pattern "subdir/ignored.md" should work when running from parent
+    // This was the bug in issue #185 - path patterns failed when cwd != project root
+    let (_temp_dir, parent, _project) = setup_path_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg("project")
+        .arg("--no-cache")
+        .current_dir(&parent)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // subdir/ignored.md should be excluded (this was failing before the fix)
+    assert!(
+        !stdout.contains("subdir/ignored.md") && !stdout.contains("ignored.md:"),
+        "subdir/ignored.md should be excluded when running from parent. stdout: {stdout}"
+    );
+    // subdir/other.md should be linted
+    assert!(
+        stdout.contains("other.md"),
+        "subdir/other.md should be linted. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_glob_pattern_docs_star_from_project_root() {
+    // Pattern "docs/*" should exclude all files in docs/ when running from project
+    let (_temp_dir, _parent, project) = setup_path_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg(".")
+        .arg("--no-cache")
+        .current_dir(&project)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // docs/api.md and docs/guide.md should be excluded
+    assert!(
+        !stdout.contains("api.md"),
+        "docs/api.md should be excluded. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("guide.md"),
+        "docs/guide.md should be excluded. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_glob_pattern_docs_star_from_parent_directory() {
+    // Pattern "docs/*" should work when running from parent directory
+    let (_temp_dir, parent, _project) = setup_path_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg("project")
+        .arg("--no-cache")
+        .current_dir(&parent)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // docs/api.md and docs/guide.md should be excluded
+    assert!(
+        !stdout.contains("api.md"),
+        "docs/api.md should be excluded when running from parent. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("guide.md"),
+        "docs/guide.md should be excluded when running from parent. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_deep_glob_pattern_from_project_root() {
+    // Pattern "generated/**/*.md" should exclude deeply nested files
+    let (_temp_dir, _parent, project) = setup_path_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg(".")
+        .arg("--no-cache")
+        .current_dir(&project)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // generated/deep/nested/file.md should be excluded
+    assert!(
+        !stdout.contains("generated") && !stdout.contains("nested"),
+        "generated/**/*.md files should be excluded. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_deep_glob_pattern_from_parent_directory() {
+    // Pattern "generated/**/*.md" should work when running from parent
+    let (_temp_dir, parent, _project) = setup_path_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg("project")
+        .arg("--no-cache")
+        .current_dir(&parent)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // generated/deep/nested/file.md should be excluded
+    assert!(
+        !stdout.contains("generated") && !stdout.contains("nested"),
+        "generated/**/*.md should be excluded when running from parent. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_path_pattern_from_sibling_directory() {
+    // Run from a sibling directory to test path resolution
+    let (_temp_dir, parent, _project) = setup_path_pattern_project();
+
+    // Create sibling directory
+    let sibling = parent.join("sibling");
+    fs::create_dir(&sibling).expect("Failed to create sibling dir");
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg("../project")
+        .arg("--no-cache")
+        .current_dir(&sibling)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // All path-based excludes should still work
+    assert!(
+        !stdout.contains("ignored.md:"),
+        "subdir/ignored.md should be excluded from sibling. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("api.md"),
+        "docs/api.md should be excluded from sibling. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("generated"),
+        "generated/**/*.md should be excluded from sibling. stdout: {stdout}"
+    );
+
+    // But non-excluded files should be linted
+    assert!(stdout.contains("root.md"), "root.md should be linted. stdout: {stdout}");
+}
+
+#[test]
+fn test_path_pattern_with_explicit_config_flag() {
+    // When using --config flag, patterns should still resolve relative to config location
+    let (_temp_dir, parent, project) = setup_path_pattern_project();
+
+    let config_path = project.join(".rumdl.toml");
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg("--config")
+        .arg(config_path.to_str().unwrap())
+        .arg("project")
+        .arg("--no-cache")
+        .current_dir(&parent)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Path-based patterns should work with explicit config
+    assert!(
+        !stdout.contains("ignored.md:"),
+        "subdir/ignored.md should be excluded with explicit config. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("api.md"),
+        "docs/api.md should be excluded with explicit config. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_multiple_nested_subdirs_pattern() {
+    // Test patterns at various nesting depths
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let parent = temp_dir.path();
+    let project = parent.join("project");
+
+    // Create deep structure
+    fs::create_dir(&project).expect("Failed to create project");
+    fs::create_dir_all(project.join("a/b/c/d")).expect("Failed to create nested dirs");
+
+    let config = r#"[global]
+exclude = ["a/b/c/d/deep.md", "a/b/mid.md", "a/shallow.md"]
+"#;
+    fs::write(project.join(".rumdl.toml"), config).expect("Failed to write config");
+
+    let content = "# Test\n\n\n\n# Violation\n";
+    fs::write(project.join("root.md"), content).expect("Failed to write root.md");
+    fs::write(project.join("a/shallow.md"), content).expect("Failed to write shallow.md");
+    fs::write(project.join("a/b/mid.md"), content).expect("Failed to write mid.md");
+    fs::write(project.join("a/b/c/d/deep.md"), content).expect("Failed to write deep.md");
+    fs::write(project.join("a/b/c/d/other.md"), content).expect("Failed to write other.md");
+
+    // Run from parent
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg("project")
+        .arg("--no-cache")
+        .current_dir(parent)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // All specifically excluded files should be excluded
+    assert!(
+        !stdout.contains("shallow.md:"),
+        "a/shallow.md should be excluded. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("mid.md:"),
+        "a/b/mid.md should be excluded. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("deep.md:"),
+        "a/b/c/d/deep.md should be excluded. stdout: {stdout}"
+    );
+
+    // Non-excluded files should be linted
+    assert!(stdout.contains("root.md"), "root.md should be linted. stdout: {stdout}");
+    assert!(
+        stdout.contains("other.md"),
+        "a/b/c/d/other.md should be linted (not excluded). stdout: {stdout}"
+    );
+}
 
 #[test]
 fn test_absolute_config_path_works() {
