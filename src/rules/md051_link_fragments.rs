@@ -199,12 +199,10 @@ impl MD051LinkFragments {
                     if let Some(after_dot) = clean_path.strip_prefix('.') {
                         let dots_count = clean_path.matches('.').count();
                         if dots_count == 1 {
-                            // Could be ".ext" (just extension) or ".hidden" (hidden file)
-                            // If it's a known file extension, treat as cross-file link
+                            // Could be ".ext" (file extension) or ".hidden" (hidden file)
+                            // Treat short alphanumeric suffixes as file extensions
                             !after_dot.is_empty() && after_dot.len() <= 10 &&
-                            after_dot.chars().all(|c| c.is_ascii_alphanumeric()) &&
-                            // Additional check: common file extensions are likely cross-file
-                            (after_dot.len() <= 4 || matches!(after_dot, "html" | "json" | "yaml" | "toml"))
+                            after_dot.chars().all(|c| c.is_ascii_alphanumeric())
                         } else {
                             // Hidden file with extension like ".hidden.txt"
                             clean_path.split('.').next_back().is_some_and(|ext| {
