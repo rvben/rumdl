@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      # Only match semver tags like v0.0.191, not major version tags like v0
+      - 'v[0-9]*.[0-9]*.[0-9]*'
   # Manual trigger for testing and recovery scenarios
   workflow_dispatch:
     inputs:
