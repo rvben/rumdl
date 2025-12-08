@@ -292,3 +292,54 @@ fn test_issue_148_pattern() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Issue #148 pattern should be valid and fast");
 }
+
+/// Regression test for issue #186: Sublist after code block in list item
+/// When a parent list item is skipped as continuation content, its children
+/// should also be skipped to prevent orphaned items being flagged incorrectly.
+#[test]
+fn test_issue_186_sublist_after_code_block() {
+    let rule = MD005ListIndent::default();
+
+    // This is the exact pattern from issue #186
+    let content = "\
+* Some list
+  * item1
+
+  ```sh
+  echo \"code\"
+  ```
+
+  * item2
+    * correctly indented subitem";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Issue #186: Sublist after code block incorrectly flagged. Got: {:?}",
+        result
+    );
+
+    // Also test with ordered lists
+    let content = "\
+1. Main item
+
+   ```rust
+   fn foo() {}
+   ```
+
+   Sublist:
+
+   - A
+   - B";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Ordered list with code block and continuation sublist incorrectly flagged. Got: {:?}",
+        result
+    );
+}

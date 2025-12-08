@@ -449,8 +449,14 @@ impl MD005ListIndent {
         // Build cache once for O(n) preprocessing instead of O(n²) scanning
         let cache = LineCacheInfo::new(ctx);
 
-        // Collect all list items from all blocks in the group
-        let mut all_list_items = Vec::new();
+        // First pass: collect all candidate items without filtering
+        // We need to process in line order so parents are seen before children
+        let mut candidate_items: Vec<(
+            usize,
+            usize,
+            &crate::lint_context::LineInfo,
+            &crate::lint_context::ListItemInfo,
+        )> = Vec::new();
 
         for list_block in group {
             for &item_line in &list_block.item_lines {
@@ -466,14 +472,40 @@ impl MD005ListIndent {
                         list_item.marker_column
                     };
 
-                    // Skip list items that are continuation content
-                    if self.is_continuation_content(ctx, &cache, item_line, effective_indent) {
-                        continue;
-                    }
-
-                    all_list_items.push((item_line, effective_indent, line_info, list_item));
+                    candidate_items.push((item_line, effective_indent, line_info, list_item));
                 }
             }
+        }
+
+        // Sort by line number so parents are processed before children
+        candidate_items.sort_by_key(|(line_num, _, _, _)| *line_num);
+
+        // Second pass: filter out continuation content AND their children
+        // When a parent is skipped, all its descendants must also be skipped
+        let mut skipped_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut all_list_items: Vec<(
+            usize,
+            usize,
+            &crate::lint_context::LineInfo,
+            &crate::lint_context::ListItemInfo,
+        )> = Vec::new();
+
+        for (item_line, effective_indent, line_info, list_item) in candidate_items {
+            // Skip list items that are continuation content
+            if self.is_continuation_content(ctx, &cache, item_line, effective_indent) {
+                skipped_lines.insert(item_line);
+                continue;
+            }
+
+            // Also skip items whose parent was skipped (children of continuation content)
+            if let Some(&parent_line) = cache.parent_map.get(&item_line)
+                && skipped_lines.contains(&parent_line)
+            {
+                skipped_lines.insert(item_line);
+                continue;
+            }
+
+            all_list_items.push((item_line, effective_indent, line_info, list_item));
         }
 
         if all_list_items.is_empty() {

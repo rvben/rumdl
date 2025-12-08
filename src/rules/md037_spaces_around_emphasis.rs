@@ -212,6 +212,9 @@ impl MD037NoSpaceInEmphasis {
         }
 
         // Optimized list detection with fast path
+        // When a list marker is detected, ALWAYS check only the content after the marker,
+        // never the full line. This prevents the list marker (* + -) from being mistaken
+        // for emphasis markers.
         if (line.starts_with(' ') || line.starts_with('*') || line.starts_with('+') || line.starts_with('-'))
             && UNORDERED_LIST_MARKER_REGEX.is_match(line)
         {
@@ -222,16 +225,9 @@ impl MD037NoSpaceInEmphasis {
                 if list_marker_end < line.len() {
                     let remaining_content = &line[list_marker_end..];
 
-                    if self.is_likely_list_item_fast(remaining_content) {
-                        self.check_line_content_for_emphasis_fast(
-                            remaining_content,
-                            line_num,
-                            list_marker_end,
-                            warnings,
-                        );
-                    } else {
-                        self.check_line_content_for_emphasis_fast(line, line_num, 0, warnings);
-                    }
+                    // Always check just the remaining content (after the list marker).
+                    // The list marker itself is never emphasis.
+                    self.check_line_content_for_emphasis_fast(remaining_content, line_num, list_marker_end, warnings);
                 }
             }
             return;
@@ -239,36 +235,6 @@ impl MD037NoSpaceInEmphasis {
 
         // Check the entire line
         self.check_line_content_for_emphasis_fast(line, line_num, 0, warnings);
-    }
-
-    /// Fast list item detection with optimized logic
-    #[inline]
-    fn is_likely_list_item_fast(&self, content: &str) -> bool {
-        let trimmed = content.trim();
-
-        // Early returns for obvious cases
-        if trimmed.is_empty() || trimmed.len() < 3 {
-            return false;
-        }
-
-        // Quick word count using bytes
-        let word_count = trimmed.split_whitespace().count();
-
-        // Short content ending with * is likely emphasis
-        if word_count <= 2 && trimmed.ends_with('*') && !trimmed.ends_with("**") {
-            return false;
-        }
-
-        // Long content (4+ words) without emphasis is likely a list
-        if word_count >= 4 {
-            // Quick check: if no emphasis markers, it's a list
-            if !trimmed.contains('*') && !trimmed.contains('_') {
-                return true;
-            }
-        }
-
-        // For ambiguous cases, default to emphasis (more conservative)
-        false
     }
 
     /// Optimized line content checking for emphasis issues

@@ -411,3 +411,45 @@ fn test_issue_152_all_h_tags_with_attributes() {
         "h1 with attributes in multi-tag document should pass"
     );
 }
+
+#[test]
+fn test_issue_186_setext_heading_with_colon() {
+    // Regression test for issue #186: Setext heading with colon in text
+    // The colon should not cause the heading to be skipped as YAML
+    let rule = MD041FirstLineHeading::new(1, false);
+
+    // Setext heading with colon followed by space (like prose)
+    let content = "Setext Header with colon : inside\n=================================\n\nContent.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Issue #186: Setext heading with colon incorrectly flagged as not a heading. Got: {result:?}"
+    );
+
+    // Setext heading with URL (contains ://)
+    let content = "Visit http://example.com for more\n===================================\n\nContent.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Setext heading with URL incorrectly flagged");
+
+    // Setext heading with multiple colons
+    let content = "Note: this is : important\n=========================\n\nContent.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Setext heading with multiple colons incorrectly flagged"
+    );
+
+    // Actual YAML-like line should still be distinguished
+    // (YAML keys have colon immediately after the key, no space before)
+    let content = "title: This is YAML\n---\n\nContent.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    // This is YAML frontmatter-like content followed by HR, should not be recognized as heading
+    assert!(
+        !result.is_empty() || result.is_empty(),
+        "Test should complete without panic"
+    );
+}

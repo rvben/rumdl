@@ -2027,23 +2027,6 @@ impl<'a> LintContext<'a> {
 
                     let underline = next_line.trim();
 
-                    // Skip if the underline looks like YAML delimiter (exactly 3 or more dashes)
-                    // YAML uses exactly `---` while Setext headings typically use longer underlines
-                    if underline == "---" {
-                        continue;
-                    }
-
-                    // Skip if the current line looks like YAML key-value syntax
-                    let current_line_trimmed = line.trim();
-                    if current_line_trimmed.contains(':')
-                        && !current_line_trimmed.starts_with('#')
-                        && !current_line_trimmed.contains('[')
-                        && !current_line_trimmed.contains("](")
-                    {
-                        // This looks like "key: value" which suggests YAML, not a heading
-                        continue;
-                    }
-
                     let level = if underline.starts_with('=') { 1 } else { 2 };
                     let style = if level == 1 {
                         HeadingStyle::Setext1

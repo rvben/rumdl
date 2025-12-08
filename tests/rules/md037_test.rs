@@ -554,3 +554,40 @@ fn test_math_expressions_not_flagged() {
         );
     }
 }
+
+#[test]
+fn test_issue_186_list_item_with_asterisk_in_text() {
+    // Regression test for issue #186: List item with asterisk inside text
+    // The asterisk in "asterisk * inside" should not be paired with the list marker
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = "* List item with asterisk * inside";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Issue #186: List item with asterisk in text incorrectly flagged as emphasis. Got: {result:?}"
+    );
+
+    // Test with different list markers
+    let content = "- List item with asterisk * inside text";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Dash list with asterisk in text incorrectly flagged");
+
+    let content = "+ List item with asterisk * inside text";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Plus list with asterisk in text incorrectly flagged");
+
+    // Ensure real emphasis issues in list content are still flagged
+    let content = "* List item with * bad emphasis * inside";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag actual emphasis spacing issue in list item content"
+    );
+}
