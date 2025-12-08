@@ -1309,7 +1309,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
 
         // Preserve tables
-        if trimmed.contains('|') {
+        if crate::utils::table_utils::TableUtils::is_potential_table_row(line) {
             result.push(line.to_string());
             i += 1;
             continue;
@@ -1527,7 +1527,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
         || target_line.starts_with("    ")
         || target_line.starts_with('\t')
         || trimmed.starts_with('>')
-        || trimmed.contains('|') // Tables
+        || crate::utils::table_utils::TableUtils::is_potential_table_row(target_line) // Tables
         || (trimmed.starts_with('[') && target_line.contains("]:")) // Reference definitions
         || is_horizontal_rule(trimmed)
         || ((trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+'))
@@ -1554,7 +1554,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
             || prev_line.starts_with("    ")
             || prev_line.starts_with('\t')
             || prev_trimmed.starts_with('>')
-            || prev_trimmed.contains('|')
+            || crate::utils::table_utils::TableUtils::is_potential_table_row(prev_line)
             || (prev_trimmed.starts_with('[') && prev_line.contains("]:"))
             || is_horizontal_rule(prev_trimmed)
             || ((prev_trimmed.starts_with('-') || prev_trimmed.starts_with('*') || prev_trimmed.starts_with('+'))
@@ -1584,7 +1584,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
             || next_line.starts_with("    ")
             || next_line.starts_with('\t')
             || next_trimmed.starts_with('>')
-            || next_trimmed.contains('|')
+            || crate::utils::table_utils::TableUtils::is_potential_table_row(next_line)
             || (next_trimmed.starts_with('[') && next_line.contains("]:"))
             || is_horizontal_rule(next_trimmed)
             || ((next_trimmed.starts_with('-') || next_trimmed.starts_with('*') || next_trimmed.starts_with('+'))
