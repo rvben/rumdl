@@ -18,7 +18,7 @@ This is a document with [inline links](https://example.com).
 Here's another [link](https://example2.com).
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -30,7 +30,7 @@ Here's a [collapsed][] link.
 [collapsed]: https://example.com
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -45,7 +45,7 @@ This is a document with [inline links](https://example.com).
 Here's an <https://example.com> autolink.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
@@ -66,7 +66,7 @@ Here's an <https://example.com> autolink in a code block.
 This is an inline code with a link: `<https://example.com>`
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -79,7 +79,7 @@ fn test_fix_unsupported() {
 This has [inline](https://example.com) and <https://example.org> links.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx);
     assert!(result.is_err());
 }
@@ -92,7 +92,7 @@ fn test_url_inline_style() {
 This is a [https://example.com](https://example.com) URL-inline link.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
@@ -112,7 +112,7 @@ This is a [shortcut] reference.
 [shortcut]: https://shortcut.com
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert!(result.iter().any(|w| w.line == 3 && w.message.contains("full")));
@@ -138,7 +138,7 @@ fn test_all_link_types() {
     "#;
 
     // Should be valid since all styles are allowed by default
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -163,7 +163,7 @@ fn test_unicode_support() {
     "#;
 
     // Should be valid since all styles are allowed by default
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -175,7 +175,7 @@ fn test_unicode_support() {
 <https://example.com/unicode/汉字>
     "#;
 
-    let ctx_mixed = LintContext::new(content_mixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_mixed = LintContext::new(content_mixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule_restricted.check(&ctx_mixed).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3);
@@ -186,7 +186,7 @@ fn test_unicode_support() {
 This is a very long line with some [Unicode content including many characters like café, 汉字, ñáéíóú, こんにちは, привет, שלום, مرحبا, and many more symbols like ⚡🔥🌟✨🌈⭐💫🌠 in a very long text](https://example.com/unicode).
     "#;
 
-    let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx_long).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -196,7 +196,7 @@ This is a reversed link with Unicode: (Unicode café)[https://example.com/café]
     "#;
 
     // This should be caught by MD011, not MD054, so no warnings here
-    let ctx_reversed = LintContext::new(content_reversed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_reversed = LintContext::new(content_reversed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx_reversed).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -215,7 +215,7 @@ A ![shortcut image].
 [ref]: img.png
 [shortcut image]: img.png
     "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "All image styles should be valid by default");
 
@@ -227,7 +227,7 @@ An ![collapsed image][].
 
 [collapsed image]: img.png
     "#;
-    let ctx_mix = LintContext::new(content_mix, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_mix = LintContext::new(content_mix, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule_no_collapse.check(&ctx_mix).unwrap();
     assert_eq!(result.len(), 1, "Should flag disallowed collapsed image style");
     assert_eq!(result[0].line, 3);
@@ -244,7 +244,7 @@ And `![shortcut]`
 [ref]: img.png
 [shortcut]: img.png
     "#;
-    let ctx_code = LintContext::new(content_code, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_code = LintContext::new(content_code, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx_code).unwrap();
     assert!(result.is_empty(), "Image styles in code spans should be ignored");
 }
@@ -265,7 +265,7 @@ Link [full][ref] followed by text.
 [collapsed]: /collapsed
 [ref]: /full
     "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -283,7 +283,7 @@ Link [full][ref] followed by text.
 [ref]: /
 [Not okay shortcut]: /
     "#;
-    let ctx_flag_shortcut = LintContext::new(content_flag_shortcut, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx_flag_shortcut = LintContext::new(content_flag_shortcut, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule_no_shortcut.check(&ctx_flag_shortcut).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 4);
@@ -299,7 +299,7 @@ fn test_html_comments_are_ignored() {
 <!-- [inline link](https://example.com) -->
 <!-- [Unicode café link](https://example.com/café) -->
 "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Links in HTML comments should not be flagged");
 }
@@ -311,7 +311,7 @@ fn test_autolink_unicode_in_and_outside_comments() {
 This is an autolink: <https://example.com/汉字>
 <!-- This is a comment with an autolink: <https://example.com/汉字> -->
 "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Only autolink outside comment should be flagged");
     assert_eq!(result[0].line, 2);
@@ -332,7 +332,7 @@ fn test_mixed_styles_in_and_outside_comments() {
 [ref]: https://example.com
 [shortcut]: https://example.com
 "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),

@@ -21,7 +21,7 @@ code block at root level
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors because the second list correctly starts at 1
@@ -58,7 +58,7 @@ fn test_indented_code_block_does_not_separate_lists() {
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors because items 3 and 4 are correct
@@ -83,7 +83,7 @@ print("tilde-fenced code block")
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors
@@ -117,7 +117,7 @@ fn test_indented_code_block_3_spaces_continues_list() {
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors because the third item correctly follows as item 3
@@ -143,7 +143,7 @@ fn test_indented_code_block_2_spaces_insufficient() {
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors because lists should be separate
@@ -181,7 +181,7 @@ another root level code block
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report any MD029 errors
@@ -208,7 +208,7 @@ def hello():
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors
@@ -241,7 +241,7 @@ code block
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors because the second list correctly starts at 1
@@ -264,7 +264,7 @@ fn test_edge_case_empty_code_block() {
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors
@@ -290,7 +290,7 @@ code block right after list
 "#;
 
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors - code block should still separate

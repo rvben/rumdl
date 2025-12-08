@@ -411,7 +411,7 @@ mod tests {
     fn test_md033_basic_html() {
         let rule = MD033NoInlineHtml::default();
         let content = "<div>Some content</div>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Only reports opening tags, not closing tags
         assert_eq!(result.len(), 1); // Only <div>, not </div>
@@ -422,7 +422,7 @@ mod tests {
     fn test_md033_case_insensitive() {
         let rule = MD033NoInlineHtml::default();
         let content = "<DiV>Some <B>content</B></dIv>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Only reports opening tags, not closing tags
         assert_eq!(result.len(), 2); // <DiV>, <B> (not </B>, </dIv>)
@@ -434,7 +434,7 @@ mod tests {
     fn test_md033_allowed_tags() {
         let rule = MD033NoInlineHtml::with_allowed(vec!["div".to_string(), "br".to_string()]);
         let content = "<div>Allowed</div><p>Not allowed</p><br/>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Only warnings for non-allowed opening tags (<p> only, div and br are allowed)
         assert_eq!(result.len(), 1);
@@ -442,7 +442,7 @@ mod tests {
 
         // Test case-insensitivity of allowed tags
         let content2 = "<DIV>Allowed</DIV><P>Not allowed</P><BR/>";
-        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
         let result2 = rule.check(&ctx2).unwrap();
         assert_eq!(result2.len(), 1); // Only <P> flagged
         assert_eq!(result2[0].message, "Inline HTML found: <P>");
@@ -452,7 +452,7 @@ mod tests {
     fn test_md033_html_comments() {
         let rule = MD033NoInlineHtml::default();
         let content = "<!-- This is a comment --> <p>Not a comment</p>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Should detect warnings for HTML opening tags (comments are skipped, closing tags not reported)
         assert_eq!(result.len(), 1); // Only <p>
@@ -463,14 +463,14 @@ mod tests {
     fn test_md033_tags_in_links() {
         let rule = MD033NoInlineHtml::default();
         let content = "[Link](http://example.com/<div>)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // The <div> in the URL should be detected as HTML (not skipped)
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].message, "Inline HTML found: <div>");
 
         let content2 = "[Link <a>text</a>](url)";
-        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
         let result2 = rule.check(&ctx2).unwrap();
         // Only reports opening tags
         assert_eq!(result2.len(), 1); // Only <a>
@@ -481,7 +481,7 @@ mod tests {
     fn test_md033_fix_escaping() {
         let rule = MD033NoInlineHtml::default();
         let content = "Text with <div> and <br/> tags.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed_content = rule.fix(&ctx).unwrap();
         // No fix for HTML tags; output should be unchanged
         assert_eq!(fixed_content, content);
@@ -491,7 +491,7 @@ mod tests {
     fn test_md033_in_code_blocks() {
         let rule = MD033NoInlineHtml::default();
         let content = "```html\n<div>Code</div>\n```\n<div>Not code</div>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Only reports opening tags outside code block
         assert_eq!(result.len(), 1); // Only <div> outside code block
@@ -502,7 +502,7 @@ mod tests {
     fn test_md033_in_code_spans() {
         let rule = MD033NoInlineHtml::default();
         let content = "Text with `<p>in code</p>` span. <br/> Not in span.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Should detect <br/> outside code span, but not tags inside code span
         assert_eq!(result.len(), 1);
@@ -521,7 +521,7 @@ mod tests {
 - this
 + that
 ```"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Should NOT detect <env> as HTML since it's inside backticks
         assert_eq!(result.len(), 0, "Should not report HTML tags inside code spans");
@@ -532,7 +532,7 @@ mod tests {
         // Test multiple code spans on same line
         let rule = MD033NoInlineHtml::default();
         let content = "`<one>` and `<two>` and `<three>` are all code spans";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should not report HTML tags inside any code spans");
     }
@@ -542,7 +542,7 @@ mod tests {
         // Test nested angle brackets
         let rule = MD033NoInlineHtml::default();
         let content = "Text with `<<nested>>` brackets";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should handle nested angle brackets in code spans");
     }
@@ -552,7 +552,7 @@ mod tests {
         // Test code span at end of line before code block
         let rule = MD033NoInlineHtml::default();
         let content = "Testing `<test>`\n```\ncode here\n```";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should handle code span before code block");
     }
@@ -562,7 +562,7 @@ mod tests {
         // Test Quick Fix for inline HTML tags - keeps content, removes tags
         let rule = MD033NoInlineHtml::default();
         let content = "This has <span>inline text</span> that should keep content.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1, "Should find one HTML tag");
@@ -578,7 +578,7 @@ mod tests {
         // Test Quick Fix for multiline HTML tags - keeps content
         let rule = MD033NoInlineHtml::default();
         let content = "<div>\nBlock content\n</div>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1, "Should find one HTML tag");
@@ -594,7 +594,7 @@ mod tests {
         // Test Quick Fix for self-closing tags - removes tag (no content)
         let rule = MD033NoInlineHtml::default();
         let content = "Self-closing: <br/>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1, "Should find one HTML tag");
@@ -610,7 +610,7 @@ mod tests {
         // Test Quick Fix with multiple HTML tags - keeps content for both
         let rule = MD033NoInlineHtml::default();
         let content = "<span>first</span> and <strong>second</strong>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2, "Should find two HTML tags");

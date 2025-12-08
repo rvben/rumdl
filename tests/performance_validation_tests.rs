@@ -32,7 +32,7 @@ fn test_performance_with_large_content() {
 
     for rule in &rules {
         let start_time = Instant::now();
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
         let check_duration = start_time.elapsed();
 
@@ -109,7 +109,7 @@ fn test_deeply_nested_structures() {
     ];
 
     for rule in &rules {
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start_time = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
@@ -148,7 +148,7 @@ fn test_many_small_issues() {
     }
 
     let rule = MD009TrailingSpaces::default();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     let start_time = Instant::now();
     let warnings = rule.check(&ctx).expect("Rule check should succeed");
@@ -230,7 +230,7 @@ More content
 
     // Test each rule individually first
     for rule in &rules {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start_time = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
@@ -258,7 +258,7 @@ More content
     }
 
     // Test all rules together (simulate full lint)
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let start_time = Instant::now();
 
     let mut all_warnings = Vec::new();

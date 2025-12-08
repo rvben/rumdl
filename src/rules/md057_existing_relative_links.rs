@@ -208,30 +208,25 @@ impl Rule for MD057ExistingRelativeLinks {
 
         let mut warnings = Vec::new();
 
-        // Cache base path lookup to avoid repeated mutex operations
+        // Determine base path for resolving relative links
         let base_path = {
-            let base_path_guard = self.base_path.lock().expect("Base path mutex poisoned");
+            let mut base_path_guard = self.base_path.lock().expect("Base path mutex poisoned");
             if base_path_guard.is_some() {
                 base_path_guard.clone()
             } else {
-                // Try to determine the base path from the file being processed (cached)
-                static CACHED_FILE_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-                CACHED_FILE_PATH
-                    .get_or_init(|| {
-                        if let Ok(file_path) = env::var("RUMDL_FILE_PATH") {
-                            let path = Path::new(&file_path);
-                            if path.exists() {
-                                path.parent()
-                                    .map(|p| p.to_path_buf())
-                                    .or_else(|| Some(CURRENT_DIR.clone()))
-                            } else {
-                                Some(CURRENT_DIR.clone())
-                            }
-                        } else {
-                            Some(CURRENT_DIR.clone())
-                        }
-                    })
-                    .clone()
+                // Get the file path from LintContext
+                let computed = if let Some(ref source_file) = ctx.source_file {
+                    source_file
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .or_else(|| Some(CURRENT_DIR.clone()))
+                } else {
+                    // No source file available - cannot validate relative links
+                    None
+                };
+                // Store the computed base path so resolve_link_path can use it
+                *base_path_guard = computed.clone();
+                computed
             }
         };
 
@@ -292,6 +287,12 @@ impl Rule for MD057ExistingRelativeLinks {
                     }
                 }
             }
+        }
+
+        // Also process images - they have URLs already parsed
+        for image in &ctx.images {
+            let url = image.url.as_ref();
+            self.process_link(url, image.line, image.start_col + 1, &mut warnings);
         }
 
         Ok(warnings)
@@ -379,7 +380,8 @@ impl Rule for MD057ExistingRelativeLinks {
                     // Get fragment from capture group 2 (includes # prefix)
                     let fragment = caps.get(2).map(|m| m.as_str().trim_start_matches('#')).unwrap_or("");
 
-                    // Only index links to markdown files
+                    // Only index markdown file links for cross-file validation
+                    // Non-markdown files (images, media) are validated via filesystem in check()
                     if is_markdown_file(file_path) {
                         index.add_cross_file_link(CrossFileLinkIndex {
                             target_path: file_path.to_string(),
@@ -420,28 +422,20 @@ impl Rule for MD057ExistingRelativeLinks {
             // Normalize the path (handle .., ., etc.)
             let target_path = normalize_path(&target_path);
 
-            // Check if the target file exists in the workspace index
+            // Check if the target markdown file exists in the workspace index
             if !workspace_index.contains_file(&target_path) {
-                // File not in index - it might not exist or might not be a markdown file
-                // For markdown files, if they're not indexed, they don't exist in the workspace
-                if cross_link.target_path.ends_with(".md") || cross_link.target_path.ends_with(".markdown") {
-                    // Fallback: check the filesystem directly to handle case-insensitive
-                    // filesystems (macOS, Windows) where "README.pt-BR.md" matches "README.pt-br.md"
-                    if !target_path.exists() {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: cross_link.line,
-                            column: cross_link.column,
-                            end_line: cross_link.line,
-                            end_column: cross_link.column + cross_link.target_path.len(),
-                            message: format!(
-                                "Relative link '{}' does not exist in the workspace",
-                                cross_link.target_path
-                            ),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
+                // File not in index - check filesystem directly for case-insensitive filesystems
+                if !target_path.exists() {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: cross_link.line,
+                        column: cross_link.column,
+                        end_line: cross_link.line,
+                        end_column: cross_link.column + cross_link.target_path.len(),
+                        message: format!("Relative link '{}' does not exist", cross_link.target_path),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
                 }
             }
         }
@@ -525,7 +519,7 @@ mod tests {
         let rule = MD057ExistingRelativeLinks::new();
         let content = "[Link](missing.md)";
 
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should have no warnings without base path");
     }
@@ -557,7 +551,7 @@ mod tests {
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
         // Test the rule
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should have two warnings: missing.md and image.jpg (both don't exist)
@@ -589,7 +583,7 @@ mod tests {
         // Test with default settings
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should have one warning for missing.md
@@ -616,7 +610,7 @@ mod tests {
 
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should warn about all missing files regardless of extension
@@ -636,7 +630,7 @@ mod tests {
         // Test with document structure
         let content = "This is a [link](nonexistent.md) and `[not a link](not-checked.md)` in code.";
 
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only find the real link, not the one in code
@@ -666,7 +660,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
         let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
         // Test the rule
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only have warning for the normal link, not for links in code spans
@@ -705,7 +699,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
 [Media file](video.mp4)
 "#;
 
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let mut index = FileIndex::new();
         rule.contribute_to_index(&ctx, &mut index);
 
@@ -735,7 +729,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
 [WWW link](www.example.com)
 "#;
 
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let mut index = FileIndex::new();
         rule.contribute_to_index(&ctx, &mut index);
 

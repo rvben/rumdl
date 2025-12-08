@@ -20,7 +20,7 @@ fn test_consistent_column_count() {
 | Cell 2.1 | Cell 2.2 | Cell 2.3 |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -32,7 +32,7 @@ Cell 1.1 | Cell 1.2 | Cell 1.3
 Cell 2.1 | Cell 2.2 | Cell 2.3
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -48,7 +48,7 @@ fn test_inconsistent_column_count() {
 | Cell 2.1 | Cell 2.2 | Cell 2.3 | Extra |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 4); // 2 columns instead of 3
@@ -69,7 +69,7 @@ fn test_complex_tables() {
 |          | Cell 2.2 |          |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -81,7 +81,7 @@ fn test_complex_tables() {
 | 4    | 5      | 6     |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -102,7 +102,7 @@ fn test_code_blocks_ignored() {
 ```
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -117,7 +117,7 @@ fn test_fix_too_few_columns() {
 | Cell 1.1 | Cell 1.2 |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert!(result.contains("| Cell 1.1 | Cell 1.2 |  |"));
 }
@@ -132,7 +132,7 @@ fn test_fix_too_many_columns() {
 | Cell 1.1 | Cell 1.2 | Cell 1.3 | Extra |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert!(result.contains("| Cell 1.1 | Cell 1.2 | Cell 1.3 |"));
     assert!(!result.contains("Extra"));
@@ -152,7 +152,7 @@ but isn't actually a table row.
 | Cell 1.1 | Cell 1.2 |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -171,7 +171,7 @@ fn test_mkdocs_flavor_pipes_in_code_spans_issue_165() {
 "#;
 
     // With MkDocs flavor, the table should be valid (2 columns throughout)
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -181,7 +181,7 @@ fn test_mkdocs_flavor_pipes_in_code_spans_issue_165() {
 
     // With Standard/GFM flavor, the same table would have inconsistent columns
     // because GFM treats pipes inside backticks as delimiters
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -204,7 +204,7 @@ fn test_mkdocs_flavor_various_code_spans_with_pipes() {
 "#;
 
     // MkDocs: all rows should have 2 columns
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "MkDocs should handle multiple pipes in code spans");
 }
@@ -221,11 +221,11 @@ fn test_escaped_pipes_both_flavors() {
 "#;
 
     // Escaped pipes should work in both flavors
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Escaped pipes should work in Standard flavor");
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Escaped pipes should work in MkDocs flavor");
 }
@@ -242,7 +242,7 @@ fn test_mkdocs_flavor_fix_preserves_inline_code_pipes() {
 | OR   | `a | b` |
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let result = rule.fix(&ctx).unwrap();
 
     // The fix should add an empty cell, preserving the inline code

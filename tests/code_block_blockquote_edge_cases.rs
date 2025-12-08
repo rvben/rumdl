@@ -15,7 +15,7 @@ fn test_deeply_nested_blockquote_performance() {
     let content = ">>>>>>>>>>>>>>>>>> ```html\n>>>>>>>>>>>>>>>>>> <div>test</div>\n>>>>>>>>>>>>>>>>>> ```\n";
 
     let start = std::time::Instant::now();
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     let elapsed = start.elapsed();
 
@@ -39,7 +39,7 @@ fn test_fence_boundary_alignment() {
 <span>outside</span>
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag only the <span> outside the code block (opening tag only)
@@ -62,7 +62,7 @@ fn test_blank_line_detection_in_blockquotes() {
 >     <code>indented</code>
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Indented code after blank blockquote line should be detected as code
@@ -82,7 +82,7 @@ fn test_list_vs_code_in_blockquotes() {
 >     code continuation
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag HTML in list item (opening tag only), not in code continuation
@@ -102,7 +102,7 @@ fn test_malformed_blockquote_markers() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Line without space after > breaks the blockquote
@@ -123,7 +123,7 @@ fn test_mixed_blockquote_nesting_levels() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle transition correctly
@@ -141,7 +141,7 @@ fn test_indentation_preservation() {
 >     <code>4 spaces after marker</code>
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should be detected as indented code block after blank line
@@ -162,7 +162,7 @@ fn test_fence_with_varying_indentation() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Indentation inside fence should not matter
@@ -179,7 +179,7 @@ fn test_unicode_in_blockquote_code() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0, "Should handle Unicode in blockquote code blocks");
@@ -194,7 +194,7 @@ fn test_very_long_lines_in_blockquote() {
     let content = format!("> ```html\n> <div>{long_content}</div>\n> ```\n");
 
     let start = std::time::Instant::now();
-    let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     let elapsed = start.elapsed();
 
@@ -218,7 +218,7 @@ fn test_multiple_fences_same_blockquote() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the <b> tag between code blocks (opening tag only)
@@ -234,7 +234,7 @@ fn test_tab_indentation_in_blockquote() {
 
     let content = "> text\n>\n> \t<tab-indented>code</tab-indented>\n";
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Tab after blank line should be treated as indented code

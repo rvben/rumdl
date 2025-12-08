@@ -22,7 +22,7 @@ Here is some `中文代码` in inline code
     ];
 
     for rule in &rules {
-        let ctx = LintContext::new(unicode_content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(unicode_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Get warnings from check method (LSP style)
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
@@ -99,7 +99,7 @@ fn test_complex_unicode_scenarios() {
     let rule = MD047SingleTrailingNewline;
 
     for (content, description) in test_cases {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Test that rule can handle the content without panicking
         let warnings_result = rule.check(&ctx);
@@ -151,7 +151,7 @@ fn test_unicode_byte_boundary_validation() {
     ];
 
     for rule in &rules {
-        let ctx = LintContext::new(unicode_content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(unicode_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
         for warning in &warnings {

@@ -7,7 +7,7 @@ use rumdl_lib::rules::code_block_utils::CodeBlockStyle;
 fn test_consistent_fenced_blocks() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "# Code blocks\n\n```\ncode here\n```\n\n```rust\nmore code\n```";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -16,7 +16,7 @@ fn test_consistent_fenced_blocks() {
 fn test_consistent_indented_blocks() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
     let content = "# Code blocks\n\n    code here\n    more code\n\n    another block\n    continues";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -25,7 +25,7 @@ fn test_consistent_indented_blocks() {
 fn test_mixed_blocks_prefer_fenced() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "# Mixed blocks\n\n```\nfenced block\n```\n\n    indented block";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -44,7 +44,7 @@ fn test_mixed_blocks_prefer_fenced() {
 fn test_mixed_blocks_prefer_indented() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
     let content = "# Mixed blocks\n\n```\nfenced block\n```\n\n    indented block";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -64,7 +64,7 @@ fn test_mixed_blocks_prefer_indented() {
 fn test_consistent_style_fenced_first() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Mixed blocks\n\n```\nfenced block\n```\n\n    indented block";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty(), "Should detect inconsistent code blocks");
     let fixed = rule.fix(&ctx).unwrap();
@@ -84,7 +84,7 @@ fn test_consistent_style_indented_first() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     // One indented and one fenced block - tie prefers fenced
     let content = "# Mixed blocks\n\n    indented block\n\n```\nfenced block\n```";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty(), "Should detect inconsistent code blocks");
     let fixed = rule.fix(&ctx).unwrap();
@@ -103,7 +103,7 @@ fn test_consistent_style_indented_first() {
 fn test_empty_content() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -112,7 +112,7 @@ fn test_empty_content() {
 fn test_no_code_blocks() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Just a heading\n\nSome regular text\n\n> A blockquote";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -121,7 +121,7 @@ fn test_no_code_blocks() {
 fn test_fenced_with_language() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "```rust\nlet x = 42;\n```\n\n```python\nprint('hello')\n```";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -130,7 +130,7 @@ fn test_fenced_with_language() {
 fn test_convert_indented_preserves_content() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "    let x = 42;\n    println!(\"{}\", x);";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty(), "Should detect indented code blocks");
     let fixed = rule.fix(&ctx).unwrap();
@@ -166,7 +166,7 @@ console.log("Hello");
 The above shows proper markdown syntax.
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not detect any issues with markdown example blocks
@@ -184,7 +184,7 @@ The above shows proper markdown syntax.
 fn test_unclosed_code_block() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Test\n\n```python\ndef hello():\n    print('world')\n\nThis content is inside an unclosed block.";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect exactly one unclosed code block");
     assert!(
@@ -202,7 +202,7 @@ fn test_unclosed_code_block() {
 fn test_unclosed_tilde_code_block() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Test\n\n~~~javascript\nfunction test() {\n  return 42;\n}\n\nMore content here.";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect exactly one unclosed code block");
     assert!(
@@ -223,7 +223,7 @@ fn test_unclosed_tilde_code_block() {
 fn test_nested_code_block_opening() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "# Test\n\n```bash\n\n```markdown\n\n# Hello world\n\n```\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 1, "Should detect exactly one nested code block issue");
@@ -250,7 +250,7 @@ fn test_nested_code_block_opening() {
 fn test_nested_code_block_different_languages() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "```python\n\n```javascript\ncode here\n```\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 1, "Should detect nested opening");
@@ -269,7 +269,7 @@ fn test_nested_markdown_blocks_allowed() {
     // But based on our conversation, we're now flagging ALL nested openings
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "```bash\n\n```markdown\n# Example\n```\n```\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // This test case has both nested opening AND unclosed blocks, so we get multiple warnings
@@ -302,7 +302,7 @@ fn main() {
 ```
 ```"#; // Close the markdown block
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag anything - all nested blocks are inside markdown documentation
@@ -318,7 +318,7 @@ fn test_nested_same_language() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "```python\n\n```python\nprint('nested')\n```";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 1, "Should flag nested non-markdown blocks");
@@ -343,7 +343,7 @@ print("code")
 More content
 ````"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(result.is_empty(), "Deeply nested markdown blocks should be allowed");
@@ -355,7 +355,7 @@ fn test_mixed_fence_lengths() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "````python\n\n```javascript\ncode\n```\n\n````";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should work correctly with 4-backtick fences
@@ -368,7 +368,7 @@ fn test_adjacent_code_blocks() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "```rust\ncode1\n```\n```python\ncode2\n```";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(result.is_empty(), "Adjacent blocks should not be flagged as nested");
@@ -380,7 +380,7 @@ fn test_markdown_block_at_end() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Doc\n\n```markdown\n## Example\n\n```rust\nfn test() {}\n```";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // The markdown block is unclosed but contains properly formatted examples
@@ -403,7 +403,7 @@ fn test_fence_in_list_context() {
        pass
    ```"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(result.is_empty(), "Code blocks in lists should not cause issues");
@@ -435,7 +435,7 @@ ValueError: Empty sequence not allowed
 The `~~~~~~~~^^^^` markers show where the error occurred.
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(
@@ -468,7 +468,7 @@ print("~=~=~=~=~=~=~=~=~=~")
 All the above should be fine.
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(
@@ -500,7 +500,7 @@ Five tildes with trailing spaces
 ~~~~~
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(result.is_empty(), "Valid tilde fences should work correctly");
@@ -523,7 +523,7 @@ fn test_invalid_fence_patterns() {
 The code block above should be properly closed.
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(
@@ -549,7 +549,7 @@ fn test_issue_27_html_blocks_not_indented_code() {
 >>> name = "Trey"
 ```"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(
@@ -576,7 +576,7 @@ Traceback (most recent call last):
 TypeError: can only concatenate str (not "int") to str
 ```"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag the ~~~ or ^ characters inside the fenced block

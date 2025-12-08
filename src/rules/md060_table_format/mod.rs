@@ -795,7 +795,7 @@ mod tests {
     fn test_md060_disabled_by_default() {
         let rule = MD060TableFormat::default();
         let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0);
@@ -809,7 +809,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |";
@@ -826,7 +826,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let content = "| Name | Age |\n|---|---|\n| 中文 | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -845,7 +845,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let content = "| Status | Name |\n|---|---|\n| ✅ | Test |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains("Status"));
@@ -856,7 +856,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let content = "| Emoji | Name |\n|---|---|\n| 👨‍👩‍👧‍👦 | Family |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content);
@@ -870,7 +870,7 @@ mod tests {
 
         // CORRECT: `[0-9]\|[0-9]` - the \| is escaped, stays as content (2 columns)
         let content = "| Pattern | Regex |\n|---|---|\n| Time | `[0-9]\\|[0-9]` |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains(r"`[0-9]\|[0-9]`"), "Escaped pipes should be preserved");
@@ -881,7 +881,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "compact".to_string());
 
         let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
@@ -893,7 +893,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "tight".to_string());
 
         let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "|Name|Age|\n|---|---|\n|Alice|30|";
@@ -906,14 +906,14 @@ mod tests {
 
         // Table is already compact, should stay compact
         let content = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content);
 
         // Table is aligned, should stay aligned
         let content_aligned = "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |";
-        let ctx_aligned = LintContext::new(content_aligned, crate::config::MarkdownFlavor::Standard);
+        let ctx_aligned = LintContext::new(content_aligned, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed_aligned = rule.fix(&ctx_aligned).unwrap();
         assert_eq!(fixed_aligned, content_aligned);
@@ -924,7 +924,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let content = "| A | B |\n|---|---|\n|  | X |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains("|"));
@@ -935,7 +935,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let content = "| Name | Age | City |\n|---|---|---|\n| 中文 | 30 | NYC |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains("中文"));
@@ -947,7 +947,7 @@ mod tests {
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | B | C |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -963,7 +963,7 @@ mod tests {
         // Test with very short column content to ensure minimum width of 3
         // GFM requires at least 3 dashes in delimiter rows
         let content = "| ID | Name |\n|-|-|\n| 1 | A |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -990,7 +990,7 @@ mod tests {
         // Formula: 1 + (3 * 3) + (20 + 20 + 30) = 1 + 9 + 70 = 80 chars
         // But with actual content padding it will exceed
         let content = "| Very Long Column Header | Another Long Header | Third Very Long Header Column |\n|---|---|---|\n| Short | Data | Here |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1019,7 +1019,7 @@ mod tests {
         // Column widths: 25 + 25 + 25 = 75 chars
         // Formula: 1 + (3 * 3) + 75 = 85 chars (exceeds 50)
         let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| Data | Data | Data |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1047,7 +1047,7 @@ mod tests {
 
         // Small table that fits well under 100 chars
         let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1074,7 +1074,7 @@ mod tests {
         // Expected aligned width: 1 + (3 * 3) + 15 = 1 + 9 + 15 = 25 chars
         // This is under 30, so should stay aligned
         let content = "| AAAAA | BBBBB | CCCCC |\n|---|---|---|\n| AAAAA | BBBBB | CCCCC |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1112,7 +1112,7 @@ mod tests {
         // 8 columns with widths of 12 chars each = 96 chars
         // Formula: 1 + (8 * 3) + 96 = 121 chars (exceeds 80)
         let content = "| Column One A | Column Two B | Column Three | Column Four D | Column Five E | Column Six FG | Column Seven | Column Eight |\n|---|---|---|---|---|---|---|---|\n| A | B | C | D | E | F | G | H |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1136,7 +1136,7 @@ mod tests {
 
         // Medium-sized table
         let content = "| Column Header A | Column Header B | Column Header C |\n|---|---|---|\n| Some Data | More Data | Even More |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         // With 80 char limit, likely compacts
         let _fixed_80 = rule_80.fix(&ctx).unwrap();
@@ -1163,7 +1163,7 @@ mod tests {
         let rule = MD060TableFormat::from_config_struct(config, 80);
 
         let content = "| AAAAA | BBBBB |\n|---|---|\n| AAAAA | BBBBB |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1200,7 +1200,7 @@ mod tests {
 
         // Table that will be auto-compacted (exceeds 50 chars when aligned)
         let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| Data | Data | Data |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
 
@@ -1233,7 +1233,7 @@ mod tests {
                        | a              | 1                    |\n\
                        | b b            | 2                    |\n\
                        | c c c          | 3                    |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1267,7 +1267,7 @@ mod tests {
 
         // Small misaligned table
         let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
 

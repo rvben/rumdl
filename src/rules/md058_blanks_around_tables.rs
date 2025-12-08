@@ -312,7 +312,7 @@ mod tests {
 | Cell 1   | Cell 2   |
 
 Some text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -327,7 +327,7 @@ Some text after.";
 | Cell 1   | Cell 2   |
 
 Some text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -344,7 +344,7 @@ Some text after.";
 |----------|----------|
 | Cell 1   | Cell 2   |
 Some text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -360,7 +360,7 @@ Some text after.";
 |----------|----------|
 | Cell 1   | Cell 2   |
 Some text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -376,7 +376,7 @@ Some text after.";
 | Cell 1   | Cell 2   |
 
 Some text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // No blank line needed before table at start of document
@@ -391,7 +391,7 @@ Some text after.";
 | Header 1 | Header 2 |
 |----------|----------|
 | Cell 1   | Cell 2   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // No blank line needed after table at end of document
@@ -410,7 +410,7 @@ Text between tables.
 |--------|-------|
 | Data 2 | Val 2 |
 Text after second table.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 4);
@@ -436,7 +436,7 @@ Text after second table.";
 | Data 2 | Val 2 |
 
 More text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Tables separated by blank line should be OK
@@ -458,7 +458,7 @@ Text between.
 | Data 2 | Val 2 |
 
 More text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag missing blanks around both tables
@@ -475,7 +475,7 @@ More text.";
 |--------|-------|
 | Cell   | Data  |
 Text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = "Text before.
@@ -500,7 +500,7 @@ Middle
 |----|----|
 | D2 | V2 |
 End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = "Start
@@ -523,7 +523,7 @@ End";
     fn test_empty_content() {
         let rule = MD058BlanksAroundTables::default();
         let content = "";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -535,7 +535,7 @@ End";
         let content = "Just regular text.
 No tables here.
 Only paragraphs.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -551,7 +551,7 @@ Only paragraphs.";
 | In  | Code | Block |
 ```
 Text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Tables in code blocks should be ignored
@@ -567,7 +567,7 @@ Text after.";
 | Left     | Center   | Right    |
 | Data     | More     | Info     |
 ## Another Heading";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -586,7 +586,7 @@ Text after.";
 | O   |     | X   |
 
 More text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -601,7 +601,7 @@ More text.";
 | 田中 | 25   | 東京 |
 | 佐藤 | 30   | 大阪 |
 End.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -617,7 +617,7 @@ End.";
 | Data  | This is an extremely long cell content that goes on |
 
 After.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -630,7 +630,7 @@ After.";
 | Header 1 | Header 2 |
 |----------|----------|
 Next paragraph.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should still require blanks around header-only table
@@ -647,7 +647,7 @@ Next paragraph.";
     | Data     | Here  |
 
     More content.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Indented tables should be detected
@@ -662,7 +662,7 @@ Next paragraph.";
 |--------|
 | Column |
 Text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Single column tables ARE now detected (fixed to support 1+ columns)
@@ -687,7 +687,7 @@ Text after.";
 | Cell   | Data  |
 
 Text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should pass with 1 blank line before (but we configured to require 2)
@@ -710,7 +710,7 @@ Text after.";
 | Cell   | Data  |
 
 More text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should fail with only 1 blank line after (but we configured to require 3)
@@ -731,7 +731,7 @@ More text.";
 |--------|-------|
 | Cell   | Data  |
 More text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should fail both before and after
@@ -753,7 +753,7 @@ More text.";
 |--------|-------|
 | Cell   | Data  |
 More text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should pass with zero blank lines required
@@ -773,7 +773,7 @@ More text.";
 |--------|-------|
 | Cell   | Data  |
 Text after.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = "Text before.
@@ -832,7 +832,7 @@ Text after.";
         // Test case from issue #25 - table with very long line
         let rule = MD058BlanksAroundTables::default();
         let content = "# Title\n\nThis is a table:\n\n| Name          | Query                                                    |\n| ------------- | -------------------------------------------------------- |\n| b             | a                                                        |\n| c             | a                                                        |\n| d             | a                                                        |\n| long          | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |\n| e             | a                                                        |\n| f             | a                                                        |\n| g             | a                                                        |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         // Debug: Print detected table blocks
         let table_blocks = TableUtils::find_table_blocks(content, &ctx);

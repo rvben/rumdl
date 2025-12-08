@@ -63,16 +63,11 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     // Determine the filename to use for display and context
     let display_filename = args.stdin_filename.as_deref().unwrap_or("<stdin>");
 
-    // Set RUMDL_FILE_PATH if stdin-filename is provided
-    // This allows rules like MD057 to know the file location for relative path checking
-    if let Some(ref filename) = args.stdin_filename {
-        unsafe {
-            std::env::set_var("RUMDL_FILE_PATH", filename);
-        }
-    }
+    // Convert stdin-filename to PathBuf for LintContext
+    let source_file = args.stdin_filename.as_ref().map(std::path::PathBuf::from);
 
     // Create a lint context for the stdin content
-    let ctx = LintContext::new(&content, config.markdown_flavor());
+    let ctx = LintContext::new(&content, config.markdown_flavor(), source_file.clone());
     let mut all_warnings = Vec::new();
 
     // Run all enabled rules on the content
@@ -120,7 +115,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             print!("{output_content}");
 
             // Re-check the fixed content to see if any issues remain
-            let fixed_ctx = LintContext::new(&fixed_content, config.markdown_flavor());
+            let fixed_ctx = LintContext::new(&fixed_content, config.markdown_flavor(), source_file.clone());
             let mut remaining_warnings = Vec::new();
             for rule in rules {
                 if let Ok(warnings) = rule.check(&fixed_ctx) {
@@ -147,12 +142,6 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             print!("{content}");
         }
 
-        // Clean up environment variable
-        if args.stdin_filename.is_some() {
-            unsafe {
-                std::env::remove_var("RUMDL_FILE_PATH");
-            }
-        }
         return;
     }
 
@@ -200,13 +189,6 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                         .ok();
                 }
             }
-        }
-    }
-
-    // Clean up environment variable
-    if args.stdin_filename.is_some() {
-        unsafe {
-            std::env::remove_var("RUMDL_FILE_PATH");
         }
     }
 

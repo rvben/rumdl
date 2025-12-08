@@ -167,7 +167,7 @@ impl IndexWorker {
 
     /// Build a FileIndex from content
     fn build_file_index(content: &str) -> FileIndex {
-        let ctx = LintContext::new(content, MarkdownFlavor::default());
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
         let mut file_index = FileIndex::new();
 
         // Extract headings from the content

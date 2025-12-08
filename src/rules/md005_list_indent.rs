@@ -771,7 +771,7 @@ mod tests {
   * Nested 1
   * Nested 2
 * Item 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -785,7 +785,7 @@ mod tests {
    1. Nested 1
    2. Nested 2
 3. Item 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // With dynamic alignment, nested items should align with parent's text content
         // Ordered items starting with "1. " have text at column 3, so nested items need 3 spaces
@@ -799,7 +799,7 @@ mod tests {
 * Item 1
  * Item 2
    * Nested 1";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // With dynamic alignment, line 3 correctly aligns with line 2's text position
         // Only line 2 is incorrectly indented
@@ -815,7 +815,7 @@ mod tests {
 1. Item 1
  2. Item 2
     1. Nested 1";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fixed = rule.fix(&ctx).unwrap();
@@ -833,7 +833,7 @@ mod tests {
   1. Nested ordered
   * Nested unordered
 * Item 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -845,7 +845,7 @@ mod tests {
 * Level 1
    * Level 2
       * Level 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // MD005 should now accept consistent 3-space increments
         assert!(result.is_empty(), "MD005 should accept consistent indentation pattern");
@@ -860,7 +860,7 @@ mod tests {
   * Nested 1
 
 * Item 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -872,7 +872,7 @@ mod tests {
 Just some text
 More text
 Even more text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -888,7 +888,7 @@ Even more text";
     1. Ordered 3
     2. Still 3
 * Back to 1";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -904,7 +904,7 @@ Even more text";
       1. Ordered 3
      2. Still 3
 * Back to 1";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Lines 5-6 have inconsistent indentation (6 vs 5 spaces) for the same level
         assert_eq!(result.len(), 1);
@@ -920,19 +920,19 @@ Even more text";
 
         // Test with consistent list indentation
         let content = "* Item 1\n* Item 2\n  * Nested item\n  * Another nested item";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with inconsistent list indentation
         let content = "* Item 1\n* Item 2\n * Nested item\n  * Another nested item";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty()); // Should have at least one warning
 
         // Test with different level indentation issues
         let content = "* Item 1\n  * Nested item\n * Another nested item with wrong indent";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty()); // Should have at least one warning
     }
@@ -948,7 +948,7 @@ Even more text";
   * Nested item
     with its own continuation
 * Item 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -961,7 +961,7 @@ Even more text";
 >   * Nested 1
 >   * Nested 2
 > * Item 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Blockquoted lists should have correct indentation within the blockquote context
@@ -981,7 +981,7 @@ Even more text";
   ```
   * Nested item
 * Item 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -990,7 +990,7 @@ Even more text";
     fn test_list_with_tabs() {
         let rule = MD005ListIndent::default();
         let content = "* Item 1\n\t* Tab indented\n  * Space indented";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Should detect inconsistent indentation
         assert!(!result.is_empty());
@@ -1005,7 +1005,7 @@ Even more text";
   * Nested 2
    * Wrong indent for same level
   * Nested 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty());
         // Should flag the inconsistent item
@@ -1017,7 +1017,7 @@ Even more text";
         let rule = MD005ListIndent::default();
         // Use concat to preserve the leading space
         let content = concat!(" * Wrong indent\n", "* Correct\n", "  * Nested");
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag the indented top-level item
@@ -1032,7 +1032,7 @@ Even more text";
 * Item with **bold** and *italic*
  * Wrong indent with `code`
    * Also wrong with [link](url)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains("**bold**"));
         assert!(fixed.contains("*italic*"));
@@ -1050,7 +1050,7 @@ Even more text";
       * L4
         * L5
           * L6";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -1065,7 +1065,7 @@ Even more text";
     * Wrong 3
   * Correct
    * Wrong 4";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         // Should fix to consistent indentation
         let lines: Vec<&str> = fixed.lines().collect();
@@ -1082,7 +1082,7 @@ Even more text";
             content.push_str(&format!("* Item {i}\n"));
             content.push_str(&format!("  * Nested {i}\n"));
         }
-        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -1091,7 +1091,7 @@ Even more text";
     fn test_column_positions() {
         let rule = MD005ListIndent::default();
         let content = " * Wrong indent";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].column, 1, "Expected column 1, got {}", result[0].column);
@@ -1107,18 +1107,18 @@ Even more text";
         let rule = MD005ListIndent::default();
 
         // Empty content should skip
-        let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.should_skip(&ctx));
 
         // Content without lists should skip
-        let ctx = LintContext::new("Just plain text", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("Just plain text", crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.should_skip(&ctx));
 
         // Content with lists should not skip
-        let ctx = LintContext::new("* List item", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("* List item", crate::config::MarkdownFlavor::Standard, None);
         assert!(!rule.should_skip(&ctx));
 
-        let ctx = LintContext::new("1. Ordered list", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("1. Ordered list", crate::config::MarkdownFlavor::Standard, None);
         assert!(!rule.should_skip(&ctx));
     }
 
@@ -1126,11 +1126,11 @@ Even more text";
     fn test_should_skip_validation() {
         let rule = MD005ListIndent::default();
         let content = "* List item";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(!rule.should_skip(&ctx));
 
         let content = "No lists here";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.should_skip(&ctx));
     }
 
@@ -1141,7 +1141,7 @@ Even more text";
 * Item 1
  * Single space - wrong
   * Two spaces - correct";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Both the single space and two space items get warnings
         // because they establish inconsistent indentation at the same level
@@ -1156,7 +1156,7 @@ Even more text";
 * Item 1
    * Three spaces - first establishes pattern
   * Two spaces - inconsistent with established pattern";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // First-established indent (3) is the expected value
         // Line 3 with 2 spaces is inconsistent with the pattern
@@ -1176,7 +1176,7 @@ Even more text";
 2. **Oracle Unified Directory (OUD)**
    - Extended user directory services
    - Verification of project account presence and changes";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Should have no warnings - 3 spaces is correct for bullets under numbered items
         assert!(
@@ -1192,7 +1192,7 @@ Even more text";
 1. **Active Directory/LDAP**
   - Wrong: only 2 spaces
    - Correct: 3 spaces";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Should flag one of them as inconsistent
         assert_eq!(
@@ -1218,7 +1218,7 @@ Even more text";
 * Top level
   * Second level (2 spaces is correct for bullets under bullets)
     * Third level (4 spaces)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Should have no warnings - regular bullet nesting still uses 2-space increments
         assert!(
@@ -1231,7 +1231,7 @@ Even more text";
     fn test_fix_range_accuracy() {
         let rule = MD005ListIndent::default();
         let content = " * Wrong indent";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
 
@@ -1248,7 +1248,7 @@ Even more text";
     * Item 2 with 4 spaces
         * Item 3 with 8 spaces
     * Item 4 with 4 spaces";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // MD005 should accept consistent 4-space pattern
         assert!(
@@ -1269,7 +1269,7 @@ Even more text";
     * Another sub item with 4 spaces
 * Another top level";
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // MD005 should accept consistent 4-space pattern
@@ -1291,7 +1291,7 @@ Even more text";
     - The `target-version` option in a `ruff.toml` file
     - The `project.requires-python` field in a `pyproject.toml` file";
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let result = rule.check(&ctx).unwrap();
 
@@ -1321,7 +1321,7 @@ Even more text";
     - If Ruff finds a user-level configuration, the `requires-python` field will take precedence
     - If there is no config file, Ruff will search for the closest `pyproject.toml`";
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let result = rule.check(&ctx).unwrap();
 
@@ -1349,7 +1349,7 @@ Even more text";
    - A
    - B
 ";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Sub-list items A and B are continuation content (3-space indent is correct)
         // because they appear after continuation content (code block and text) that is
@@ -1370,7 +1370,7 @@ Even more text";
 * Item (content at column 2)
   Text at column 2 (exact boundary - continuation)
   * Sub at column 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // The sub-list should be recognized as continuation content
         assert!(
@@ -1386,7 +1386,7 @@ Even more text";
 * Parent
   Text with emoji 😀 and Unicode ñ characters
   * Sub-list should still work";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Unicode shouldn't break continuation detection
         assert!(
@@ -1408,7 +1408,7 @@ Even more text";
 
   * Child after gap
   * Another child";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Empty lines shouldn't break continuation detection
         assert!(
@@ -1426,7 +1426,7 @@ Even more text";
     Indented quote at column 4
   Back to column 2
   * Sub-list at column 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Should handle varying indentation in continuation content
         assert!(
@@ -1445,7 +1445,7 @@ Even more text";
       * Great-grandchild
         * Great-great-grandchild
   * Another child at level 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Deep nesting without continuation content should work
         assert!(
@@ -1462,7 +1462,7 @@ Even more text";
 >   Continuation in blockquote
 >   * Sub-list in blockquote
 >   * Another sub-list";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Blockquote continuation should work correctly
         assert!(
@@ -1478,7 +1478,7 @@ Even more text";
 * Parent (content at column 2)
  Text at column 1 (one less than content_column - NOT continuation)
   * Child";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Text at column 1 should NOT be continuation (< parent_content_column)
         // This breaks the list context, so child should be treated as top-level
@@ -1503,7 +1503,7 @@ Even more text";
     code at 4 spaces
     ```
   * Sub-list should not be confused";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Multiple code blocks shouldn't confuse continuation detection
         assert!(
@@ -1526,7 +1526,7 @@ Even more text";
             }
         }
 
-        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
 
         // Should complete quickly with O(n) optimization
         let start = std::time::Instant::now();
@@ -1572,7 +1572,7 @@ Even more text";
    - One
 10. Ten
     - One";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -1589,7 +1589,7 @@ Even more text";
    - First sublist at 3 spaces
   - Second sublist at 2 spaces (inconsistent)
    - Third sublist at 3 spaces";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // The item at column 2 should be flagged (inconsistent with siblings at column 3)
         assert_eq!(
@@ -1608,7 +1608,7 @@ Even more text";
         let content = "\
 10. Item ten
    - Only sublist at 3 spaces";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // No warning because there's only one sibling
         assert!(
@@ -1632,7 +1632,7 @@ Even more text";
     - First sublist at 4 spaces
     - Second sublist at 4 spaces
     - Third sublist at 4 spaces";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // No warnings: sublists under item 9 are at col 3 (consistent within group),
         // sublists under item 10 are at col 4 (consistent within their group)
@@ -1651,7 +1651,7 @@ Even more text";
     - First sublist at 4 spaces
    - Second sublist at 3 spaces (inconsistent!)
     - Third sublist at 4 spaces";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // The item at 3 spaces should be flagged (inconsistent with siblings at 4 spaces)
         assert_eq!(

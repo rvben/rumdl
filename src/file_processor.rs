@@ -641,7 +641,7 @@ pub fn process_file_with_formatter(
         // In fix mode, show warnings with [fixed] for issues that were fixed
         if !silent {
             // Re-lint the fixed content to see which warnings remain
-            let fixed_ctx = LintContext::new(&content, config.markdown_flavor());
+            let fixed_ctx = LintContext::new(&content, config.markdown_flavor(), None);
             let mut remaining_warnings = Vec::new();
 
             for rule in rules {
@@ -845,11 +845,6 @@ pub fn process_file_with_index(
     }
 
     let lint_start = Instant::now();
-    // Set the environment variable for the file path
-    // This allows rules like MD057 to know which file is being processed
-    unsafe {
-        std::env::set_var("RUMDL_FILE_PATH", file_path);
-    }
 
     // Filter rules based on per-file-ignores configuration
     let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
@@ -873,12 +868,9 @@ pub fn process_file_with_index(
     };
 
     // Use lint_and_index for single-file linting + index contribution
-    let (warnings_result, file_index) = rumdl_lib::lint_and_index(&content, &filtered_rules, verbose, flavor);
-
-    // Clear the environment variable after processing
-    unsafe {
-        std::env::remove_var("RUMDL_FILE_PATH");
-    }
+    let source_file = Some(std::path::PathBuf::from(file_path));
+    let (warnings_result, file_index) =
+        rumdl_lib::lint_and_index(&content, &filtered_rules, verbose, flavor, source_file);
 
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();

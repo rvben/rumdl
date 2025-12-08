@@ -26,7 +26,7 @@ This is included content that might have duplicate headings.
     let rule = MD024NoDuplicateHeading::default();
 
     // Test with standard flavor - should flag duplicate
-    let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings_standard = rule.check(&ctx_standard).unwrap();
     assert_eq!(
         warnings_standard.len(),
@@ -40,7 +40,7 @@ This is included content that might have duplicate headings.
     );
 
     // Test with MkDocs flavor - should NOT flag duplicate
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings_mkdocs = rule.check(&ctx_mkdocs).unwrap();
     assert_eq!(
         warnings_mkdocs.len(),
@@ -66,7 +66,7 @@ More content here.
     let rule = MD052ReferenceLinkImages::default();
 
     // With MkDocs flavor, the snippet line should be ignored
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings_mkdocs = rule.check(&ctx_mkdocs).unwrap();
     assert_eq!(
         warnings_mkdocs.len(),
@@ -102,7 +102,7 @@ fn test_mkdocs_nested_snippets() {
     let rule = MD024NoDuplicateHeading::default();
 
     // With MkDocs flavor, duplicates within snippets should be ignored
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings_mkdocs = rule.check(&ctx_mkdocs).unwrap();
 
     // Debug: Print warnings if any
@@ -136,7 +136,7 @@ fn test_mkdocs_snippet_variations() {
     let rule = MD052ReferenceLinkImages::default();
 
     // All variations should be recognized in MkDocs mode
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings_mkdocs = rule.check(&ctx_mkdocs).unwrap();
 
     // Debug: Print warnings if any

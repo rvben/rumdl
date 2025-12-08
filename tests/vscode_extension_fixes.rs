@@ -16,7 +16,7 @@ use rumdl_lib::rules::*;
 /// 2. Applying the fix replacement text to that warning range only
 /// 3. Returning the result
 fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String> {
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).map_err(|e| format!("Check failed: {e:?}"))?;
 
     if warnings.is_empty() {

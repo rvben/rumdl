@@ -14,7 +14,7 @@ echo hello
 {:.wrap}
 
 Some text"#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should auto-detect Kramdown block attributes");
 }
@@ -31,7 +31,7 @@ echo hello
 {not kramdown}
 
 Some text"#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should flag non-Kramdown brace lines");
     assert!(result[0].message.contains("No blank line after"));
@@ -47,7 +47,7 @@ fn test_kramdown_css_class_variants() {
 echo hello
 ```
 {:.wrap}"#;
-    let ctx = LintContext::new(content1, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content1, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(rule.check(&ctx).unwrap().is_empty());
 
     // ID attribute
@@ -55,7 +55,7 @@ echo hello
 echo hello
 ```
 {:#my-code}"#;
-    let ctx = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(rule.check(&ctx).unwrap().is_empty());
 
     // Multiple attributes
@@ -63,7 +63,7 @@ echo hello
 echo hello
 ```
 {:.wrap #my-code .highlight}"#;
-    let ctx = LintContext::new(content3, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content3, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(rule.check(&ctx).unwrap().is_empty());
 }
 
@@ -76,7 +76,7 @@ echo hello
 ```
 {:.wrap}
 Some text immediately after"#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // This should not flag since the Kramdown attribute is auto-detected
     assert!(result.is_empty(), "Should auto-detect Kramdown attributes");
@@ -92,7 +92,7 @@ fn test_normal_code_blocks_still_checked() {
 echo hello
 ```
 Some text immediately after"#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -110,7 +110,7 @@ echo hello
 ```
 {:.wrap}
 Text after"#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Should add blank line before the code block but not after (due to attribute)

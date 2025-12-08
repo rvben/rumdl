@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD021NoMultipleSpaceClosedAtx;
 fn test_valid_closed_atx_headings() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_valid_closed_atx_headings() {
 fn test_invalid_closed_atx_headings() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "#  Heading 1  #\n##  Heading 2 ##\n###   Heading 3   ###";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 1);
@@ -27,7 +27,7 @@ fn test_invalid_closed_atx_headings() {
 fn test_mixed_closed_atx_headings() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "# Heading 1 #\n##  Heading 2  ##\n### Heading 3 ###\n####    Heading 4    ####";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
 }
@@ -36,7 +36,7 @@ fn test_mixed_closed_atx_headings() {
 fn test_code_block() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "```markdown\n#  Not a heading  #\n##   Also not a heading   ##\n```\n# Real Heading #";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -45,7 +45,7 @@ fn test_code_block() {
 fn test_fix_closed_atx_headings() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "#  Heading 1  #\n##  Heading 2 ##\n###   Heading 3   ###";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###");
 }
@@ -54,7 +54,7 @@ fn test_fix_closed_atx_headings() {
 fn test_fix_mixed_closed_atx_headings() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "# Heading 1 #\n##  Heading 2  ##\n### Heading 3 ###\n####    Heading 4    ####";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result,
@@ -66,7 +66,7 @@ fn test_fix_mixed_closed_atx_headings() {
 fn test_preserve_code_blocks() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "# Real Heading #\n```\n#  Not a heading  #\n```\n# Another Heading #";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result,
@@ -78,7 +78,7 @@ fn test_preserve_code_blocks() {
 fn test_heading_with_multiple_hashes() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "######  Heading 6  ######";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(
@@ -93,7 +93,7 @@ fn test_heading_with_multiple_hashes() {
 fn test_not_a_heading() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "This is #  not a heading  #\nAnd this is also #   not a heading   #";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -102,7 +102,7 @@ fn test_not_a_heading() {
 fn test_indented_closed_atx_headings() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "  #  Heading 1  #\n    ##   Heading 2   ##\n      ###    Heading 3    ###";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -116,7 +116,7 @@ fn test_indented_closed_atx_headings() {
 fn test_empty_closed_atx_headings() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "# #\n## ##\n### ###";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -125,7 +125,7 @@ fn test_empty_closed_atx_headings() {
 fn test_multiple_spaces_at_start() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "#   Heading 1 #\n##    Heading 2 ##\n###     Heading 3 ###";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(
@@ -140,7 +140,7 @@ fn test_multiple_spaces_at_start() {
 fn test_multiple_spaces_at_end() {
     let rule = MD021NoMultipleSpaceClosedAtx::new();
     let content = "# Heading 1   #\n## Heading 2    ##\n### Heading 3     ###";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(

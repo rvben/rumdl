@@ -512,20 +512,20 @@ mod tests {
 
         // Test with only one level-1 heading
         let content = "# Title\n\n## Section 1\n\n## Section 2";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with multiple level-1 headings (non-section names) - should flag
         let content = "# Title 1\n\n## Section 1\n\n# Another Title\n\n## Section 2";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1); // Should flag the second level-1 heading
         assert_eq!(result[0].line, 5);
 
         // Test with front matter title and a level-1 heading
         let content = "---\ntitle: Document Title\n---\n\n# Main Heading\n\n## Section 1";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag a single title after front matter");
     }
@@ -551,7 +551,7 @@ mod tests {
         ];
 
         for case in valid_cases {
-            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
             let result = rule.check(&ctx).unwrap();
             assert!(result.is_empty(), "Should not flag document sections in: {case}");
         }
@@ -563,7 +563,7 @@ mod tests {
         ];
 
         for case in invalid_cases {
-            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
             let result = rule.check(&ctx).unwrap();
             assert!(!result.is_empty(), "Should flag non-section headings in: {case}");
         }
@@ -575,7 +575,7 @@ mod tests {
 
         // Even document sections should be flagged in strict mode
         let content = "# Main Title\n\n## Content\n\n# Appendix A\n\nAppendix content";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Strict mode should flag all multiple H1s");
     }
@@ -588,7 +588,7 @@ mod tests {
 
         // Create content with very short second heading
         let content = "# First\n#";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         // This should not panic
         let result = rule.check(&ctx);
@@ -609,7 +609,7 @@ mod tests {
         // col will be 0, self.config.level.as_usize() is 1, so col + self.config.level.as_usize() = 1
         // This should not exceed bounds for "#" but tests the edge case
         let content = "# First Title\n#";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         // This should not panic and should handle the edge case gracefully
         let result = rule.check(&ctx);
@@ -642,7 +642,7 @@ mod tests {
 
         // Test that headings separated by horizontal rules are allowed
         let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.\n\n***\n\n# Third Title\n\nFinal content.";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -651,7 +651,7 @@ mod tests {
 
         // Test that headings without separators are still flagged
         let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.\n\n# Third Title\n\nNo separator before this one.";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag the heading without separator");
         assert_eq!(result[0].line, 11); // Third title on line 11
@@ -659,7 +659,7 @@ mod tests {
         // Test with allow_with_separators = false
         let strict_rule = MD025SingleTitle::strict();
         let content = "# First Title\n\nContent here.\n\n---\n\n# Second Title\n\nMore content.";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = strict_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -674,7 +674,7 @@ mod tests {
 
         // Test that Python comments in code blocks are not treated as headers
         let content = "# Main Title\n\n```python\n# This is a Python comment, not a heading\nprint('Hello')\n```\n\n## Section\n\nMore content.";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -683,7 +683,7 @@ mod tests {
 
         // Test the fix method doesn't modify Python comments
         let content = "# Main Title\n\n```python\n# Python comment\nprint('test')\n```\n\n# Second Title";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert!(
             fixed.contains("# Python comment"),

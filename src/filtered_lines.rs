@@ -16,7 +16,7 @@
 //! use rumdl_lib::filtered_lines::FilteredLinesExt;
 //!
 //! let content = "---\nurl: http://example.com\n---\n\n# Title\n\nContent";
-//! let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+//! let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 //!
 //! // Simple: get all content lines (skips front matter by default)
 //! for line in ctx.content_lines() {
@@ -221,7 +221,7 @@ pub trait FilteredLinesExt {
     /// use rumdl_lib::filtered_lines::FilteredLinesExt;
     ///
     /// let content = "# Title\n\n```rust\ncode\n```\n\nContent";
-    /// let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    /// let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     ///
     /// for line in ctx.filtered_lines().skip_code_blocks() {
     ///     println!("Line {}: {}", line.line_num, line.content);
@@ -244,7 +244,7 @@ pub trait FilteredLinesExt {
     /// use rumdl_lib::filtered_lines::FilteredLinesExt;
     ///
     /// let content = "---\ntitle: Test\n---\n\n# Content";
-    /// let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    /// let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     ///
     /// for line in ctx.content_lines() {
     ///     // Front matter is automatically skipped
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn test_filtered_line_structure() {
         let content = "# Title\n\nContent";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let line = ctx.content_lines().next().unwrap();
         assert_eq!(line.line_num, 1);
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn test_skip_front_matter_yaml() {
         let content = "---\ntitle: Test\nurl: http://example.com\n---\n\n# Content\n\nMore content";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let lines: Vec<_> = ctx.content_lines().collect();
         // After front matter (lines 1-4), we have: empty line, "# Content", empty line, "More content"
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_skip_front_matter_toml() {
         let content = "+++\ntitle = \"Test\"\nurl = \"http://example.com\"\n+++\n\n# Content";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let lines: Vec<_> = ctx.content_lines().collect();
         assert_eq!(lines.len(), 2); // Empty line + "# Content"
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn test_skip_front_matter_json() {
         let content = "{\n\"title\": \"Test\",\n\"url\": \"http://example.com\"\n}\n\n# Content";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let lines: Vec<_> = ctx.content_lines().collect();
         assert_eq!(lines.len(), 2); // Empty line + "# Content"
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn test_skip_code_blocks() {
         let content = "# Title\n\n```rust\nlet x = 1;\nlet y = 2;\n```\n\nContent";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let lines: Vec<_> = ctx.filtered_lines().skip_code_blocks().into_iter().collect();
 
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn test_no_filters() {
         let content = "---\ntitle: Test\n---\n\n# Content";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // With no filters, all lines should be included
         let lines: Vec<_> = ctx.filtered_lines().into_iter().collect();
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn test_multiple_filters() {
         let content = "---\ntitle: Test\n---\n\n# Title\n\n```rust\ncode\n```\n\nContent";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let lines: Vec<_> = ctx
             .filtered_lines()
@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn test_line_numbering_is_1_indexed() {
         let content = "First\nSecond\nThird";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let lines: Vec<_> = ctx.content_lines().collect();
         assert_eq!(lines[0].line_num, 1);
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn test_content_lines_convenience_method() {
         let content = "---\nfoo: bar\n---\n\nContent";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // content_lines() should automatically skip front matter
         let lines: Vec<_> = ctx.content_lines().collect();
@@ -463,7 +463,7 @@ mod tests {
     #[test]
     fn test_empty_document() {
         let content = "";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let lines: Vec<_> = ctx.content_lines().collect();
         assert_eq!(lines.len(), 0);
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn test_only_front_matter() {
         let content = "---\ntitle: Test\n---";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let lines: Vec<_> = ctx.content_lines().collect();
         assert_eq!(
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn test_builder_pattern_ergonomics() {
         let content = "# Title\n\n```\ncode\n```\n\nContent";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // Test that builder pattern works smoothly
         let _lines: Vec<_> = ctx
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn test_filtered_line_access_to_line_info() {
         let content = "# Title\n\nContent";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         for line in ctx.content_lines() {
             // Should be able to access line_info fields
@@ -527,7 +527,7 @@ Some regular content here.
       show_signature: true
 
 More content."#;
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let lines: Vec<_> = ctx.filtered_lines().skip_mkdocstrings().into_iter().collect();
 
         // Verify lines OUTSIDE mkdocstrings blocks are INCLUDED
@@ -575,7 +575,7 @@ Content about snowfall data.
 import {Footer} from './footer.js'
 
 More content."#;
-        let ctx = LintContext::new(content, MarkdownFlavor::MDX);
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
         let lines: Vec<_> = ctx.filtered_lines().skip_esm_blocks().into_iter().collect();
 
         // Verify lines OUTSIDE ESM blocks are INCLUDED
@@ -642,7 +642,7 @@ HTML block
 </div>
 
 Content"#;
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
         let lines: Vec<_> = ctx
             .filtered_lines()

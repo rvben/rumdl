@@ -51,7 +51,7 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
     ];
 
     for (content, rule) in test_cases {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
         for warning in &warnings {
@@ -128,7 +128,7 @@ fn test_pattern_2_content_duplication_prevention() {
     ];
 
     for (content, rule) in test_cases {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
         // Apply fixes using both CLI and LSP methods
@@ -188,7 +188,7 @@ fn test_pattern_3_missing_lsp_implementations_prevention() {
     ];
 
     for (content, rule) in test_cases {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
         // Critical regression test: Every warning should have a valid fix
@@ -254,7 +254,7 @@ fn test_byte_range_boundaries() {
         let content_len = content_bytes.len();
 
         for rule in &rules {
-            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
             for warning in &warnings {
@@ -316,13 +316,13 @@ fn test_fix_application_idempotency() {
 
     for content in test_contents {
         for rule in &rules {
-            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
             // First application
             let first_fix = rule.fix(&ctx).expect("First fix should succeed");
 
             // Second application on already-fixed content
-            let ctx2 = LintContext::new(&first_fix, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx2 = LintContext::new(&first_fix, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let second_fix = rule.fix(&ctx2).expect("Second fix should succeed");
 
             // Critical regression test: Should be idempotent
@@ -366,7 +366,7 @@ fn test_warning_fix_quality() {
 
     for content in problematic_contents {
         for rule in &rules {
-            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let initial_warnings = rule.check(&ctx).expect("Initial check should succeed");
 
             if !initial_warnings.is_empty() {
@@ -374,7 +374,7 @@ fn test_warning_fix_quality() {
                 let fixed_content = rule.fix(&ctx).expect("Fix should succeed");
 
                 // Check the fixed content
-                let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard);
+                let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
                 let remaining_warnings = rule.check(&fixed_ctx).expect("Fixed content check should succeed");
 
                 // Critical regression test: Fix should resolve all issues of this rule type

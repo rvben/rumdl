@@ -44,7 +44,7 @@ More content."#,
     let rule = MD009TrailingSpaces::default();
 
     for (step, content) in editing_steps.iter().enumerate() {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start_time = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
@@ -107,7 +107,7 @@ Final paragraph."#;
     ];
 
     // Phase 1: Initial check (editor save trigger)
-    let ctx = LintContext::new(content_with_issues, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content_with_issues, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let mut all_warnings = Vec::new();
 
     let check_start = Instant::now();
@@ -139,7 +139,7 @@ Final paragraph."#;
     let mut fixed_content = content_with_issues.to_string();
 
     for rule in &rules {
-        let ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
         if !warnings.is_empty() {
@@ -166,7 +166,7 @@ Final paragraph."#;
     );
 
     // Phase 3: Verify fixes (post-save check)
-    let verify_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let verify_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let mut remaining_warnings = Vec::new();
 
     for rule in &rules {
@@ -205,7 +205,7 @@ fn test_partial_document_editing() {
     for (scenario_name, start_pos, end_pos) in edit_scenarios {
         // Extract the edited section
         let section = &large_document[start_pos..end_pos];
-        let ctx = LintContext::new(section, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(section, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start_time = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
@@ -265,7 +265,7 @@ More content."#;
     // Simulate rapid successive edits (like when user is typing fast)
     let overall_start = Instant::now();
     for (i, content) in rapid_edits.iter().enumerate() {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let edit_start = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
@@ -328,15 +328,15 @@ More content.",
     let rule = MD009TrailingSpaces::default();
 
     // Original state
-    let ctx1 = LintContext::new(original, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx1 = LintContext::new(original, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings1 = rule.check(&ctx1).expect("Rule check should succeed");
 
     // After edit (simulate typing spaces)
-    let ctx2 = LintContext::new(&after_edit, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx2 = LintContext::new(&after_edit, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings2 = rule.check(&ctx2).expect("Rule check should succeed");
 
     // After undo (back to original)
-    let ctx3 = LintContext::new(original, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx3 = LintContext::new(original, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings3 = rule.check(&ctx3).expect("Rule check should succeed");
 
     // Undo should restore original state exactly

@@ -1000,7 +1000,7 @@ mod tests {
     fn test_consistent_style_with_fenced_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "```\ncode\n```\n\nMore text\n\n```\nmore code\n```";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // All blocks are fenced, so consistent style should be OK
@@ -1011,7 +1011,7 @@ mod tests {
     fn test_consistent_style_with_indented_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "Text\n\n    code\n    more code\n\nMore text\n\n    another block";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // All blocks are indented, so consistent style should be OK
@@ -1022,7 +1022,7 @@ mod tests {
     fn test_consistent_style_mixed() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "```\nfenced code\n```\n\nText\n\n    indented code\n\nMore";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Mixed styles should be flagged
@@ -1033,7 +1033,7 @@ mod tests {
     fn test_fenced_style_with_indented_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "Text\n\n    indented code\n    more code\n\nMore text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Indented blocks should be flagged when fenced style is required
@@ -1045,7 +1045,7 @@ mod tests {
     fn test_indented_style_with_fenced_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
         let content = "Text\n\n```\nfenced code\n```\n\nMore text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Fenced blocks should be flagged when indented style is required
@@ -1057,7 +1057,7 @@ mod tests {
     fn test_unclosed_code_block() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\ncode without closing fence";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -1068,7 +1068,7 @@ mod tests {
     fn test_nested_code_blocks() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\nouter\n```\n\ninner text\n\n```\ncode\n```";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // This should parse as two separate code blocks
@@ -1079,7 +1079,7 @@ mod tests {
     fn test_fix_indented_to_fenced() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "Text\n\n    code line 1\n    code line 2\n\nMore text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(fixed.contains("```\ncode line 1\ncode line 2\n```"));
@@ -1089,7 +1089,7 @@ mod tests {
     fn test_fix_fenced_to_indented() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
         let content = "Text\n\n```\ncode line 1\ncode line 2\n```\n\nMore text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(fixed.contains("    code line 1\n    code line 2"));
@@ -1100,7 +1100,7 @@ mod tests {
     fn test_fix_unclosed_block() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\ncode without closing";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should add closing fence
@@ -1111,7 +1111,7 @@ mod tests {
     fn test_code_block_in_list() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "- List item\n    code in list\n    more code\n- Next item";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Code in lists should not be flagged
@@ -1149,7 +1149,7 @@ mod tests {
     fn test_tilde_fence() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "~~~\ncode\n~~~";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Tilde fences should be accepted as fenced blocks
@@ -1160,7 +1160,7 @@ mod tests {
     fn test_language_specification() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```rust\nfn main() {}\n```";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1170,7 +1170,7 @@ mod tests {
     fn test_empty_content() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1187,7 +1187,7 @@ mod tests {
     fn test_markdown_documentation_block() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```markdown\n# Example\n\n```\ncode\n```\n\nText\n```";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Nested code blocks in markdown documentation should be allowed
@@ -1198,7 +1198,7 @@ mod tests {
     fn test_preserve_trailing_newline() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\ncode\n```\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, content);
@@ -1224,7 +1224,7 @@ mod tests {
     More tab content here
     Also not an indented code block"#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag tab content as indented code blocks
@@ -1245,7 +1245,7 @@ Regular text
     This is an actual indented code block
     Should be flagged"#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag the actual indented code block but not the tab content
@@ -1288,7 +1288,7 @@ Regular text
         Nested tab content
         Should not be flagged"#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
 
         // Nested tabs should not be flagged
@@ -1320,7 +1320,7 @@ More text with another footnote[^2].
 
     And even a third paragraph!"#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Indented paragraphs in footnotes should not be flagged as code blocks
@@ -1387,7 +1387,7 @@ Text with footnote[^1].
 
 Regular text at column 0 ends the footnote."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // The indented paragraphs in the footnote should not be flagged as code blocks
@@ -1413,7 +1413,7 @@ Regular text at column 0 ends the footnote."#;
 
 Not indented, so footnote ends here."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // The indented content should not be flagged
@@ -1437,7 +1437,7 @@ This paragraph is not indented, so footnote ends.
 
     This should be flagged as indented code block."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // The last indented block should be flagged (it's after the footnote ended)
@@ -1469,7 +1469,7 @@ This paragraph is not indented, so footnote ends.
 
     This should also be flagged (after horizontal rule)."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Both indented blocks after structural elements should be flagged
@@ -1496,7 +1496,7 @@ This paragraph is not indented, so footnote ends.
 
     More footnote text after code."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should have no warnings - the fenced code block is valid
@@ -1515,7 +1515,7 @@ This paragraph is not indented, so footnote ends.
         code block
         more code"#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // The 8-space indented code is valid within footnote
@@ -1541,7 +1541,7 @@ This paragraph is not indented, so footnote ends.
 
     Continuation of second."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // All indented content is part of footnotes
@@ -1564,7 +1564,7 @@ This paragraph is not indented, so footnote ends.
 
     This indented content is part of the list, not the footnote."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // List continuation should not be flagged
@@ -1593,7 +1593,7 @@ Regular paragraph ends footnote context.
     This is actual indented code (MUST be flagged)
     Should be detected as code block"#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag the indented code after the regular paragraph

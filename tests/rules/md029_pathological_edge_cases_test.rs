@@ -19,7 +19,7 @@ fn test_extreme_deep_nesting_15_levels() {
         content.push_str(&format!("{}2. Level {} item 2\n", indent, level + 1));
     }
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let start = Instant::now();
     let result = rule.check(&ctx);
     let duration = start.elapsed();
@@ -46,7 +46,7 @@ fn test_massive_numbers_overflow_conditions() {
         usize::MAX.saturating_sub(2)
     );
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx);
 
     assert!(result.is_ok(), "Large numbers should not crash");
@@ -69,7 +69,7 @@ fn test_unicode_digit_markers_vulnerability() {
 1. Regular ASCII digit
 2. Regular ASCII digit two";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Unicode digits should not be recognized as list markers
@@ -89,7 +89,7 @@ fn test_zero_width_and_invisible_characters() {
 4.\u{2060} Item with word joiner
 5. \u{200C}Item with zero-width non-joiner in text";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle invisible characters gracefully
@@ -110,7 +110,7 @@ fn test_malformed_mixed_tab_space_indentation() {
 \t\t1. Double tab level 3
     1. Four spaces level 2 - different from tab";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle mixed indentation without crashing
@@ -130,7 +130,7 @@ fn test_empty_and_whitespace_only_list_items() {
 4. Normal item
 5. ";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle empty list items gracefully
@@ -158,7 +158,7 @@ fn test_lists_in_nested_blockquotes_and_tables() {
 1. List after table
 2. Should start fresh";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Complex nesting should not crash
@@ -178,7 +178,7 @@ fn test_pathological_parenthesis_markers() {
 2. Mixing markers
 5) Back to parenthesis";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle mixed markers appropriately
@@ -209,7 +209,7 @@ fn test_performance_killer_massive_document() {
         content.push_str("\n");
     }
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let start = Instant::now();
     let result = rule.check(&ctx);
     let duration = start.elapsed();
@@ -238,7 +238,7 @@ fn test_parent_detection_confusion() {
       3. Orphaned deep item
    3. Level 2 under wrong parent?";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle parent detection edge cases
@@ -266,7 +266,7 @@ fn test_indentation_boundary_edge_cases() {
   2. Two space - breaks nesting?
  2. One space continuation";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     println!("Indentation boundary cases: {} warnings", result.len());
@@ -290,7 +290,7 @@ fn test_real_world_copy_paste_artifacts() {
 7. Item with combining chars: café (café vs cafe\u{0301})
 8. Final item";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle various whitespace artifacts
@@ -313,7 +313,7 @@ fn test_automated_tool_malformed_markdown() {
 101. Continue large sequence
 1. Reset to 1 again";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should handle malformed spacing
@@ -334,7 +334,7 @@ fn test_stack_overflow_recursive_parent_detection() {
         content.push_str(&format!("{}1. Item at level {} (iteration {})\n", indent, indent_level, i));
     }
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let start = Instant::now();
     let result = rule.check(&ctx);
     let duration = start.elapsed();
@@ -359,7 +359,7 @@ fn test_unicode_normalization_edge_cases() {
 6. Item with \u{1F1FA}\u{1F1F8} (flag emoji)
 7. Final item";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Unicode normalization should not affect numbering
@@ -377,7 +377,7 @@ fn test_memory_exhaustion_large_numbers() {
 2. Normal item
 3. Another normal item", large_number);
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx);
 
     assert!(result.is_ok(), "Large numbers should not cause memory exhaustion");
@@ -401,7 +401,7 @@ fn test_fix_function_pathological_cases() {
    1. Reset nested
 2. Back to main";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx);
 
     assert!(result.is_ok(), "Fix should handle pathological numbers");
@@ -434,7 +434,7 @@ standalone code block
 2. New parent
    1. Clear child of item 2";
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     println!("Code block interruption: {} warnings", result.len());
@@ -463,7 +463,7 @@ fn test_performance_worst_case_parent_detection() {
         }
     }
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let start = Instant::now();
     let result = rule.check(&ctx);
     let duration = start.elapsed();

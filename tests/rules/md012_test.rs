@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD012NoMultipleBlanks;
 fn test_md012_valid() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\nLine 2\n\nLine 3\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_md012_valid() {
 fn test_md012_invalid() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].line, 3);
@@ -30,7 +30,7 @@ fn test_md012_invalid() {
 fn test_md012_start_end() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "\n\nLine 1\nLine 2\n\n\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
@@ -43,7 +43,7 @@ fn test_md012_start_end() {
 fn test_md012_code_blocks() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n```\n\n\nCode\n\n\n```\nLine 2\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Multiple blank lines in code blocks are allowed
 }
@@ -52,7 +52,7 @@ fn test_md012_code_blocks() {
 fn test_md012_front_matter() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "---\ntitle: Test\n\n\ndescription: Test\n---\n\nContent\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Multiple blank lines in front matter are allowed
 }
@@ -61,7 +61,7 @@ fn test_md012_front_matter() {
 fn test_md012_custom_maximum() {
     let rule = MD012NoMultipleBlanks::new(2);
     let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Only the second group (3 blanks > maximum 2) is invalid, reporting 1 excess line
     assert_eq!(result.len(), 1);
@@ -73,7 +73,7 @@ fn test_md012_custom_maximum() {
 fn test_md012_fix() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "Line 1\n\nLine 2\n\nLine 3\n");
 }
@@ -82,7 +82,7 @@ fn test_md012_fix() {
 fn test_md012_fix_with_code_blocks() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n\n```\n\n\nCode\n\n\n```\nLine 2\n\n\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "Line 1\n\n```\n\n\nCode\n\n\n```\nLine 2\n\n");
 }
@@ -91,7 +91,7 @@ fn test_md012_fix_with_code_blocks() {
 fn test_md012_fix_with_front_matter() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "---\ntitle: Test\n\n\ndescription: Test\n---\n\n\n\nContent\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, "---\ntitle: Test\n\n\ndescription: Test\n---\n\nContent\n");
 }
@@ -100,7 +100,7 @@ fn test_md012_fix_with_front_matter() {
 fn test_md012_whitespace_lines() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n  \n \t \nLine 2\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Expects 1 warning for the excess whitespace line
     assert_eq!(result.len(), 1);
@@ -112,7 +112,7 @@ fn test_md012_whitespace_lines() {
 fn test_md012_indented_code_blocks() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Line 1\n\n    code block\n\n    more code\n\nLine 2\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Multiple blank lines in indented code blocks are allowed
 }
@@ -121,7 +121,7 @@ fn test_md012_indented_code_blocks() {
 fn test_md012_indented_fenced_code_blocks() {
     let rule = MD012NoMultipleBlanks::default();
     let content = "Text\n\n    ```bash\n    code\n    ```\n\nMore text\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty()); // Should not flag blank lines around indented fenced code blocks
 }
@@ -139,7 +139,7 @@ fn test_md012_debug_indented_fenced() {
 
     // Test the rule
     let rule = MD012NoMultipleBlanks::default();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     println!("Warnings: {result:?}");
@@ -157,7 +157,7 @@ fn test_md012_contributing_pattern() {
     let content = "To set up the MLflow repository, run the following commands:\n\n    ```bash\n    # Clone the repository\n    git clone --recurse-submodules git@github.com:<username>/mlflow.git\n    # The alternative way of cloning through https may cause permission error during branch push\n";
 
     let rule = MD012NoMultipleBlanks::default();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     println!("Content lines:");
@@ -188,7 +188,7 @@ fn test_md012_region_calculation() {
     // We need to access the compute_code_block_regions function somehow
     // For now, let's just test the rule behavior
     let rule = MD012NoMultipleBlanks::default();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     println!("Warnings: {result:?}");

@@ -22,7 +22,7 @@ Good spacing."#;
     let rule = MD031BlanksAroundFences::default();
 
     // Test with MkDocs flavor
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings = rule.check(&ctx_mkdocs).unwrap();
 
     // Should flag missing blanks around admonitions
@@ -59,7 +59,7 @@ Outside content."#;
     let rule = MD031BlanksAroundFences::default();
 
     // Test with MkDocs flavor
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings = rule.check(&ctx_mkdocs).unwrap();
 
     // The implementation treats nested admonitions as requiring blank lines too,
@@ -86,7 +86,7 @@ Regular text."#;
     let rule = MD032BlanksAroundLists;
 
     // Test with MkDocs flavor
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings = rule.check(&ctx_mkdocs).unwrap();
 
     // Lists inside admonitions should not trigger MD032
@@ -117,7 +117,7 @@ Regular text."#;
 
     // Test with MkDocs flavor - but MD022 doesn't check inside admonitions
     // since content within admonitions is typically skipped
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings = rule.check(&ctx_mkdocs).unwrap();
 
     // MD022 still checks headings inside admonitions, which is reasonable
@@ -143,7 +143,7 @@ Regular text."#;
     let rule = MD031BlanksAroundFences::default();
 
     // Test with MkDocs flavor
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings = rule.check(&ctx_mkdocs).unwrap();
 
     // Collapsible admonitions should be treated the same as regular ones
@@ -167,7 +167,7 @@ Text continues."#;
     // For inline admonitions, they don't require blank lines as they flow with text
     let rule = MD031BlanksAroundFences::default();
 
-    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let warnings = rule.check(&ctx_mkdocs).unwrap();
 
     // Inline admonitions don't need blank lines (they're inline!)
@@ -190,7 +190,7 @@ More text."#;
     let rule = MD031BlanksAroundFences::default();
 
     // Test with Standard flavor - should not treat as admonition
-    let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx_standard).unwrap();
 
     // In standard flavor, !!! is just text, not an admonition

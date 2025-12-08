@@ -257,7 +257,7 @@ mod tests {
     fn test_single_asterisk_emphasis() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "*This is emphasized*\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -273,7 +273,7 @@ mod tests {
     fn test_single_underscore_emphasis() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "_This is emphasized_\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -289,7 +289,7 @@ mod tests {
     fn test_double_asterisk_strong() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "**This is strong**\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -305,7 +305,7 @@ mod tests {
     fn test_double_underscore_strong() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "__This is strong__\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -321,7 +321,7 @@ mod tests {
     fn test_emphasis_with_punctuation() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "**Important Note:**\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Emphasis with punctuation should NOT be flagged (matches markdownlint)
@@ -332,7 +332,7 @@ mod tests {
     fn test_emphasis_in_paragraph() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "This is a paragraph with *emphasis* in the middle.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag emphasis within a line
@@ -343,7 +343,7 @@ mod tests {
     fn test_emphasis_in_list() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "- *List item with emphasis*\n- Another item";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag emphasis in list items
@@ -354,7 +354,7 @@ mod tests {
     fn test_emphasis_in_blockquote() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "> *Quote with emphasis*\n> Another line";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag emphasis in blockquotes
@@ -365,7 +365,7 @@ mod tests {
     fn test_emphasis_in_code_block() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "```\n*Not emphasis in code*\n```";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag emphasis in code blocks
@@ -376,7 +376,7 @@ mod tests {
     fn test_toc_label() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "**Table of Contents**\n\n- Item 1\n- Item 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag common TOC labels
@@ -387,7 +387,7 @@ mod tests {
     fn test_already_heading() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "# **Bold in heading**\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag emphasis that's already in a heading
@@ -398,7 +398,7 @@ mod tests {
     fn test_fix_no_changes() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "*Convert to heading*\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         // MD036 no longer provides automatic fixes
@@ -409,7 +409,7 @@ mod tests {
     fn test_fix_preserves_content() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "**Convert to heading**\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         // MD036 no longer provides automatic fixes
@@ -420,7 +420,7 @@ mod tests {
     fn test_empty_punctuation_config() {
         let rule = MD036NoEmphasisAsHeading::new("".to_string());
         let content = "**Important Note:**\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // With empty punctuation config, all emphasis is flagged
@@ -435,7 +435,7 @@ mod tests {
     fn test_multiple_emphasized_lines() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "*First heading*\n\nSome text\n\n**Second heading**\n\nMore text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -447,7 +447,7 @@ mod tests {
     fn test_whitespace_handling() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "  **Indented emphasis**  \n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -458,7 +458,7 @@ mod tests {
     fn test_nested_emphasis() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "***Not a simple emphasis***\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Nested emphasis (3 asterisks) should not match our patterns
@@ -469,7 +469,7 @@ mod tests {
     fn test_emphasis_with_newlines() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "*First line\nSecond line*\n\nRegular text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Multi-line emphasis should not be flagged
@@ -480,7 +480,7 @@ mod tests {
     fn test_fix_preserves_trailing_newline() {
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "*Convert to heading*\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         // MD036 no longer provides automatic fixes
@@ -502,7 +502,7 @@ mod tests {
         // Test the specific issue from #23 - bold text used as image caption
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "#### Métriques\n\n**commits par année : rumdl**\n\n![rumdl Commits By Year image](commits_by_year.png \"commits par année : rumdl\")";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should detect the bold text even though it's followed by an image
@@ -523,7 +523,7 @@ mod tests {
         // Test that with empty punctuation config, even text ending with colon is flagged
         let rule = MD036NoEmphasisAsHeading::new("".to_string());
         let content = "**commits par année : rumdl**\n\nSome text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // With empty punctuation config, this should be flagged
@@ -536,7 +536,7 @@ mod tests {
         // Test that with default punctuation config, text ending with colon is NOT flagged
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "**Important Note:**\n\nSome text";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // With default punctuation including colon, this should NOT be flagged

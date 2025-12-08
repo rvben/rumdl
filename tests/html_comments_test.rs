@@ -20,7 +20,7 @@ fn test_links_in_html_comments_ignored() {
 <!-- or if none - *No Calls for participation were submitted this week.* -->
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // MD039: No spaces inside link text
     let md039 = MD039NoSpaceInLinks::new();
@@ -54,7 +54,7 @@ fn test_lists_in_html_comments_ignored() {
 -->
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // MD005: List indentation
     let md005 = MD005ListIndent::default();
@@ -81,7 +81,7 @@ $ python3 vote.py
 ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // MD052: Reference links and images should use a label that is defined
     let md052 = MD052ReferenceLinkImages::default();
@@ -106,7 +106,7 @@ fn test_images_in_html_comments_ignored() {
 Valid content here.
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Check that images inside comments don't get parsed
     assert_eq!(ctx.images.len(), 0, "Images inside HTML comments should not be parsed");
@@ -128,7 +128,7 @@ with various markdown syntax:
 Valid content.
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // MD042: No empty links
     let md042 = MD042NoEmptyLinks::new();
@@ -155,7 +155,7 @@ fn test_inline_html_comments() {
 Some text <!-- [broken link]() --> more text.
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // MD042: No empty links
     let md042 = MD042NoEmptyLinks::new();
@@ -177,7 +177,7 @@ fn test_content_outside_comments_is_checked() {
 This empty link is outside: [ - ]()
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // MD042: No empty links
     let md042 = MD042NoEmptyLinks::new();
@@ -203,7 +203,7 @@ fn test_nested_html_comments() {
 Valid content.
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // The parser should handle this without crashing
     // Behavior may vary, but it shouldn't panic

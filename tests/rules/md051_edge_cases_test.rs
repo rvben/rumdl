@@ -28,7 +28,7 @@ mod tests {
     fn assert_fragment_generation(style: &AnchorStyle, heading: &str, expected: &str, test_name: &str) {
         let rule = create_rule(style);
         let content = format!("# {heading}\n\n[Link](#{expected})");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Debug output to see what's happening
@@ -52,7 +52,7 @@ mod tests {
     fn assert_safe_and_fast(style: &AnchorStyle, heading: &str, max_duration: Duration, test_name: &str) {
         let rule = create_rule(style);
         let content = format!("# {heading}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
@@ -449,7 +449,7 @@ Edge cases:
 [No extension](somefile#section)
 "#;
 
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag the invalid internal link and ambiguous "somefile#section"
@@ -483,7 +483,7 @@ Edge cases:
             for size in sizes.iter() {
                 let heading = "word ".repeat(*size);
                 let content = format!("# {heading}\n\n[Link](#test)");
-                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
                 let rule = create_rule(style);
 
                 let start = Instant::now();
@@ -718,8 +718,8 @@ Edge cases:
                     let content1 = format!("# {heading}\n\n[Link](#{expected})");
                     let content2 = format!("# {heading}\n\n[Link](#section)");
 
-                    let ctx1 = LintContext::new(&content1, rumdl_lib::config::MarkdownFlavor::Standard);
-                    let ctx2 = LintContext::new(&content2, rumdl_lib::config::MarkdownFlavor::Standard);
+                    let ctx1 = LintContext::new(&content1, rumdl_lib::config::MarkdownFlavor::Standard, None);
+                    let ctx2 = LintContext::new(&content2, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
                     let result1 = rule.check(&ctx1).unwrap();
                     let result2 = rule.check(&ctx2).unwrap();
@@ -951,7 +951,7 @@ Edge cases:
             for heading in &common_headings {
                 let rule = create_rule(style);
                 let content = format!("# {heading}\n\n");
-                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
                 // Just verify no panic and reasonable performance
                 let start = Instant::now();
@@ -1047,7 +1047,7 @@ Edge cases:
 
         for style in &styles {
             let rule = create_rule(style);
-            let ctx = LintContext::new(&complex_content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(&complex_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
             let start = Instant::now();
             let result = rule.check(&ctx);

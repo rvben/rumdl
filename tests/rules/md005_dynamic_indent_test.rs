@@ -12,7 +12,7 @@ fn test_four_space_indent_detection() {
         * Double nested with 8 spaces
     * Another nested with 4 spaces
 * Item 2";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Should detect 4-space pattern and accept it
     assert!(
@@ -30,7 +30,7 @@ fn test_four_space_indent_inconsistent() {
     * Nested with 4 spaces
   * Wrong: only 2 spaces
     * Back to 4 spaces";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Should flag the 2-space item as inconsistent
     assert!(!result.is_empty(), "MD005 should flag inconsistent indentation");
@@ -47,7 +47,7 @@ fn test_three_space_indent_detection() {
       * Double nested with 6 spaces
    * Another nested with 3 spaces
 * Item 2";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Should detect 3-space pattern and accept it
     assert!(
@@ -66,7 +66,7 @@ fn test_mixed_ordered_unordered_with_four_spaces() {
     * Another unordered with 4 spaces
 2. Second ordered
     1. Nested ordered with 4 spaces";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // MD005 should accept this - bullets under ordered items naturally need more spaces
     // and the pattern is consistent
@@ -86,7 +86,7 @@ fn test_deep_nesting_with_four_spaces() {
         * L3 (8 spaces)
             * L4 (12 spaces)
                 * L5 (16 spaces)";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -103,7 +103,7 @@ fn test_fix_with_detected_four_space_pattern() {
     * Correctly indented with 4
   * Wrong: only 2 spaces
       * Nested under wrong item";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
     // MD005 now consistently uses 2-space indentation by default (markdownlint compatibility)
     assert!(
@@ -123,7 +123,7 @@ fn test_issue_64_scenario() {
     * Another sub item with 4 spaces
 * Another top level";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // MD005 should now detect the 4-space pattern and not flag any issues
@@ -148,7 +148,7 @@ fn test_ruff_example_from_issue() {
     * Over 800 built-in rules
     * Support for Python 3.13";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(
@@ -171,7 +171,7 @@ First list:
     * Sub A1 with 4 spaces
     * Sub A2 with 4 spaces";
 
-    let ctx1 = LintContext::new(content1, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx1 = LintContext::new(content1, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result1 = rule.check(&ctx1).unwrap();
     assert!(
         result1.is_empty(),
@@ -185,7 +185,7 @@ Second list:
   * Sub B1 with 2 spaces
     * Sub B2 with 4 spaces - inconsistent with Sub B1";
 
-    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result2 = rule.check(&ctx2).unwrap();
 
     // Dynamic detection: 2-space then 4-space pattern is accepted as valid

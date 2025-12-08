@@ -73,7 +73,7 @@ impl MockCli {
             if let Some(content) = self.files.get(file_path) {
                 processed_files.push(file_path.to_path_buf());
 
-                let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+                let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
                 let default_config = Config::default();
                 let config = self.config.as_ref().unwrap_or(&default_config);
                 let all_rules = rules::all_rules(config);
@@ -139,7 +139,7 @@ impl MockCli {
             if let Some(content) = self.files.get(file_path) {
                 processed_files.push(file_path.to_path_buf());
 
-                let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+                let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
                 let default_config = Config::default();
                 let config = self.config.as_ref().unwrap_or(&default_config);
                 let all_rules = rules::all_rules(config);

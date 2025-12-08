@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD053LinkImageReferenceDefinitions;
 fn test_all_references_used() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[link1][id1]\n[link2][id2]\n![image][id3]\n\n[id1]: http://example.com/1\n[id2]: http://example.com/2\n[id3]: http://example.com/3";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_all_references_used() {
 fn test_unused_reference() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[link1][id1]\n\n[id1]: http://example.com/1\n[id2]: http://example.com/2";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Should detect id2 as unused
 }
@@ -24,7 +24,7 @@ fn test_unused_reference() {
 fn test_shortcut_reference() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[example]\n\n[example]: http://example.com";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -34,7 +34,7 @@ fn test_multiple_unused_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content =
         "[link1][id1]\n\n[id1]: http://example.com/1\n[id2]: http://example.com/2\n[id3]: http://example.com/3";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // Should detect id2 and id3 as unused
 }
@@ -43,7 +43,7 @@ fn test_multiple_unused_references() {
 fn test_case_insensitive() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[example][ID]\n\n[id]: http://example.com";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -52,7 +52,7 @@ fn test_case_insensitive() {
 fn test_empty_content() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -61,7 +61,7 @@ fn test_empty_content() {
 fn test_no_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "# Just a heading\n\nSome regular text\n\n> A blockquote";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -70,7 +70,7 @@ fn test_no_references() {
 fn test_only_unused_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[id1]: http://example.com/1\n[id2]: http://example.com/2";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2); // All references are unused
 }
@@ -79,7 +79,7 @@ fn test_only_unused_references() {
 fn test_mixed_used_unused_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[link][used]\nSome text\n\n[used]: http://example.com/used\n[unused]: http://example.com/unused";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Should detect unused reference
 }
@@ -88,7 +88,7 @@ fn test_mixed_used_unused_references() {
 fn test_valid_reference_definitions() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[ref]: https://example.com\n[ref] is a link";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -97,7 +97,7 @@ fn test_valid_reference_definitions() {
 fn test_unused_reference_definition() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[unused]: https://example.com\nThis has no references";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
 }
@@ -106,7 +106,7 @@ fn test_unused_reference_definition() {
 fn test_multiple_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[ref1]: https://example1.com\n[ref2]: https://example2.com\n[ref1] and [ref2] are links";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -115,7 +115,7 @@ fn test_multiple_references() {
 fn test_image_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[img]: image.png\n![Image][img]";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -124,7 +124,7 @@ fn test_image_references() {
 fn test_mixed_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[ref]: https://example.com\n[img]: image.png\n[ref] is a link and ![Image][img] is an image";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -133,7 +133,7 @@ fn test_mixed_references() {
 fn test_ignored_definitions() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[ignored]: https://example.com\nNo references here";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 }
@@ -142,7 +142,7 @@ fn test_ignored_definitions() {
 fn test_case_sensitivity() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[REF]: https://example.com\n[ref] is a link";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -153,7 +153,7 @@ fn test_case_sensitivity() {
 fn test_with_document_structure() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     let content = "[link1][id1]\n[link2][id2]\n![image][id3]\n\n[id1]: http://example.com/1\n[id2]: http://example.com/2\n[id3]: http://example.com/3";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -163,7 +163,7 @@ fn test_case_insensitive_with_backticks() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test case mismatch with backticks
     let content = "# Test\n\nThis is [`Example`].\n\n[`example`]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -176,7 +176,7 @@ fn test_case_insensitive_dotted_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test case mismatch with dots in backticks (like dataclasses.InitVar from ruff repo)
     let content = "From the Python documentation on [`dataclasses.InitVar`]:\n\n[`dataclasses.initvar`]: https://docs.python.org/3/library/dataclasses.html#dataclasses.InitVar\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -189,7 +189,7 @@ fn test_references_with_apostrophes() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test case mismatch with apostrophes (like De Morgan's)
     let content = "The [De Morgan's Laws] are important.\n\n[de morgan's laws]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -202,7 +202,7 @@ fn test_references_with_dots_not_filtered() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test references with dots (previously incorrectly filtered as config sections)
     let content = "See [tool.ruff] for details.\n\n[tool.ruff]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "References with dots should be recognized");
 }
@@ -212,7 +212,7 @@ fn test_references_with_slashes_not_filtered() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test references with forward slashes (previously incorrectly filtered as file paths)
     let content = "See [docs/api] for details.\n\n[docs/api]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -225,7 +225,7 @@ fn test_single_letter_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test single letter references (previously incorrectly filtered)
     let content = "See [T] for type parameter.\n\n[T]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Single letter references should be recognized");
 }
@@ -235,7 +235,7 @@ fn test_common_type_name_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test common type name references (previously incorrectly filtered)
     let content = "The [str] type in Python.\n\n[str]: https://docs.python.org/3/library/stdtypes.html#str\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -248,7 +248,7 @@ fn test_shortcut_reference_with_colon() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test shortcut reference followed by colon (common in documentation)
     let content = "As stated in [`reference`]:\n\n[`reference`]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -261,7 +261,7 @@ fn test_shortcut_reference_with_period() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test shortcut reference followed by period
     let content = "See [reference].\n\n[reference]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -274,7 +274,7 @@ fn test_numeric_footnote_references() {
     let rule = MD053LinkImageReferenceDefinitions::default();
     // Test numeric references (could be footnotes)
     let content = "See note [1] for details.\n\n[1]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Numeric references should be recognized");
 }
@@ -285,13 +285,13 @@ fn test_patterns_still_skipped() {
 
     // Alert patterns (GitHub alerts) should still be skipped
     let content = "[!NOTE]\nThis is a note.\n\n[other]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Alert patterns should be skipped");
 
     // Pure punctuation should still be skipped
     let content = "Array[...] notation.\n\n[other]: https://example.com\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Pure punctuation patterns should be skipped");
 }
@@ -319,7 +319,7 @@ Single type parameters like [T] are common.
 [t]: https://docs.python.org/3/library/typing.html#type-variables
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -343,7 +343,7 @@ From the Python documentation on [`dataclasses.InitVar`]:
 [`dataclasses.InitVar`]: https://docs.python.org/3/library/dataclasses.html#dataclasses.InitVar
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     println!("\n=== PARSED LINKS ===");
     for (i, link) in ctx.links.iter().enumerate() {
@@ -390,7 +390,7 @@ From the Python documentation on [`dataclasses.InitVar`]:
 [`dataclasses.initvar`]: https://docs.python.org/3/library/dataclasses.html#dataclasses.InitVar
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // This should work due to case-insensitive matching
@@ -406,7 +406,7 @@ fn test_backtick_reference_with_double_colon_and_comma() {
     // Test case from GitHub issue #128: backtick reference with `::` and `, `
     // Previously filtered out because it contains both `:` and space
     let content = "See [`Bound<'_, PyAny>::is_callable`] function.\n\n[`Bound<'_, PyAny>::is_callable`]: foo\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -426,7 +426,7 @@ fn test_backtick_reference_in_list_continuation() {
 
 [`CompareOp::matches`]: https://example.com
 "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),

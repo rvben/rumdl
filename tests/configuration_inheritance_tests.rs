@@ -299,7 +299,7 @@ disable = ["MD025"]
 Content here.
 "#;
 
-    let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let mut total_warnings = 0;
 
     for rule in &filtered_rules {

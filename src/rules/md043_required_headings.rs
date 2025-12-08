@@ -370,7 +370,7 @@ mod tests {
 
         // Test 1: Basic content with code block
         let content = "# Test Document\n\nThis is regular content.\n\n```markdown\n# This is a heading in a code block\n## Another heading in code block\n```\n\n## Real heading 2\n\nSome content.";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let actual_headings = rule.extract_headings(&ctx);
         assert_eq!(
             actual_headings,
@@ -380,7 +380,7 @@ mod tests {
 
         // Test 2: Content with invalid headings
         let content = "# Test Document\n\nThis is regular content.\n\n```markdown\n# This is a heading in a code block\n## This should be ignored\n```\n\n## Not Real heading 2\n\nSome content.";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let actual_headings = rule.extract_headings(&ctx);
         assert_eq!(
             actual_headings,
@@ -402,21 +402,33 @@ mod tests {
         // Test with matching headings
         let content = "# Introduction\n\nContent\n\n# Method\n\nMore content\n\n# Results\n\nFinal content";
         let warnings = rule
-            .check(&LintContext::new(content, crate::config::MarkdownFlavor::Standard))
+            .check(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None,
+            ))
             .unwrap();
         assert!(warnings.is_empty(), "Expected no warnings for matching headings");
 
         // Test with mismatched headings
         let content = "# Introduction\n\nContent\n\n# Results\n\nSkipped method";
         let warnings = rule
-            .check(&LintContext::new(content, crate::config::MarkdownFlavor::Standard))
+            .check(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None,
+            ))
             .unwrap();
         assert!(!warnings.is_empty(), "Expected warnings for mismatched headings");
 
         // Test with no headings but requirements exist
         let content = "No headings here, just plain text";
         let warnings = rule
-            .check(&LintContext::new(content, crate::config::MarkdownFlavor::Standard))
+            .check(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None,
+            ))
             .unwrap();
         assert!(!warnings.is_empty(), "Expected warnings when headings are missing");
 
@@ -429,7 +441,11 @@ mod tests {
         let rule_setext = MD043RequiredHeadings::new(required_setext);
         let content = "Introduction\n===========\n\nContent\n\nMethod\n------\n\nMore content\n\nResults\n=======\n\nFinal content";
         let warnings = rule_setext
-            .check(&LintContext::new(content, crate::config::MarkdownFlavor::Standard))
+            .check(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None,
+            ))
             .unwrap();
         assert!(warnings.is_empty(), "Expected no warnings for matching setext headings");
     }
@@ -443,42 +459,66 @@ mod tests {
         // Test 1: Content with '#' character in normal text (not a heading)
         let content = "This paragraph contains a # character but is not a heading";
         assert!(
-            rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should skip content with # in normal text"
         );
 
         // Test 2: Content with code block containing heading-like syntax
         let content = "Regular paragraph\n\n```markdown\n# This is not a real heading\n```\n\nMore text";
         assert!(
-            rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should skip content with heading-like syntax in code blocks"
         );
 
         // Test 3: Content with list items using '-' character
         let content = "Some text\n\n- List item 1\n- List item 2\n\nMore text";
         assert!(
-            rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should skip content with list items using dash"
         );
 
         // Test 4: Content with horizontal rule that uses '---'
         let content = "Some text\n\n---\n\nMore text below the horizontal rule";
         assert!(
-            rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should skip content with horizontal rule"
         );
 
         // Test 5: Content with equals sign in normal text
         let content = "This is a normal paragraph with equals sign x = y + z";
         assert!(
-            rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should skip content with equals sign in normal text"
         );
 
         // Test 6: Content with dash/minus in normal text
         let content = "This is a normal paragraph with minus sign x - y = z";
         assert!(
-            rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should skip content with minus sign in normal text"
         );
     }
@@ -492,28 +532,44 @@ mod tests {
         // Test 1: Content with ATX heading
         let content = "# This is a heading\n\nAnd some content";
         assert!(
-            !rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            !rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should not skip content with ATX heading"
         );
 
         // Test 2: Content with Setext heading (equals sign)
         let content = "This is a heading\n================\n\nAnd some content";
         assert!(
-            !rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            !rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should not skip content with Setext heading (=)"
         );
 
         // Test 3: Content with Setext heading (dash)
         let content = "This is a subheading\n------------------\n\nAnd some content";
         assert!(
-            !rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            !rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should not skip content with Setext heading (-)"
         );
 
         // Test 4: Content with ATX heading with closing hashes
         let content = "## This is a heading ##\n\nAnd some content";
         assert!(
-            !rule.should_skip(&LintContext::new(content, crate::config::MarkdownFlavor::Standard)),
+            !rule.should_skip(&LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )),
             "Should not skip content with ATX heading with closing hashes"
         );
     }
@@ -528,7 +584,7 @@ mod tests {
 
         // Should fail with different case
         let content = "# introduction\n\n# method";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -547,7 +603,7 @@ mod tests {
 
         // Should pass with different case
         let content = "# introduction\n\n# method";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Should allow case mismatch when match_case is false");
@@ -563,7 +619,7 @@ mod tests {
 
         // Should pass with mixed case variations
         let content = "# INTRODUCTION\n\n# method";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -582,7 +638,7 @@ mod tests {
 
         // Should pass with exact case match
         let content = "# Introduction\n\n# Method";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -597,7 +653,7 @@ mod tests {
 
         // Should be disabled with empty headings
         let content = "# Any heading\n\n# Another heading";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Should be disabled with default empty headings");
@@ -660,7 +716,7 @@ mod tests {
 
         // Should skip processing when no headings are required
         let content = "# Any heading\n\n# Another heading";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Should be disabled with empty headings list");
@@ -675,7 +731,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "Wrong content";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         // MD043 now preserves original content to prevent data loss
@@ -695,7 +751,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "# Start\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* should allow zero headings between Start and End");
@@ -711,7 +767,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "# Start\n\n## Section 1\n\n## Section 2\n\n## Section 3\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -730,7 +786,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "# Introduction\n\n## Details\n\n### Subsection\n\n## More";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* at end should allow any trailing headings");
@@ -747,7 +803,7 @@ mod tests {
 
         // Should fail with zero headings
         let content = "# Start\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "+ should require at least one heading");
@@ -764,14 +820,14 @@ mod tests {
 
         // Should pass with one heading
         let content = "# Start\n\n## Middle\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "+ should allow one heading");
 
         // Should pass with multiple headings
         let content = "# Start\n\n## Middle 1\n\n## Middle 2\n\n## Middle 3\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "+ should allow multiple headings");
@@ -788,7 +844,7 @@ mod tests {
 
         // Should pass with exactly one heading before Description
         let content = "# Project Name\n\n## Description";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "? should allow exactly one heading");
@@ -804,7 +860,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "## Description";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "? should require exactly one heading");
@@ -826,14 +882,14 @@ mod tests {
 
         // Should pass with minimal structure
         let content = "# My Project\n\n## Overview\n\n## License";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Complex pattern should match minimal structure");
 
         // Should pass with additional sections
         let content = "# My Project\n\n## Overview\n\n## Installation\n\n## Usage\n\n## License";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Complex pattern should match with optional sections");
@@ -855,13 +911,13 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "# Title\n\n## Middle\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Multiple * wildcards should work");
 
         let content = "# Title\n\n### Details\n\n## Middle\n\n### More Details\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -884,14 +940,14 @@ mod tests {
 
         // Should pass with correct case
         let content = "# Title\n\n## Description";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Wildcard should work with case-sensitive matching");
 
         // Should fail with wrong case
         let content = "# Title\n\n## description";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -911,14 +967,14 @@ mod tests {
 
         // Should pass with any headings
         let content = "# Any\n\n## Headings\n\n### Work";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* alone should allow any heading structure");
 
         // Should pass with no headings
         let content = "No headings here";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* alone should allow no headings");
@@ -935,14 +991,14 @@ mod tests {
 
         // Should fail with no additional headings
         let content = "# Start";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "+ at end should require at least one more heading");
 
         // Should pass with additional headings
         let content = "# Start\n\n## More";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "+ at end should allow additional headings");
@@ -959,14 +1015,14 @@ mod tests {
 
         // Matching content
         let content = "# Project\n\n## Description";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, content, "Fix should preserve matching wildcard content");
 
         // Non-matching content
         let content = "# Project\n\n## Other";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(
@@ -993,14 +1049,14 @@ mod tests {
 
         // Should require at least one heading from +
         let content = "# Start\n\n## Middle\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Consecutive * and + should work together");
 
         // Should fail without the + requirement
         let content = "# Start\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "Should fail when + is not satisfied");
@@ -1017,14 +1073,14 @@ mod tests {
 
         // Should match with exactly one before Description
         let content = "# Title\n\n## Description\n\n## License";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "? should consume exactly one heading");
 
         // Should fail if Description comes first (? needs something to match)
         let content = "## Description\n\n## License";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "? requires exactly one heading to match");
@@ -1046,21 +1102,21 @@ mod tests {
 
         // Should work with zero headings between A and B
         let content = "# Title\n\n## Section A\n\n## Section B";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* should allow zero headings");
 
         // Should work with many headings between A and B
         let content = "# Title\n\n## Section A\n\n### Sub1\n\n### Sub2\n\n### Sub3\n\n## Section B";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* should allow multiple headings");
 
         // Should fail if Section B is missing
         let content = "# Title\n\n## Section A\n\n### Sub1";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -1080,21 +1136,21 @@ mod tests {
 
         // Should fail with no headings
         let content = "No headings here";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "+ should fail with zero headings");
 
         // Should pass with any heading
         let content = "# Any heading";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "+ should pass with one heading");
 
         // Should pass with multiple headings
         let content = "# First\n\n## Second\n\n### Third";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "+ should pass with multiple headings");
@@ -1117,21 +1173,21 @@ mod tests {
 
         // Should pass in correct order
         let content = "# A\n\n# B\n\n# C";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Should match literals in correct order");
 
         // Should fail in wrong order
         let content = "# A\n\n# C\n\n# B";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "Should fail when literals are out of order");
 
         // Should fail with missing required literal
         let content = "# A\n\n# C";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "Should fail when required literal is missing");
@@ -1148,14 +1204,14 @@ mod tests {
 
         // Should require at least 2 headings (? = 1, + = 1+)
         let content = "# First\n\n## Second";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "? followed by + should require at least 2 headings");
 
         // Should fail with only one heading
         let content = "# First";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -1180,7 +1236,7 @@ mod tests {
 
         // Should correctly skip to first "Target" match
         let content = "# Start\n\n## Other\n\n## Target\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* should correctly skip to next literal match");
@@ -1188,7 +1244,7 @@ mod tests {
         // Should handle case where there are extra headings after the match
         // (First Target matches, second Target is extra - should fail)
         let content = "# Start\n\n## Target\n\n## Target\n\n# End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(
@@ -1208,7 +1264,7 @@ mod tests {
 
         // Should allow any headings before End
         let content = "# Random\n\n## Stuff\n\n## End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* at start should allow any preceding headings");
@@ -1222,13 +1278,13 @@ mod tests {
 
         // Should require at least one heading before End
         let content = "## End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "+ at start should require at least one heading");
 
         let content = "# First\n\n## End";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "+ at start should allow headings before End");
@@ -1244,7 +1300,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "Title\n=====\n\nSection\n======\n\nOptional\n--------";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Wildcards should work with setext headings");
@@ -1260,7 +1316,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "No headings";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "Empty document should fail with ? requirement");
@@ -1273,7 +1329,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "No headings";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "Empty document should fail with + requirement");
@@ -1290,7 +1346,7 @@ mod tests {
 
         // Should fail with extra headings
         let content = "# Title\n\n## Section\n\n### Extra";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(!result.is_empty(), "Should fail with trailing headings beyond pattern");
@@ -1303,7 +1359,7 @@ mod tests {
         let rule = MD043RequiredHeadings::from_config_struct(config);
 
         let content = "# Title\n\n## Section\n\n### Extra";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* at end should allow trailing headings");

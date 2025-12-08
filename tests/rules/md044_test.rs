@@ -6,7 +6,7 @@ fn test_correct_names() {
     let names = vec!["JavaScript".to_string(), "TypeScript".to_string()];
     let rule = MD044ProperNames::new(names, true);
     let content = "# Guide to JavaScript and TypeScript\n\nJavaScript is awesome!";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -16,7 +16,7 @@ fn test_incorrect_names() {
     let names = vec!["JavaScript".to_string(), "TypeScript".to_string()];
     let rule = MD044ProperNames::new(names, true);
     let content = "# Guide to javascript and typescript\n\njavascript is awesome!";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3);
     let fixed = rule.fix(&ctx).unwrap();
@@ -28,7 +28,7 @@ fn test_code_block_excluded() {
     let names = vec!["JavaScript".to_string()];
     let rule = MD044ProperNames::new(names, false); // false = skip code blocks
     let content = "# JavaScript Guide\n\n```javascript\nconst x = 'javascript';\n```";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -38,7 +38,7 @@ fn test_code_block_included() {
     let names = vec!["JavaScript".to_string()];
     let rule = MD044ProperNames::new(names, true); // true = check code blocks
     let content = "# JavaScript Guide\n\n```javascript\nconst x = 'javascript';\n```";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty(), "Should detect 'javascript' in the code block");
     let fixed = rule.fix(&ctx).unwrap();
@@ -53,7 +53,7 @@ fn test_indented_code_block() {
     let names = vec!["JavaScript".to_string()];
     let rule = MD044ProperNames::new(names, false); // false = skip code blocks
     let content = "# JavaScript Guide\n\n    const x = 'javascript';\n    console.log(x);";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     if !result.is_empty() {
         eprintln!("Test failed - found violations:");
@@ -82,7 +82,7 @@ fn test_multiple_occurrences() {
     let names = vec!["JavaScript".to_string(), "Node.js".to_string()];
     let rule = MD044ProperNames::new(names, true);
     let content = "javascript with nodejs\njavascript and nodejs again";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Add debug output
@@ -117,7 +117,7 @@ fn test_word_boundaries() {
     let names = vec!["Git".to_string()];
     let rule = MD044ProperNames::new(names, true);
     let content = "Using git and github with gitflow";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1); // Only "git" should be flagged, not "github" or "gitflow"
     let fixed = rule.fix(&ctx).unwrap();
@@ -129,7 +129,7 @@ fn test_fix_multiple_on_same_line() {
     let names = vec!["Rust".to_string(), "Cargo".to_string()];
     let rule = MD044ProperNames::new(names, true);
     let content = "Using rust and cargo is fun. rust is fast.";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Using Rust and Cargo is fun. Rust is fast.");
 }
@@ -139,7 +139,7 @@ fn test_fix_adjacent_to_markdown() {
     let names = vec!["Markdown".to_string()];
     let rule = MD044ProperNames::new(names, false); // false = skip code blocks
     let content = "*markdown* _markdown_ `markdown` [markdown](link)";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
     // When code_blocks=false, inline code should not be fixed
     // With link filtering, proper names inside links should not be corrected
@@ -151,7 +151,7 @@ fn test_fix_with_dots() {
     let names = vec!["Node.js".to_string()];
     let rule = MD044ProperNames::new(names, true);
     let content = "Using node.js or sometimes nodejs.";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Using Node.js or sometimes Node.js.");
 }
@@ -161,7 +161,7 @@ fn test_fix_code_block_included() {
     let names = vec!["Rust".to_string()];
     let rule = MD044ProperNames::new(names, true); // true = check code blocks
     let content = "```rust\nlet lang = \"rust\";\n```\n\nThis is rust code.";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "```rust\nlet lang = \"Rust\";\n```\n\nThis is Rust code.");
 }
@@ -187,7 +187,7 @@ python = "python"
 const javascript = "javascript";
 ```"#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Language identifiers should remain lowercase
@@ -224,7 +224,7 @@ fn test_tilde_fence_language_identifiers() {
     let rule = MD044ProperNames::new(names, true); // true = check code blocks
 
     let content = "~~~ruby\nputs 'ruby'\n~~~";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     assert!(
@@ -241,7 +241,7 @@ fn test_fence_with_attributes() {
     let rule = MD044ProperNames::new(names, true); // true = check code blocks
 
     let content = "```json {highlight: [2]}\n{\n  \"json\": \"value\"\n}\n```";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     assert!(
@@ -258,7 +258,7 @@ fn test_mixed_fence_types() {
     let rule = MD044ProperNames::new(names, true);
 
     let content = "```go\nfmt.Println(\"go\")\n```\n\n~~~go\nfmt.Println(\"go\")\n~~~";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     assert!(fixed.contains("```go"), "Backtick fence preserved");
@@ -273,7 +273,7 @@ fn test_html_comments() {
     let names = vec!["JavaScript".to_string(), "TypeScript".to_string()];
     let rule = MD044ProperNames::new(names, true);
     let content = "# JavaScript Guide\n\n<!-- javascript and typescript are mentioned here -->\n\nJavaScript is great!";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // By default (html_comments=true), it should detect names inside HTML comments

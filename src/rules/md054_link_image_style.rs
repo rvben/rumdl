@@ -315,7 +315,7 @@ mod tests {
     fn test_all_styles_allowed_by_default() {
         let rule = MD054LinkImageStyle::new(true, true, true, true, true, true);
         let content = "[inline](url) [ref][] [ref] <autolink> [full][ref] [url](url)\n\n[ref]: url";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -325,7 +325,7 @@ mod tests {
     fn test_only_inline_allowed() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "[allowed](url) [not][ref] <https://bad.com> [bad][] [shortcut]\n\n[ref]: url\n[shortcut]: url";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 4);
@@ -339,7 +339,7 @@ mod tests {
     fn test_only_autolink_allowed() {
         let rule = MD054LinkImageStyle::new(true, false, false, false, false, false);
         let content = "<https://good.com> [bad](url) [bad][ref]\n\n[ref]: url";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -351,7 +351,7 @@ mod tests {
     fn test_url_inline_detection() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, true);
         let content = "[https://example.com](https://example.com) [text](https://example.com)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // First is url_inline (allowed), second is inline (allowed)
@@ -362,7 +362,7 @@ mod tests {
     fn test_url_inline_not_allowed() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "[https://example.com](https://example.com)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -373,7 +373,7 @@ mod tests {
     fn test_shortcut_vs_full_detection() {
         let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
         let content = "[shortcut] [full][ref]\n\n[shortcut]: url\n[ref]: url2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only shortcut should be flagged
@@ -385,7 +385,7 @@ mod tests {
     fn test_collapsed_reference() {
         let rule = MD054LinkImageStyle::new(false, true, false, false, false, false);
         let content = "[collapsed][] [bad][ref]\n\n[collapsed]: url\n[ref]: url2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -396,7 +396,7 @@ mod tests {
     fn test_code_blocks_ignored() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "```\n[ignored](url) <https://ignored.com>\n```\n\n[checked](url)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only the link outside code block should be checked
@@ -407,7 +407,7 @@ mod tests {
     fn test_code_spans_ignored() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "`[ignored](url)` and `<https://ignored.com>` but [checked](url)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only the link outside code spans should be checked
@@ -418,7 +418,7 @@ mod tests {
     fn test_reference_definitions_ignored() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "[ref]: https://example.com\n[ref2]: <https://example2.com>";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Reference definitions should be ignored
@@ -429,7 +429,7 @@ mod tests {
     fn test_html_comments_ignored() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "<!-- [ignored](url) -->\n  <!-- <https://ignored.com> -->";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -439,7 +439,7 @@ mod tests {
     fn test_unicode_support() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "[café ☕](https://café.com) [emoji 😀](url) [한글](url) [עברית](url)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // All should be detected as inline (allowed)
@@ -450,7 +450,7 @@ mod tests {
     fn test_line_positions() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "Line 1\n\nLine 3 with <https://bad.com> here";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -462,7 +462,7 @@ mod tests {
     fn test_multiple_links_same_line() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "[ok](url) but <bad> and [also][bad]\n\n[bad]: url";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -474,7 +474,7 @@ mod tests {
     fn test_empty_content() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -484,7 +484,7 @@ mod tests {
     fn test_no_links() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "Just plain text without any links";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -494,7 +494,7 @@ mod tests {
     fn test_fix_returns_error() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         let content = "[link](url)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.fix(&ctx);
 
         assert!(result.is_err());
@@ -508,7 +508,7 @@ mod tests {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         // Test that [text][ref] is detected as full, not shortcut
         let content = "[text][ref] not detected as [shortcut]\n\n[ref]: url\n[shortcut]: url2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -521,7 +521,7 @@ mod tests {
         let rule = MD054LinkImageStyle::new(false, false, false, true, true, false);
         // [text][ should not be detected as shortcut
         let content = "[text][ more text\n[text](url) is inline";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only second line should have inline link
@@ -533,7 +533,7 @@ mod tests {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
         // Test with zero-width joiners and complex Unicode
         let content = "[👨‍👩‍👧‍👦 family](url) [café☕](https://café.com)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Both should be detected as inline (allowed)

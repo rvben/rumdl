@@ -228,13 +228,13 @@ mod tests {
     use crate::lint_context::LintContext;
 
     fn run_test(content: &str, config: MD024Config) -> LintResult {
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let rule = MD024NoDuplicateHeading::from_config_struct(config);
         rule.check(&ctx)
     }
 
     fn run_fix_test(content: &str, config: MD024Config) -> Result<String, LintError> {
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let rule = MD024NoDuplicateHeading::from_config_struct(config);
         rule.fix(&ctx)
     }

@@ -32,8 +32,8 @@ fn property_deterministic_fragment_generation() {
         let content1 = format!("# {input}\n\n");
         let content2 = format!("# {input}\n\n");
 
-        let ctx1 = LintContext::new(&content1, rumdl_lib::config::MarkdownFlavor::Standard);
-        let ctx2 = LintContext::new(&content2, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx1 = LintContext::new(&content1, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let ctx2 = LintContext::new(&content2, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Extract headings and compare - they should be identical
         let headings1 = extract_generated_headings(&rule, &ctx1);
@@ -66,7 +66,7 @@ fn property_valid_fragment_characters() {
 
     for input in test_inputs {
         let content = format!("# {input}\n\n");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let headings = extract_generated_headings(&rule, &ctx);
 
         for heading in headings {
@@ -106,7 +106,7 @@ fn property_reasonable_fragment_length() {
 
     for input in test_inputs {
         let content = format!("# {input}\n\n");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let headings = extract_generated_headings(&rule, &ctx);
 
         for heading in headings {
@@ -148,8 +148,8 @@ fn property_similarity_preservation() {
         let content1 = format!("# {input1}\n\n");
         let content2 = format!("# {input2}\n\n");
 
-        let ctx1 = LintContext::new(&content1, rumdl_lib::config::MarkdownFlavor::Standard);
-        let ctx2 = LintContext::new(&content2, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx1 = LintContext::new(&content1, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let ctx2 = LintContext::new(&content2, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let headings1 = extract_generated_headings(&rule, &ctx1);
         let headings2 = extract_generated_headings(&rule, &ctx2);
@@ -190,7 +190,7 @@ fn property_robustness_no_panics() {
 
     for input in edge_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // This should not panic
         let result = std::panic::catch_unwind(|| rule.check(&ctx));
@@ -228,7 +228,7 @@ fn property_mode_consistency() {
 
     for input in test_inputs {
         let content = format!("# {input}\n\n");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Both modes should produce valid results (no panics)
         let github_result = github_rule.check(&ctx);
@@ -274,7 +274,7 @@ fn property_performance_bounds() {
         };
 
         let content = format!("# {input}\n\n");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start = std::time::Instant::now();
         let _result = rule.check(&ctx).unwrap();
@@ -392,7 +392,7 @@ fn property_fuzz_like_testing() {
                 let test_input = format!("{prefix}{input}{suffix}");
 
                 let content = format!("# {test_input}\n\n");
-                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
                 // Should not panic
                 let result = rule.check(&ctx);

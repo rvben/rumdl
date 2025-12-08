@@ -37,7 +37,7 @@ fn test_regression_xxxx_content_replacement_bug() {
     for (original_content, expected_after_fix) in test_cases {
         println!("Testing XXXX regression with: {original_content}");
 
-        let ctx = LintContext::new(original_content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(original_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed_content = rule.fix(&ctx).unwrap();
 
         println!("  Original: {original_content}");
@@ -81,7 +81,7 @@ fn test_regression_xxxx_content_replacement_bug() {
         );
 
         // Verify that fixed content passes validation (no warnings)
-        let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result_after_fix = rule.check(&fixed_ctx).unwrap();
         assert!(
             result_after_fix.is_empty(),

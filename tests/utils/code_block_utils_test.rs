@@ -165,7 +165,7 @@ fn test_indented_list_items_not_code_blocks() {
     // Test that indented list items are not detected as code blocks
     let content = "- Item 1\n    - Nested item\n    - Another nested\n- Item 2";
     // Using LintContext to get proper code block detection
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(
         ctx.code_blocks.is_empty(),
         "Indented list items should not be detected as code blocks"
@@ -176,7 +176,7 @@ fn test_indented_list_items_not_code_blocks() {
 fn test_numbered_list_indentation() {
     // Test numbered lists with various formats
     let content = "1. First item\n    1) Nested with parenthesis\n    2. Another nested\n2. Second item";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(
         ctx.code_blocks.is_empty(),
         "Indented numbered list items should not be detected as code blocks"
@@ -187,7 +187,7 @@ fn test_numbered_list_indentation() {
 fn test_code_block_requires_blank_line() {
     // Test that indented code blocks require a blank line before them
     let content = "Some text\n    This should not be a code block\n\n    This should be a code block";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert_eq!(ctx.code_blocks.len(), 1, "Should have code block after blank line");
 }
 
@@ -195,7 +195,7 @@ fn test_code_block_requires_blank_line() {
 fn test_document_start_indented_code() {
     // Test that indented content at document start needs blank line
     let content = "    Not a code block at start\n\n    This is a code block";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert_eq!(ctx.code_blocks.len(), 1, "Should have code block after blank line");
 }
 
@@ -203,7 +203,7 @@ fn test_document_start_indented_code() {
 fn test_mixed_list_markers() {
     // Test various list markers
     let content = "- Dash list\n    - Nested\n* Star list\n    * Nested\n+ Plus list\n    + Nested";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(ctx.code_blocks.is_empty(), "All list types should be recognized");
 }
 
@@ -218,7 +218,7 @@ fn test_list_continuation_with_code() {
     ```
 
 2. Next item"#;
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     // Should find the fenced code block in the list
     assert!(!ctx.code_blocks.is_empty(), "Should find the fenced code block");
 }
@@ -227,7 +227,7 @@ fn test_list_continuation_with_code() {
 fn test_tab_indented_lists() {
     // Test with tab indentation
     let content = "-\tTab after marker\n\t-\tNested with tabs\n\t\tContent";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(
         ctx.code_blocks.is_empty(),
         "Tab-indented lists should not be code blocks"
@@ -238,7 +238,7 @@ fn test_tab_indented_lists() {
 fn test_edge_case_single_digit_lists() {
     // Test edge cases with single digit followed by period/paren
     let content = "5. Five\n    5) Sub item\n6) Six with paren\n    6. Sub item";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(
         ctx.code_blocks.is_empty(),
         "All numbered list formats should be recognized"
@@ -251,7 +251,7 @@ fn test_fence_indentation_document_level() {
 
     // 0 spaces - should be recognized as fence
     let content = "Text\n\n```\ncode\n```\n\nMore text";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(
         !ctx.code_blocks.is_empty(),
         "0-space indented fence should be recognized"
@@ -259,7 +259,7 @@ fn test_fence_indentation_document_level() {
 
     // 3 spaces - should be recognized as fence
     let content = "Text\n\n   ```\n   code\n   ```\n\nMore text";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(
         !ctx.code_blocks.is_empty(),
         "3-space indented fence should be recognized"
@@ -273,7 +273,7 @@ fn test_fence_indentation_in_list_context() {
 
     // 4-space indented fence inside a list item (valid - 1 space relative to list content)
     let content = "1. List item\n\n    ```rust\n    fn code() {}\n    ```\n\n2. Next";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(
         !ctx.code_blocks.is_empty(),
         "4-space indented fence inside list should be recognized"
@@ -299,6 +299,6 @@ fn test_fence_indentation_nested_list() {
        ```
 
 2. Back to first"#;
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert!(!ctx.code_blocks.is_empty(), "Fence in nested list should be recognized");
 }

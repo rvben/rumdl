@@ -12,7 +12,7 @@ fn assert_fragments(test_cases: &[(&str, &str)]) {
 
     for (heading, expected_fragment) in test_cases {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
@@ -183,7 +183,7 @@ fn test_kramdown_vs_github_differences() {
     for (heading, github_expected, kramdown_gfm_expected, kramdown_expected) in test_cases {
         // Test GitHub mode (preserves underscores)
         let content = format!("# {heading}\n\n[Link](#{github_expected})");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = github_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -193,7 +193,7 @@ fn test_kramdown_vs_github_differences() {
 
         // Test Kramdown GFM mode (preserves underscores)
         let content = format!("# {heading}\n\n[Link](#{kramdown_gfm_expected})");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = kramdown_gfm_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -203,7 +203,7 @@ fn test_kramdown_vs_github_differences() {
 
         // Test Pure Kramdown mode (removes underscores)
         let content = format!("# {heading}\n\n[Link](#{kramdown_expected})");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = kramdown_rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -235,7 +235,7 @@ Valid internal links:
 [Should fail](#missing-section)
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the missing internal link
@@ -270,7 +270,7 @@ Valid internal:
 [Fails](#missing)
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag ambiguous patterns + missing internal = 4 warnings
@@ -318,7 +318,7 @@ fn test_performance_with_complex_patterns() {
 
     let start = std::time::Instant::now();
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let _result = rule.check(&ctx).unwrap();
     let duration = start.elapsed();
 
@@ -349,7 +349,7 @@ fn test_regression_prevention_issue_39() {
 
     for (heading, expected_fragment) in issue_39_cases {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         if result.is_empty() {
@@ -436,7 +436,7 @@ fn test_duplicate_heading_numbering() {
 [Invalid](#section-3)
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid link (section-3 doesn't exist)
@@ -465,7 +465,7 @@ fn test_custom_header_id_edge_cases() {
 [Invalid](#missing-id)
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid link

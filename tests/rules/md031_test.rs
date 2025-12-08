@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD031BlanksAroundFences;
 fn test_valid_fenced_blocks() {
     let rule = MD031BlanksAroundFences::default();
     let content = "Text before\n\n```\ncode block\n```\n\nText after";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_valid_fenced_blocks() {
 fn test_no_blank_before() {
     let rule = MD031BlanksAroundFences::default();
     let content = "Text before\n```\ncode block\n```\n\nText after";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
@@ -26,7 +26,7 @@ fn test_no_blank_before() {
 fn test_no_blank_after() {
     let rule = MD031BlanksAroundFences::default();
     let content = "Text before\n\n```\ncode block\n```\nText after";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 5);
@@ -37,9 +37,9 @@ fn test_no_blank_after() {
 fn test_fix_missing_blanks() {
     let rule = MD031BlanksAroundFences::default();
     let content = "Text before\n```\ncode block\n```\nText after";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&result, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&result, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed_result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(fixed_result, Vec::new());
 }
@@ -50,7 +50,7 @@ fn test_nested_code_blocks_no_internal_blanks() {
 
     // Test nested markdown code blocks (4 backticks containing 3 backticks)
     let content = "# Test\n\n````markdown\nHere's some text.\n\n```python\ndef hello():\n    print(\"Hello!\")\n```\n\nMore text.\n````\n\nAfter.";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
 
     // Verify that the inner ```python block has NO internal blank lines
@@ -75,7 +75,7 @@ fn test_nested_code_blocks_different_fence_types() {
 
     // Test ~~~ containing ```
     let content = "Text\n~~~markdown\n```python\ncode\n```\n~~~\nAfter";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
 
     // Inner ```python should not get blank lines (it's content inside ~~~)
@@ -90,7 +90,7 @@ fn test_multiple_nested_levels() {
 
     // Test 5 backticks containing 4 backticks containing 3 backticks
     let content = "`````text\n````markdown\n```python\ncode\n```\n````\n`````";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
 
     // Only the outermost fence should be treated as a real code block
@@ -105,7 +105,7 @@ fn test_nested_vs_standalone_distinction() {
 
     // Test that standalone ``` blocks still get blank lines, but nested ones don't
     let content = "# Test\nStandalone:\n```python\ncode1\n```\nNested:\n````markdown\n```python\ncode2\n```\n````\nEnd";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
 
     // Standalone ```python should get blank lines around it
@@ -126,7 +126,7 @@ fn test_mixed_fence_markers_nested() {
 
     // Test ``` inside ~~~ and ~~~ inside ```
     let content = "Test1:\n~~~text\n```python\ncode\n```\n~~~\nTest2:\n````text\n~~~bash\nscript\n~~~\n````\nEnd";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
 
     // Inner fences should not get blank lines
@@ -146,7 +146,7 @@ fn test_documentation_example_scenario() {
 
     // Test the exact scenario from docs/md031.md that was causing issues
     let content = "### Example\n\n````markdown\nHere's some text explaining the code.\n\n```python\ndef hello():\n    print(\"Hello, world!\")\n```\n\nAnd here's more text after the code.\n````\n\n## Next section";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
 
     // The ```python block should remain clean (no internal blank lines)
@@ -167,7 +167,7 @@ fn test_fence_length_specificity() {
 
     // Test that fence length matters - ``` inside ```` should not close the outer block
     let content = "````markdown\n```python\ncode\n```\nmore content\n````";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
 
     // The ```python should be treated as content, not as opening/closing a block
@@ -204,7 +204,7 @@ fn test_code_blocks_in_lists() {
 
 Regular paragraph."#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Code blocks in lists should still require blank lines

@@ -32,7 +32,7 @@ impl InMemoryTestRunner {
         let content = self.files.get(path)
             .ok_or_else(|| format!("File not found: {}", path))?;
 
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Apply all default rules for testing
         let mut warnings = Vec::new();

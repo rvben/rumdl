@@ -975,7 +975,7 @@ mod tests {
     fn test_valid_reference_link() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[text][ref]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -985,7 +985,7 @@ mod tests {
     fn test_undefined_reference_link() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[text][undefined]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -996,7 +996,7 @@ mod tests {
     fn test_valid_reference_image() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "![alt][img]\n\n[img]: image.jpg";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1006,7 +1006,7 @@ mod tests {
     fn test_undefined_reference_image() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "![alt][missing]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -1017,7 +1017,7 @@ mod tests {
     fn test_case_insensitive_references() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[Text][REF]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1027,7 +1027,7 @@ mod tests {
     fn test_shortcut_reference_valid() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[ref]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1039,7 +1039,7 @@ mod tests {
         // Enable it to test undefined shortcut references
         let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
         let content = "[undefined]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -1051,7 +1051,7 @@ mod tests {
         // By default, shortcut references are NOT checked (matches markdownlint behavior)
         let rule = MD052ReferenceLinkImages::new();
         let content = "[undefined]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should be 0 because shortcut_syntax is false by default
@@ -1062,7 +1062,7 @@ mod tests {
     fn test_inline_links_ignored() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[text](https://example.com)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1072,7 +1072,7 @@ mod tests {
     fn test_inline_images_ignored() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "![alt](image.jpg)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1082,7 +1082,7 @@ mod tests {
     fn test_references_in_code_blocks_ignored() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "```\n[undefined]\n```\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1092,7 +1092,7 @@ mod tests {
     fn test_references_in_inline_code_ignored() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "`[undefined]`";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // References inside inline code spans should be ignored
@@ -1120,7 +1120,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
 
 `Multiple [refs] in [same] code span` ignored."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag: outside, missing, badimg, three (4 total)
@@ -1144,7 +1144,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     fn test_multiple_undefined_references() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[link1][ref1] [link2][ref2] [link3][ref3]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 3);
@@ -1157,7 +1157,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     fn test_mixed_valid_and_undefined() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[valid][ref] [invalid][missing]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -1168,7 +1168,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     fn test_empty_reference() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[text][]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Empty reference should use the link text as reference
@@ -1179,7 +1179,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     fn test_escaped_brackets_ignored() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "\\[not a link\\]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1189,7 +1189,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     fn test_list_items_ignored() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "- [undefined]\n* [another]\n+ [third]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // List items that look like shortcut references should be ignored
@@ -1201,7 +1201,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
         // Enable shortcut_syntax to test example section handling
         let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
         let content = "## Output\n\n[undefined]\n\n## Normal Section\n\n[missing]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only the reference outside the Output section should be flagged
@@ -1213,7 +1213,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     fn test_reference_definitions_in_code_blocks_ignored() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[link][ref]\n\n```\n[ref]: https://example.com\n```";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Reference defined in code block should not count
@@ -1225,7 +1225,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     fn test_multiple_references_to_same_undefined() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[first][missing] [second][missing] [third][missing]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only report once per unique reference
@@ -1237,7 +1237,7 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     fn test_reference_with_special_characters() {
         let rule = MD052ReferenceLinkImages::new();
         let content = "[text][ref-with-hyphens]\n\n[ref-with-hyphens]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -1256,7 +1256,7 @@ Want to fill out this form?
 <form method="post">
     <input type="email" name="fields[email]" id="drip-email" placeholder="email@domain.com">
 </form>"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
@@ -1295,7 +1295,7 @@ But this [reference] should be flagged.
 And this `[inline code]` should not be flagged.
 "#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
 
         // Should only flag [reference], not the ones in backticks
@@ -1318,7 +1318,7 @@ And this `[inline code]` should not be flagged.
 [real-undefined] reference outside
 "#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
 
         // Should only flag [real-undefined], not the ones in code block
@@ -1340,7 +1340,7 @@ $ python3 vote.py
 3 votes for: 2
 2 votes for: 3, 4
 ```"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "Should not flag [1:] inside HTML comments");
 
@@ -1348,7 +1348,7 @@ $ python3 vote.py
         let content = r#"<!-- This is [ref1] and [ref2][ref3] -->
 Normal [text][undefined]
 <!-- Another [comment][with] references -->"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -1363,7 +1363,7 @@ Normal [text][undefined]
 [ref2][ref3]
 -->
 [actual][undefined]"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -1379,7 +1379,7 @@ Valid [link][ref]
 ![image][missing]
 
 [ref]: https://example.com"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should only flag missing image reference");
         assert!(result[0].message.contains("missing"));
@@ -1410,7 +1410,7 @@ This is the actual markdown content that should be linted.
 ## Section 1
 
 Some content here."#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag [undefined] in the content, not the ["test", "example"] array in frontmatter
@@ -1430,7 +1430,7 @@ tags = ["example", "test"]
 # Content
 
 [missing] reference should be flagged."#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -1462,7 +1462,7 @@ More content here.
 <!-- --8<-- [start:another-section] -->
 Content in another section
 <!-- --8<-- [end:another-section] -->"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag any snippet markers as undefined references
@@ -1481,7 +1481,7 @@ Content with [reference] inside snippet section
 # -8<- [end:section]
 
 Regular [undefined] reference outside snippet markers."#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
@@ -1498,7 +1498,7 @@ Regular [undefined] reference outside snippet markers."#;
 
 # -8<- [start:section]
 # -8<- [end:section]"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
@@ -1523,7 +1523,7 @@ Multiple citations [@citation1; @citation2; @citation3] are also supported.
 
 Regular [undefined] reference should still be flagged.
 "#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag the undefined reference, not the citations
@@ -1549,7 +1549,7 @@ Another footnote^[with some text and a [link](https://example.com)].
 
 But this [reference] without ^ should be flagged.
 "#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag the reference without ^
@@ -1586,7 +1586,7 @@ But this [reference] without ^ should be flagged.
 > This is a caution alert.
 
 Regular content with [undefined] reference."#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag the undefined reference, not the GitHub alerts
@@ -1604,7 +1604,7 @@ Regular content with [undefined] reference."#;
 > Multiple lines are allowed.
 
 [something] is mentioned but not defined."#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag only the [something] outside blockquotes
@@ -1618,7 +1618,7 @@ Regular content with [undefined] reference."#;
 > See [reference] for more details.
 
 [reference]: https://example.com"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag anything - [!NOTE] is GitHub alert and [reference] is defined

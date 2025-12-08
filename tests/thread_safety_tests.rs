@@ -23,7 +23,7 @@ Another line.
 More content.
 "#;
 
-    let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let shared_ctx = Arc::new(ctx);
     let results = Arc::new(Mutex::new(Vec::new()));
 
@@ -88,6 +88,7 @@ Text with *emphasis * and **strong **.
     let ctx = Arc::new(LintContext::new(
         test_content,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     ));
     let results = Arc::new(Mutex::new(Vec::new()));
 
@@ -190,6 +191,7 @@ More content."#;
     let ctx = Arc::new(LintContext::new(
         test_content,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     ));
     let results = Arc::new(Mutex::new(Vec::new()));
 
@@ -256,6 +258,7 @@ Text with *bad emphasis * here.
     let ctx = Arc::new(LintContext::new(
         test_content,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     ));
     let results = Arc::new(Mutex::new(Vec::new()));
 
@@ -385,6 +388,7 @@ Content for section 10.
     let ctx = Arc::new(LintContext::new(
         large_content,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     ));
     let success_count = Arc::new(Mutex::new(0));
 

@@ -158,7 +158,7 @@ pub fn lint(
     flavor: crate::config::MarkdownFlavor,
 ) -> LintResult {
     // Use lint_and_index but discard the FileIndex for backward compatibility
-    let (result, _file_index) = lint_and_index(content, rules, verbose, flavor);
+    let (result, _file_index) = lint_and_index(content, rules, verbose, flavor, None);
     result
 }
 
@@ -184,7 +184,7 @@ pub fn build_file_index_only(
     }
 
     // Parse LintContext once with the provided flavor
-    let lint_ctx = crate::lint_context::LintContext::new(content, flavor);
+    let lint_ctx = crate::lint_context::LintContext::new(content, flavor, None);
 
     // Only call contribute_to_index for cross-file rules (no rule checking!)
     for rule in rules {
@@ -208,6 +208,7 @@ pub fn lint_and_index(
     rules: &[Box<dyn Rule>],
     _verbose: bool,
     flavor: crate::config::MarkdownFlavor,
+    source_file: Option<std::path::PathBuf>,
 ) -> (LintResult, crate::workspace_index::FileIndex) {
     let mut warnings = Vec::new();
     // Compute content hash for change detection
@@ -239,7 +240,7 @@ pub fn lint_and_index(
     let _applicable_count = applicable_rules.len();
 
     // Parse LintContext once with the provided flavor
-    let lint_ctx = crate::lint_context::LintContext::new(content, flavor);
+    let lint_ctx = crate::lint_context::LintContext::new(content, flavor, source_file);
 
     #[cfg(not(target_arch = "wasm32"))]
     let profile_rules = std::env::var("RUMDL_PROFILE_RULES").is_ok();

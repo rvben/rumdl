@@ -27,7 +27,7 @@ should also be ignored
 
 Final * test * outside comments."#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag exactly 3 issues (outside HTML comments)
@@ -60,7 +60,7 @@ Double dollar inline math $$x * y * z$$ should not be flagged.
 
 But this * spaced emphasis * outside math should be flagged."#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag exactly 2 issues (outside math contexts)
@@ -93,7 +93,7 @@ and [another][ref5] one
 
 <!-- Complex patterns like [1:] from issue #20 should not be flagged -->"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag exactly 2 undefined references (outside HTML comments)
@@ -140,7 +140,7 @@ Double dollar inline $$f[x]$$ should not be flagged.
 
 But this [link][missing_ref] reference outside math should be flagged."#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag exactly 2 undefined references (outside math contexts)
@@ -182,7 +182,7 @@ Another table:
 
 Final [link3][broken_ref] reference should be flagged."#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag exactly 3 undefined references (outside tables)
@@ -226,7 +226,7 @@ Multi-line comment with
 should also be ignored
 -->"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag exactly 2 reversed links (outside HTML comments)
@@ -262,7 +262,7 @@ Double dollar inline $$g(y)[j]$$ should not be flagged.
 
 But this (https://test.com)[reversed] outside math should be flagged."#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag exactly 2 reversed links (outside math contexts)
@@ -299,7 +299,7 @@ pattern = "(toml)[pattern]"
 
 Another (https://test.com)[reversed] link should be flagged."#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag exactly 3 reversed links (outside front matter)
@@ -349,7 +349,7 @@ Outside contexts: * spaced * emphasis and [link][missing_ref] reference and (htt
 
     // Test MD037
     let md037 = MD037NoSpaceInEmphasis;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = md037.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "MD037: Expected 2 warnings outside skip contexts");
 
@@ -376,7 +376,7 @@ Math with inline code: $$`array[0]` is inline code in math$$
 Regular * spaces * outside all contexts should be flagged."#;
 
     let md037 = MD037NoSpaceInEmphasis;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = md037.check(&ctx).unwrap();
 
     // Should only flag the last line

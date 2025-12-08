@@ -14,7 +14,7 @@ fn test_deeply_nested_unordered_lists_performance() {
     let content = generate_deeply_nested_unordered_lists(15, 5);
 
     let start = Instant::now();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let parsing_duration = start.elapsed();
 
     // Should parse within reasonable time (< 100ms for 15 levels)
@@ -53,7 +53,7 @@ fn test_deeply_nested_ordered_lists_performance() {
     let content = generate_deeply_nested_ordered_lists(12, 8);
 
     let start = Instant::now();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let parsing_duration = start.elapsed();
 
     assert!(
@@ -88,7 +88,7 @@ fn test_mixed_deeply_nested_lists_performance() {
     let content = generate_mixed_deeply_nested_lists(10, 6);
 
     let start = Instant::now();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let parsing_duration = start.elapsed();
 
     assert!(
@@ -125,7 +125,7 @@ fn test_extremely_wide_nested_lists_performance() {
     let content = generate_wide_nested_lists(6, 50);
 
     let start = Instant::now();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let parsing_duration = start.elapsed();
 
     assert!(
@@ -160,7 +160,7 @@ fn test_pathological_nesting_with_content_performance() {
     let content = generate_pathological_nested_content(8);
 
     let start = Instant::now();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let parsing_duration = start.elapsed();
 
     // More lenient for complex content parsing
@@ -194,7 +194,7 @@ fn test_fix_performance_on_deeply_nested_lists() {
     // Test fix performance on deeply nested lists that need blank line fixes
     let content = generate_nested_lists_needing_fixes(10, 4);
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD032BlanksAroundLists;
 
     // Ensure there are warnings to fix
@@ -215,7 +215,7 @@ fn test_fix_performance_on_deeply_nested_lists() {
     assert_ne!(fixed_content, content, "Content should be modified by fix");
 
     // Verify fix resolves issues
-    let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings_after_fix = rule.check(&fixed_ctx).unwrap();
     assert!(
         warnings_after_fix.len() < warnings.len(),
@@ -236,7 +236,7 @@ fn test_memory_usage_with_extreme_nesting() {
     let content = generate_memory_stress_lists(20, 3);
 
     let start = Instant::now();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let parsing_duration = start.elapsed();
 
     // Verify the structure is parsed without panic or excessive time

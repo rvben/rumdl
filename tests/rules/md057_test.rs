@@ -27,7 +27,7 @@ fn test_missing_links() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have one warning for the missing link
@@ -59,7 +59,7 @@ fn test_external_links() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings for external links
@@ -87,7 +87,7 @@ fn test_code_blocks() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only have one warning for the link outside the code block
@@ -129,7 +129,7 @@ fn test_disabled_rule() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have two warnings even with disable comment
@@ -171,7 +171,7 @@ fn test_complex_paths() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have warnings for missing links but not for valid links
@@ -209,7 +209,7 @@ fn test_no_base_path() {
     let rule = MD057ExistingRelativeLinks::new();
 
     // Test the rule
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no warnings when no base path is set
@@ -258,7 +258,7 @@ More content.
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have one warning for external file link only (fragment-only links are skipped)
@@ -297,7 +297,7 @@ fn test_combined_links() {
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
     // Test the rule
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only have one warning for the missing file link with fragment

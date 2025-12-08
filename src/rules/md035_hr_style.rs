@@ -288,7 +288,7 @@ mod tests {
         // Single style (with blank lines to avoid Setext interpretation)
         let content = "Content\n\n---\n\nMore\n\n---\n\nText";
         let lines: Vec<&str> = content.lines().collect();
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(
             MD035HRStyle::most_prevalent_hr_style(&lines, &ctx),
             Some("---".to_string())
@@ -297,7 +297,7 @@ mod tests {
         // Multiple styles, one more prevalent
         let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
         let lines: Vec<&str> = content.lines().collect();
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(
             MD035HRStyle::most_prevalent_hr_style(&lines, &ctx),
             Some("---".to_string())
@@ -306,7 +306,7 @@ mod tests {
         // Multiple styles, tie broken by first encountered
         let content = "Content\n\n***\n\nMore\n\n---\n\nText";
         let lines: Vec<&str> = content.lines().collect();
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(
             MD035HRStyle::most_prevalent_hr_style(&lines, &ctx),
             Some("***".to_string())
@@ -315,13 +315,13 @@ mod tests {
         // No horizontal rules
         let content = "Just\nRegular\nContent";
         let lines: Vec<&str> = content.lines().collect();
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(MD035HRStyle::most_prevalent_hr_style(&lines, &ctx), None);
 
         // Exclude Setext headings
         let content = "Heading\n---\nContent\n\n***";
         let lines: Vec<&str> = content.lines().collect();
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(
             MD035HRStyle::most_prevalent_hr_style(&lines, &ctx),
             Some("***".to_string())
@@ -332,7 +332,7 @@ mod tests {
     fn test_consistent_style() {
         let rule = MD035HRStyle::new("consistent".to_string());
         let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag the *** as it doesn't match the most prevalent style ---
@@ -345,7 +345,7 @@ mod tests {
     fn test_specific_style_dashes() {
         let rule = MD035HRStyle::new("---".to_string());
         let content = "Content\n\n***\n\nMore\n\n___\n\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag both *** and ___ as they don't match ---
@@ -359,7 +359,7 @@ mod tests {
     fn test_indented_horizontal_rule() {
         let rule = MD035HRStyle::new("---".to_string());
         let content = "Content\n\n  ---\n\nMore";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -371,7 +371,7 @@ mod tests {
     fn test_setext_heading_not_flagged() {
         let rule = MD035HRStyle::new("***".to_string());
         let content = "Heading\n---\nContent\n***";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag the --- under "Heading" as it's a Setext heading
@@ -382,7 +382,7 @@ mod tests {
     fn test_fix_consistent_style() {
         let rule = MD035HRStyle::new("consistent".to_string());
         let content = "Content\n\n---\n\nMore\n\n***\n\nText\n\n---";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = "Content\n\n---\n\nMore\n\n---\n\nText\n\n---";
@@ -393,7 +393,7 @@ mod tests {
     fn test_fix_specific_style() {
         let rule = MD035HRStyle::new("***".to_string());
         let content = "Content\n\n---\n\nMore\n\n___\n\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = "Content\n\n***\n\nMore\n\n***\n\nText";
@@ -404,7 +404,7 @@ mod tests {
     fn test_fix_preserves_setext_headings() {
         let rule = MD035HRStyle::new("***".to_string());
         let content = "Heading 1\n=========\nHeading 2\n---\nContent\n\n---";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = "Heading 1\n=========\nHeading 2\n---\nContent\n\n***";
@@ -415,7 +415,7 @@ mod tests {
     fn test_fix_removes_indentation() {
         let rule = MD035HRStyle::new("---".to_string());
         let content = "Content\n\n  ***\n\nMore\n\n   ___\n\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = "Content\n\n---\n\nMore\n\n---\n\nText";
@@ -426,7 +426,7 @@ mod tests {
     fn test_spaced_styles() {
         let rule = MD035HRStyle::new("* * *".to_string());
         let content = "Content\n\n- - -\n\nMore\n\n_ _ _\n\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -437,7 +437,7 @@ mod tests {
     fn test_empty_style_uses_consistent() {
         let rule = MD035HRStyle::new("".to_string());
         let content = "Content\n\n---\n\nMore\n\n***\n\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Empty style should behave like "consistent"
@@ -449,7 +449,7 @@ mod tests {
     fn test_all_hr_styles_consistent() {
         let rule = MD035HRStyle::new("consistent".to_string());
         let content = "Content\n---\nMore\n---\nText\n---";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // All HRs are the same style, should not flag anything
@@ -460,7 +460,7 @@ mod tests {
     fn test_no_horizontal_rules() {
         let rule = MD035HRStyle::new("---".to_string());
         let content = "Just regular content\nNo horizontal rules here";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -470,7 +470,7 @@ mod tests {
     fn test_mixed_spaced_and_unspaced() {
         let rule = MD035HRStyle::new("consistent".to_string());
         let content = "Content\n\n---\n\nMore\n\n- - -\n\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag the spaced style as inconsistent
@@ -482,7 +482,7 @@ mod tests {
     fn test_trailing_whitespace_in_hr() {
         let rule = MD035HRStyle::new("---".to_string());
         let content = "Content\n\n---   \n\nMore";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Trailing whitespace is OK for HRs
@@ -494,7 +494,7 @@ mod tests {
         let rule = MD035HRStyle::new("---".to_string());
         let content =
             "Text\n\n```bash\n----------------------------------------------------------------------\n```\n\nMore";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag horizontal rule patterns inside code blocks
@@ -505,7 +505,7 @@ mod tests {
     fn test_hr_in_code_span_not_flagged() {
         let rule = MD035HRStyle::new("---".to_string());
         let content = "Text with inline `---` code span";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not flag horizontal rule patterns inside code spans
@@ -516,7 +516,7 @@ mod tests {
     fn test_hr_with_extra_characters() {
         let rule = MD035HRStyle::new("---".to_string());
         let content = "Content\n-----\nMore\n--------\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Extra characters in the same style should not be flagged

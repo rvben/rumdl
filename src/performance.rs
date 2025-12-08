@@ -249,7 +249,7 @@ impl PerformanceBenchmark {
 
     /// Benchmark a single rule with given content
     pub fn benchmark_rule(&self, rule: &dyn Rule, content: &str) -> RulePerformanceResult {
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let content_size = content.len();
         let lines_count = content.lines().count();
 
@@ -299,7 +299,7 @@ impl PerformanceBenchmark {
 
     /// Benchmark all rules with given content
     pub fn benchmark_all_rules(&self, content: &str) -> AggregatePerformanceResult {
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let content_size = content.len();
         let lines_count = content.lines().count();
         let mut rule_results = Vec::new();

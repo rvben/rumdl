@@ -200,6 +200,7 @@ mod tests {
         let ctx = LintContext::new(
             "[click here](url)\n[here](url)\n[link](url)\n[more](url)",
             MarkdownFlavor::Standard,
+            None,
         );
 
         let warnings = rule.check(&ctx).unwrap();
@@ -214,7 +215,11 @@ mod tests {
     #[test]
     fn test_case_insensitive() {
         let rule = MD059LinkText::default();
-        let ctx = LintContext::new("[CLICK HERE](url)\n[Here](url)\n[LINK](url)", MarkdownFlavor::Standard);
+        let ctx = LintContext::new(
+            "[CLICK HERE](url)\n[Here](url)\n[LINK](url)",
+            MarkdownFlavor::Standard,
+            None,
+        );
 
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 3);
@@ -223,7 +228,7 @@ mod tests {
     #[test]
     fn test_whitespace_trimming() {
         let rule = MD059LinkText::default();
-        let ctx = LintContext::new("[  click here  ](url)\n[  here  ](url)", MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[  click here  ](url)\n[  here  ](url)", MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 2);
@@ -235,6 +240,7 @@ mod tests {
         let ctx = LintContext::new(
             "[API documentation](url)\n[Installation guide](url)\n[Read the tutorial](url)",
             MarkdownFlavor::Standard,
+            None,
         );
 
         let warnings = rule.check(&ctx).unwrap();
@@ -247,6 +253,7 @@ mod tests {
         let ctx = LintContext::new(
             "[click here for more info](url)\n[see here](url)\n[hyperlink](url)",
             MarkdownFlavor::Standard,
+            None,
         );
 
         let warnings = rule.check(&ctx).unwrap();
@@ -256,7 +263,7 @@ mod tests {
     #[test]
     fn test_empty_text_skipped() {
         let rule = MD059LinkText::default();
-        let ctx = LintContext::new("[](url)", MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[](url)", MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0, "Empty link text should be skipped");
@@ -265,7 +272,7 @@ mod tests {
     #[test]
     fn test_custom_prohibited_texts() {
         let rule = MD059LinkText::new(vec!["bad".to_string(), "poor".to_string()]);
-        let ctx = LintContext::new("[bad](url)\n[poor](url)", MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[bad](url)\n[poor](url)", MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 2);
@@ -274,7 +281,7 @@ mod tests {
     #[test]
     fn test_reference_links() {
         let rule = MD059LinkText::default();
-        let ctx = LintContext::new("[click here][ref]\n[ref]: url", MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[click here][ref]\n[ref]: url", MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1, "Should check reference links");
@@ -284,7 +291,7 @@ mod tests {
     fn test_fix_not_supported() {
         let rule = MD059LinkText::default();
         let content = "[click here](url)";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // MD059 is not auto-fixable, so fix() returns unchanged content
         let result = rule.fix(&ctx);
@@ -295,7 +302,7 @@ mod tests {
     #[test]
     fn test_non_english() {
         let rule = MD059LinkText::new(vec!["hier klicken".to_string(), "hier".to_string(), "link".to_string()]);
-        let ctx = LintContext::new("[hier klicken](url)\n[hier](url)", MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[hier klicken](url)\n[hier](url)", MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 2);

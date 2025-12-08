@@ -6,7 +6,7 @@ use rumdl_lib::rules::strong_style::StrongStyle;
 fn test_consistent_asterisks() {
     let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
     let content = "# Test\n\nThis is **strong** and this is also **strong**";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_consistent_asterisks() {
 fn test_consistent_underscores() {
     let rule = MD050StrongStyle::new(StrongStyle::Underscore);
     let content = "# Test\n\nThis is __strong__ and this is also __strong__";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -24,7 +24,7 @@ fn test_consistent_underscores() {
 fn test_mixed_strong_prefer_asterisks() {
     let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
     let content = "# Mixed strong\n\nThis is **asterisk** and this is __underscore__";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
@@ -37,7 +37,7 @@ fn test_mixed_strong_prefer_asterisks() {
 fn test_mixed_strong_prefer_underscores() {
     let rule = MD050StrongStyle::new(StrongStyle::Underscore);
     let content = "# Mixed strong\n\nThis is **asterisk** and this is __underscore__";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
@@ -50,7 +50,7 @@ fn test_mixed_strong_prefer_underscores() {
 fn test_consistent_style_first_asterisk() {
     let rule = MD050StrongStyle::new(StrongStyle::Consistent);
     let content = "# Mixed strong\n\nThis is **asterisk** and this is __underscore__";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
@@ -64,7 +64,7 @@ fn test_consistent_style_first_underscore() {
     let rule = MD050StrongStyle::new(StrongStyle::Consistent);
     // One underscore and one asterisk - tie prefers asterisk
     let content = "# Mixed strong\n\nThis is __underscore__ and this is **asterisk**";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
@@ -77,7 +77,7 @@ fn test_consistent_style_first_underscore() {
 fn test_empty_content() {
     let rule = MD050StrongStyle::new(StrongStyle::Consistent);
     let content = "";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -86,7 +86,7 @@ fn test_empty_content() {
 fn test_no_strong() {
     let rule = MD050StrongStyle::new(StrongStyle::Consistent);
     let content = "# Just a heading\n\nSome regular text\n\n> A blockquote";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -95,7 +95,7 @@ fn test_no_strong() {
 fn test_ignore_emphasis() {
     let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
     let content = "# Test\n\nThis is *emphasis* and this is **strong**";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -118,7 +118,7 @@ Use **asterisks** or __underscores__ for bold.
 Another **bold** word here.
 "#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not detect strong text inside code spans or blocks
@@ -161,7 +161,7 @@ More examples: <code>__init__.py</code>, <code>__main__.py</code>
 
 Mixed: __real__ emphasis and <code>__code__</code> together"#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should only flag the real emphasis (lines 5 and 9), not the code content
@@ -181,7 +181,7 @@ fn test_md050_nested_html_code() {
 
 Real emphasis: __should be flagged__"#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should only flag line 5, not the content in code tags on line 3
@@ -201,7 +201,7 @@ Between tags: __this should be flagged__
 
 After tags <code>__main__</code> more text __also flagged__"#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should flag lines 5 and 7 but not the code content
@@ -223,7 +223,8 @@ __should be flagged__
 <code/>
 __also flagged__"#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content_separate, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx =
+        rumdl_lib::lint_context::LintContext::new(content_separate, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Self-closing code tags don't create a code context
@@ -238,7 +239,7 @@ __also flagged__"#;
 
 <code/> __also flagged__"#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // These should also be flagged
@@ -261,7 +262,7 @@ fn test_md050_code_with_attributes() {
 
 Regular __emphasis__ here."#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should only flag line 5
@@ -277,7 +278,7 @@ fn test_md050_fix_preserves_html_code() {
 
 Uses <code>__pycache__</code> but __this__ should be fixed."#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Should preserve code content but fix the emphasis
@@ -299,7 +300,7 @@ fn test_md050_complex_html_structure() {
 
 <span>More <code>__code__</code> content</span> and __emphasis__."#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should flag lines 5 and 8
@@ -318,7 +319,7 @@ fn test_issue_118_underscores_in_link_title_with_code() {
 - [An odd but sensible use of `super`](https://www.pythonmorsels.com/how-not-to-use-super/#an-odd-but-sensible-use-of-super "Calling `super().__setitem__` might make sense, depending on how you've implemented your class")
 "#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag __setitem__ inside the quoted title attribute
@@ -339,7 +340,7 @@ fn test_issue_118_parentheses_in_link_titles() {
 [Another link](https://example.com "Function call like `func()`")
 "#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag anything - parentheses in titles are valid
@@ -385,7 +386,7 @@ Here is a link with code in the hover text:
 - [An odd but sensible use of `super`](https://www.pythonmorsels.com/how-not-to-use-super/#an-odd-but-sensible-use-of-super "Calling `super().__setitem__` might make sense, depending on how you've implemented your class")
 "#;
 
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not report any issues with the full document

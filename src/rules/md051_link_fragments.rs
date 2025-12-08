@@ -531,7 +531,7 @@ More details in [@tbl-results] and [@sec-methods].
 The equation [@eq-regression] shows the relationship.
 
 Reference to [@lst-code] for implementation."#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -543,7 +543,7 @@ Reference to [@lst-code] for implementation."#;
         let content_with_anchor = r#"# Test
 
 See [link](#test) for details."#;
-        let ctx_anchor = LintContext::new(content_with_anchor, crate::config::MarkdownFlavor::Quarto);
+        let ctx_anchor = LintContext::new(content_with_anchor, crate::config::MarkdownFlavor::Quarto, None);
         let result_anchor = rule.check(&ctx_anchor).unwrap();
         assert!(result_anchor.is_empty(), "Valid anchor should not trigger warning");
 
@@ -551,7 +551,7 @@ See [link](#test) for details."#;
         let content_invalid = r#"# Test
 
 See [link](#nonexistent) for details."#;
-        let ctx_invalid = LintContext::new(content_invalid, crate::config::MarkdownFlavor::Quarto);
+        let ctx_invalid = LintContext::new(content_invalid, crate::config::MarkdownFlavor::Quarto, None);
         let result_invalid = rule.check(&ctx_invalid).unwrap();
         assert_eq!(result_invalid.len(), 1, "Invalid anchor should still trigger warning");
     }
@@ -567,7 +567,7 @@ See [link](#nonexistent) for details."#;
     fn test_contribute_to_index_extracts_headings() {
         let rule = MD051LinkFragments::new();
         let content = "# First Heading\n\n# Second { #custom }\n\n## Third";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let mut file_index = FileIndex::new();
         rule.contribute_to_index(&ctx, &mut file_index);
@@ -587,7 +587,7 @@ See [link](#nonexistent) for details."#;
     fn test_contribute_to_index_extracts_cross_file_links() {
         let rule = MD051LinkFragments::new();
         let content = "See [docs](other.md#installation) and [more](../guide.md#getting-started)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let mut file_index = FileIndex::new();
         rule.contribute_to_index(&ctx, &mut file_index);

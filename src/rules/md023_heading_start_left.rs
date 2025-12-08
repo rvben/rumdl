@@ -223,13 +223,13 @@ mod tests {
 
         // Test with properly aligned headings
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with indented headings
         let content = "  # Heading 1\n ## Heading 2\n   ### Heading 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 3); // Should flag all three indented headings
         assert_eq!(result[0].line, 1);
@@ -238,7 +238,7 @@ mod tests {
 
         // Test with setext headings
         let content = "Heading 1\n=========\n  Heading 2\n  ---------";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should flag the indented heading and underline
         assert_eq!(result[0].line, 3);

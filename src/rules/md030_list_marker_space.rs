@@ -437,14 +437,14 @@ mod tests {
     fn test_basic_functionality() {
         let rule = MD030ListMarkerSpace::default();
         let content = "* Item 1\n* Item 2\n  * Nested item\n1. Ordered item";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Correctly spaced list markers should not generate warnings"
         );
         let content = "*  Item 1 (too many spaces)\n* Item 2\n1.   Ordered item (too many spaces)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Expect warnings for lines with too many spaces after the marker
         assert_eq!(

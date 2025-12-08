@@ -8,6 +8,7 @@ fn test_valid_link_fragment() {
     let ctx = LintContext::new(
         "# Test Heading\n\nThis is a [link](somepath#test-heading) to the heading.",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
@@ -19,6 +20,7 @@ fn test_invalid_link_fragment() {
     let ctx = LintContext::new(
         "# Test Heading\n\nThis is a [link](somepath#wrong-heading) to the heading.",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
@@ -30,6 +32,7 @@ fn test_multiple_headings() {
     let ctx = LintContext::new(
         "# First Heading\n\n## Second Heading\n\n[Link 1](somepath#first-heading)\n[Link 2](somepath#second-heading)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
@@ -41,6 +44,7 @@ fn test_special_characters() {
     let ctx = LintContext::new(
         "# Test & Heading!\n\nThis is a [link](somepath#test--heading) to the heading.",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
@@ -54,6 +58,7 @@ fn test_no_fragments() {
     let ctx = LintContext::new(
         "# Test Heading\n\nThis is a [link](https://example.com) without fragment.",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
@@ -62,7 +67,7 @@ fn test_no_fragments() {
 
 #[test]
 fn test_empty_content() {
-    let ctx = LintContext::new("", rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new("", rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -73,6 +78,7 @@ fn test_multiple_invalid_fragments() {
     let ctx = LintContext::new(
         "# Test Heading\n\n[Link 1](somepath#wrong1)\n[Link 2](somepath#wrong2)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
@@ -89,6 +95,7 @@ fn test_case_sensitivity() {
 [Valid Link Different Case](#MY-HEADING)
 "#,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     let rule = MD051LinkFragments::new();
@@ -108,6 +115,7 @@ fn test_complex_heading_structures() {
     let ctx = LintContext::new(
         "# Heading 1\n\nSome text\n\nHeading 2\n-------\n\n### Heading 3\n\n[Link to 1](somepath#heading-1)\n[Link to 2](somepath#heading-2)\n[Link to 3](somepath#heading-3)\n[Link to missing](somepath#heading-4)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
 
@@ -120,6 +128,7 @@ fn test_complex_heading_structures() {
     let ctx = LintContext::new(
         "# Heading & Special! Characters\n\n[Link](somepath#heading--special-characters)\n[Bad Link](somepath#heading-special-characters-bad)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let result = rule.check(&ctx).unwrap();
 
@@ -138,6 +147,7 @@ fn test_heading_id_generation() {
 [Link with multiple hyphens](#heading-1)
 "#,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     let rule = MD051LinkFragments::new();
@@ -155,6 +165,7 @@ fn test_heading_to_fragment_edge_cases() {
     let ctx = LintContext::new(
         "# Heading\n\n# Heading\n\n[Link 1](somepath#heading)\n[Link 2](somepath#heading-1)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
 
@@ -166,6 +177,7 @@ fn test_heading_to_fragment_edge_cases() {
     let ctx = LintContext::new(
         "# @#$%^\n\n[Link](somepath#)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
@@ -174,6 +186,7 @@ fn test_heading_to_fragment_edge_cases() {
     let ctx = LintContext::new(
         "# Heading\n\n[Internal](somepath#heading)\n[External](https://example.com#heading)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
@@ -184,6 +197,7 @@ fn test_fragment_in_code_blocks() {
     let ctx = LintContext::new(
         "# Real Heading\n\n```markdown\n# Fake Heading\n[Link](somepath#fake-heading)\n```\n\n[Link](somepath#real-heading)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
 
@@ -200,6 +214,7 @@ fn test_fragment_in_code_blocks() {
     let ctx = LintContext::new(
         "```markdown\n# Code Heading\n```\n\n[Link](#code-heading)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let result = rule.check(&ctx).unwrap();
     println!("Second test has {} warnings", result.len());
@@ -220,6 +235,7 @@ fn test_fragment_with_complex_content() {
 [Link to heading](#heading-with-bold-and-italic)
 "#,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     let rule = MD051LinkFragments::new();
@@ -245,6 +261,7 @@ fn test_nested_formatting_in_fragments() {
 [Link to heading](#heading-with-bold-italic-text)
 "#,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     let rule = MD051LinkFragments::new();
@@ -269,6 +286,7 @@ fn test_multiple_formatting_styles() {
 [Link to heading](#heading-with-underscores-and-asterisks-mixed)
 "#,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     let rule = MD051LinkFragments::new();
@@ -293,6 +311,7 @@ fn test_complex_nested_formatting() {
 [Link to heading](#bold-with-italic-and-code-and-link)
 "#,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::KramdownGfm);
@@ -314,6 +333,7 @@ fn test_formatting_edge_cases() {
 [Link to nested formatting](#heading-with-apartialbold-and-italic-with-nested-formatting)
 "#,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     let rule = MD051LinkFragments::new();
@@ -363,7 +383,7 @@ fn test_performance_md051() {
     // Measure performance
     let start = std::time::Instant::now();
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     let duration = start.elapsed();
 
@@ -384,6 +404,7 @@ fn test_inline_code_spans() {
     let ctx = LintContext::new(
         "# Real Heading\n\nThis is a real link: [Link](somepath#real-heading)\n\nThis is a code example: `[Example](#missing-section)`",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let rule = MD051LinkFragments::new();
 
@@ -396,6 +417,7 @@ fn test_inline_code_spans() {
     let ctx = LintContext::new(
         "# Heading One\n\n`[Invalid](#missing)` and [Valid](#heading-one) and `[Another Invalid](#nowhere)`",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
     let result = rule.check(&ctx).unwrap();
 
@@ -406,6 +428,7 @@ fn test_inline_code_spans() {
     let ctx = LintContext::new(
         "# Heading One\n\n`[Example](#missing-section)` and [Invalid Link](#section-two)",
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     // Debug: Let's check what the LintContext contains
@@ -456,7 +479,7 @@ fn test_readme_fragments_debug() {
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Test the actual rule
     println!("\nRunning MD051 check on README-like content:");
@@ -522,7 +545,7 @@ fn test_md051_fragment_generation_regression() {
     for (heading, expected_fragment) in test_cases {
         // Create a test document with the heading and a link to it
         let content = format!("# {heading}\n\n[Link](#{expected_fragment})");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // If the fragment generation is correct, there should be no warnings
@@ -562,7 +585,7 @@ fn test_md051_real_world_scenarios() {
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // All links should be valid with the fixed algorithm
@@ -596,7 +619,7 @@ fn test_md051_ampersand_variations() {
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // All ampersand cases should be handled correctly
@@ -636,7 +659,7 @@ And some cross-file links that should be ignored by MD051:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only have one warning for the missing internal fragment
@@ -684,7 +707,7 @@ Test various link types:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid fragment-only link
@@ -735,7 +758,7 @@ Fragment-only links (should be validated):
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid fragment-only link
@@ -783,7 +806,7 @@ Fragment-only tests:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag the invalid fragment-only link plus the ambiguous paths without extensions
@@ -829,7 +852,7 @@ Fragment-only (should be validated):
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag ambiguous paths without extensions plus the invalid fragment
@@ -877,7 +900,7 @@ Fragment validation:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid fragment-only link
@@ -905,7 +928,7 @@ fn test_performance_stress_case() {
     content.push_str("- [Invalid](#missing)\n");
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the one invalid fragment
@@ -943,7 +966,7 @@ Fragment tests:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag 2 ambiguous paths + 1 invalid fragment = 3 warnings
@@ -1008,7 +1031,7 @@ Fragment-only validation tests:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag only 1 invalid fragment - ambiguous paths are now treated as cross-file links
@@ -1042,7 +1065,7 @@ Fragment-only tests:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid fragment
@@ -1077,7 +1100,7 @@ Fragment tests with normalization:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag only the invalid symbol fragment
@@ -1121,7 +1144,7 @@ Fragment-only (should be validated):
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the invalid fragment
@@ -1153,7 +1176,7 @@ Malformed and edge case links:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag the invalid fragment and potentially malformed links
@@ -1182,7 +1205,7 @@ fn test_performance_with_many_links() {
     content.push_str("- [Invalid](#nonexistent)\n");
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     let start = std::time::Instant::now();
     let result = rule.check(&ctx).unwrap();
@@ -1238,7 +1261,7 @@ Links that should fail:
 - [Link to nonexistent](#nonexistent-id)
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
 
@@ -1290,7 +1313,7 @@ Links that should fail:
 - [Nonexistent](#nonexistent)
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
 
@@ -1344,7 +1367,7 @@ Links that should fail:
 - [Nonexistent](#nonexistent-next-line)
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
 
@@ -1391,7 +1414,7 @@ Links:
 - [Next Line Class](#next-line-class)
 "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD051LinkFragments::new();
     let result = rule.check(&ctx).unwrap();
 
@@ -1421,7 +1444,7 @@ Links for testing:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     println!("Number of errors: {}", result.len());
@@ -1456,7 +1479,7 @@ There will be another section.
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - link to second section should work
@@ -1483,7 +1506,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - all complex punctuation should be handled correctly
@@ -1512,7 +1535,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - ampersands and colons should be handled correctly
@@ -1544,7 +1567,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - mixed punctuation should be handled correctly
@@ -1573,7 +1596,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - consecutive hyphens should be collapsed
@@ -1605,7 +1628,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have no errors - all edge cases should work
@@ -1634,7 +1657,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only have 1 error for #missing
@@ -1668,7 +1691,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only have 1 error for #does-not-exist
@@ -1690,7 +1713,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have 1 error - anchors in code blocks don't count
@@ -1710,7 +1733,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have 1 error for second-id
@@ -1741,7 +1764,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only have 1 error for #wrong
@@ -1765,7 +1788,7 @@ Links to test:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have 2 errors for wrong case
@@ -1804,7 +1827,7 @@ Table of contents:
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // All links should be valid - no errors
@@ -1835,7 +1858,7 @@ Content with arrows.
 "#;
 
     let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // All links should be valid with the fixed arrow pattern handling

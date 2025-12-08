@@ -10,7 +10,7 @@ fn test_mkdocs_paragraph_anchor_not_flagged() {
 
     // Valid MkDocs anchor syntax
     let content = "[](){ #anchor_name }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -29,7 +29,7 @@ fn test_mkdocs_paragraph_anchor_in_context() {
 Another paragraph.
 [](){ #another-anchor }"#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -47,7 +47,7 @@ fn test_mkdocs_list_item_anchor() {
 - Second item
   [](){ #second }"#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -61,7 +61,7 @@ fn test_mkdocs_anchor_with_classes() {
 
     // Anchors can also have classes
     let content = "[](){ #anchor .class1 .class2 }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -75,7 +75,7 @@ fn test_standard_mode_still_flags_empty_links() {
 
     // In standard mode, this should still be flagged
     let content = "[](){ #anchor_name }";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -90,7 +90,7 @@ fn test_actual_empty_links_still_flagged_in_mkdocs() {
 
     // Actual empty links without the attribute syntax should still be flagged
     let content = "[]() without attributes";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -105,7 +105,7 @@ fn test_empty_link_with_url_still_flagged_in_mkdocs() {
 
     // Empty text with URL (not an anchor) should still be flagged
     let content = "[](https://example.com)";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),

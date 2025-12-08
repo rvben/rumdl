@@ -404,7 +404,7 @@ impl RumdlLanguageServer {
                 continue;
             }
 
-            let ctx = crate::lint_context::LintContext::new(&fixed_text, flavor);
+            let ctx = crate::lint_context::LintContext::new(&fixed_text, flavor, None);
             match rule.fix(&ctx) {
                 Ok(new_text) => {
                     if new_text != fixed_text {

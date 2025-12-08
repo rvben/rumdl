@@ -209,13 +209,13 @@ mod tests {
 
         // Test with valid headings
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with invalid headings
         let content = "# Heading 1\n### Heading 3\n#### Heading 4";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);

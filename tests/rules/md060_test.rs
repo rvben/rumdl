@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 fn test_md060_disabled_by_default() {
     let rule = MD060TableFormat::default();
     let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 0, "Rule should be disabled by default");
@@ -22,7 +22,7 @@ fn test_md060_align_simple_ascii_table() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 3, "Should warn about all three rows");
@@ -41,7 +41,7 @@ fn test_md060_cjk_characters() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Name | Age |\n|---|---|\n| 中文 | 30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("中文"), "CJK characters should be preserved");
@@ -53,7 +53,7 @@ fn test_md060_cjk_characters() {
     assert_eq!(lines[1].width(), lines[2].width(), "Display widths should match");
 
     let content2 = "| Name | City |\n|---|---|\n| Alice | 東京 |";
-    let ctx2 = LintContext::new(content2, MarkdownFlavor::Standard);
+    let ctx2 = LintContext::new(content2, MarkdownFlavor::Standard, None);
     let fixed2 = rule.fix(&ctx2).unwrap();
     assert!(fixed2.contains("東京"), "Japanese characters should be preserved");
 
@@ -68,7 +68,7 @@ fn test_md060_basic_emoji() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Status | Name |\n|---|---|\n| ✅ | Test |\n| ❌ | Fail |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("✅"), "Basic emoji should be preserved");
@@ -89,7 +89,7 @@ fn test_md060_zwj_emoji_skipped() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Emoji | Name |\n|---|---|\n| 👨‍👩‍👧‍👦 | Family |\n| 👩‍💻 | Developer |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(
@@ -112,7 +112,7 @@ fn test_md060_inline_code_with_escaped_pipes() {
     // WRONG: `[0-9]|[0-9]` - the | splits cells (3 columns total)
     // CORRECT: `[0-9]\|[0-9]` - the \| is escaped, stays as content (2 columns)
     let content = "| Pattern | Regex |\n|---|---|\n| Time | `[0-9]\\|[0-9]` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     // The escaped pipe \| should be preserved in the output
@@ -137,7 +137,7 @@ fn test_md060_complex_regex_with_escaped_pipes() {
     // CORRECT: Pipes escaped with \| stay as content
     let content =
         "| Challenge | Solution |\n|---|---|\n| Hour:minute:second | `^([0-1]?\\d\\|2[0-3]):[0-5]\\d:[0-5]\\d$` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     // The escaped pipe \| should be preserved
@@ -157,7 +157,7 @@ fn test_md060_compact_style() {
     let rule = MD060TableFormat::new(true, "compact".to_string());
 
     let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     let expected = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
@@ -172,7 +172,7 @@ fn test_md060_max_width_fallback() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| VeryLongColumnName | AnotherLongColumn | ThirdColumn |\n|---|---|---|\n| Data | Data | Data |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -187,7 +187,7 @@ fn test_md060_empty_cells() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| A | B | C |\n|---|---|---|\n|  | X |  |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("|"), "Table structure should be preserved");
@@ -205,7 +205,7 @@ fn test_md060_mixed_content() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Name | Age | City | Status |\n|---|---|---|---|\n| 中文 | 30 | NYC | ✅ |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("中文"), "CJK should be preserved");
@@ -223,7 +223,7 @@ fn test_md060_preserve_alignment_indicators() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | B | C |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     // Now with alignment support: A is left-aligned, B is center-aligned, C is right-aligned
@@ -246,7 +246,7 @@ fn test_md060_table_with_trailing_newline() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Name | Age |\n|---|---|\n| Alice | 30 |\n";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.ends_with('\n'), "Trailing newline should be preserved");
@@ -258,7 +258,7 @@ fn test_md060_multiple_tables() {
 
     // Use ACTUALLY misaligned tables (different row lengths within each table)
     let content = "# First Table\n\n| A | B |\n|---|---|\n| 1 | 2222 |\n\n# Second Table\n\n| X | Y | Z |\n|---|---|---|\n| aaaa | b | c |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("# First Table"));
@@ -273,7 +273,7 @@ fn test_md060_table_without_content_rows() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Header 1 | Header 2 |\n|---|---|";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("Header 1"));
@@ -285,7 +285,7 @@ fn test_md060_none_style() {
     let rule = MD060TableFormat::new(true, "none".to_string());
 
     let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 0, "None style should not produce warnings");
@@ -299,7 +299,7 @@ fn test_md060_single_column_table() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Column |\n|---|\n| Value1 |\n| Value2 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("Column"));
@@ -313,7 +313,7 @@ fn test_md060_table_in_context() {
 
     let content =
         "# Documentation\n\nSome text before.\n\n| Name | Age |\n|---|---|\n| Alice | 30 |\n\nSome text after.";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("# Documentation"));
@@ -338,7 +338,7 @@ fn test_md060_warning_messages() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 3);
@@ -355,7 +355,7 @@ fn test_md060_escaped_pipes() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Pattern | Description |\n|---|---|\n| `a\\|b` | Or operator |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("`a\\|b`"), "Escaped pipes should be preserved");
@@ -367,7 +367,7 @@ fn test_md060_very_long_content() {
 
     let long_text = "A".repeat(100);
     let content = format!("| Col1 | Col2 |\n|---|---|\n| {long_text} | B |");
-    let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains(&long_text), "Long content should be preserved");
@@ -380,7 +380,7 @@ fn test_md060_minimum_column_width() {
     // Test with very short column content (1-2 chars) to ensure minimum width of 3
     // This is required because GFM mandates at least 3 dashes in delimiter rows
     let content = "| ID | First Name | Last Name | Department |\n|-|-|-|-|\n| 1 | John | Doe | Engineering |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -422,7 +422,7 @@ fn test_md060_minimum_width_with_alignment_indicators() {
 
     // Test minimum width with alignment indicators
     let content = "| A | B | C |\n|:---|---:|:---:|\n| X | Y | Z |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -441,7 +441,7 @@ fn test_md060_empty_header_table() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "|||\n|-|-|\n|lorem|ipsum|";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     // Empty headers should be formatted with proper spacing
@@ -461,7 +461,7 @@ fn test_md060_delimiter_width_does_not_affect_alignment() {
 
     // The first delimiter has many dashes, but that shouldn't affect column width
     let content = "|lorem|ipsum|\n|--------------|-|\n|dolor|sit|";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     // Column width should be based on content (lorem/dolor), not delimiter dashes
@@ -483,7 +483,7 @@ fn test_md060_content_alignment_left() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Left |\n|:-----|\n| A |\n| BB |\n| CCC |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     let lines: Vec<&str> = fixed.lines().collect();
@@ -518,7 +518,7 @@ fn test_md060_content_alignment_center() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Center |\n|:------:|\n| A |\n| BB |\n| CCC |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     let lines: Vec<&str> = fixed.lines().collect();
@@ -556,7 +556,7 @@ fn test_md060_content_alignment_right() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Right |\n|------:|\n| A |\n| BB |\n| CCC |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     let lines: Vec<&str> = fixed.lines().collect();
@@ -591,7 +591,7 @@ fn test_md060_mixed_column_alignments() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | B | C |\n| AA | BB | CC |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     let lines: Vec<&str> = fixed.lines().collect();
@@ -641,7 +641,7 @@ fn test_md060_tables_in_html_comments_should_not_be_formatted() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "# Normal table\n\n| A | B |\n|---|---|\n| C | D |\n\n<!-- Commented table\n| X | Y |\n|---|---|\n| Z | W |\n-->\n\n| E | F |\n|---|---|\n| G | H |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
 
@@ -690,7 +690,7 @@ fn test_md060_zero_width_characters() {
 
     // Test Zero Width Space (U+200B), Zero Width Non-Joiner (U+200C), Word Joiner (U+2060)
     let content = "| Name | Status |\n|---|---|\n| Test\u{200B}Word | Active\u{200C}User |\n| Word\u{2060}Join | OK |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(
@@ -723,7 +723,7 @@ fn test_md060_rtl_text_arabic() {
 
     // Test Arabic text (RTL)
     let content = "| Name | City |\n|---|---|\n| أحمد | القاهرة |\n| محمد | دبي |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -758,7 +758,7 @@ fn test_md060_rtl_text_hebrew() {
 
     // Test Hebrew text (RTL)
     let content = "| שם | עיר |\n|---|---|\n| דוד | תל אביב |\n| שרה | ירושלים |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -793,7 +793,7 @@ fn test_md060_mismatched_column_counts_more_in_header() {
 
     // Header has 4 columns, delimiter has 3, content has 2
     let content = "| A | B | C | D |\n|---|---|---|\n| X | Y |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // This should not panic or crash
     let result = rule.fix(&ctx);
@@ -817,7 +817,7 @@ fn test_md060_mismatched_column_counts_more_in_content() {
 
     // Header has 2 columns, delimiter has 2, content has 4
     let content = "| A | B |\n|---|---|\n| X | Y | Z | W |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // This should not panic or crash
     let result = rule.fix(&ctx);
@@ -836,7 +836,7 @@ fn test_md060_escaped_pipes_outside_code() {
 
     // Test escaped pipes in regular text (not in inline code)
     let content = "| Operator | Example |\n|---|---|\n| OR | a \\| b |\n| Pipe | x \\| y \\| z |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -871,7 +871,7 @@ fn test_md060_combining_characters_diacritics() {
 
     // Test combining diacritical marks (café, São Paulo, etc.)
     let content = "| City | Country |\n|---|---|\n| café | français |\n| São Paulo | Brasil |\n| Zürich | Schweiz |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -903,7 +903,7 @@ fn test_md060_skin_tone_modifiers() {
 
     // Test emoji with skin tone modifiers (these are complex grapheme clusters)
     let content = "| User | Avatar |\n|---|---|\n| Alice | 👍🏻 |\n| Bob | 👋🏿 |\n| Carol | 🤝🏽 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // This might be skipped like ZWJ emoji due to measurement complexity
     let fixed = rule.fix(&ctx).unwrap();
@@ -920,7 +920,7 @@ fn test_md060_flag_emojis() {
 
     // Test flag emojis (regional indicator symbols)
     let content = "| Country | Flag |\n|---|---|\n| USA | 🇺🇸 |\n| Japan | 🇯🇵 |\n| France | 🇫🇷 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -936,7 +936,7 @@ fn test_md060_tables_in_blockquotes() {
 
     // Test tables inside blockquotes
     let content = "> | Name | Age |\n> |---|---|\n> | Alice | 30 |\n\nNormal text\n\n| X | Y |\n|---|---|\n| A | B |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -961,7 +961,7 @@ fn test_md060_adjacent_tables_without_blank_line() {
     // Test two tables directly adjacent (no blank line between)
     // This is technically invalid Markdown but shouldn't crash
     let content = "| A | B |\n|---|---|\n| 1 | 2 |\n| C | D |\n|---|---|\n| 3 | 4 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Should not panic
     let result = rule.fix(&ctx);
@@ -996,7 +996,7 @@ fn test_md060_maximum_column_count_stress() {
     );
 
     let content = format!("{header_row}\n{delimiter_row}\n{content_row}");
-    let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
 
     // This should complete in reasonable time and not crash
     let result = rule.fix(&ctx);
@@ -1014,12 +1014,12 @@ fn test_md060_fix_idempotency() {
 
     // Test that fix(fix(x)) == fix(x)
     let content = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | NYC |\n| Bob | 25 | LA |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed_once = rule.fix(&ctx).unwrap();
 
     // Apply fix again on the already-fixed content
-    let ctx2 = LintContext::new(&fixed_once, MarkdownFlavor::Standard);
+    let ctx2 = LintContext::new(&fixed_once, MarkdownFlavor::Standard, None);
     let fixed_twice = rule.fix(&ctx2).unwrap();
 
     assert_eq!(
@@ -1044,7 +1044,7 @@ fn test_md060_completely_empty_table() {
 
     // Table with all empty cells
     let content = "| | | |\n|---|---|---|\n| | | |\n| | | |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Should not panic
     let result = rule.fix(&ctx);
@@ -1065,7 +1065,7 @@ fn test_md060_table_with_no_delimiter() {
 
     // Invalid table: missing delimiter row
     let content = "| Name | Age |\n| Alice | 30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Should not panic - this won't be detected as a table by the parser
     let result = rule.fix(&ctx);
@@ -1078,7 +1078,7 @@ fn test_md060_single_row_table_header_only() {
 
     // Table with just header and delimiter, no content
     let content = "| Column A | Column B | Column C |\n|---|---|---|";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1102,7 +1102,7 @@ fn test_md060_varying_column_counts_per_row() {
 
     // Each row has different number of columns (malformed table)
     let content = "| A | B | C | D |\n|---|---|\n| X |\n| Y | Z | W | V | U |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Should not panic
     let result = rule.fix(&ctx);
@@ -1115,7 +1115,7 @@ fn test_md060_delimiter_with_no_dashes() {
 
     // Invalid delimiter row with only colons (edge case)
     let content = "| A | B |\n|:::|:::|\n| X | Y |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Should handle gracefully (likely won't be detected as valid table)
     let result = rule.fix(&ctx);
@@ -1130,7 +1130,7 @@ fn test_md060_bidirectional_text_mixed_ltr_rtl() {
 
     // Mix of LTR (English) and RTL (Arabic) in same table
     let content = "| English | العربية |\n|---|---|\n| Hello | مرحبا |\n| World | عالم |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1154,7 +1154,7 @@ fn test_md060_unicode_variation_selectors() {
     // Variation selectors change glyph appearance (text vs emoji style)
     // U+FE0E = text style, U+FE0F = emoji style
     let content = "| Char | Style |\n|---|---|\n| ☺︎ | Text |\n| ☺️ | Emoji |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1174,7 +1174,7 @@ fn test_md060_unicode_control_characters() {
     // Test with various control characters that might cause issues
     // U+0000 = NULL, U+0001 = SOH, U+001F = Unit Separator
     let content = "| Name | Value |\n|---|---|\n| Test\u{0001} | Data |\n| Item | Info\u{001F} |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Should not panic
     let result = rule.fix(&ctx);
@@ -1188,7 +1188,7 @@ fn test_md060_unicode_normalization_issues() {
     // Same visual character in different normalization forms (NFD vs NFC)
     // é can be: U+00E9 (precomposed) or U+0065 U+0301 (e + combining acute)
     let content = "| NFC | NFD |\n|---|---|\n| café | cafe\u{0301} |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1205,7 +1205,7 @@ fn test_md060_mixed_emoji_types() {
 
     // Mix basic emoji, emoji with modifiers, and multi-codepoint emoji
     let content = "| Type | Example |\n|---|---|\n| Basic | 😀 |\n| Gender | 👨 |\n| Number | #️⃣ |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1226,7 +1226,7 @@ fn test_md060_extremely_wide_single_cell() {
     // Single cell with 10000 characters
     let long_text = "A".repeat(10000);
     let content = format!("| Short | Long |\n|---|---|\n| X | {long_text} |");
-    let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
 
     // Should complete without timeout or excessive memory
     let result = rule.fix(&ctx);
@@ -1246,7 +1246,7 @@ fn test_md060_many_rows_stress() {
         lines.push(format!("| {i} | Row{i} | Data{i} |"));
     }
     let content = lines.join("\n");
-    let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
 
     // Should complete in reasonable time
     let result = rule.fix(&ctx);
@@ -1265,7 +1265,7 @@ fn test_md060_deeply_nested_inline_code() {
     // To have literal pipes in table cells, use backslash-escaped pipes (\|).
     // This test verifies escaped pipes inside inline code are preserved during formatting.
     let content = "| Code | Description |\n|---|---|\n| `a\\|b` | Simple |\n| `x\\|y\\|z` | Multiple |\n| `{a\\|b}\\|{c\\|d}` | Complex |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1286,7 +1286,7 @@ fn test_md060_table_with_links() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Name | Link |\n|---|---|\n| GitHub | [Link](https://github.com) |\n| Google | [Search](https://google.com) |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1303,7 +1303,7 @@ fn test_md060_table_with_html_entities() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Symbol | HTML |\n|---|---|\n| Less than | &lt; |\n| Greater | &gt; |\n| Ampersand | &amp; |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1319,7 +1319,7 @@ fn test_md060_table_with_bold_and_italic() {
 
     let content =
         "| Text | Style |\n|---|---|\n| **Bold** | Strong |\n| *Italic* | Emphasis |\n| ***Both*** | Combined |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1334,7 +1334,7 @@ fn test_md060_table_with_strikethrough() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Status | Item |\n|---|---|\n| Done | ~~Old~~ |\n| Active | Current |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1350,7 +1350,7 @@ fn test_md060_cells_with_leading_trailing_spaces() {
 
     // Cells with intentional spaces (though they'll be trimmed in output)
     let content = "| Name | Value |\n|---|---|\n|   Spaced   |   Data   |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1365,7 +1365,7 @@ fn test_md060_cells_with_tabs() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Name | Value |\n|---|---|\n| Tab\there | Data |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1379,7 +1379,7 @@ fn test_md060_cells_with_newline_escape() {
 
     // Cells with literal \n (not actual newlines)
     let content = "| Pattern | Example |\n|---|---|\n| Newline | Line\\nBreak |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1395,7 +1395,7 @@ fn test_md060_delimiter_with_many_dashes() {
 
     // Delimiter rows with varying dash counts
     let content = "| A | B | C |\n|----------|---|---------------------------|\n| X | Y | Z |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1412,7 +1412,7 @@ fn test_md060_all_alignment_combinations() {
     // Test all possible alignment combinations in one table
     let content =
         "| Default | Left | Right | Center |\n|---|:---|---:|:---:|\n| A | B | C | D |\n| AA | BB | CC | DD |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1452,7 +1452,7 @@ fn test_md060_unicode_in_aligned_columns() {
 
     // Different Unicode widths with alignment indicators
     let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | 中 | 1 |\n| AAA | 中中中 | 111 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1473,7 +1473,7 @@ fn test_md060_empty_and_whitespace_only_cells_mixed() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| A | B | C |\n|---|---|---|\n|  |   | X |\n| Y |  |  |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1496,7 +1496,7 @@ fn test_md060_issue_164_already_aligned_short_separators() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| a   |  b  |   c |\n| :-- | :-: | --: |\n| 1   |  2  |   3 |\n| 10  | 20  |  30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Should produce NO warnings - table is already aligned
     let warnings = rule.check(&ctx).unwrap();
@@ -1535,7 +1535,7 @@ fn test_md060_issue_164_misaligned_short_separators_detected() {
 
     // Misaligned table - inconsistent column widths
     let content = "| a |  b  | c |\n| :-- | :-: | --: |\n| 1 |  2  |   3 |\n| 10 | 20 |  30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Should produce warnings - table is NOT aligned
     let warnings = rule.check(&ctx).unwrap();
@@ -1561,7 +1561,7 @@ fn test_md060_mkdocs_flavor_pipes_in_code_spans_issue_165() {
 
     // This is the exact example from issue #165
     let content = "| Type | Example |\n| - | - |\n| Union | `x | y` |\n| Dict | `dict` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
     // Should recognize this as a 2-column table and format it correctly
     let fixed = rule.fix(&ctx).unwrap();
@@ -1607,7 +1607,7 @@ fn test_md060_mkdocs_flavor_various_code_spans_with_pipes() {
     // Multiple rows with pipes in inline code
     let content =
         "| Type | Syntax |\n| - | - |\n| Union | `A | B` |\n| Optional | `T | None` |\n| Multiple | `a | b | c` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1640,7 +1640,7 @@ fn test_md060_mkdocs_flavor_no_false_positives() {
 
     // Use a table that would be already aligned if parsed correctly as 2 columns
     let content = "| Type  | Example  |\n| ----- | -------- |\n| Union | `x | y`  |";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
     // Check should produce no warnings because table is aligned with consistent columns
     let warnings = rule.check(&ctx).unwrap();
@@ -1659,7 +1659,7 @@ fn test_md060_mkdocs_flavor_fix_preserves_inline_code_pipes() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |\n| Dict | `dict` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1687,7 +1687,7 @@ fn test_md060_mkdocs_flavor_compact_style() {
     let rule = MD060TableFormat::new(true, "compact".to_string());
 
     let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1706,7 +1706,7 @@ fn test_md060_mkdocs_flavor_tight_style() {
     let rule = MD060TableFormat::new(true, "tight".to_string());
 
     let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1727,7 +1727,7 @@ fn test_md060_standard_flavor_pipes_in_code_are_delimiters() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Type | Example |\n|-|-|\n| Union | `x | y` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -1747,7 +1747,7 @@ fn test_md060_mkdocs_flavor_escaped_and_inline_code_pipes() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
     let content = "| Type | Example |\n|-|-|\n| Escaped | a \\| b |\n| Code | `x | y` |";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 

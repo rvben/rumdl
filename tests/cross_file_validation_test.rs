@@ -42,8 +42,8 @@ Here are the features.
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
     // Lint and index both files
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default());
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default());
+    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
 
     // Build workspace index
     let mut workspace_index = WorkspaceIndex::new();
@@ -106,7 +106,7 @@ fn test_heading_anchor_generation_in_index() {
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default());
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
 
     // Should have 3 headings indexed
     let unique_anchors: std::collections::HashSet<_> =
@@ -144,7 +144,7 @@ fn test_cross_file_links_extraction() {
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default());
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
 
     // Should have 1 cross-file link with fragment (./guide.md#install)
     // Local anchors (#local) and links without fragments are not included

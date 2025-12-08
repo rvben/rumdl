@@ -466,27 +466,27 @@ mod tests {
 
         // Test with correctly ordered list
         let content = "1. First item\n2. Second item\n3. Third item";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with incorrectly ordered list
         let content = "1. First item\n3. Third item\n5. Fifth item";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 5
 
         // Test with one-one style
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOne);
         let content = "1. First item\n2. Second item\n3. Third item";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should have warnings for items 2 and 3
 
         // Test with ordered0 style
         let rule = MD029OrderedListPrefix::new(ListStyle::Ordered0);
         let content = "0. First item\n1. Second item\n2. Third item";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -501,7 +501,7 @@ mod tests {
 
         // Test with mixed valid and edge case content
         let content = "1. First item\n3. Wrong number\n2. Another wrong number";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         // This should not panic and should produce warnings for incorrect numbering
         let result = rule.check(&ctx).unwrap();
@@ -523,7 +523,7 @@ mod tests {
             content.push_str(&format!("{}. Item {}\n", i + 1, i)); // All wrong numbers
         }
 
-        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
 
         // This should complete without issues and produce warnings for all items
         let result = rule.check(&ctx).unwrap();
@@ -540,7 +540,7 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
 
         let content = "1. First item\n1. Second item\n1. Third item";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "All ones should be valid in OneOrOrdered mode");
     }
@@ -551,7 +551,7 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
 
         let content = "1. First item\n2. Second item\n3. Third item";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -565,7 +565,7 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
 
         let content = "1. First item\n2. Second item\n1. Third item";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Mixed style should produce one warning");
         assert!(result[0].message.contains("1") && result[0].message.contains("expected 3"));
@@ -577,7 +577,7 @@ mod tests {
         let rule = MD029OrderedListPrefix::new(ListStyle::OneOrOrdered);
 
         let content = "# First list\n\n1. Item A\n1. Item B\n\n# Second list\n\n1. Item X\n2. Item Y\n3. Item Z";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),

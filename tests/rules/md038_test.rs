@@ -6,7 +6,7 @@ use rumdl_lib::rules::MD038NoSpaceInCode;
 fn test_valid_code_spans() {
     let rule = MD038NoSpaceInCode::new();
     let content = "`code` and `another code` here";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 }
@@ -15,7 +15,7 @@ fn test_valid_code_spans() {
 fn test_spaces_both_ends() {
     let rule = MD038NoSpaceInCode::new();
     let content = "` code ` and ` another code ` here";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
@@ -26,7 +26,7 @@ fn test_spaces_both_ends() {
 fn test_space_at_start() {
     let rule = MD038NoSpaceInCode::new();
     let content = "` code` and ` another code` here";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
@@ -37,7 +37,7 @@ fn test_space_at_start() {
 fn test_space_at_end() {
     let rule = MD038NoSpaceInCode::new();
     let content = "`code ` and `another code ` here";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
@@ -48,7 +48,7 @@ fn test_space_at_end() {
 fn test_code_in_code_block() {
     let rule = MD038NoSpaceInCode::new();
     let content = "```\n` code `\n```\n` code `";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -59,7 +59,7 @@ fn test_code_in_code_block() {
 fn test_multiple_code_spans() {
     let rule = MD038NoSpaceInCode::new();
     let content = "` code ` and ` another ` in one line";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();
@@ -70,7 +70,7 @@ fn test_multiple_code_spans() {
 fn test_code_with_internal_spaces() {
     let rule = MD038NoSpaceInCode::new();
     let content = "`this is code` and ` this is also code `";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     let fixed = rule.fix(&ctx).unwrap();
@@ -81,7 +81,7 @@ fn test_code_with_internal_spaces() {
 fn test_code_with_punctuation() {
     let rule = MD038NoSpaceInCode::new();
     let content = "` code! ` and ` code? ` here";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
     let fixed = rule.fix(&ctx).unwrap();

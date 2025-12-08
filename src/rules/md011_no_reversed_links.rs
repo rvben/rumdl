@@ -355,14 +355,14 @@ mod tests {
 
         // Should detect reversed links
         let content = "(http://example.com)[Example]\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].line, 1);
 
         // Should not detect correct links
         let content = "[Example](http://example.com)\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0);
     }
@@ -373,7 +373,7 @@ mod tests {
 
         // Should not detect if brackets are escaped
         let content = "(url)[text\\]\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0);
     }
@@ -384,7 +384,7 @@ mod tests {
 
         // Should not detect (text)[ref](url) as reversed
         let content = "(text)[ref](url)\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0);
     }
@@ -394,7 +394,7 @@ mod tests {
         let rule = MD011NoReversedLinks;
 
         let content = "(http://example.com)[Example]\n(another/url)[text]\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[Example](http://example.com)\n[text](another/url)\n");
     }
@@ -404,7 +404,7 @@ mod tests {
         let rule = MD011NoReversedLinks;
 
         let content = "```\n(url)[text]\n```\n(url)[text]\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].line, 4);
@@ -415,7 +415,7 @@ mod tests {
         let rule = MD011NoReversedLinks;
 
         let content = "`(url)[text]` and (url)[text]\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].column, 19);
@@ -428,19 +428,19 @@ mod tests {
         // Should not detect [link](url)[^footnote] as reversed - this is valid markdown
         // The [^footnote] is a footnote reference, not part of a reversed link
         let content = "Some text with [a link](https://example.com/)[^ft].\n\n[^ft]: Note.\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0);
 
         // Also test with multiple footnotes
         let content = "[link1](url1)[^1] and [link2](url2)[^2]\n\n[^1]: First\n[^2]: Second\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 0);
 
         // But should still detect actual reversed links
         let content = "(url)[text] and [link](url)[^footnote]\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].line, 1);

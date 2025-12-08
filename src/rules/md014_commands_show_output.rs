@@ -486,7 +486,7 @@ mod tests {
         let rule = MD014CommandsShowOutput::new();
         // Bare $ doesn't match command pattern (needs a command after $)
         let content = "```bash\n$ \n```";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -495,13 +495,13 @@ mod tests {
 
         // Test empty code block
         let empty_content = "```bash\n```";
-        let ctx2 = LintContext::new(empty_content, crate::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new(empty_content, crate::config::MarkdownFlavor::Standard, None);
         let result2 = rule.check(&ctx2).unwrap();
         assert!(result2.is_empty(), "Empty code block should not be flagged");
 
         // Test minimal command
         let minimal = "```bash\n$ a\n```";
-        let ctx3 = LintContext::new(minimal, crate::config::MarkdownFlavor::Standard);
+        let ctx3 = LintContext::new(minimal, crate::config::MarkdownFlavor::Standard, None);
         let result3 = rule.check(&ctx3).unwrap();
         assert_eq!(result3.len(), 1, "Minimal command should be flagged");
     }

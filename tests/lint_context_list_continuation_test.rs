@@ -11,7 +11,7 @@ fn test_list_continuation_not_marked_as_code_block() {
 Normal paragraph.
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Line 0: "- Item"
     assert!(!ctx.lines[0].in_code_block, "List item should not be in code block");
@@ -51,7 +51,7 @@ fn test_indented_code_block_is_marked_correctly() {
 Normal paragraph.
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Line 0: "Paragraph."
     assert!(

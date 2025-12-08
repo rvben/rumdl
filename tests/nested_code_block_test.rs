@@ -20,7 +20,7 @@ def hello():
 
 More text"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // MD031 should NOT flag the inner ``` as needing blank lines
@@ -41,7 +41,7 @@ echo "hello"
 ````
 `````"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should not flag any of the inner fence markers
@@ -69,7 +69,7 @@ This has no language but should not be flagged
 This should be flagged
 ```"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should only flag the last code block (line 13)
@@ -88,7 +88,7 @@ content
 ```
 ````"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // The fix should NOT add blank lines inside the nested code block
@@ -128,7 +128,7 @@ def hello():
 
 <!-- rumdl-enable MD040 -->"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // MD031 should not flag anything inside the code blocks
     let md031_warnings = md031.check(&ctx).unwrap();

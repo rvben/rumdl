@@ -33,7 +33,7 @@ Die Überprüfung der Backupintegrität ist wichtig für die Zuverlässigkeit.
 Teste äöü ÄÖÜ ß in verschiedenen Kontexten."#;
 
     // This should not panic when checking if list items are in code blocks
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Run various rules that might interact with list detection and code blocks
     let rules: Vec<Box<dyn Rule>> = vec![
@@ -72,7 +72,7 @@ fn test_umlauts_in_code_spans_within_lists() {
 - Item with multiple `äöü` and `ÄÖÜ` code spans
 - Regular text: Die Größe der Änderungen überprüfen"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Test MD038 which checks for spaces in code spans
     let rule = MD038NoSpaceInCode::default();
@@ -99,7 +99,7 @@ Text with ü right after code block.
     ```
 - Item with ß after code"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Test rules that analyze code blocks and lists
     let rules: Vec<Box<dyn Rule>> = vec![
@@ -135,7 +135,7 @@ fn test_multibyte_characters_at_slice_boundaries() {
 
     for (content, description) in test_cases {
         let list_content = format!("- {content}\n- Another item");
-        let ctx = LintContext::new(&list_content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&list_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Test list-related rules
         let rules: Vec<Box<dyn Rule>> = vec![
@@ -168,7 +168,7 @@ fn test_code_block_detection_with_utf8_boundaries() {
     ```
 - Item with ö"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Test that we can check rules without panicking
     // This triggers the internal list parsing and code block detection
@@ -198,7 +198,7 @@ fn test_escaped_backticks_with_umlauts() {
 - Item with `regular code` and ö
 - Item with \`escaped\` and ü mixed"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Test MD038 which was reporting false positives
     let rule = MD038NoSpaceInCode::default();

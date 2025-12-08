@@ -12,7 +12,7 @@ Real reference: [real reference][ref]
 Images too: \![not an image](image.jpg)
 Real image: ![actual image](image.jpg)"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // WORKAROUND: pulldown-cmark bug with escaped brackets
     // Per CommonMark spec Example 14, \[escaped\] should NOT be a link.
@@ -45,7 +45,7 @@ fn test_complex_escaped_brackets() {
 Text with \[brackets\] in the middle
 Multiple \[escaped\] \[brackets\] on same line"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Currently, LintContext doesn't handle double backslash escapes
     // This is a potential future enhancement: when \\ precedes [, the first \ escapes the second \
@@ -65,7 +65,7 @@ fn test_nested_brackets_with_escapes() {
 Nested reference: [text with \[brackets\]][ref]
 [ref]: https://example.com"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Should correctly parse links with escaped brackets inside
     assert_eq!(ctx.links.len(), 2);

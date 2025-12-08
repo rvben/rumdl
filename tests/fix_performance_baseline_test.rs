@@ -32,7 +32,7 @@ fn count_context_creations_for_fix(rules: &[Box<dyn Rule>], content: &str, confi
     // Simulate current behavior: one context per rule that fixes
     for rule in rules {
         // Create context for this rule
-        let ctx = LintContext::new(&current_content, config.markdown_flavor());
+        let ctx = LintContext::new(&current_content, config.markdown_flavor(), None);
         context_creations += 1;
 
         let warnings = rule.check(&ctx).unwrap_or_default();
@@ -111,8 +111,8 @@ http://bare-url.com
         let elapsed = start.elapsed().as_millis();
 
         // Count warnings before and after
-        let ctx_before = LintContext::new(content, config.markdown_flavor());
-        let ctx_after = LintContext::new(&fixed_content, config.markdown_flavor());
+        let ctx_before = LintContext::new(content, config.markdown_flavor(), None);
+        let ctx_after = LintContext::new(&fixed_content, config.markdown_flavor(), None);
 
         let mut warnings_before = 0;
         let mut warnings_after = 0;
@@ -193,22 +193,22 @@ fn test_fix_application_order_independence() {
     let md009 = MD009TrailingSpaces::default();
     let md004 = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
 
-    let ctx = LintContext::new(&content1, config.markdown_flavor());
+    let ctx = LintContext::new(&content1, config.markdown_flavor(), None);
     if let Ok(fixed) = md009.fix(&ctx) {
         content1 = fixed;
     }
-    let ctx = LintContext::new(&content1, config.markdown_flavor());
+    let ctx = LintContext::new(&content1, config.markdown_flavor(), None);
     if let Ok(fixed) = md004.fix(&ctx) {
         content1 = fixed;
     }
 
     // Apply MD004 first, then MD009
     let mut content2 = content.to_string();
-    let ctx = LintContext::new(&content2, config.markdown_flavor());
+    let ctx = LintContext::new(&content2, config.markdown_flavor(), None);
     if let Ok(fixed) = md004.fix(&ctx) {
         content2 = fixed;
     }
-    let ctx = LintContext::new(&content2, config.markdown_flavor());
+    let ctx = LintContext::new(&content2, config.markdown_flavor(), None);
     if let Ok(fixed) = md009.fix(&ctx) {
         content2 = fixed;
     }
@@ -245,7 +245,7 @@ fn test_overlapping_fixes() {
     let all_rules = all_rules(&config);
 
     for (name, content) in test_cases {
-        let ctx = LintContext::new(content, config.markdown_flavor());
+        let ctx = LintContext::new(content, config.markdown_flavor(), None);
 
         // Collect all fixes that would be applied
         let mut fixes_applied = Vec::new();
@@ -267,7 +267,7 @@ fn test_overlapping_fixes() {
         // Ensure sequential application works
         let mut sequential_content = content.to_string();
         for rule in &all_rules {
-            let ctx = LintContext::new(&sequential_content, config.markdown_flavor());
+            let ctx = LintContext::new(&sequential_content, config.markdown_flavor(), None);
             if let Ok(warnings) = rule.check(&ctx)
                 && !warnings.is_empty()
                 && let Ok(fixed) = rule.fix(&ctx)
@@ -277,7 +277,7 @@ fn test_overlapping_fixes() {
         }
 
         // Final content should be valid
-        let final_ctx = LintContext::new(&sequential_content, config.markdown_flavor());
+        let final_ctx = LintContext::new(&sequential_content, config.markdown_flavor(), None);
         let mut remaining_warnings = 0;
         for rule in &all_rules {
             if let Ok(warnings) = rule.check(&final_ctx) {

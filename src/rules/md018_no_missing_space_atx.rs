@@ -322,13 +322,13 @@ mod tests {
 
         // Test with correct space
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
         // Test with missing space
         let content = "#Heading 1\n## Heading 2\n###Heading 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2); // Should flag the two headings with missing spaces
         assert_eq!(result[0].line, 1);
@@ -377,7 +377,7 @@ This should NOT be detected (fenced code block).
 This should be detected.
 "#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should detect malformed headings but ignore code blocks
@@ -398,7 +398,7 @@ This is a test.
 ###Background
 More content."#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = r#"## Introduction
@@ -425,7 +425,7 @@ More content."#;
 #### Proper with space
 "#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only detect the malformed ones
@@ -456,7 +456,7 @@ More content."#;
 ## Another Heading
 "#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not detect CSS selectors as malformed headings
@@ -482,7 +482,7 @@ const element = document.querySelector('#main-content');
 ## Another Heading
 "#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not detect JS code as malformed headings

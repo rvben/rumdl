@@ -354,6 +354,7 @@ mod tests {
         let ctx = LintContext::new(
             "[valid link](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
@@ -362,6 +363,7 @@ mod tests {
         let ctx = LintContext::new(
             "[another valid link](path/to/page.html)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Links with text and relative URLs should pass");
@@ -369,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_links_with_empty_text_should_fail() {
-        let ctx = LintContext::new("[](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[](https://example.com)", crate::config::MarkdownFlavor::Standard, None);
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
@@ -380,13 +382,21 @@ mod tests {
 
     #[test]
     fn test_links_with_only_whitespace_should_fail() {
-        let ctx = LintContext::new("[   ](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(
+            "[   ](https://example.com)",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].message, "Empty link found: [   ](https://example.com)");
 
-        let ctx = LintContext::new("[\t\n](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(
+            "[\t\n](https://example.com)",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].message, "Empty link found: [\t\n](https://example.com)");
@@ -397,6 +407,7 @@ mod tests {
         let ctx = LintContext::new(
             "[][ref]\n\n[ref]: https://example.com",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
@@ -408,6 +419,7 @@ mod tests {
         let ctx = LintContext::new(
             "[][]\n\n[]: https://example.com",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
@@ -416,12 +428,12 @@ mod tests {
     #[test]
     fn test_images_should_be_ignored() {
         // Images can have empty alt text, so they should not trigger the rule
-        let ctx = LintContext::new("![](image.png)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("![](image.png)", crate::config::MarkdownFlavor::Standard, None);
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Images with empty alt text should be ignored");
 
-        let ctx = LintContext::new("![   ](image.png)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("![   ](image.png)", crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Images with whitespace alt text should be ignored");
     }
@@ -430,17 +442,25 @@ mod tests {
     fn test_links_with_nested_formatting() {
         // Links with nested formatting but empty effective text
         // Note: [**] contains "**" as text, which is not empty after trimming
-        let ctx = LintContext::new("[**](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(
+            "[**](https://example.com)",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "[**] is not considered empty since ** is text");
 
-        let ctx = LintContext::new("[__](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(
+            "[__](https://example.com)",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "[__] is not considered empty since __ is text");
 
         // Links with truly empty formatting should fail
-        let ctx = LintContext::new("[](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[](https://example.com)", crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
 
@@ -448,6 +468,7 @@ mod tests {
         let ctx = LintContext::new(
             "[**bold text**](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Links with nested formatting and text should pass");
@@ -455,6 +476,7 @@ mod tests {
         let ctx = LintContext::new(
             "[*italic* and **bold**](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Links with multiple nested formatting should pass");
@@ -465,6 +487,7 @@ mod tests {
         let ctx = LintContext::new(
             "[](url1) and [](url2) and [valid](url3)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
@@ -476,13 +499,21 @@ mod tests {
     #[test]
     fn test_escaped_brackets() {
         // Escaped brackets should not be treated as links
-        let ctx = LintContext::new("\\[\\](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(
+            "\\[\\](https://example.com)",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Escaped brackets should not be treated as links");
 
         // But this should still be a link
-        let ctx = LintContext::new("[\\[\\]](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(
+            "[\\[\\]](https://example.com)",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Link with escaped brackets in text should pass");
     }
@@ -493,6 +524,7 @@ mod tests {
         let ctx = LintContext::new(
             "- [](https://example.com)\n- [valid](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
@@ -503,6 +535,7 @@ mod tests {
         let ctx = LintContext::new(
             "> [](https://example.com)\n> [valid](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
@@ -512,6 +545,7 @@ mod tests {
         let ctx = LintContext::new(
             "> - [](url1)\n> - [text](url2)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
@@ -523,6 +557,7 @@ mod tests {
         let ctx = LintContext::new(
             "[\u{00A0}](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
@@ -532,6 +567,7 @@ mod tests {
         let ctx = LintContext::new(
             "[\u{2003}](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Em space should be treated as whitespace");
@@ -541,6 +577,7 @@ mod tests {
         let ctx = LintContext::new(
             "[\u{200B}](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert!(
@@ -554,6 +591,7 @@ mod tests {
         let ctx = LintContext::new(
             "[ \u{200B} ](https://example.com)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert!(
@@ -564,7 +602,7 @@ mod tests {
 
     #[test]
     fn test_empty_url_with_text() {
-        let ctx = LintContext::new("[some text]()", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[some text]()", crate::config::MarkdownFlavor::Standard, None);
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
@@ -573,7 +611,7 @@ mod tests {
 
     #[test]
     fn test_both_empty_text_and_url() {
-        let ctx = LintContext::new("[]()", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[]()", crate::config::MarkdownFlavor::Standard, None);
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
@@ -582,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_reference_link_with_undefined_reference() {
-        let ctx = LintContext::new("[text][undefined]", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[text][undefined]", crate::config::MarkdownFlavor::Standard, None);
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Undefined reference should be treated as empty URL");
@@ -596,6 +634,7 @@ mod tests {
         let ctx = LintContext::new(
             "[example][]\n\n[example]: https://example.com",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
@@ -605,6 +644,7 @@ mod tests {
         let ctx = LintContext::new(
             "[][]\n\n[]: https://example.com",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Empty implicit reference link should fail");
@@ -613,6 +653,7 @@ mod tests {
         let ctx = LintContext::new(
             "[example]\n\n[example]: https://example.com",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let result = rule.check(&ctx).unwrap();
         assert!(
@@ -626,14 +667,14 @@ mod tests {
         let rule = MD042NoEmptyLinks::new();
 
         // Case 1: Empty text, has URL - fixable (add placeholder text)
-        let ctx = LintContext::new("[](https://example.com)", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[](https://example.com)", crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result[0].fix.is_some(), "Empty text with URL should be fixable");
         let fix = result[0].fix.as_ref().unwrap();
         assert_eq!(fix.replacement, "[Link text](https://example.com)");
 
         // Case 2: Non-URL text, empty URL - NOT fixable (can't guess the URL)
-        let ctx = LintContext::new("[text]()", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[text]()", crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result[0].fix.is_none(),
@@ -641,14 +682,14 @@ mod tests {
         );
 
         // Case 3: URL text, empty URL - fixable (use text as URL)
-        let ctx = LintContext::new("[https://example.com]()", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[https://example.com]()", crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result[0].fix.is_some(), "URL text with empty URL should be fixable");
         let fix = result[0].fix.as_ref().unwrap();
         assert_eq!(fix.replacement, "[https://example.com](https://example.com)");
 
         // Case 4: Both empty - NOT fixable (can't guess either)
-        let ctx = LintContext::new("[]()", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[]()", crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result[0].fix.is_none(), "Both empty should NOT be fixable");
     }
@@ -678,7 +719,7 @@ Code block should be ignored:
 [ref2]: https://ref2.com
 "#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
 
@@ -720,7 +761,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
 [local scope]: https://www.pythonmorsels.com/local-and-global-variables/
 [global scope]: https://www.pythonmorsels.com/assigning-global-variables/"#;
 
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
 
@@ -737,6 +778,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         let ctx = LintContext::new(
             "[`#[derive(Serialize, Deserialize)`](https://serde.rs/derive.html)",
             crate::config::MarkdownFlavor::Standard,
+            None,
         );
         let rule = MD042NoEmptyLinks::new();
         let result = rule.check(&ctx).unwrap();
@@ -752,7 +794,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         let rule = MD042NoEmptyLinks::new();
 
         // Module.Class pattern with backticks
-        let ctx = LintContext::new("[`module.Class`][]", crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new("[`module.Class`][]", crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -760,7 +802,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         );
 
         // Reference with explicit ID
-        let ctx = LintContext::new("[`module.Class`][ref]", crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new("[`module.Class`][ref]", crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -768,7 +810,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         );
 
         // Path-like reference with backticks
-        let ctx = LintContext::new("[`api/endpoint`][]", crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new("[`api/endpoint`][]", crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -776,7 +818,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         );
 
         // Should still flag in standard mode
-        let ctx = LintContext::new("[`module.Class`][]", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("[`module.Class`][]", crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -785,7 +827,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         );
 
         // Should still flag truly empty links even in MkDocs mode
-        let ctx = LintContext::new("[][]", crate::config::MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new("[][]", crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),

@@ -267,7 +267,7 @@ mod tests {
 |----------|----------|----------|
 | Cell 1   | Cell 2   | Cell 3   |
 | Cell 4   | Cell 5   | Cell 6   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -280,7 +280,7 @@ mod tests {
 |----------|----------|----------|
 | Cell 1   | Cell 2   |
 | Cell 4   | Cell 5   | Cell 6   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -295,7 +295,7 @@ mod tests {
 |----------|----------|
 | Cell 1   | Cell 2   | Cell 3   | Cell 4   |
 | Cell 5   | Cell 6   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -309,7 +309,7 @@ mod tests {
         let content = "| Header 1 | Header 2 | Header 3 |
 |----------|----------|
 | Cell 1   | Cell 2   | Cell 3   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -324,7 +324,7 @@ mod tests {
 |----------|----------|----------|
 | Cell 1   | Cell 2   |
 | Cell 4   | Cell 5   | Cell 6   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(fixed.contains("| Cell 1 | Cell 2 |  |"));
@@ -337,7 +337,7 @@ mod tests {
 |----------|----------|
 | Cell 1   | Cell 2   | Cell 3   | Cell 4   |
 | Cell 5   | Cell 6   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(fixed.contains("| Cell 1 | Cell 2 |"));
@@ -352,7 +352,7 @@ mod tests {
 ---------|----------|----------|
 Cell 1   | Cell 2   |
 Cell 4   | Cell 5   | Cell 6   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -366,7 +366,7 @@ Cell 4   | Cell 5   | Cell 6   |";
 |----------|----------|----------
 | Cell 1   | Cell 2
 | Cell 4   | Cell 5   | Cell 6";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -379,7 +379,7 @@ Cell 4   | Cell 5   | Cell 6   |";
         let content = "This is not a table
 Just regular text
 No pipes here";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -392,7 +392,7 @@ No pipes here";
 |----------|----------|----------|
 |          |          |          |
 | Cell 1   |          | Cell 3   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -411,7 +411,7 @@ Some text in between.
 |----------------|----------------|----------------|
 | Data 3         | Data 4         |
 | Data 5         | Data 6         | Data 7         |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -428,7 +428,7 @@ Some text in between.
 |---------|-------------|
 | `echo \\| grep` | Pipe example |
 | `ls` | List files |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 0, "escaped pipe \\| should not split cells");
 
@@ -437,7 +437,7 @@ Some text in between.
 |---------|-------------|
 | `echo \\\\| grep` | Pipe example |
 | `ls` | List files |";
-        let ctx2 = LintContext::new(content_double, crate::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new(content_double, crate::config::MarkdownFlavor::Standard, None);
         let result2 = rule.check(&ctx2).unwrap();
         // Line 3 has \\| which becomes 3 cells, but header expects 2
         assert_eq!(result2.len(), 1, "double backslash \\\\| should split cells");
@@ -447,7 +447,7 @@ Some text in between.
     fn test_empty_content() {
         let rule = MD056TableColumnCount;
         let content = "";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -465,7 +465,7 @@ Some text in between.
 | Real | Table |
 |------|-------|
 | Data | Here  |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not check tables inside code blocks
@@ -479,7 +479,7 @@ Some text in between.
         let content = "| Header 1 | Header 2 | Header 3
 |----------|----------|----------
 | Cell 1   | Cell 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let lines: Vec<&str> = fixed.lines().collect();
@@ -495,7 +495,7 @@ Some text in between.
 |---------|
 | Cell 1  |
 | Cell 2  |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -508,7 +508,7 @@ Some text in between.
 |:-----|:------:|------:|
 | L    | C      | R     |
 | Left | Center |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -522,7 +522,7 @@ Some text in between.
 |------|------|------|
 | 田中 | 25   | 東京 |
 | 佐藤 | 30   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -535,7 +535,7 @@ Some text in between.
         let content = "| Short | Very very very very very very very very very very long header | Another |
 |-------|--------------------------------------------------------------|---------|
 | Data  | This is an extremely long cell content that goes on and on   |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -549,7 +549,7 @@ Some text in between.
 |---|---|---|
 | 1 | 2 |
 ";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(fixed.ends_with('\n'));
@@ -562,7 +562,7 @@ Some text in between.
         let content = "| A | B | C |
 |---|---|---|
 | 1 | 2 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(!fixed.ends_with('\n'));

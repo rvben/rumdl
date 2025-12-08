@@ -22,7 +22,7 @@ fn test_extreme_length_headings() {
     for (size, description) in test_cases {
         let heading = "a".repeat(size);
         let content = format!("# {}\n\n[Link](#{})", heading, "test");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
@@ -58,7 +58,7 @@ fn test_redos_vulnerability_prevention() {
 
     for pattern in malicious_patterns {
         let content = format!("# {pattern}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
@@ -107,7 +107,7 @@ fn test_unicode_security_edge_cases() {
 
     for (input, description) in security_test_cases {
         let content = format!("# {input}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Should not panic on any Unicode edge case
         let result = std::panic::catch_unwind(|| rule.check(&ctx));
@@ -141,7 +141,7 @@ fn test_memory_exhaustion_prevention() {
 
     for (pattern, description) in memory_bomb_patterns.iter() {
         let content = format!("# {pattern}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start = Instant::now();
         let memory_before = get_memory_usage_estimate();
@@ -201,7 +201,7 @@ fn test_consecutive_hyphen_pathological_cases() {
 
     for (heading, description) in hyphen_stress_cases.iter() {
         let content = format!("# {heading}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
@@ -237,7 +237,7 @@ fn test_cross_platform_line_endings() {
     ];
 
     for (content, description) in line_ending_tests {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
 
         // Should handle all line ending types consistently
@@ -276,7 +276,7 @@ fn test_malformed_markdown_edge_cases() {
 
     for (heading, description) in malformed_cases {
         let content = format!("{heading}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Should handle malformed markdown gracefully
         let result = rule.check(&ctx);
@@ -310,7 +310,7 @@ fn test_algorithm_correctness_under_stress() {
 
     for (heading, expected_fragment_part) in stress_cases.iter() {
         let content = format!("# {heading}\n\n[Link](#{expected_fragment_part})");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Stress test algorithm failed");
@@ -338,7 +338,7 @@ fn test_performance_bounds_comprehensive() {
     for (size, description) in performance_tests {
         let heading = "word ".repeat(size);
         let content = format!("# {heading}\n\n[Link](#test)");
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start = Instant::now();
         let result = rule.check(&ctx);
@@ -398,7 +398,7 @@ fn test_combined_edge_cases() {
         "-".repeat(50)
     );
 
-    let ctx = LintContext::new(&complex_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&complex_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     let start = Instant::now();
     let result = rule.check(&ctx);

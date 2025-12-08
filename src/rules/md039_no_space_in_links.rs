@@ -385,7 +385,7 @@ mod tests {
     fn test_valid_links() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[link](url) and [another link](url) here";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -394,7 +394,7 @@ mod tests {
     fn test_spaces_both_ends() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[ link ](url) and [ another link ](url) here";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         let fixed = rule.fix(&ctx).unwrap();
@@ -405,7 +405,7 @@ mod tests {
     fn test_space_at_start() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[ link](url) and [ another link](url) here";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         let fixed = rule.fix(&ctx).unwrap();
@@ -416,7 +416,7 @@ mod tests {
     fn test_space_at_end() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[link ](url) and [another link ](url) here";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         let fixed = rule.fix(&ctx).unwrap();
@@ -430,7 +430,7 @@ mod tests {
 [ link ](url)
 ```
 [ link ](url)";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fixed = rule.fix(&ctx).unwrap();
@@ -447,7 +447,7 @@ mod tests {
     fn test_multiple_links() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[ link ](url) and [ another ](url) in one line";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         let fixed = rule.fix(&ctx).unwrap();
@@ -458,7 +458,7 @@ mod tests {
     fn test_link_with_internal_spaces() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[this is link](url) and [ this is also link ](url)";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         let fixed = rule.fix(&ctx).unwrap();
@@ -469,7 +469,7 @@ mod tests {
     fn test_link_with_punctuation() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[ link! ](url) and [ link? ](url) here";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         let fixed = rule.fix(&ctx).unwrap();
@@ -480,7 +480,7 @@ mod tests {
     fn test_parity_only_whitespace_and_newlines_minimal() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[   \n  ](url) and [\t\n\t](url)";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         // markdownlint removes all whitespace, resulting in empty link text
         assert_eq!(fixed, "[](url) and [](url)");
@@ -490,7 +490,7 @@ mod tests {
     fn test_parity_internal_newlines_minimal() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[link\ntext](url) and [ another\nlink ](url)";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         // markdownlint trims only leading/trailing whitespace, preserves internal newlines
         assert_eq!(fixed, "[link\ntext](url) and [another\nlink](url)");
@@ -500,7 +500,7 @@ mod tests {
     fn test_parity_escaped_brackets_minimal() {
         let rule = MD039NoSpaceInLinks::new();
         let content = "[link\\]](url) and [link\\[]](url)";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         // markdownlint does not trim or remove escapes, so output should be unchanged
         assert_eq!(fixed, "[link\\]](url) and [link\\[]](url)");
@@ -536,7 +536,7 @@ mod tests {
             content.lines().count()
         );
 
-        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
 
         // Warm up
         let _ = rule.check(&ctx).unwrap();

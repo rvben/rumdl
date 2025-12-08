@@ -16,7 +16,7 @@ fn test_extremely_long_lines() {
     ];
 
     for rule in &rules {
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Should not panic or take excessive time
         let start_time = Instant::now();
@@ -59,7 +59,7 @@ fn test_deeply_nested_blockquotes() {
     ];
 
     for rule in &rules {
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let start_time = Instant::now();
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
@@ -124,7 +124,7 @@ fn test_malformed_markdown_edge_cases() {
 
     for (i, test_content) in test_cases.iter().enumerate() {
         for rule in &rules {
-            let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
             // Should not panic
             let start_time = Instant::now();
@@ -209,7 +209,7 @@ fn test_unicode_boundary_conditions() {
 
     for test_content in &test_cases {
         for rule in &rules {
-            let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
             // Should handle Unicode correctly without panicking
             let warnings = rule.check(&ctx).expect("Rule should handle Unicode content");
@@ -260,7 +260,7 @@ fn test_memory_intensive_scenarios() {
     ];
 
     for (i, content) in scenarios.iter().enumerate() {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Collect all warnings from all rules
         let mut all_warnings = Vec::new();
@@ -327,7 +327,7 @@ fn test_pathological_regex_patterns() {
 
     for (i, test_content) in test_cases.iter().enumerate() {
         for rule in &rules {
-            let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
             // Should complete within reasonable time (regex should not hang)
             let start_time = Instant::now();

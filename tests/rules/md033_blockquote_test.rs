@@ -18,7 +18,7 @@ fn test_md033_html_in_fenced_code_inside_blockquote() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag HTML tags inside fenced code blocks within blockquotes
@@ -39,7 +39,7 @@ fn test_md033_html_in_fenced_code_outside_blockquote() {
 ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag HTML tags inside fenced code blocks
@@ -54,7 +54,7 @@ fn test_md033_html_outside_fenced_code_inside_blockquote() {
     let content = r#"> This is quoted text with <div>HTML</div>
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag HTML tags outside code blocks
@@ -75,7 +75,7 @@ fn test_md033_mixed_blockquote_with_code_and_html() {
 > More text with <div>HTML</div>
 "##;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag HTML outside code blocks: <span>, <div> (opening tags only)
@@ -101,7 +101,7 @@ fn test_md033_nested_blockquote_with_code() {
 >> ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag HTML inside code block even in nested blockquote
@@ -122,7 +122,7 @@ fn test_md033_blockquote_indented_code() {
 >     <indented>code</indented>
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Indented code blocks inside blockquotes are tricky and not yet supported
@@ -143,7 +143,7 @@ fn test_md033_issue_105_exact_example() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag the HTML inside the fenced code block
@@ -172,7 +172,7 @@ fn test_md033_blockquote_multiple_code_blocks() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag HTML between code blocks but not inside them
@@ -196,7 +196,7 @@ fn test_md033_blockquote_tilde_fences() {
 > ~~~
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag HTML in tilde-fenced code blocks
@@ -214,7 +214,7 @@ fn test_md033_blockquote_unclosed_code_block() {
 > <div>Unclosed block
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag HTML in unclosed code block
@@ -233,7 +233,7 @@ fn test_md033_blockquote_empty_lines_in_fence() {
 > ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag HTML with empty lines in code block
@@ -250,7 +250,7 @@ fn test_md033_blockquote_language_specific_fence() {
 > ```
 "##;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag HTML in language-specific fenced code blocks
@@ -271,7 +271,7 @@ fn test_md033_blockquote_indented_fence() {
 >   ```
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT flag HTML in indented fences

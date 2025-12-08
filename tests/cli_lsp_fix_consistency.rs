@@ -11,7 +11,7 @@ use rumdl_lib::utils::fix_utils;
 
 /// Test helper to compare CLI and LSP fix results for a given rule and content
 fn test_cli_lsp_consistency(rule: &dyn Rule, content: &str, test_name: &str) {
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Get CLI fix result
     let cli_result = rule.fix(&ctx);
@@ -302,7 +302,7 @@ fn test_comprehensive_rule_consistency() {
     for (rule, content, rule_name) in rules_with_test_content {
         tested_count += 1;
 
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let cli_result = rule.fix(&ctx);
         let warnings_result = rule.check(&ctx);
 
@@ -398,7 +398,7 @@ fn test_all_53_rules_systematic_coverage() {
             }
         };
 
-        let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let cli_result = rule.fix(&ctx);
         let warnings_result = rule.check(&ctx);
 

@@ -12,7 +12,7 @@ fn test_malformed_empty_attributes() {
 
     // Empty braces should still flag as empty link
     let content = "[](){ }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -27,7 +27,7 @@ fn test_unclosed_brace() {
 
     // Missing closing brace - should flag as empty link
     let content = "[](){ #anchor";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Unclosed brace should flag as empty link");
 }
@@ -38,7 +38,7 @@ fn test_no_opening_brace() {
 
     // No opening brace - should flag as empty link
     let content = "[]() #anchor }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "No opening brace should flag as empty link");
 }
@@ -50,7 +50,7 @@ fn test_attributes_only_no_anchor() {
     // Only classes, no anchor - this is valid per Python-Markdown attr_list
     // Classes alone are valid attributes
     let content = "[](){ .class1 .class2 }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -71,7 +71,7 @@ fn test_whitespace_variations() {
     ];
 
     for (content, should_flag) in test_cases {
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(!result.is_empty(), should_flag, "Failed for: {content}");
     }
@@ -84,7 +84,7 @@ fn test_newline_before_attributes_rejected() {
     // Newline before attributes - should be flagged
     // attr_list should be inline, not on next line for inline elements
     let content = "[]()\n{ #anchor }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
 
     // Current implementation uses trim_start() which removes newlines
@@ -101,7 +101,7 @@ fn test_multiple_anchors_per_line() {
     let rule = MD042NoEmptyLinks::new();
 
     let content = "Text [](){ #a1 } middle [](){ #a2 } end [](){ #a3 }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Multiple anchors per line should all be valid");
 }
@@ -111,7 +111,7 @@ fn test_anchor_at_document_end() {
     let rule = MD042NoEmptyLinks::new();
 
     let content = "Content here [](){ #anchor }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Anchor at document end should be valid");
 }
@@ -122,19 +122,19 @@ fn test_anchor_adjacent_to_text() {
 
     // Anchor immediately followed by text (no space)
     let content = "[](){ #anchor }More text";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Anchor followed by text should be valid");
 
     // Anchor at end of line
     let content = "Some text [](){ #anchor }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Anchor at line end should be valid");
 
     // Anchor with punctuation after
     let content = "[](){ #anchor }.";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Anchor with punctuation after should be valid");
 }
@@ -145,7 +145,7 @@ fn test_utf8_boundary_safety() {
 
     // Multi-byte UTF-8 characters near the link end
     let content = "[]()😀{ #anchor }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
 
     // Should not panic - even if implementation doesn't handle properly
     let result = rule.check(&ctx);
@@ -155,7 +155,7 @@ fn test_utf8_boundary_safety() {
     let test_cases = vec!["[]()日本語{ #anchor }", "[]()🎉{ #anchor }", "[]()™{ #anchor }"];
 
     for content in test_cases {
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Should handle UTF-8 in: {content}");
     }
@@ -168,7 +168,7 @@ fn test_very_long_attribute_strings() {
     // Very long anchor name
     let long_anchor = "a".repeat(1000);
     let content = format!("[](){{ #{long_anchor} }}");
-    let ctx = LintContext::new(&content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(&content, MarkdownFlavor::MkDocs, None);
 
     // Should handle gracefully without panic or timeout
     let start = std::time::Instant::now();
@@ -185,7 +185,7 @@ fn test_nested_braces_edge_case() {
 
     // Content with nested braces - implementation finds first }
     let content = "[](){ #anchor { nested } }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
 
     // Current implementation will find first } and check "anchor { nested"
@@ -203,7 +203,7 @@ fn test_multiple_classes_with_anchor() {
     let rule = MD042NoEmptyLinks::new();
 
     let content = "[](){ .class1 #anchor .class2 }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Mixed attributes with anchor should be valid");
 }
@@ -216,7 +216,7 @@ fn test_anchor_in_blockquotes() {
 > [](){ #anchor }
 > More quote"#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Anchors in blockquotes should be valid");
 }
@@ -230,7 +230,7 @@ fn test_anchor_in_lists() {
 - Item 2
   [](){ #anchor2 }"#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Anchors in lists should be valid");
 }
@@ -241,13 +241,13 @@ fn test_anchors_in_code_blocks_ignored() {
 
     // Fenced code block
     let content = "```\n[](){ #anchor }\n```";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Anchors in fenced code blocks should be ignored");
 
     // Inline code
     let content = "`[](){ #anchor }`";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Anchors in inline code should be ignored");
 }
@@ -266,7 +266,7 @@ fn test_actual_empty_links_still_flagged() {
     ];
 
     for content in test_cases {
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag actual empty link: {content}");
     }
@@ -278,7 +278,7 @@ fn test_standard_mode_still_flags_anchors() {
 
     // In standard mode, anchors should be flagged
     let content = "[](){ #anchor }";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -292,7 +292,7 @@ fn test_multiple_attributes_per_element() {
     let rule = MD042NoEmptyLinks::new();
 
     let content = r#"[](){ #anchor .class1 .class2 title="Tooltip" }"#;
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
@@ -312,7 +312,7 @@ fn test_whitespace_inside_braces() {
     ];
 
     for (content, should_pass) in test_cases {
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.is_empty(), should_pass, "Failed for: {content}");
     }
@@ -324,7 +324,7 @@ fn test_no_space_before_brace() {
 
     // Per Python-Markdown spec, inline attributes should have no space
     let content = "[](){: #anchor }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
 
     // With colon - valid attr_list syntax
@@ -332,7 +332,7 @@ fn test_no_space_before_brace() {
 
     // Without colon but immediate attachment
     let content = "[](){ #anchor }";
-    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Without colon should also work");
 }

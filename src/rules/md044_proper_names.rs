@@ -611,7 +611,7 @@ mod tests {
     use crate::lint_context::LintContext;
 
     fn create_context(content: &str) -> LintContext<'_> {
-        LintContext::new(content, crate::config::MarkdownFlavor::Standard)
+        LintContext::new(content, crate::config::MarkdownFlavor::Standard, None)
     }
 
     #[test]

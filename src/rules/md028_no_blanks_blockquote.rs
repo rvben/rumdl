@@ -290,7 +290,7 @@ mod tests {
     fn test_no_blockquotes() {
         let rule = MD028NoBlanksBlockquote;
         let content = "This is regular text\n\nWith blank lines\n\nBut no blockquotes";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag content without blockquotes");
     }
@@ -299,7 +299,7 @@ mod tests {
     fn test_valid_blockquote_no_blanks() {
         let rule = MD028NoBlanksBlockquote;
         let content = "> This is a blockquote\n> With multiple lines\n> But no blank lines";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag blockquotes without blank lines");
     }
@@ -309,7 +309,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote;
         // Lines with just > are valid and should NOT be flagged
         let content = "> First line\n>\n> Third line";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag lines with just > marker");
     }
@@ -319,7 +319,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote;
         // Lines with > and space are also valid
         let content = "> First line\n> \n> Third line";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag lines with > and space");
     }
@@ -329,7 +329,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote;
         // Truly blank line (no >) inside blockquote should be flagged
         let content = "> First line\n\n> Third line";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag truly blank line inside blockquote");
         assert_eq!(result[0].line, 2);
@@ -340,7 +340,7 @@ mod tests {
     fn test_multiple_blank_lines() {
         let rule = MD028NoBlanksBlockquote;
         let content = "> First\n\n\n> Fourth";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // With proper indentation checking, both blank lines are flagged as they're within the same blockquote
         assert_eq!(result.len(), 2, "Should flag each blank line within the blockquote");
@@ -352,7 +352,7 @@ mod tests {
     fn test_nested_blockquote_blank() {
         let rule = MD028NoBlanksBlockquote;
         let content = ">> Nested quote\n\n>> More nested";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
@@ -363,7 +363,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote;
         // Lines with >> are valid
         let content = ">> Nested quote\n>>\n>> More nested";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag lines with >> marker");
     }
@@ -372,7 +372,7 @@ mod tests {
     fn test_fix_single_blank() {
         let rule = MD028NoBlanksBlockquote;
         let content = "> First\n\n> Third";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> First\n>\n> Third");
     }
@@ -381,7 +381,7 @@ mod tests {
     fn test_fix_nested_blank() {
         let rule = MD028NoBlanksBlockquote;
         let content = ">> Nested\n\n>> More";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, ">> Nested\n>>\n>> More");
     }
@@ -390,7 +390,7 @@ mod tests {
     fn test_fix_with_indentation() {
         let rule = MD028NoBlanksBlockquote;
         let content = "  > Indented quote\n\n  > More";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "  > Indented quote\n  >\n  > More");
     }
@@ -400,7 +400,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote;
         // Blank lines between different levels
         let content = "> Level 1\n\n>> Level 2\n\n> Level 1 again";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Line 2 is a blank between > and >>, level 1 to level 2, considered inside level 1
         // Line 4 is a blank between >> and >, level 2 to level 1, NOT inside blockquote
@@ -412,7 +412,7 @@ mod tests {
     fn test_blockquote_with_code_block() {
         let rule = MD028NoBlanksBlockquote;
         let content = "> Quote with code:\n> ```\n> code\n> ```\n>\n> More quote";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // Line 5 has > marker, so it's not a blank line
         assert!(result.is_empty(), "Should not flag line with > marker");
@@ -427,10 +427,10 @@ mod tests {
     #[test]
     fn test_should_skip() {
         let rule = MD028NoBlanksBlockquote;
-        let ctx1 = LintContext::new("No blockquotes here", crate::config::MarkdownFlavor::Standard);
+        let ctx1 = LintContext::new("No blockquotes here", crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.should_skip(&ctx1));
 
-        let ctx2 = LintContext::new("> Has blockquote", crate::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new("> Has blockquote", crate::config::MarkdownFlavor::Standard, None);
         assert!(!rule.should_skip(&ctx2));
     }
 
@@ -438,7 +438,7 @@ mod tests {
     fn test_empty_content() {
         let rule = MD028NoBlanksBlockquote;
         let content = "";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -447,7 +447,7 @@ mod tests {
     fn test_blank_after_blockquote() {
         let rule = MD028NoBlanksBlockquote;
         let content = "> Quote\n\nNot a quote";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Blank line after blockquote ends is valid");
     }
@@ -456,7 +456,7 @@ mod tests {
     fn test_blank_before_blockquote() {
         let rule = MD028NoBlanksBlockquote;
         let content = "Not a quote\n\n> Quote";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Blank line before blockquote starts is valid");
     }
@@ -465,12 +465,12 @@ mod tests {
     fn test_preserve_trailing_newline() {
         let rule = MD028NoBlanksBlockquote;
         let content = "> Quote\n\n> More\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.ends_with('\n'));
 
         let content_no_newline = "> Quote\n\n> More";
-        let ctx2 = LintContext::new(content_no_newline, crate::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new(content_no_newline, crate::config::MarkdownFlavor::Standard, None);
         let fixed2 = rule.fix(&ctx2).unwrap();
         assert!(!fixed2.ends_with('\n'));
     }
@@ -478,13 +478,13 @@ mod tests {
     #[test]
     fn test_document_structure_extension() {
         let rule = MD028NoBlanksBlockquote;
-        let ctx = LintContext::new("> test", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("> test", crate::config::MarkdownFlavor::Standard, None);
         // Test that the rule works correctly with blockquotes
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag valid blockquote");
 
         // Test that rule skips content without blockquotes
-        let ctx2 = LintContext::new("no blockquote", crate::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new("no blockquote", crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.should_skip(&ctx2), "Should skip content without blockquotes");
     }
 
@@ -492,7 +492,7 @@ mod tests {
     fn test_deeply_nested_blank() {
         let rule = MD028NoBlanksBlockquote;
         let content = ">>> Deep nest\n\n>>> More deep";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
 
@@ -505,7 +505,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote;
         // Lines with >>> are valid
         let content = ">>> Deep nest\n>>>\n>>> More deep";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag lines with >>> marker");
     }
@@ -515,7 +515,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote;
         // Line with > is valid, not a blank line
         let content = "> Level 1\n> > Nested properly\n>\n> Back to level 1";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Should not flag line with > marker");
     }
@@ -526,7 +526,7 @@ mod tests {
         // Blank line between different nesting levels is not flagged
         // (going from >> back to > is a context change)
         let content = "> Level 1\n> > Nested\n\n> Back to level 1";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),

@@ -60,7 +60,7 @@ fn test_md029_fix_with_2_space_code_blocks() {
   sudo dnf install ...
   ```"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     assert_eq!(
@@ -93,7 +93,7 @@ fn test_md029_fix_with_4_space_code_blocks() {
     // No changes expected since 4-space indented code blocks maintain list continuity
     let expected = content;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     assert_eq!(
@@ -115,7 +115,7 @@ fn test_md029_fix_matches_check() {
 2. Second item
 3. Third item"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Get warnings from check
     let warnings = rule.check(&ctx).unwrap();
@@ -125,7 +125,7 @@ fn test_md029_fix_matches_check() {
     let fixed = rule.fix(&ctx).unwrap();
 
     // Check the fixed content - should have no warnings
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed_warnings = rule.check(&fixed_ctx).unwrap();
 
     assert_eq!(fixed_warnings.len(), 0, "Fixed content should have no MD029 warnings");
@@ -152,7 +152,7 @@ fn test_md029_fix_preserves_content() {
 2. Second item with more text
 3. Third item with even more text"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Check that content is preserved

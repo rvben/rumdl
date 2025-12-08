@@ -26,7 +26,7 @@ fn main() {
         println!("{}", dash_line);
 
         // Run once to see timings
-        let _ = rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let _ = rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         println!();
     }
 }

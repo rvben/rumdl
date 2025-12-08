@@ -11,7 +11,7 @@ mod tests {
     #[test]
     fn test_html_tag_with_cjk_attributes() {
         let content = r#"<div class="测试">안녕하세요</div>"#;
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let rule = MD033NoInlineHtml::new();
 
         // This should not panic
@@ -26,7 +26,7 @@ mod tests {
     #[test]
     fn test_html_tag_with_cjk_content() {
         let content = r#"<div>안녕하세요</div>"#;
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let rule = MD033NoInlineHtml::new();
 
         let result = rule.check(&ctx);
@@ -37,7 +37,7 @@ mod tests {
     #[test]
     fn test_code_spans_with_cjk() {
         let content = r#"Text with `안녕하세요` code span."#;
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // Access code spans - this should not panic
         let code_spans = ctx.code_spans();
@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn test_html_tag_byte_boundaries() {
         let content = r#"<div class="测试">안녕</div>"#;
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // Verify all HTML tag byte offsets are at character boundaries
         for tag in ctx.html_tags().iter() {
@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn test_issue_154_exact_scenario() {
         let content = r#"- 2023 년 초 이후 주가 상승        +1,000% (10 배 상승)  "#;
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // This should not panic
         let _ = &ctx.lines;

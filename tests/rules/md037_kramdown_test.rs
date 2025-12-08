@@ -8,13 +8,13 @@ fn test_md037_with_kramdown_span_ial() {
 
     // Emphasis with spaces but has span IAL - should not trigger
     let content = "This is * emphasized *{:.highlight} text";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should not flag spaces when emphasis has span IAL");
 
     // Emphasis with spaces and no IAL - should trigger
     let content = "This is * emphasized * text";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert!(result[0].message.contains("Spaces inside emphasis"));
@@ -29,7 +29,7 @@ Another ** bold **{:#id} example
 Yet _another_{:style="color: red"} one
 And __double__{:.class #id} underscore"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should not flag any emphasis with span IAL");
 }
@@ -45,7 +45,7 @@ Bad: ** bold **
 Good: _italic_{:attr="value"}
 Bad: _ italic _"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Should only flag emphasis without IAL");
 
@@ -63,7 +63,7 @@ fn test_md037_span_ial_on_links() {
     let content = r#"[link text](url){:target="_blank"}
 [another * link *](url){:.external}"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should handle span IAL on links");
 }
@@ -75,7 +75,7 @@ fn test_md037_inline_code_with_ial() {
     // Inline code with IAL (though less common)
     let content = "`code`{:#special-code}";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should handle span IAL on inline code");
 }
@@ -88,7 +88,7 @@ fn test_md037_false_positive_ial() {
     let content = r#"Some * text * {not-ial}
 Another * text * {:.class}"#; // Space before IAL
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should flag invalid IAL patterns");
 }

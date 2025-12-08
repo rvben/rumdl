@@ -312,7 +312,7 @@ mod tests {
     fn test_no_whitespace() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](https://example.com)";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert!(warnings.is_empty());
     }
@@ -321,7 +321,7 @@ mod tests {
     fn test_leading_whitespace() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( https://example.com)";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -334,7 +334,7 @@ mod tests {
     fn test_trailing_whitespace() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](https://example.com )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -347,7 +347,7 @@ mod tests {
     fn test_both_whitespace() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( https://example.com )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -360,7 +360,7 @@ mod tests {
     fn test_multiple_spaces() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](   https://example.com   )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -373,7 +373,7 @@ mod tests {
     fn test_with_title() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( https://example.com \"title\")";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -386,7 +386,7 @@ mod tests {
     fn test_image_leading_whitespace() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "![alt]( https://example.com/image.png)";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -399,7 +399,7 @@ mod tests {
     fn test_multiple_links() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[a]( url1) and [b](url2 ) here";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 2);
     }
@@ -408,7 +408,7 @@ mod tests {
     fn test_fix() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( https://example.com ) and ![img]( /path/to/img.png )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[link](https://example.com) and ![img](/path/to/img.png)");
     }
@@ -417,7 +417,7 @@ mod tests {
     fn test_reference_links_skipped() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link][ref]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert!(warnings.is_empty());
     }
@@ -426,7 +426,7 @@ mod tests {
     fn test_nested_brackets() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[text [nested]]( https://example.com)";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
     }
@@ -435,7 +435,7 @@ mod tests {
     fn test_empty_destination() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]()";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert!(warnings.is_empty());
     }
@@ -444,7 +444,7 @@ mod tests {
     fn test_tabs_and_newlines() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](\thttps://example.com\t)";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -459,7 +459,7 @@ mod tests {
     fn test_trailing_whitespace_after_title() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](https://example.com \"title\" )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -472,7 +472,7 @@ mod tests {
     fn test_leading_and_trailing_with_title() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( https://example.com \"title\" )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -485,7 +485,7 @@ mod tests {
     fn test_multiple_spaces_before_title() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](https://example.com  \"title\")";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -498,7 +498,7 @@ mod tests {
     fn test_single_quote_title() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( https://example.com 'title')";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -511,7 +511,7 @@ mod tests {
     fn test_single_quote_title_trailing_space() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](https://example.com 'title' )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -525,7 +525,7 @@ mod tests {
         // Wikipedia URLs with parentheses should work correctly
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[wiki]( https://en.wikipedia.org/wiki/Rust_(programming_language) )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -539,7 +539,7 @@ mod tests {
         // Angle bracket URLs can contain spaces per CommonMark, so we should skip them
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](<https://example.com/path with spaces>)";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         // Angle bracket URLs are allowed to have spaces, no warning expected
         assert!(warnings.is_empty());
@@ -549,7 +549,7 @@ mod tests {
     fn test_image_with_title() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "![alt]( https://example.com/img.png \"Image title\" )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -562,7 +562,7 @@ mod tests {
     fn test_only_whitespace_in_destination() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](   )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].fix.as_ref().unwrap().replacement, "[link]()");
@@ -572,7 +572,7 @@ mod tests {
     fn test_code_block_skipped() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "```\n[link]( https://example.com )\n```";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert!(warnings.is_empty());
     }
@@ -582,7 +582,7 @@ mod tests {
         // Links in inline code are not valid markdown anyway
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "text `[link]( url )` more text";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         // pulldown-cmark doesn't parse this as a link since it's in code
         assert!(warnings.is_empty());
@@ -592,7 +592,7 @@ mod tests {
     fn test_valid_link_with_title_no_warning() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link](https://example.com \"Title\")";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert!(warnings.is_empty());
     }
@@ -601,7 +601,7 @@ mod tests {
     fn test_mixed_links_on_same_line() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[good](https://example.com) and [bad]( https://example.com ) here";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -614,7 +614,7 @@ mod tests {
     fn test_fix_multiple_on_same_line() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[a]( url1 ) and [b]( url2 )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[a](url1) and [b](url2)");
     }
@@ -623,7 +623,7 @@ mod tests {
     fn test_complex_nested_brackets() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[text [with [deeply] nested] brackets]( https://example.com )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
     }
@@ -632,7 +632,7 @@ mod tests {
     fn test_url_with_query_params() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( https://example.com?foo=bar&baz=qux )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -645,7 +645,7 @@ mod tests {
     fn test_url_with_fragment() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( https://example.com#section )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -658,7 +658,7 @@ mod tests {
     fn test_relative_path() {
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "[link]( ./path/to/file.md )";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(
@@ -672,7 +672,7 @@ mod tests {
         // Autolinks use <> syntax and are different from inline links
         let rule = MD062LinkDestinationWhitespace::new();
         let content = "<https://example.com>";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert!(warnings.is_empty());
     }

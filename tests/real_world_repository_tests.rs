@@ -26,7 +26,7 @@ fn test_large_repository_simulation() {
         println!("Testing file: {filename}");
         let start_time = Instant::now();
 
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let mut all_warnings = Vec::new();
 
         for rule in &rules {
@@ -425,7 +425,7 @@ fn test_memory_usage_with_large_content() {
     // Create LintContext ONCE and share it across all rules
     // This is more realistic to actual usage where the context is created once per file
     let ctx_start = Instant::now();
-    let ctx = LintContext::new(&large_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&large_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let ctx_duration = ctx_start.elapsed();
     println!(
         "LintContext creation for 50k lines took: {:.2}s",

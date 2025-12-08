@@ -29,7 +29,7 @@ fn test_real_world_performance() {
 
         println!("  Document size: {} bytes", content.len());
 
-        let ctx = LintContext::new(&content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
 
         // Test a representative sample of rules
         test_rule(&ctx, "MD001", || {

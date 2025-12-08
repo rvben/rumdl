@@ -580,7 +580,7 @@ mod tests {
     fn test_used_reference_link() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[text][ref]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -590,7 +590,7 @@ mod tests {
     fn test_unused_reference_definition() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[unused]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -601,7 +601,7 @@ mod tests {
     fn test_used_reference_image() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "![alt][img]\n\n[img]: image.jpg";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -611,7 +611,7 @@ mod tests {
     fn test_case_insensitive_matching() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[Text][REF]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -621,7 +621,7 @@ mod tests {
     fn test_shortcut_reference() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -631,7 +631,7 @@ mod tests {
     fn test_collapsed_reference() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref][]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -641,7 +641,7 @@ mod tests {
     fn test_multiple_unused_definitions() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[unused1]: url1\n[unused2]: url2\n[unused3]: url3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 3);
@@ -657,7 +657,7 @@ mod tests {
     fn test_mixed_used_and_unused() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[used]\n\n[used]: url1\n[unused]: url2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -668,7 +668,7 @@ mod tests {
     fn test_multiline_definition() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref]: https://example.com\n  \"Title on next line\"";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1); // Still unused
@@ -678,7 +678,7 @@ mod tests {
     fn test_reference_in_code_block() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "```\n[ref]\n```\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Reference used only in code block is still considered unused
@@ -689,7 +689,7 @@ mod tests {
     fn test_reference_in_inline_code() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "`[ref]`\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Reference in inline code is not a usage
@@ -700,7 +700,7 @@ mod tests {
     fn test_escaped_reference() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[example\\-ref]\n\n[example-ref]: https://example.com";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should match despite escaping
@@ -711,7 +711,7 @@ mod tests {
     fn test_duplicate_definitions() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref]: url1\n[ref]: url2\n\n[ref]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should flag the duplicate definition even though it's used (matches markdownlint)
@@ -723,7 +723,7 @@ mod tests {
         // MD053 is warning-only, fix should return original content
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[used]\n\n[used]: url1\n[unused]: url2\n\nMore content";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, content);
@@ -734,7 +734,7 @@ mod tests {
         // MD053 is warning-only, fix should preserve all content
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "Content\n\n[unused]: url\n\nMore content";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, content);
@@ -745,7 +745,7 @@ mod tests {
         // MD053 is warning-only, fix should not remove anything
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[unused1]: url1\n[unused2]: url2\n[unused3]: url3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, content);
@@ -755,7 +755,7 @@ mod tests {
     fn test_special_characters_in_reference() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref-with_special.chars]\n\n[ref-with_special.chars]: url";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 0);
@@ -765,7 +765,7 @@ mod tests {
     fn test_find_definitions() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref1]: url1\n[ref2]: url2\nSome text\n[ref3]: url3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let defs = rule.find_definitions(&ctx);
 
         assert_eq!(defs.len(), 3);
@@ -778,7 +778,7 @@ mod tests {
     fn test_find_usages() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[text][ref1] and [ref2] and ![img][ref3]";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let usages = rule.find_usages(&ctx);
 
         assert!(usages.contains("ref1"));
@@ -795,7 +795,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
 
         let content = "[todo]: https://example.com/todo\n[draft]: https://example.com/draft\n[unused]: https://example.com/unused";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag "unused", not "todo" or "draft"
@@ -814,7 +814,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
 
         let content = "[todo]: https://example.com/todo\n[unused]: https://example.com/unused";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only flag "unused", not "todo" (matches "TODO" case-insensitively)
@@ -850,7 +850,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::from_config_struct(config);
 
         let content = "[template]: https://example.com/template\n[unused]: https://example.com/unused\n\nSome content.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should keep everything since MD053 doesn't fix
@@ -861,7 +861,7 @@ mod tests {
     fn test_duplicate_definitions_exact_case() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref]: url1\n[ref]: url2\n[ref]: url3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should have 2 duplicate warnings (for the 2nd and 3rd definitions)
@@ -877,7 +877,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content =
             "[method resolution order]: url1\n[Method Resolution Order]: url2\n[METHOD RESOLUTION ORDER]: url3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should have 2 duplicate warnings (for the 2nd and 3rd definitions)
@@ -895,7 +895,7 @@ mod tests {
     fn test_duplicate_and_unused() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[used]\n[used]: url1\n[used]: url2\n[unused]: url3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should have 1 duplicate warning and 1 unused warning
@@ -913,7 +913,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         // Even if used, duplicates should still be reported
         let content = "[ref]\n\n[ref]: url1\n[ref]: url2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should have 1 duplicate warning (no unused since it's referenced)
@@ -929,7 +929,7 @@ mod tests {
     fn test_no_duplicate_different_ids() {
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "[ref1]: url1\n[ref2]: url2\n[ref3]: url3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should have no duplicate warnings, only unused warnings
@@ -942,7 +942,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         // Most popular comment pattern: [//]: # (comment)
         let content = "[//]: # (This is a comment)\n\nSome regular text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not report as unused - it's recognized as a comment
@@ -954,7 +954,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         // Semantic comment pattern: [comment]: # (text)
         let content = "[comment]: # (This is a semantic comment)\n\n[note]: # (This is a note)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not report either as unused
@@ -966,7 +966,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         // Task tracking patterns: [todo]: # and [fixme]: #
         let content = "[todo]: # (Add more examples)\n[fixme]: # (Fix this later)\n[hack]: # (Temporary workaround)";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not report any as unused
@@ -978,7 +978,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         // Any reference with just "#" as URL should be treated as a comment
         let content = "[anything]: #\n[ref]: #\n\nSome text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not report as unused - fragment-only URLs are often comments
@@ -990,7 +990,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         // Mix of comment and real reference - only real one should be flagged if unused
         let content = "[//]: # (This is a comment)\n[real-ref]: https://example.com\n\nSome text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should only report the real reference as unused
@@ -1003,7 +1003,7 @@ mod tests {
         let rule = MD053LinkImageReferenceDefinitions::new();
         // Comment pattern with a fragment section (still a comment)
         let content = "[//]: #section (Comment about section)\n\nSome text.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Should not report as unused - it's still a comment pattern

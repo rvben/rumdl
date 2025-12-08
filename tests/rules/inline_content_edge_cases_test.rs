@@ -36,7 +36,7 @@ The implementation is naive.
 
 🚀rocket is launching soon.";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: MD044 MUST detect ALL improper capitalizations including accented characters
     // KNOWN ISSUE: Currently only detects 4/7 due to Unicode word boundary limitations (see docs/KNOWN_PRODUCTION_ISSUES.md)
@@ -92,7 +92,7 @@ Connect to wifi or wi-fi network.
 
 Send an Email or e-Mail message.";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.len() >= 8, "Should detect special character names");
 
@@ -128,7 +128,7 @@ This is a test of A versus a.
 
 Don't match 'ago' or 'bit' or 'ai'.";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Should only match whole words
     assert!(
@@ -167,7 +167,7 @@ plain javascript and python in code block
 
 More javascript and python outside code.";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: When code_blocks=true, MD044 MUST exclude ALL code (blocks AND inline)
     // Should detect:
@@ -202,7 +202,7 @@ More javascript usage.
 
 <!-- javascript --> between <!-- javascript --> comments";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: Default MUST check HTML comments
     assert_eq!(
@@ -242,7 +242,7 @@ Use typescript with javascript.
 
 Support for ipados and IpadOS.";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let _result = rule.check(&ctx).unwrap();
 
     // Verify all variations are caught
@@ -277,7 +277,7 @@ fn test_md045_unicode_alt_text() {
 
 ![　](full-width-space.jpg)";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 8, "Should detect all images with missing/empty alt text");
 
@@ -310,7 +310,7 @@ Shortcut reference: ![shortcut]
 
 [shortcut]: shortcut.png";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Should detect reference images without alt text");
 }
@@ -337,7 +337,7 @@ fn test_md045_nested_constructs() {
 
 **Strong with ![](image8.png) inside**";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 8, "Should detect images in all contexts");
 }
@@ -364,7 +364,7 @@ Even in markdown code blocks ![](still-ignored.png)
 
 More regular: ![](regular2.png)";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should only detect images outside code");
 }
@@ -393,7 +393,7 @@ fn test_md045_edge_patterns() {
 
 ![Existing alt](image.png)";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Should handle edge cases gracefully
     assert!(result.len() >= 3, "Should detect valid images without alt text");
@@ -415,7 +415,7 @@ fn test_md045_html_images() {
 
 Mixed: ![](md.png) and <img src=\"html2.png\">";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // MD045 only checks Markdown images, not HTML
     assert_eq!(result.len(), 2, "Should only check Markdown images");
@@ -443,7 +443,7 @@ Missing: [undefined][参照なし]
 
 Note: 🔗link is not defined";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Should detect missing Unicode references");
     assert!(result.iter().any(|r| r.message.contains("参照なし")));
@@ -465,7 +465,7 @@ Missing: [text][MISSING], [text][missing]
 [ref]: https://example.com
 [IMG]: image.png";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: MD052 MUST be case-insensitive
     // [MISSING] and [missing] are the same undefined reference
@@ -499,7 +499,7 @@ Mixed with [normal][ref] syntax
 
 [ref]: https://ref.com";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Shortcut references are NOT checked by default (shortcut_syntax: false)
     // Only full reference syntax [text][ref] is checked
@@ -531,7 +531,7 @@ List context might affect this:
 [ref6]: url6
 [ref7]: url7";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Should not check references in code blocks
     assert!(!result.iter().any(|r| r.message.contains("ref2")));
@@ -565,7 +565,7 @@ Special chars: [text][ref-with-dash_and_underscore]
 
 Missing: ref2, ref4, ref7, ref with spaces";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.len() >= 4, "Should detect various missing references");
 }
@@ -598,7 +598,7 @@ Duplicate definitions:
 
 Using [dup][dup] should work";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: MD052 MUST detect ONLY truly undefined references
     // Empty definitions are valid, duplicate definitions use the first one
@@ -627,7 +627,7 @@ Another image reference: ![github logo][gh-logo]
 
 Note: js-guide is not defined";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Each rule should detect its issues independently and correctly
     let result044 = md044.check(&ctx).unwrap();
@@ -660,7 +660,7 @@ fn test_md044_performance_edge_cases() {
     // Test with many occurrences
     let content = "test ".repeat(1000);
 
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1000, "Should handle many occurrences efficiently");
 }
@@ -681,7 +681,7 @@ fn test_md045_image_title_attribute() {
 
 [ref]: image.png \"Reference title\"";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "Title attribute doesn't replace alt text requirement");
 }
@@ -706,7 +706,7 @@ But this is real: [link][ref5]
 [ref2]: url2
 [ref5]: url5";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // PRODUCTION REQUIREMENT: MD052 MUST handle escaped brackets correctly
     assert_eq!(result.len(), 0, "Should NOT detect escaped references as undefined");
@@ -727,7 +727,7 @@ tags: [javascript, programming]
 
 The javascript ecosystem is vast.";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = md044.check(&ctx).unwrap();
     // Should detect in front matter and content
     assert!(result.len() >= 2, "Should check front matter content");
@@ -753,7 +753,7 @@ Regular ![](outside.png) image.
 
 [ref]: defined.com";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result045 = md045.check(&ctx).unwrap();
     let result052 = md052.check(&ctx).unwrap();
 
@@ -790,7 +790,7 @@ Don't match 'manuscript' or 'subscription'.
 
 But do match java and script separately.";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let _result = rule.check(&ctx).unwrap();
 
     // Should handle overlapping patterns correctly
@@ -819,7 +819,7 @@ text](multiline3.png)
 
 ![    ](spaces.png)";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Per CommonMark: Blank lines break inline syntax
     // - ![<newline>](url) → valid (1 newline) → empty alt text → flagged
@@ -854,7 +854,7 @@ Examples:
 
 Note: ref2 and ref3 in example sections might be excluded";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Behavior depends on implementation details
     assert!(result.len() <= 2, "May exclude example sections");

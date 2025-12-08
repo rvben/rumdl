@@ -47,7 +47,7 @@ fn validate_core_functionality() {
         Box::new(MD040FencedCodeLanguage),
     ];
 
-    let ctx = LintContext::new(&test_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let mut total_warnings = 0;
 
     for rule in &critical_rules {
@@ -99,7 +99,7 @@ fn validate_cli_lsp_consistency() {
 
     for (i, content) in test_cases.iter().enumerate() {
         for rule in &rules {
-            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
             if !warnings.is_empty() {
@@ -135,7 +135,7 @@ fn validate_performance_characteristics() {
     ];
 
     let start_time = Instant::now();
-    let ctx = LintContext::new(&typical_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&typical_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     for rule in &rules {
         let rule_start = Instant::now();
@@ -201,7 +201,7 @@ fn validate_unicode_and_edge_cases() {
     let mut edge_case_checks = 0;
 
     for (i, content) in edge_cases.iter().enumerate() {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Should not panic or error on edge cases
         let result = rule.check(&ctx);
@@ -253,7 +253,7 @@ fn validate_integration_scenarios() {
     ];
 
     for (scenario_name, content) in &integration_tests {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let mut total_warnings = 0;
 
         for rule in &comprehensive_rules {

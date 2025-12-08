@@ -7,7 +7,7 @@ use rumdl_lib::rules::MD005ListIndent;
 fn test_first_list_item_no_parent() {
     let rule = MD005ListIndent::default();
     let content = "* First item ever";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "First list item should not trigger warnings");
 }
@@ -19,7 +19,7 @@ fn test_jump_multiple_indentation_levels() {
     let content = "\
 * Level 0
       * Jumped to 6 spaces";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Dynamic detection should accept this as a valid 6-space pattern
     assert!(result.is_empty(), "Large indentation jump should be valid with dynamic detection");
@@ -35,7 +35,7 @@ fn test_very_deep_nesting() {
     * Level 3
       * Level 4
         * Level 5";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Very deep nesting should be valid");
 }
@@ -50,7 +50,7 @@ fn test_sibling_items_same_level() {
 * Item 3
   * Nested under 3
 * Item 4";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Sibling items at same level should be valid");
 }
@@ -66,7 +66,7 @@ fn test_jump_back_multiple_levels() {
       * Level 4
 * Back to Level 1
   * Level 2 again";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Jumping back multiple levels should work correctly");
 }
@@ -83,7 +83,7 @@ fn test_alternating_levels() {
     * Level 3
   * Level 2
 * Level 1";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Alternating between levels should be valid");
 }
@@ -98,7 +98,7 @@ fn test_different_markers_per_level() {
     + Plus level 3
   - Dash level 2 again
 * Asterisk level 1 again";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Different markers at different levels should be valid");
 }
@@ -112,7 +112,7 @@ fn test_incorrect_parent_indentation() {
   * Level 2 (2 spaces)
     * Level 3 (4 spaces)
    * Wrong indent (3 spaces - not aligned with any parent)";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Should flag the item with 3 spaces as it doesn't match the 2-space pattern
     assert_eq!(result.len(), 1, "Should detect incorrect indentation");
@@ -127,7 +127,7 @@ fn test_many_items_same_level() {
     for i in 1..=50 {
         content.push_str(&format!("* Item {}\n", i));
     }
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Many items at same level should be valid");
 }
@@ -142,7 +142,7 @@ fn test_stale_hashmap_entries_bug() {
   * Item at indent 2
 * Back to indent 0
   * Item at indent 2 - should find indent 0 as parent, NOT indent 1";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // The critical test: line 5 should correctly identify line 4 (indent 0) as parent,
     // not line 2 (indent 1) which should have been removed from the tracking HashMap
@@ -159,7 +159,7 @@ fn test_ordered_lists_large_numbers() {
 100. Item one hundred
      1. Nested item (aligned with parent text)
 101. Item one hundred one";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Large numbered items should work correctly");
 }
@@ -175,7 +175,7 @@ fn test_mixed_ordered_unordered_complex() {
         * Unordered level 4
    * Back to unordered level 2
 2. Ordered level 1 again";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Complex mixing should be valid");
 }
@@ -192,7 +192,7 @@ fn test_blank_lines_between_levels() {
     * Level 3
 
 * Back to level 1";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Blank lines between levels should be valid");
 }
@@ -206,7 +206,7 @@ fn test_parent_is_most_recent() {
   * Level 2a (indent 2)
 * Level 1b (indent 0) - should invalidate 2a as potential parent
     * Level 2b (indent 4) - parent should be 1b (line 3), not 2a (line 2)";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Dynamic detection: line 4 has 4 spaces, which becomes a new pattern
     assert!(result.is_empty(), "Should use most recent parent at each level");
@@ -224,7 +224,7 @@ fn test_zigzag_nesting() {
       * Back to deep level (6 spaces)
   * Level 2
 * Level 1";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Dynamic detection allows this pattern
     assert!(result.is_empty(), "Zigzag nesting should be valid");
@@ -238,7 +238,7 @@ fn test_all_items_wrong_indent() {
  * Item 1 (1 space - wrong)
  * Item 2 (1 space - wrong)
  * Item 3 (1 space - wrong)";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // All items have 1 space, which is detected as a pattern
     // Should flag all 3 lines as they should start at column 0
@@ -255,7 +255,7 @@ fn test_transition_valid_to_invalid() {
     * Item 3 (correct - 4 spaces)
    * Item 4 (wrong - 3 spaces, doesn't match pattern)
   * Item 5 (correct - 2 spaces)";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should flag only the item with wrong indentation");
     assert_eq!(result[0].line, 4, "Should flag line 4");
@@ -270,7 +270,7 @@ fn test_empty_list_items() {
   *
     *
 * Item";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Empty items should still follow indentation rules
     assert!(result.is_empty(), "Empty list items should follow same rules");
@@ -288,7 +288,7 @@ fn test_issue_148_pattern() {
         content.push_str("    * Deep\n");
         content.push_str("      * Deeper\n");
     }
-    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Issue #148 pattern should be valid and fast");
 }
@@ -312,7 +312,7 @@ fn test_issue_186_sublist_after_code_block() {
   * item2
     * correctly indented subitem";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(
@@ -334,7 +334,7 @@ fn test_issue_186_sublist_after_code_block() {
    - A
    - B";
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(

@@ -347,19 +347,19 @@ mod tests {
 
         // Test with no spaces inside emphasis - should pass
         let content = "This is *correct* emphasis and **strong emphasis**";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "No warnings expected for correct emphasis");
 
         // Test with actual spaces inside emphasis - use content that should warn
         let content = "This is * text with spaces * and more content";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty(), "Expected warnings for spaces in emphasis");
 
         // Test with code blocks - emphasis in code should be ignored
         let content = "This is *correct* emphasis\n```\n* incorrect * in code block\n```\nOutside block with * spaces in emphasis *";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             !result.is_empty(),
@@ -373,7 +373,7 @@ mod tests {
         let content = r#"Check this [* spaced asterisk *](https://example.com/*test*) link.
 
 This has * real spaced emphasis * that should be flagged."#;
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Test passed - emphasis inside links are filtered out correctly
@@ -396,7 +396,7 @@ This has * real spaced emphasis * that should be flagged."#;
         let content = r#"Check [* spaced *](https://example.com/*test*) and inline * real spaced * text.
 
 [* link *]: https://example.com/*path*"#;
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only the actual emphasis outside links should be flagged
@@ -413,7 +413,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case from issue #49
         let content = "The `__mul__` method is needed for left-hand multiplication (`vector * 3`) and `__rmul__` is needed for right-hand multiplication (`3 * vector`).";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -428,7 +428,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 1: inline code with single backticks inside bold emphasis
         let content = "Though, we often call this an **inline `if`** because it looks sort of like an `if`-`else` statement all in *one line* of code.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -437,7 +437,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 2: multiple inline code snippets inside emphasis
         let content2 = "The **`foo` and `bar`** methods are important.";
-        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard);
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
         let result2 = rule.check(&ctx2).unwrap();
         assert!(
             result2.is_empty(),
@@ -446,7 +446,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 3: inline code with underscores for emphasis
         let content3 = "This is __inline `code`__ with underscores.";
-        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard);
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard, None);
         let result3 = rule.check(&ctx3).unwrap();
         assert!(
             result3.is_empty(),
@@ -455,7 +455,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 4: single asterisk emphasis with inline code
         let content4 = "This is *inline `test`* with single asterisks.";
-        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::Standard);
+        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::Standard, None);
         let result4 = rule.check(&ctx4).unwrap();
         assert!(
             result4.is_empty(),
@@ -464,7 +464,7 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Test case 5: actual spaces that should be flagged
         let content5 = "This has * real spaces * that should be flagged.";
-        let ctx5 = LintContext::new(content5, crate::config::MarkdownFlavor::Standard);
+        let ctx5 = LintContext::new(content5, crate::config::MarkdownFlavor::Standard, None);
         let result5 = rule.check(&ctx5).unwrap();
         assert!(!result5.is_empty(), "Should still flag actual spaces in emphasis");
         assert!(result5[0].message.contains("Spaces inside emphasis markers"));
@@ -479,38 +479,38 @@ This has * real spaced emphasis * that should be flagged."#;
 
         // Greek text with emphasis
         let greek = "Αυτό είναι ένα * τεστ με ελληνικά * και πολύ μεγάλο κείμενο που θα πρέπει να περικοπεί σωστά.";
-        let ctx = LintContext::new(greek, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(greek, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Greek text should not panic");
 
         // Chinese text with emphasis
         let chinese = "这是一个 * 测试文本 * 包含中文字符，需要正确处理多字节边界。";
-        let ctx = LintContext::new(chinese, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(chinese, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Chinese text should not panic");
 
         // Cyrillic/Russian text with emphasis
         let cyrillic = "Это * тест с кириллицей * и очень длинным текстом для проверки обрезки.";
-        let ctx = LintContext::new(cyrillic, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(cyrillic, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Cyrillic text should not panic");
 
         // Mixed multi-byte characters in a long emphasis span that triggers truncation
         let mixed =
             "日本語と * 中文と한국어が混在する非常に長いテキストでtruncate_for_displayの境界処理をテスト * します。";
-        let ctx = LintContext::new(mixed, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(mixed, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Mixed CJK text should not panic");
 
         // Arabic text (right-to-left) with emphasis
         let arabic = "هذا * اختبار بالعربية * مع نص طويل جداً لاختبار معالجة حدود الأحرف.";
-        let ctx = LintContext::new(arabic, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(arabic, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Arabic text should not panic");
 
         // Emoji with emphasis
         let emoji = "This has * 🎉 party 🎊 celebration 🥳 emojis * that use multi-byte sequences.";
-        let ctx = LintContext::new(emoji, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(emoji, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Emoji text should not panic");
     }

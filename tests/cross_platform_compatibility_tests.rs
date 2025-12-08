@@ -23,7 +23,7 @@ fn test_line_ending_compatibility() {
     for (name, content) in test_cases {
         println!("Testing {name} line endings...");
 
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Test that rules work consistently regardless of line endings
         let rules: Vec<Box<dyn Rule>> = vec![
@@ -94,7 +94,7 @@ Some content here.
 
         // Verify file can be read and processed
         let content = fs::read_to_string(&file_path).unwrap();
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let rule = MD025SingleTitle::default();
         let warnings = rule.check(&ctx).unwrap();
@@ -113,7 +113,7 @@ Some content here.
             fs::write(&file_path, test_content).unwrap();
 
             let content = fs::read_to_string(&file_path).unwrap();
-            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
             let rule = MD025SingleTitle::default();
             let warnings = rule.check(&ctx).unwrap();
@@ -151,7 +151,7 @@ fn test_unicode_content_handling() {
     for (name, content) in unicode_test_cases {
         println!("Testing {name} content...");
 
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         // Test various rules with Unicode content
         let rules: Vec<Box<dyn Rule>> = vec![
@@ -201,7 +201,7 @@ fn test_platform_specific_newlines_in_fixes() {
     for (platform, content, expected_line_ending) in test_cases {
         println!("Testing {platform} platform newlines...");
 
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let rule = MD022BlanksAroundHeadings::default();
 
         // Check for warnings
@@ -282,7 +282,7 @@ fn test_file_encoding_detection() {
         println!("Testing {description} file...");
 
         let content = fs::read_to_string(&file_path).unwrap();
-        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
         let rule = MD025SingleTitle::default();
         let warnings = rule.check(&ctx).unwrap();
@@ -381,7 +381,7 @@ fn test_large_file_cross_platform() {
     assert_eq!(read_content.len(), large_content.len(), "File content should match");
 
     // Test processing large file
-    let ctx = LintContext::new(&read_content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&read_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD022BlanksAroundHeadings::default();
 
     let start_time = std::time::Instant::now();
@@ -422,7 +422,7 @@ fn test_concurrent_file_access() {
             let file_path = base_path.join(format!("concurrent_test_{i}.md"));
             std::thread::spawn(move || {
                 let content = fs::read_to_string(&file_path).unwrap();
-                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
                 let rule = MD025SingleTitle::default();
                 rule.check(&ctx).unwrap()
             })

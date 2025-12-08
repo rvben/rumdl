@@ -407,7 +407,7 @@ mod tests {
     fn test_single_blank_line_allowed() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Line 1\n\nLine 2\n\nLine 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -416,7 +416,7 @@ mod tests {
     fn test_multiple_blank_lines_flagged() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 3); // 1 extra in first gap, 2 extra in second gap
         assert_eq!(result[0].line, 3);
@@ -428,7 +428,7 @@ mod tests {
     fn test_custom_maximum() {
         let rule = MD012NoMultipleBlanks::new(2);
         let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1); // Only the fourth blank line is excessive
         assert_eq!(result[0].line, 7);
@@ -438,7 +438,7 @@ mod tests {
     fn test_fix_multiple_blank_lines() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Line 1\n\nLine 2\n\nLine 3");
     }
@@ -447,7 +447,7 @@ mod tests {
     fn test_blank_lines_in_code_block() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Before\n\n```\ncode\n\n\n\nmore code\n```\n\nAfter";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty()); // Blank lines inside code blocks are ignored
     }
@@ -456,7 +456,7 @@ mod tests {
     fn test_fix_preserves_code_block_blanks() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Before\n\n\n```\ncode\n\n\n\nmore code\n```\n\n\nAfter";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Before\n\n```\ncode\n\n\n\nmore code\n```\n\nAfter");
     }
@@ -465,7 +465,7 @@ mod tests {
     fn test_blank_lines_in_front_matter() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "---\ntitle: Test\n\n\nauthor: Me\n---\n\nContent";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty()); // Blank lines in front matter are ignored
     }
@@ -474,7 +474,7 @@ mod tests {
     fn test_blank_lines_at_start() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "\n\n\nContent";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2);
         assert!(result[0].message.contains("at start of file"));
@@ -484,7 +484,7 @@ mod tests {
     fn test_blank_lines_at_end() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Content\n\n\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at end of file"));
@@ -495,7 +495,7 @@ mod tests {
         // Markdownlint behavior: ANY blank lines at EOF are flagged
         let rule = MD012NoMultipleBlanks::default();
         let content = "Content\n\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at end of file"));
@@ -505,7 +505,7 @@ mod tests {
     fn test_whitespace_only_lines() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Line 1\n  \n\t\nLine 2";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1); // Whitespace-only lines count as blank
     }
@@ -514,7 +514,7 @@ mod tests {
     fn test_indented_code_blocks() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Text\n\n    code\n    \n    \n    more code\n\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // The recent changes to MD012 now detect blank lines even in indented code blocks
         // This is actually correct behavior - we should flag the extra blank line
@@ -526,7 +526,7 @@ mod tests {
     fn test_fix_with_final_newline() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Line 1\n\n\nLine 2\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Line 1\n\nLine 2\n");
         assert!(fixed.ends_with('\n'));
@@ -536,7 +536,7 @@ mod tests {
     fn test_empty_content() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -545,7 +545,7 @@ mod tests {
     fn test_nested_code_blocks() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Before\n\n~~~\nouter\n\n```\ninner\n\n\n```\n\n~~~\n\nAfter";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
     }
@@ -554,7 +554,7 @@ mod tests {
     fn test_unclosed_code_block() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Before\n\n```\ncode\n\n\n\nno closing fence";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty()); // Unclosed code blocks still preserve blank lines
     }
@@ -563,7 +563,7 @@ mod tests {
     fn test_mixed_fence_styles() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Before\n\n```\ncode\n\n\n~~~\n\nAfter";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty()); // Mixed fence styles should work
     }
@@ -579,7 +579,7 @@ mod tests {
 
         let rule = MD012NoMultipleBlanks::from_config(&config);
         let content = "Line 1\n\n\n\nLine 2"; // 3 blank lines
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty()); // 3 blank lines allowed with maximum=3
     }
@@ -588,7 +588,7 @@ mod tests {
     fn test_blank_lines_between_sections() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "# Section 1\n\nContent\n\n\n# Section 2\n\nContent";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 5);
@@ -598,7 +598,7 @@ mod tests {
     fn test_fix_preserves_indented_code() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "Text\n\n\n    code\n    \n    more code\n\n\nText";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         // The fix removes the extra blank line, but this is expected behavior
         assert_eq!(fixed, "Text\n\n    code\n\n    more code\n\nText");
@@ -608,7 +608,7 @@ mod tests {
     fn test_edge_case_only_blanks() {
         let rule = MD012NoMultipleBlanks::default();
         let content = "\n\n\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // With the new EOF handling, we report once at EOF
         assert_eq!(result.len(), 1);

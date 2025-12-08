@@ -31,7 +31,7 @@ fn test_no_empty_fix_ranges() {
 
     for rule in &rules {
         for content in &test_contents {
-            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
             for warning in &warnings {
@@ -85,7 +85,7 @@ fn test_cli_lsp_consistency() {
     ];
 
     for (content, rule) in test_cases {
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
         if !warnings.is_empty() {
@@ -130,7 +130,7 @@ fn test_fix_ranges_within_bounds() {
     for rule in &rules {
         for content in &test_contents {
             let content_len = content.len();
-            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let warnings = rule.check(&ctx).expect("Rule check should succeed");
 
             for warning in &warnings {
@@ -192,7 +192,7 @@ fn test_fixes_improve_content() {
 
     for rule in &rules {
         for content in &problematic_contents {
-            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let initial_warnings = rule.check(&ctx).expect("Initial check should succeed");
 
             if !initial_warnings.is_empty() {
@@ -200,7 +200,7 @@ fn test_fixes_improve_content() {
                 let fixed_content = rule.fix(&ctx).expect("Fix should succeed");
 
                 // Check the fixed content has fewer or equal warnings
-                let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard);
+                let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
                 let remaining_warnings = rule.check(&fixed_ctx).expect("Fixed content check should succeed");
 
                 assert!(

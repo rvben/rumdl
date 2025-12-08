@@ -339,13 +339,13 @@ mod tests {
 
     fn run_check(content: &str) -> LintResult {
         let rule = MD040FencedCodeLanguage;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.check(&ctx)
     }
 
     fn run_fix(content: &str) -> Result<String, LintError> {
         let rule = MD040FencedCodeLanguage;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.fix(&ctx)
     }
 
@@ -823,19 +823,23 @@ console.log(`template string with backticks`);
         let rule = MD040FencedCodeLanguage;
 
         // Document without code fences should skip
-        let ctx = LintContext::new("# Just a header\n\nSome text", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(
+            "# Just a header\n\nSome text",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
         assert!(rule.should_skip(&ctx));
 
         // Document with backtick fences should not skip
-        let ctx = LintContext::new("```\ncode\n```", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("```\ncode\n```", crate::config::MarkdownFlavor::Standard, None);
         assert!(!rule.should_skip(&ctx));
 
         // Document with tilde fences should not skip
-        let ctx = LintContext::new("~~~\ncode\n~~~", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("~~~\ncode\n~~~", crate::config::MarkdownFlavor::Standard, None);
         assert!(!rule.should_skip(&ctx));
 
         // Empty document should skip
-        let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.should_skip(&ctx));
     }
 
@@ -858,7 +862,7 @@ x = 1
 plot(x)
 ```
 "#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -872,7 +876,7 @@ plot(x)
 code without language
 ```
 "#;
-        let ctx = LintContext::new(content_no_lang, crate::config::MarkdownFlavor::Quarto);
+        let ctx = LintContext::new(content_no_lang, crate::config::MarkdownFlavor::Quarto, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Quarto files without language should trigger warning");
 
@@ -883,7 +887,7 @@ code without language
 code
 ```
 "#;
-        let ctx = LintContext::new(content_standard, crate::config::MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content_standard, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // In standard flavor, {python} is considered "after_fence" content, so it's valid
         // The fence marker is "```" and after_fence is "{python}", which is non-empty

@@ -279,7 +279,7 @@ Also see the [`__init__`][__init__] reference.
 This should be _flagged_ since we're using asterisk style.
 
 [__init__]: https://example.com/__init__.py"#;
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only the real emphasis outside links should be flagged
@@ -295,7 +295,7 @@ This should be _flagged_ since we're using asterisk style.
         let content = r#"Check [*emphasis*](https://example.com/*test*) and inline *real emphasis* text.
 
 [*link*]: https://example.com/*path*"#;
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only the actual emphasis outside links should be flagged

@@ -19,7 +19,7 @@ fn test_consistent_pipe_styles() {
 | Cell 1   | Cell 2   |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -30,7 +30,7 @@ Header 1 | Header 2
 Cell 1   | Cell 2
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -45,7 +45,7 @@ fn test_inconsistent_pipe_styles() {
 Cell 1   | Cell 2
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 4);
@@ -63,7 +63,7 @@ fn test_leading_and_trailing_style() {
 | Cell 1   | Cell 2   |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -74,7 +74,7 @@ Header 1 | Header 2
 Cell 1   | Cell 2
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3); // Three rows, all need fixes
 }
@@ -90,7 +90,7 @@ Header 1 | Header 2
 Cell 1   | Cell 2
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 
@@ -101,7 +101,7 @@ Cell 1   | Cell 2
 | Cell 1   | Cell 2   |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3); // Three rows, all need fixes
 }
@@ -117,7 +117,7 @@ fn test_leading_only_style() {
 | Cell 1   | Cell 2
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -132,7 +132,7 @@ fn test_leading_only_style() {
 | Cell 1   | Cell 2   |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -141,9 +141,9 @@ fn test_leading_only_style() {
     );
 
     // Fix should correctly convert to leading_only style
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -159,7 +159,7 @@ Header 1 | Header 2 |
 Cell 1   | Cell 2   |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -174,7 +174,7 @@ Cell 1   | Cell 2   |
 | Cell 1   | Cell 2   |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -183,9 +183,9 @@ Cell 1   | Cell 2   |
     );
 
     // Fix should correctly convert to trailing_only style
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -205,7 +205,7 @@ Header with inconsistent style | that should be ignored
 ```
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0);
 }
@@ -219,9 +219,9 @@ Header 1 | Header 2
 -------- | --------
 Cell 1   | Cell 2
     "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
@@ -232,9 +232,9 @@ Cell 1   | Cell 2
 | -------- | -------- |
 | Cell 1   | Cell 2   |
     "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
@@ -245,9 +245,9 @@ Header 1 | Header 2 |
 -------- | -------- |
 Cell 1   | Cell 2   |
     "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 
@@ -258,9 +258,9 @@ Cell 1   | Cell 2   |
 | -------- | -------- |
 | Cell 1   | Cell 2   |
     "#;
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 }
@@ -280,7 +280,7 @@ This rule is triggered when table rows in a Markdown file have inconsistent pipe
 In Markdown tables, you can include or omit leading and trailing pipe characters (`|`). This rule enforces a consistent style for these pipes.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -299,7 +299,7 @@ The `style` parameter can have the following values:
   - `no*leading*or*trailing`: All table rows must have neither leading nor trailing pipes (`cell | cell`)
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -314,7 +314,7 @@ You can use pipes in inline code like `| cell | cell |` without issues.
 Also backticks with pipes: ``| some | code |`` should be ignored.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -329,7 +329,7 @@ This is a line with | some | pipes | but no table structure.
 Another line | with | pipes | that | doesn't | form | a | table.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -344,7 +344,7 @@ Another line | with | pipes | that | doesn't | form | a | table.
 But there's no delimiter row, so it's not a table.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -364,7 +364,7 @@ fn test_actual_tables_are_still_flagged() {
 Cell 1   | Cell 2
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -386,7 +386,7 @@ fn test_table_detection_requires_delimiter_row() {
 | Cell 3   | Cell 4   |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 0, "Properly formatted table should not be flagged");
 
@@ -397,7 +397,7 @@ fn test_table_detection_requires_delimiter_row() {
 | Cell 3   | Cell 4   |
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
@@ -428,7 +428,7 @@ Cell 1   | Cell 2
 And more text with | pipes | that | aren't | tables.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Only the actual table row should be flagged");
     assert_eq!(result[0].line, 13, "The inconsistent table row should be flagged");
@@ -454,7 +454,7 @@ In Markdown tables, you can include or omit leading and trailing pipe characters
 This line has | some | pipes | but | isn't | a | table.
     "#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // The content should be unchanged since there are no actual tables
@@ -465,7 +465,7 @@ This line has | some | pipes | but | isn't | a | table.
     );
 
     // Verify no warnings are generated
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 }

@@ -212,7 +212,7 @@ impl FixCoordinator {
                 }
 
                 // Create context for this specific rule
-                let ctx = LintContext::new(content, config.markdown_flavor());
+                let ctx = LintContext::new(content, config.markdown_flavor(), None);
                 total_ctx_creations += 1;
 
                 // Apply fix

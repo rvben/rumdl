@@ -4,6 +4,7 @@ use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::borrow::Cow;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 /// Macro for profiling sections - only active in non-WASM builds
@@ -442,6 +443,7 @@ pub struct LintContext<'a> {
     pub line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed line index for byte position calculations
     jinja_ranges: Vec<(usize, usize)>,    // Pre-computed Jinja template ranges ({{ }}, {% %})
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
+    pub source_file: Option<PathBuf>,     // Source file path (for rules that need file context)
 }
 
 /// Detailed blockquote parse result with all components
@@ -490,7 +492,7 @@ fn parse_blockquote_detailed(line: &str) -> Option<BlockquoteComponents<'_>> {
 }
 
 impl<'a> LintContext<'a> {
-    pub fn new(content: &'a str, flavor: MarkdownFlavor) -> Self {
+    pub fn new(content: &'a str, flavor: MarkdownFlavor, source_file: Option<PathBuf>) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let profile = std::env::var("RUMDL_PROFILE_QUADRATIC").is_ok();
         #[cfg(target_arch = "wasm32")]
@@ -640,6 +642,7 @@ impl<'a> LintContext<'a> {
             line_index,
             jinja_ranges,
             flavor,
+            source_file,
         }
     }
 
@@ -3355,7 +3358,7 @@ mod tests {
 
     #[test]
     fn test_empty_content() {
-        let ctx = LintContext::new("", MarkdownFlavor::Standard);
+        let ctx = LintContext::new("", MarkdownFlavor::Standard, None);
         assert_eq!(ctx.content, "");
         assert_eq!(ctx.line_offsets, vec![0]);
         assert_eq!(ctx.offset_to_line_col(0), (1, 1));
@@ -3364,7 +3367,7 @@ mod tests {
 
     #[test]
     fn test_single_line() {
-        let ctx = LintContext::new("# Hello", MarkdownFlavor::Standard);
+        let ctx = LintContext::new("# Hello", MarkdownFlavor::Standard, None);
         assert_eq!(ctx.content, "# Hello");
         assert_eq!(ctx.line_offsets, vec![0]);
         assert_eq!(ctx.offset_to_line_col(0), (1, 1));
@@ -3374,7 +3377,7 @@ mod tests {
     #[test]
     fn test_multi_line() {
         let content = "# Title\n\nSecond line\nThird line";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         assert_eq!(ctx.line_offsets, vec![0, 8, 9, 21]);
         // Test offset to line/col
         assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // start
@@ -3387,7 +3390,7 @@ mod tests {
     #[test]
     fn test_line_info() {
         let content = "# Title\n    indented\n\ncode:\n```rust\nfn main() {}\n```";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // Test line info
         assert_eq!(ctx.lines.len(), 7);
@@ -3423,7 +3426,7 @@ mod tests {
     #[test]
     fn test_list_item_detection() {
         let content = "- Unordered item\n  * Nested item\n1. Ordered item\n   2) Nested ordered\n\nNot a list";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // Line 1: "- Unordered item"
         let line1 = &ctx.lines[0];
@@ -3457,7 +3460,7 @@ mod tests {
     #[test]
     fn test_offset_to_line_col_edge_cases() {
         let content = "a\nb\nc";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         // line_offsets: [0, 2, 4]
         assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // 'a'
         assert_eq!(ctx.offset_to_line_col(1), (1, 2)); // after 'a'
@@ -3481,7 +3484,7 @@ flood conditions in many of the nearby rivers.
 <Chart color="#fcb32c" year={year} />
 "##;
 
-        let ctx = LintContext::new(content, MarkdownFlavor::MDX);
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
 
         // Check that lines 1 and 2 are marked as ESM blocks
         assert_eq!(ctx.lines.len(), 10);
@@ -3504,7 +3507,7 @@ export const year = 2023
 # Last year's snowfall
 "#;
 
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // ESM blocks should NOT be detected in Standard flavor
         assert!(

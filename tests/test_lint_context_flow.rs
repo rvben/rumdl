@@ -10,7 +10,7 @@ mod test_lint_context_flow {
         println!("Content: {content:?}");
 
         // Create context (this is when code spans are initially parsed)
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // Access code_spans() - this might trigger re-parsing
         let spans1 = ctx.code_spans();
@@ -39,7 +39,7 @@ mod test_lint_context_flow {
         println!("\n=== Testing content without code block ===");
         println!("Content: {content:?}");
 
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let spans = ctx.code_spans();
 
         println!("Found {} code spans", spans.len());

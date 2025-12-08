@@ -26,7 +26,7 @@ fn test_custom_config() {
 fn test_basic_line_length_violation() {
     let rule = MD013LineLength::new(50, false, false, false, false);
     let content = "This is a line that is definitely longer than fifty characters and should trigger a warning.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 1);
@@ -38,7 +38,7 @@ fn test_basic_line_length_violation() {
 fn test_no_violation_under_limit() {
     let rule = MD013LineLength::new(100, false, false, false, false);
     let content = "Short line.\nAnother short line.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0);
@@ -49,7 +49,7 @@ fn test_multiple_violations() {
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content =
         "This line is definitely longer than thirty chars.\nThis is also a line that exceeds the limit.\nShort line.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 2);
@@ -64,7 +64,7 @@ fn test_no_lint_front_matter() {
     // YAML front matter with long lines should NOT be flagged
     let content = "---\ntitle: This is a very long title that exceeds eighty characters and should not trigger MD013\nauthor: Another very long line in YAML front matter that exceeds the eighty character limit\n---\n\n# Heading\n\nThis is a very long line in actual content that exceeds eighty characters and SHOULD trigger MD013.\n";
 
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the content line, not front matter lines
@@ -74,7 +74,7 @@ fn test_no_lint_front_matter() {
     // Also test with TOML front matter
     let content_toml = "+++\ntitle = \"This is a very long title in TOML that exceeds eighty characters and should not trigger MD013\"\nauthor = \"Another very long line in TOML front matter that exceeds the eighty character limit\"\n+++\n\n# Heading\n\nThis is a very long line in actual content that exceeds eighty characters and SHOULD trigger MD013.\n";
 
-    let ctx_toml = LintContext::new(content_toml, crate::config::MarkdownFlavor::Standard);
+    let ctx_toml = LintContext::new(content_toml, crate::config::MarkdownFlavor::Standard, None);
     let result_toml = rule.check(&ctx_toml).unwrap();
 
     // Should only flag the content line, not TOML front matter lines
@@ -87,7 +87,7 @@ fn test_code_blocks_exemption() {
     // With code_blocks = false, code blocks should be skipped
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content = "```\nThis is a very long line inside a code block that should be ignored.\n```";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0);
@@ -98,7 +98,7 @@ fn test_code_blocks_not_exempt_when_configured() {
     // With code_blocks = true, code blocks should be checked
     let rule = MD013LineLength::new(30, true, false, false, false);
     let content = "```\nThis is a very long line inside a code block that should NOT be ignored.\n```";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(!result.is_empty());
@@ -108,7 +108,7 @@ fn test_code_blocks_not_exempt_when_configured() {
 fn test_heading_checked_when_enabled() {
     let rule = MD013LineLength::new(30, false, false, true, false);
     let content = "# This is a very long heading that would normally exceed the limit";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 1);
@@ -118,7 +118,7 @@ fn test_heading_checked_when_enabled() {
 fn test_heading_exempt_when_disabled() {
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content = "# This is a very long heading that should trigger a warning";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0);
@@ -128,7 +128,7 @@ fn test_heading_exempt_when_disabled() {
 fn test_table_checked_when_enabled() {
     let rule = MD013LineLength::new(30, false, true, false, false);
     let content = "| This is a very long table header | Another long column header |\n|-----------------------------------|-------------------------------|";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 2); // Both table lines exceed limit
@@ -152,7 +152,7 @@ this is a very long line
 | value 1 | value 2 |
 
 correct length line"#;
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag line 7 ("this is a very long line"), not the table lines
@@ -171,7 +171,7 @@ fn test_issue_78_tables_with_inline_code() {
 | value 1 | value 2 |
 
 This line exceeds limit"#;
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag the last line, not the table lines
@@ -196,7 +196,7 @@ this is a very long line
 | value 1 | value 2 |
 
 correct length line";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should only flag line 5 ("this is a very long line"), not the table lines
@@ -209,7 +209,7 @@ correct length line";
 fn test_url_exemption() {
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content = "https://example.com/this/is/a/very/long/url/that/exceeds/the/limit";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0);
@@ -219,7 +219,7 @@ fn test_url_exemption() {
 fn test_image_reference_exemption() {
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content = "![This is a very long image alt text that exceeds limit][reference]";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0);
@@ -229,7 +229,7 @@ fn test_image_reference_exemption() {
 fn test_link_reference_exemption() {
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content = "[reference]: https://example.com/very/long/url/that/exceeds/limit";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0);
@@ -239,7 +239,7 @@ fn test_link_reference_exemption() {
 fn test_strict_mode() {
     let rule = MD013LineLength::new(30, false, false, false, true);
     let content = "https://example.com/this/is/a/very/long/url/that/exceeds/the/limit";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // In strict mode, even URLs trigger warnings
@@ -250,7 +250,7 @@ fn test_strict_mode() {
 fn test_blockquote_exemption() {
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content = "> This is a very long line inside a blockquote that should be ignored.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0);
@@ -260,7 +260,7 @@ fn test_blockquote_exemption() {
 fn test_setext_heading_underline_exemption() {
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content = "Heading\n========================================";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // The underline should be exempt
@@ -271,7 +271,7 @@ fn test_setext_heading_underline_exemption() {
 fn test_no_fix_without_reflow() {
     let rule = MD013LineLength::new(60, false, false, false, false);
     let content = "This line has trailing whitespace that makes it too long      ";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 1);
@@ -288,7 +288,7 @@ fn test_character_vs_byte_counting() {
     let rule = MD013LineLength::new(10, false, false, false, false);
     // Unicode characters should count as 1 character each
     let content = "你好世界这是测试文字超过限制"; // 14 characters
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 1);
@@ -298,7 +298,7 @@ fn test_character_vs_byte_counting() {
 #[test]
 fn test_empty_content() {
     let rule = MD013LineLength::default();
-    let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 0);
@@ -308,7 +308,7 @@ fn test_empty_content() {
 fn test_excess_range_calculation() {
     let rule = MD013LineLength::new(10, false, false, false, false);
     let content = "12345678901234567890"; // 20 chars, limit is 10
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert_eq!(result.len(), 1);
@@ -321,7 +321,7 @@ fn test_excess_range_calculation() {
 fn test_html_block_exemption() {
     let rule = MD013LineLength::new(30, false, false, false, false);
     let content = "<div>\nThis is a very long line inside an HTML block that should be ignored.\n</div>";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // HTML blocks should be exempt
@@ -345,7 +345,7 @@ Code block line that is very long but exempt.
 
 Another long line that should trigger a warning."#;
 
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have warnings for the two regular paragraph lines only
@@ -358,7 +358,7 @@ Another long line that should trigger a warning."#;
 fn test_fix_without_reflow_preserves_content() {
     let rule = MD013LineLength::new(50, false, false, false, false);
     let content = "Line 1\nThis line has trailing spaces and is too long      \nLine 3";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     // Without reflow, content is unchanged
     let fixed = rule.fix(&ctx).unwrap();
@@ -371,10 +371,10 @@ fn test_content_detection() {
 
     // Use a line longer than default line_length (80) to ensure it's not skipped
     let long_line = "a".repeat(100);
-    let ctx = LintContext::new(&long_line, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(&long_line, crate::config::MarkdownFlavor::Standard, None);
     assert!(!rule.should_skip(&ctx)); // Should not skip processing when there's long content
 
-    let empty_ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard);
+    let empty_ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard, None);
     assert!(rule.should_skip(&empty_ctx)); // Should skip processing when content is empty
 }
 
@@ -392,7 +392,7 @@ fn test_url_embedded_in_text() {
 
     // This line would be 85 chars, but only ~45 without the URL
     let content = "Check the docs at https://example.com/very/long/url/that/exceeds/limit for info";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag because effective length (with URL placeholder) is under 50
@@ -405,7 +405,7 @@ fn test_multiple_urls_in_line() {
 
     // Line with multiple URLs
     let content = "See https://first-url.com/long and https://second-url.com/also/very/long here";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let result = rule.check(&ctx).unwrap();
 
@@ -419,7 +419,7 @@ fn test_markdown_link_with_long_url() {
 
     // Markdown link with very long URL
     let content = "Check the [documentation](https://example.com/very/long/path/to/documentation/page) for details";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag because effective length counts link as short
@@ -432,7 +432,7 @@ fn test_line_too_long_even_without_urls() {
 
     // Line that's too long even after URL exclusion
     let content = "This is a very long line with lots of text and https://url.com that still exceeds the limit";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should flag because even with URL placeholder, line is too long
@@ -445,7 +445,7 @@ fn test_strict_mode_counts_urls() {
 
     // Same line that passes in non-strict mode
     let content = "Check the docs at https://example.com/very/long/url/that/exceeds/limit for info";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // In strict mode, should flag because full URL is counted
@@ -458,7 +458,7 @@ fn test_documentation_example_from_md051() {
 
     // This is the actual line from md051.md that was causing issues
     let content = r#"For more information, see the [CommonMark specification](https://spec.commonmark.org/0.30/#link-reference-definitions)."#;
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not flag because the URL is in a markdown link
@@ -475,7 +475,7 @@ fn test_text_reflow_simple() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is a very long line that definitely exceeds thirty characters and needs to be wrapped.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -505,7 +505,7 @@ fn test_text_reflow_preserves_markdown_elements() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This paragraph has **bold text** and *italic text* and [a link](https://example.com) that should be preserved.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -540,7 +540,7 @@ return "This should not be wrapped"
 ```
 
 More text after code block."#;
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -569,7 +569,7 @@ And a bullet list:
 
 - Bullet item with very long content that needs wrapping
 - Short bullet"#;
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -618,7 +618,7 @@ fn test_issue_83_numbered_list_with_backticks() {
 
     // The exact case from issue #83
     let content = "1. List `manifest` to find the manifest with the largest ID. Say it's `00000000000000000002.manifest` in this example.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -637,7 +637,7 @@ fn test_text_reflow_disabled_by_default() {
     let rule = MD013LineLength::new(30, false, false, false, false);
 
     let content = "This is a very long line that definitely exceeds thirty characters.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -658,7 +658,7 @@ fn test_reflow_with_hard_line_breaks() {
 
     // Test with exactly 2 spaces (hard line break)
     let content = "This line has a hard break at the end  \nAnd this continues on the next line that is also quite long and needs wrapping";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Should preserve the hard line break (2 spaces)
@@ -681,7 +681,7 @@ fn test_reflow_preserves_reference_links() {
         "This is a very long line with a [reference link][ref] that should not be broken apart when reflowing the text.
 
 [ref]: https://example.com";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Reference link should remain intact
@@ -700,7 +700,7 @@ fn test_reflow_with_nested_markdown_elements() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This text has **bold with `code` inside** and should handle it properly when wrapping";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Nested elements should be preserved
@@ -718,7 +718,7 @@ fn test_reflow_with_unbalanced_markdown() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This has **unbalanced bold that goes on for a very long time without closing";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Should handle gracefully without panic
@@ -742,7 +742,7 @@ fn test_reflow_fix_indicator() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is a very long line that definitely exceeds the thirty character limit";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should have a fix indicator when reflow is true
@@ -764,7 +764,7 @@ fn test_no_fix_indicator_without_reflow() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is a very long line that definitely exceeds the thirty character limit";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should NOT have a fix indicator when reflow is false
@@ -787,7 +787,7 @@ fn test_reflow_preserves_all_reference_link_types() {
 [collapsed]: https://example.com
 [shortcut]: https://example.com";
 
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // All reference link types should be preserved
@@ -807,7 +807,7 @@ fn test_reflow_handles_images_correctly() {
 
     let content =
         "This line has an ![image alt text](https://example.com/image.png) that should not be broken when reflowing.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Image should remain intact
@@ -826,7 +826,7 @@ fn test_normalize_mode_flags_short_lines() {
 
     // Content with short lines that could be combined
     let content = "This is a short line.\nAnother short line.\nA third short line that could be combined.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should flag the paragraph as needing normalization
@@ -847,7 +847,7 @@ fn test_normalize_mode_combines_short_lines() {
     // Content with short lines that should be combined
     let content =
         "This is a line with\nmanual line breaks at\n80 characters that should\nbe combined into longer lines.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Should combine into a single line since it's under 100 chars total
@@ -867,7 +867,7 @@ fn test_normalize_mode_preserves_paragraph_breaks() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "First paragraph with\nshort lines.\n\nSecond paragraph with\nshort lines too.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Should preserve paragraph breaks (empty lines)
@@ -889,7 +889,7 @@ fn test_default_mode_only_fixes_violations() {
 
     // Content with short lines that are NOT violations
     let content = "This is a short line.\nAnother short line.\nA third short line.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should NOT flag anything in default mode
@@ -916,7 +916,7 @@ short lines.
 1. List item with
    short lines
 2. Another item"#;
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Should normalize the paragraph but preserve list structure
@@ -946,7 +946,7 @@ even with short lines
 
 Another paragraph with
 short lines."#;
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Code block should be preserved as-is
@@ -970,7 +970,7 @@ fn test_issue_76_use_case() {
     // Content with manual line breaks at 80 characters (typical markdown)
     let content = "We've decided to eliminate line-breaks in paragraphs. The obvious solution is\nto disable MD013, and call it good. However, that doesn't deal with the\nexisting content's line-breaks. My initial thought was to set line_length to\n999999 and enable_reflow, but realised after doing so, that it never triggers\nthe error, so nothing happens.";
 
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     // Should flag for normalization even though no lines exceed limit
     let warnings = rule.check(&ctx).unwrap();
@@ -995,7 +995,7 @@ fn test_normalize_mode_single_line_unchanged() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is a single line that should not be changed.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert!(warnings.is_empty(), "Single line should not be flagged");
@@ -1016,7 +1016,7 @@ fn test_normalize_mode_with_inline_code() {
 
     let content =
         "This paragraph has `inline code` and\nshould still be normalized properly\nwithout breaking the code.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert!(!warnings.is_empty(), "Multi-line paragraph should be flagged");
@@ -1037,7 +1037,7 @@ fn test_normalize_mode_with_emphasis() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This has **bold** and\n*italic* text that\nshould be preserved.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("**bold**"), "Bold should be preserved");
@@ -1057,7 +1057,7 @@ fn test_normalize_mode_respects_hard_breaks() {
 
     // Two spaces at end of line = hard break
     let content = "First line with hard break  \nSecond line after break\nThird line";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     // Hard break should be preserved
@@ -1080,7 +1080,7 @@ fn test_normalize_mode_with_links() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This has a [link](https://example.com) that\nshould be preserved when\nnormalizing the paragraph.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(
@@ -1101,7 +1101,7 @@ fn test_normalize_mode_empty_lines_between_paragraphs() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "First paragraph\nwith multiple lines.\n\n\nSecond paragraph\nwith multiple lines.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     // Multiple empty lines should be preserved
@@ -1136,7 +1136,7 @@ with multiple lines.
 Paragraph after list
 with multiple lines."#;
 
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Lists should be preserved
@@ -1167,7 +1167,7 @@ fn test_normalize_mode_with_horizontal_rules() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "Paragraph before\nhorizontal rule.\n\n---\n\nParagraph after\nhorizontal rule.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("---"), "Horizontal rule should be preserved");
@@ -1192,7 +1192,7 @@ fn test_normalize_mode_with_indented_code() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "Paragraph before\nindented code.\n\n    This is indented code\n    Should not be normalized\n\nParagraph after\nindented code.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(
@@ -1221,7 +1221,7 @@ fn test_normalize_mode_disabled_without_reflow() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is a line\nwith breaks that\nshould not be changed.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert!(warnings.is_empty(), "Should not flag when reflow is disabled");
@@ -1243,7 +1243,7 @@ fn test_default_mode_with_long_lines() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "Short line.\nThis is a very long line that definitely exceeds the fifty character limit and needs wrapping.\nAnother short line.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1, "Should flag the paragraph with long line");
@@ -1265,7 +1265,7 @@ fn test_default_mode_with_long_lines() {
 #[test]
 fn test_normalize_vs_default_mode_same_content() {
     let content = "This is a paragraph\nwith multiple lines\nthat could be combined.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     // Test default mode
     let default_config = MD013Config {
@@ -1322,7 +1322,7 @@ fn test_normalize_mode_with_reference_definitions() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This paragraph uses\na reference [link][ref]\nacross multiple lines.\n\n[ref]: https://example.com";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("[link][ref]"), "Reference link should be preserved");
@@ -1347,7 +1347,7 @@ fn test_normalize_mode_with_html_comments() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "Paragraph before\nHTML comment.\n\n<!-- This is a comment -->\n\nParagraph after\nHTML comment.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(
@@ -1376,7 +1376,7 @@ fn test_normalize_mode_line_starting_with_number() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This line mentions\n80 characters which\nshould not break the paragraph.";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed.lines().count(), 1, "Should be combined into single line");
@@ -1405,7 +1405,7 @@ fn test_default_mode_preserves_list_structure() {
    multiple lines that should
    also stay separate"#;
 
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // In default mode, the structure should be preserved
@@ -1444,7 +1444,7 @@ fn test_normalize_mode_multi_line_list_items_no_extra_spaces() {
    to be properly combined
 2. Second item"#;
 
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     // Check that there are no extra spaces in the combined list items
@@ -1480,7 +1480,7 @@ fn test_normalize_mode_actual_numbered_list() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "Paragraph before list\nwith multiple lines.\n\n1. First item\n2. Second item\n10. Tenth item";
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("1. First item"), "Numbered list 1 should be preserved");
@@ -1503,7 +1503,7 @@ fn test_sentence_per_line_detection() {
 
     // Test detection of multiple sentences
     let content = "This is sentence one. This is sentence two. And sentence three!";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     // Debug: check if should_skip returns false
     assert!(!rule.should_skip(&ctx), "Should not skip for sentence-per-line mode");
@@ -1527,7 +1527,7 @@ fn test_sentence_per_line_fix() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "First sentence. Second sentence.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(!result.is_empty(), "Should detect violation");
@@ -1548,7 +1548,7 @@ fn test_sentence_per_line_abbreviations() {
 
     // Should NOT trigger on abbreviations
     let content = "Mr. Smith met Dr. Jones at 3:00 PM.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(
@@ -1567,7 +1567,7 @@ fn test_sentence_per_line_with_markdown() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "# Heading\n\nSentence with **bold**. Another with [link](url).";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(!result.is_empty(), "Should detect multiple sentences with markdown");
@@ -1584,7 +1584,7 @@ fn test_sentence_per_line_questions_exclamations() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "Is this a question? Yes it is! And a statement.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(!result.is_empty(), "Should detect sentences with ? and !");
@@ -1607,7 +1607,7 @@ fn test_sentence_per_line_in_lists() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "- List item one. With two sentences.\n- Another item.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(!result.is_empty(), "Should detect sentences in list items");
@@ -1627,7 +1627,7 @@ fn test_multi_paragraph_list_item_with_3_space_indent() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "1. First paragraph\n   continuation line.\n\n   Second paragraph\n   more content.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(!result.is_empty(), "Should detect multi-line paragraphs in list item");
@@ -1653,7 +1653,7 @@ fn test_multi_paragraph_list_item_with_4_space_indent() {
 
     // User's example from issue #76 - uses 4 spaces for continuation
     let content = "1. It **generated an application template**. There's a lot of files and\n    configurations required to build a native installer, above and\n    beyond the code of your actual application.\n\n    If you're not happy with the template provided by Briefcase, you can\n    provide your own.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(
@@ -1686,7 +1686,7 @@ fn test_multi_paragraph_bullet_list_item() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "- First paragraph\n  continuation.\n\n  Second paragraph\n  more text.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(!result.is_empty(), "Should detect multi-line paragraphs in bullet list");
@@ -1712,7 +1712,7 @@ fn test_code_block_in_list_item_five_spaces() {
     // 5 spaces = code block indentation (marker_len=3 + 4 = 7, but we have 5 which is marker_len+2, still valid continuation but >= marker_len+4 would be code)
     // For "1. " marker (3 chars), 3+4=7 spaces would be code block
     let content = "1. First paragraph with some text that should be reflowed.\n\n       code_block()\n       more_code()\n\n   Second paragraph.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     if !result.is_empty() {
@@ -1742,7 +1742,7 @@ fn test_fenced_code_block_in_list_item() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "1. First paragraph with some text.\n\n   ```rust\n   fn foo() {}\n   let x = 1;\n   ```\n\n   Second paragraph.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     if !result.is_empty() {
@@ -1778,7 +1778,7 @@ fn test_mixed_indentation_3_and_4_spaces() {
 
     // First continuation has 3 spaces, second has 4 - both should be accepted
     let content = "1. Text\n   3 space continuation\n    4 space continuation";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     assert!(!result.is_empty(), "Should detect multi-line list item");
@@ -1807,7 +1807,7 @@ fn test_nested_list_in_multi_paragraph_item() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "1. First paragraph.\n\n   - Nested item\n     continuation\n\n   Second paragraph.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Nested lists at continuation indent should be INCLUDED in parent item
@@ -1839,7 +1839,7 @@ fn test_nested_fence_markers_different_types() {
 
     // Nested fences with different markers (backticks inside tildes)
     let content = "1. Example with nested fences:\n\n   ~~~markdown\n   This shows ```python\n   code = True\n   ```\n   ~~~\n\n   Text after.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     if !result.is_empty() {
@@ -1877,7 +1877,7 @@ fn test_nested_fence_markers_same_type() {
     // Nested backticks - inner must have different length or won't work
     let content =
         "1. Example:\n\n   ````markdown\n   Shows ```python in code\n   ```\n   text here\n   ````\n\n   After.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     if !result.is_empty() {
@@ -1913,7 +1913,7 @@ fn test_sibling_list_item_breaks_parent() {
 
     // Sibling list item (at indent 0, before parent marker at 3)
     let content = "1. First item\n   continuation.\n2. Second item";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should process first item only, second item breaks it
@@ -1938,7 +1938,7 @@ fn test_nested_list_at_continuation_indent_preserved() {
 
     // Nested list at exactly continuation indent (3 spaces for "1. ")
     let content = "1. Parent paragraph\n   with continuation.\n\n   - Nested at 3 spaces\n   - Another nested\n\n   After nested.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     if !result.is_empty() {
@@ -1981,7 +1981,7 @@ fn test_paragraphs_false_skips_regular_text() {
 
     let content =
         "This is a very long line of regular text that exceeds fifty characters and should not trigger a warning.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should not report any warnings when paragraphs=false
@@ -2012,7 +2012,7 @@ fn test_paragraphs_false_still_checks_code_blocks() {
     let content = r#"```
 This is a very long line in a code block that exceeds fifty characters.
 ```"#;
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // SHOULD report warnings for code blocks even when paragraphs=false
@@ -2041,7 +2041,7 @@ fn test_paragraphs_false_still_checks_headings() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "# This is a very long heading that exceeds fifty characters and should trigger a warning";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // SHOULD report warnings for headings even when paragraphs=false
@@ -2070,7 +2070,7 @@ fn test_paragraphs_false_with_reflow_sentence_per_line() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is a very long sentence that exceeds eighty characters and contains important information that should not be flagged.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT warn when paragraphs=false
@@ -2099,7 +2099,7 @@ fn test_paragraphs_true_checks_regular_text() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is a very long line of regular text that exceeds fifty characters.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // SHOULD report warnings when paragraphs=true
@@ -2128,7 +2128,7 @@ fn test_line_length_zero_disables_all_checks() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is a very very very very very very very very very very very very very very very very very very very very very very very very long line that would normally trigger MD013.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT warn when line_length = 0
@@ -2157,7 +2157,7 @@ fn test_line_length_zero_with_headings() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "# This is a very very very very very very very very very very very very very very very very very very very very very long heading";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT warn when line_length = 0
@@ -2186,7 +2186,7 @@ fn test_line_length_zero_with_code_blocks() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "```\nThis is a very very very very very very very very very very very very very very very very very very very very very long code line\n```";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should NOT warn when line_length = 0
@@ -2215,7 +2215,7 @@ fn test_line_length_zero_with_sentence_per_line_reflow() {
     let rule = MD013LineLength::from_config_struct(config);
 
     let content = "This is sentence one. This is sentence two. This is sentence three.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
     // Should have warnings with fixes (reflow enabled)
@@ -2256,7 +2256,7 @@ More text in the tab.
 Final paragraph.
 "#;
 
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         code_blocks: true,

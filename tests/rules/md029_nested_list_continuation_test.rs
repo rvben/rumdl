@@ -19,7 +19,7 @@ fn test_md029_nested_bullets_continue_list() {
 
 4. Fourth item"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should NOT report any MD029 errors - nested bullets are properly indented continuation
@@ -52,7 +52,7 @@ fn test_md029_nested_bullets_with_code_block() {
 
 4. Final step"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should NOT report any MD029 errors - all content is properly indented
@@ -75,7 +75,7 @@ fn test_md029_under_indented_bullets_break_list() {
 
 3. Third item"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should report MD029 error - under-indented bullet breaks list continuity
@@ -101,7 +101,7 @@ fn test_md029_nested_ordered_list_continues() {
 
 3. Third item"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors for parent list
@@ -143,7 +143,7 @@ fn test_md029_complex_continuation_content() {
 
 4. Fourth item"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should NOT report any MD029 errors - all content properly indented
@@ -166,7 +166,7 @@ Unindented paragraph breaks the list.
 
 3. Third item"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should report MD029 error - unindented text breaks continuity
@@ -191,7 +191,7 @@ fn test_md029_wider_marker_with_nested_list() {
 
 11. This item continues"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should report 2 errors:
@@ -219,7 +219,7 @@ fn test_md029_wider_marker_with_under_indented_bullet() {
 
 11. This item continues"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should report 2 errors:
@@ -250,7 +250,7 @@ fn test_md029_multiple_nested_levels() {
 
 3. Third item"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Should NOT report MD029 errors - all nesting properly indented
@@ -274,7 +274,7 @@ fn test_md029_fix_renumbers_correctly_after_nested_content() {
 
 2. Wrong number (should be 4)"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     assert_eq!(warnings.len(), 2, "Should detect 2 numbering errors");
@@ -305,7 +305,7 @@ fn test_md029_commonmark_example_248() {
 
 3. Third item"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Indented code (4+ spaces from margin = 7+ from "2. ") continues list
@@ -330,7 +330,7 @@ Lazy continuation (not indented)
 
 3. Item three"#;
 
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
     // Lazy continuation should NOT break list - pulldown-cmark correctly parses it as one list

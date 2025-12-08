@@ -238,7 +238,7 @@ mod tests {
         ];
 
         for case in valid_cases {
-            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
             let result = rule.check(&ctx).unwrap();
             assert!(
                 result.is_empty(),
@@ -263,7 +263,7 @@ mod tests {
             "Empty code span `` is technically valid",
         ];
         for case in valid_cases {
-            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
             let result = rule.check(&ctx).unwrap();
             assert!(result.is_empty(), "Valid case should not have warnings: {case}");
         }
@@ -287,7 +287,7 @@ mod tests {
             "This is ` code ` with both leading and trailing space.",
         ];
         for case in invalid_cases {
-            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard);
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
             let result = rule.check(&ctx).unwrap();
             assert!(!result.is_empty(), "Invalid case should have warnings: {case}");
         }
@@ -312,7 +312,7 @@ mod tests {
             ),
         ];
         for (input, expected) in test_cases {
-            let ctx = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard);
+            let ctx = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
             let result = rule.fix(&ctx).unwrap();
             assert_eq!(result, expected, "Fix did not produce expected output for: {input}");
         }
@@ -322,7 +322,7 @@ mod tests {
     fn test_check_invalid_leading_space() {
         let rule = MD038NoSpaceInCode::new();
         let input = "This has a ` leading space` in code";
-        let ctx = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn test_code_span_parsing_nested_backticks() {
         let content = "Code with ` nested `code` example ` should preserve backticks";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         println!("Content: {content}");
         println!("Code spans found:");
@@ -354,7 +354,7 @@ mod tests {
 
         // Test that code spans with backticks are skipped
         let content = "Code with `` `backticks` inside `` should not be flagged";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Code spans with backticks should be skipped");
     }
@@ -369,7 +369,7 @@ mod tests {
         let content = r#"The result is `r nchar("test")` which equals 4."#;
 
         // Quarto flavor should allow R code
-        let ctx_quarto = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Quarto);
+        let ctx_quarto = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
         let result_quarto = rule.check(&ctx_quarto).unwrap();
         assert!(
             result_quarto.is_empty(),
@@ -379,7 +379,8 @@ mod tests {
 
         // Test that other code with spaces still gets flagged in Quarto
         let content_other = "This has ` plain text ` with spaces.";
-        let ctx_other = crate::lint_context::LintContext::new(content_other, crate::config::MarkdownFlavor::Quarto);
+        let ctx_other =
+            crate::lint_context::LintContext::new(content_other, crate::config::MarkdownFlavor::Quarto, None);
         let result_other = rule.check(&ctx_other).unwrap();
         assert_eq!(
             result_other.len(),
@@ -397,25 +398,25 @@ mod tests {
 
         // Greek text with code spans
         let greek = "- Χρήσιμα εργαλεία της γραμμής εντολών είναι τα `ping`,` ipconfig`, `traceroute` και `netstat`.";
-        let ctx = crate::lint_context::LintContext::new(greek, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(greek, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Greek text should not panic");
 
         // Chinese text with code spans
         let chinese = "- 當你需要對文字檔案做集合交、並、差運算時，`sort`/`uniq` 很有幫助。";
-        let ctx = crate::lint_context::LintContext::new(chinese, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(chinese, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Chinese text should not panic");
 
         // Cyrillic/Ukrainian text with code spans
         let cyrillic = "- Основи роботи з файлами: `ls` і `ls -l`, `less`, `head`,` tail` і `tail -f`.";
-        let ctx = crate::lint_context::LintContext::new(cyrillic, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(cyrillic, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Cyrillic text should not panic");
 
         // Mixed multi-byte with multiple code spans on same line
         let mixed = "使用 `git` 命令和 `npm` 工具来管理项目，可以用 `docker` 容器化。";
-        let ctx = crate::lint_context::LintContext::new(mixed, crate::config::MarkdownFlavor::Standard);
+        let ctx = crate::lint_context::LintContext::new(mixed, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
         assert!(
             result.is_ok(),
