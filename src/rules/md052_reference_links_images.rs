@@ -95,10 +95,17 @@ impl MD052ReferenceLinkImages {
     ///
     /// These are deterministic patterns from markdown extensions or code examples,
     /// not heuristics. Returns true for:
+    /// - User-configured names via `ignore` config option
     /// - Markdown extensions: [^footnote], [@citation], [!alert], [TOC]
     /// - Programming syntax: [T], [null], [i32], ["string"]
     /// - Descriptive text: [default: value], [0-9]
-    fn is_known_non_reference_pattern(text: &str) -> bool {
+    fn is_known_non_reference_pattern(&self, text: &str) -> bool {
+        // Check user-configured ignore list first (case-insensitive match)
+        // Reference IDs are normalized to lowercase during parsing,
+        // so we use case-insensitive comparison for user convenience
+        if self.config.ignore.iter().any(|p| p.eq_ignore_ascii_case(text)) {
+            return true;
+        }
         // Skip numeric patterns (array indices, ranges)
         if text.chars().all(|c| c.is_ascii_digit()) {
             return true;
@@ -413,7 +420,7 @@ impl MD052ReferenceLinkImages {
                 let reference_lower = ref_id.to_lowercase();
 
                 // Skip known non-reference patterns (markdown extensions, code examples)
-                if Self::is_known_non_reference_pattern(ref_id) {
+                if self.is_known_non_reference_pattern(ref_id) {
                     continue;
                 }
 
@@ -508,7 +515,7 @@ impl MD052ReferenceLinkImages {
                 let reference_lower = ref_id.to_lowercase();
 
                 // Skip known non-reference patterns (markdown extensions, code examples)
-                if Self::is_known_non_reference_pattern(ref_id) {
+                if self.is_known_non_reference_pattern(ref_id) {
                     continue;
                 }
 
@@ -715,7 +722,7 @@ impl MD052ReferenceLinkImages {
                         let reference_lower = reference.to_lowercase();
 
                         // Skip known non-reference patterns (markdown extensions, code examples)
-                        if Self::is_known_non_reference_pattern(reference) {
+                        if self.is_known_non_reference_pattern(reference) {
                             continue;
                         }
 
@@ -1037,7 +1044,10 @@ mod tests {
     fn test_shortcut_reference_undefined_with_shortcut_syntax_enabled() {
         // Shortcut syntax checking is disabled by default
         // Enable it to test undefined shortcut references
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
         let content = "[undefined]";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1102,7 +1112,10 @@ mod tests {
     #[test]
     fn test_comprehensive_inline_code_detection() {
         // Enable shortcut_syntax to test comprehensive detection
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
         let content = r#"# Test
 
 This `[inside]` should be ignored.
@@ -1199,7 +1212,10 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     #[test]
     fn test_output_example_section_ignored() {
         // Enable shortcut_syntax to test example section handling
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
         let content = "## Output\n\n[undefined]\n\n## Normal Section\n\n[missing]";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1281,7 +1297,10 @@ Want to fill out this form?
     #[test]
     fn test_inline_code_not_flagged() {
         // Enable shortcut_syntax to test inline code detection
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
 
         // Test that arrays in inline code are not flagged as references
         let content = r#"# Test
@@ -1306,7 +1325,10 @@ And this `[inline code]` should not be flagged.
     #[test]
     fn test_code_block_references_ignored() {
         // Enable shortcut_syntax to test code block handling
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
 
         let content = r#"# Test
 
@@ -1389,7 +1411,10 @@ Valid [link][ref]
     fn test_frontmatter_ignored() {
         // Test for issue #24 - MD052 should not flag content inside frontmatter
         // Enable shortcut_syntax to test frontmatter handling
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
 
         // Test YAML frontmatter with arrays and references
         let content = r#"---
@@ -1444,7 +1469,10 @@ tags = ["example", "test"]
     fn test_mkdocs_snippet_markers_not_flagged() {
         // Test for issue #68 - MkDocs snippet selection markers should not be flagged as undefined references
         // Enable shortcut_syntax to test snippet marker handling
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
 
         // Test snippet section markers
         let content = r#"# Document with MkDocs Snippets
@@ -1512,7 +1540,10 @@ Regular [undefined] reference outside snippet markers."#;
     fn test_pandoc_citations_not_flagged() {
         // Test that Pandoc/RMarkdown/Quarto citation syntax is not flagged
         // Enable shortcut_syntax to test citation handling
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
 
         let content = r#"# Research Paper
 
@@ -1539,7 +1570,10 @@ Regular [undefined] reference should still be flagged.
     fn test_pandoc_inline_footnotes_not_flagged() {
         // Test that Pandoc inline footnote syntax is not flagged
         // Enable shortcut_syntax to test inline footnote handling
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
 
         let content = r#"# Math Document
 
@@ -1565,7 +1599,10 @@ But this [reference] without ^ should be flagged.
     fn test_github_alerts_not_flagged() {
         // Test for issue #60 - GitHub alerts should not be flagged as undefined references
         // Enable shortcut_syntax to test GitHub alert handling
-        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config { shortcut_syntax: true });
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
 
         // Test various GitHub alert types
         let content = r#"# Document with GitHub Alerts
@@ -1623,5 +1660,128 @@ Regular content with [undefined] reference."#;
 
         // Should not flag anything - [!NOTE] is GitHub alert and [reference] is defined
         assert_eq!(result.len(), 0, "Should not flag GitHub alerts or defined references");
+    }
+
+    #[test]
+    fn test_ignore_config() {
+        // Test that user-configured ignore list is respected
+        let config = MD052Config {
+            shortcut_syntax: true,
+            ignore: vec!["Vec".to_string(), "HashMap".to_string(), "Option".to_string()],
+        };
+        let rule = MD052ReferenceLinkImages::from_config_struct(config);
+
+        let content = r#"# Document with Custom Types
+
+Use [Vec] for dynamic arrays.
+Use [HashMap] for key-value storage.
+Use [Option] for nullable values.
+Use [Result] for error handling.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag [Result] because it's not in ignore
+        assert_eq!(result.len(), 1, "Should only flag names not in ignore");
+        assert!(result[0].message.contains("Result"));
+    }
+
+    #[test]
+    fn test_ignore_case_insensitive() {
+        // Test that ignore list is case-insensitive
+        let config = MD052Config {
+            shortcut_syntax: true,
+            ignore: vec!["Vec".to_string()],
+        };
+        let rule = MD052ReferenceLinkImages::from_config_struct(config);
+
+        let content = r#"# Case Insensitivity Test
+
+[Vec] should be ignored.
+[vec] should also be ignored (different case, same match).
+[VEC] should also be ignored (different case, same match).
+[undefined] should be flagged (not in ignore list).
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag [undefined] because ignore is case-insensitive
+        assert_eq!(result.len(), 1, "Should only flag non-ignored reference");
+        assert!(result[0].message.contains("undefined"));
+    }
+
+    #[test]
+    fn test_ignore_empty_by_default() {
+        // Test that empty ignore list doesn't affect existing behavior
+        let rule = MD052ReferenceLinkImages::new();
+
+        let content = "[text][undefined]";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should still flag undefined references
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("undefined"));
+    }
+
+    #[test]
+    fn test_ignore_with_reference_links() {
+        // Test ignore list with full reference link syntax [text][ref]
+        let config = MD052Config {
+            shortcut_syntax: false,
+            ignore: vec!["CustomType".to_string()],
+        };
+        let rule = MD052ReferenceLinkImages::from_config_struct(config);
+
+        let content = r#"# Test
+
+See [documentation][CustomType] for details.
+See [other docs][MissingRef] for more.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Debug: print warnings if test fails
+        for (i, w) in result.iter().enumerate() {
+            eprintln!("Warning {}: {}", i, w.message);
+        }
+
+        // Should flag [MissingRef] but not [CustomType]
+        // Note: reference IDs are lowercased in the message
+        assert_eq!(result.len(), 1, "Expected 1 warning, got {}", result.len());
+        assert!(
+            result[0].message.contains("missingref"),
+            "Expected 'missingref' in message: {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_ignore_multiple() {
+        // Test multiple ignored names work correctly
+        let config = MD052Config {
+            shortcut_syntax: true,
+            ignore: vec![
+                "i32".to_string(),
+                "u64".to_string(),
+                "String".to_string(),
+                "Arc".to_string(),
+                "Mutex".to_string(),
+            ],
+        };
+        let rule = MD052ReferenceLinkImages::from_config_struct(config);
+
+        let content = r#"# Types
+
+[i32] [u64] [String] [Arc] [Mutex] [Box]
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Note: i32 and u64 are already in the hardcoded list, so they'd be skipped anyway
+        // String is NOT in the hardcoded list, so we test that the user config works
+        // [Box] should be flagged (not in ignore)
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Box"));
     }
 }

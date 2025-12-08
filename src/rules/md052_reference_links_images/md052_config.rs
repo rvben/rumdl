@@ -23,6 +23,23 @@ pub struct MD052Config {
         alias = "shortcutSyntax"
     )]
     pub shortcut_syntax: bool,
+
+    /// Additional reference names to ignore when checking for undefined references.
+    ///
+    /// Default: [] (empty)
+    ///
+    /// Use this to specify project-specific type names, identifiers, or other
+    /// bracketed text that should not be flagged as undefined references.
+    ///
+    /// Example:
+    /// ```toml
+    /// [MD052]
+    /// ignore = ["Vec", "HashMap", "Option", "Result"]
+    /// ```
+    ///
+    /// This performs case-insensitive matching (e.g., "Vec" matches `[vec]`, `[Vec]`, `[VEC]`).
+    #[serde(default)]
+    pub ignore: Vec<String>,
 }
 
 impl RuleConfig for MD052Config {
