@@ -382,8 +382,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: rvben/rumdl@main
+      - uses: rvben/rumdl@v0
 ```
+
+The `v0` tag always points to the latest stable release, following GitHub Actions conventions.
 
 #### Inputs
 
@@ -399,7 +401,7 @@ jobs:
 **Lint specific directory with pinned version:**
 
 ```yaml
-- uses: rvben/rumdl@main
+- uses: rvben/rumdl@v0
   with:
     version: "0.0.189"
     path: docs/
@@ -408,7 +410,7 @@ jobs:
 **Use custom config and show annotations in PR:**
 
 ```yaml
-- uses: rvben/rumdl@main
+- uses: rvben/rumdl@v0
   with:
     config: .rumdl.toml
     report-type: annotations

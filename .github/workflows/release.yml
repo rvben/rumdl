@@ -452,6 +452,32 @@ jobs:
           echo "- Archives:"
           find artifacts/release-* \( -name "*.tar.gz*" -o -name "*.zip*" \) -type f 2>/dev/null | sort
 
+      - name: Update major version tag
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          # Extract major version (e.g., v0 from v0.0.191)
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          MAJOR_VERSION=$(echo "$TAG_NAME" | sed 's/\(v[0-9]*\).*/\1/')
+
+          echo "Updating $MAJOR_VERSION tag to point to $TAG_NAME"
+
+          # Configure git for tagging
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Force-update the major version tag
+          git tag -fa "$MAJOR_VERSION" -m "Update $MAJOR_VERSION tag to $TAG_NAME"
+          git push origin "$MAJOR_VERSION" --force
+
+          echo "Users can now use: rvben/rumdl@$MAJOR_VERSION"
+
+      - name: Test major version tag update (dry run)
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          MAJOR_VERSION=$(echo "$TAG_NAME" | sed 's/\(v[0-9]*\).*/\1/')
+          echo "DRY RUN: Would update $MAJOR_VERSION tag to point to $TAG_NAME"
+
       - name: Notify rumdl-pre-commit
         if: ${{ success() && inputs.dry_run != true }}
         env:
