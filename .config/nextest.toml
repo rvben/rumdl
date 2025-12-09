@@ -56,7 +56,9 @@ status-level = "fail"
 [profile.dev]
 
 # Skip the slowest tests but include integration tests
-default-filter = 'not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/) and not test(/performance/) and not test(/perf_check/)'
+# Complexity regression tests (perf_regression_issue_148) are excluded because timing-based
+# assertions are inherently flaky under parallel execution - they run in the performance profile
+default-filter = 'not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/) and not test(/performance/) and not test(/perf_check/) and not binary(perf_regression_issue_148)'
 
 # Good parallelization for dev machines
 test-threads = "num-cpus"
@@ -91,8 +93,8 @@ fail-fast = true
 # Performance testing profile - for scheduled/manual runs
 [profile.performance]
 
-# Only run performance, benchmark, and memory tests
-default-filter = 'test(performance) or test(benchmark) or test(deeply_nested) or test(memory)'
+# Only run performance, benchmark, memory, and complexity regression tests
+default-filter = 'test(performance) or test(benchmark) or test(deeply_nested) or test(memory) or test(linear_complexity)'
 
 # Run tests serially to reduce noise
 test-threads = 1

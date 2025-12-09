@@ -3,6 +3,21 @@
 /// Tests that document processing scales linearly O(n) and not quadratically O(n²).
 /// This specifically tests scenarios with many list items and blockquotes that
 /// previously caused LineIndex to be created in hot loops.
+///
+/// ## When These Tests Run
+///
+/// These tests are EXCLUDED from the `dev` and `ci` profiles because timing-based
+/// assertions are inherently flaky under parallel execution. They run in the
+/// `performance` profile which uses serial execution (`test-threads = 1`).
+///
+/// To run these tests manually:
+/// ```sh
+/// cargo nextest run --profile performance --test perf_regression_issue_148
+/// ```
+///
+/// Uses large input sizes (500/1000/2000 entries) to minimize timing noise from
+/// system jitter. With smaller inputs, base times are in microseconds where a
+/// single context switch can cause >6x variance.
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::{MD020NoMissingSpaceClosedAtx, MD027MultipleSpacesBlockquote, rule::Rule};
 use std::time::Instant;
@@ -48,8 +63,11 @@ fn test_md027_linear_complexity() {
     // Test with documents of increasing size
     // If complexity is O(n), doubling size should roughly double time (±50% margin)
     // If complexity is O(n²), doubling size would increase time by 4x
+    //
+    // Using 500/1000/2000 entries to ensure base times are in milliseconds,
+    // reducing impact of system jitter during parallel test execution
 
-    let sizes = [50, 100, 200];
+    let sizes = [500, 1000, 2000];
     let mut durations = Vec::new();
 
     for &size in &sizes {
@@ -72,31 +90,29 @@ fn test_md027_linear_complexity() {
         durations.push(duration);
     }
 
-    // Check that doubling from 50→100 and 100→200 doesn't cause exponential growth
-    // Allow up to 6x growth to account for:
-    // - System variance and cache effects
-    // - Concurrent test execution during pre-push hooks (heavy system load)
-    // - GC pauses and other runtime factors
-    // The old O(n²) bug showed 7x growth, so 6x still catches real regressions
-    // while being robust to environmental conditions
+    // Check that doubling from 500→1000 and 1000→2000 doesn't cause exponential growth
+    // Allow up to 5x growth to account for system variance during parallel test execution
+    // while still catching O(n²) regressions (which would show consistent 4x+ ratios)
+    // In isolation, this test shows ~2-3x ratios; under load, up to ~4.5x is normal
     let ratio_1 = durations[1].as_secs_f64() / durations[0].as_secs_f64();
     let ratio_2 = durations[2].as_secs_f64() / durations[1].as_secs_f64();
 
-    println!("Growth ratios: 50→100: {ratio_1:.2}x, 100→200: {ratio_2:.2}x");
+    println!("Growth ratios: 500→1000: {ratio_1:.2}x, 1000→2000: {ratio_2:.2}x");
 
     assert!(
-        ratio_1 < 6.0,
-        "MD027 should scale roughly linearly: 50→100 entries took {ratio_1:.2}x time (should be < 6x)"
+        ratio_1 < 5.0,
+        "MD027 should scale roughly linearly: 500→1000 entries took {ratio_1:.2}x time (should be < 5x)"
     );
     assert!(
-        ratio_2 < 6.0,
-        "MD027 should scale roughly linearly: 100→200 entries took {ratio_2:.2}x time (should be < 6x)"
+        ratio_2 < 5.0,
+        "MD027 should scale roughly linearly: 1000→2000 entries took {ratio_2:.2}x time (should be < 5x)"
     );
 }
 
 #[test]
 fn test_md020_linear_complexity() {
-    let sizes = [50, 100, 200];
+    // Using 500/1000/2000 entries for stable timing measurements
+    let sizes = [500, 1000, 2000];
     let mut durations = Vec::new();
 
     for &size in &sizes {
@@ -119,19 +135,19 @@ fn test_md020_linear_complexity() {
         durations.push(duration);
     }
 
-    // Same threshold as MD027 test - see comment there for rationale
+    // Same threshold as MD027 test - 5x allows variance while catching O(n²)
     let ratio_1 = durations[1].as_secs_f64() / durations[0].as_secs_f64();
     let ratio_2 = durations[2].as_secs_f64() / durations[1].as_secs_f64();
 
-    println!("Growth ratios: 50→100: {ratio_1:.2}x, 100→200: {ratio_2:.2}x");
+    println!("Growth ratios: 500→1000: {ratio_1:.2}x, 1000→2000: {ratio_2:.2}x");
 
     assert!(
-        ratio_1 < 6.0,
-        "MD020 should scale roughly linearly: 50→100 headings took {ratio_1:.2}x time (should be < 6x)"
+        ratio_1 < 5.0,
+        "MD020 should scale roughly linearly: 500→1000 headings took {ratio_1:.2}x time (should be < 5x)"
     );
     assert!(
-        ratio_2 < 6.0,
-        "MD020 should scale roughly linearly: 100→200 headings took {ratio_2:.2}x time (should be < 6x)"
+        ratio_2 < 5.0,
+        "MD020 should scale roughly linearly: 1000→2000 headings took {ratio_2:.2}x time (should be < 5x)"
     );
 }
 
@@ -164,7 +180,7 @@ fn test_large_document_performance() {
 #[test]
 fn test_combined_rules_performance() {
     // Test that multiple rules don't compound the performance issue
-    let content = generate_list_document(200);
+    let content = generate_list_document(1000);
     let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     let md027 = MD027MultipleSpacesBlockquote;
@@ -176,7 +192,7 @@ fn test_combined_rules_performance() {
     let duration = start.elapsed();
 
     println!(
-        "Combined rules (200 entries): {:?} (MD027: {} warnings, MD020: {} warnings)",
+        "Combined rules (1000 entries): {:?} (MD027: {} warnings, MD020: {} warnings)",
         duration,
         warnings_027.len(),
         warnings_020.len()
@@ -184,7 +200,7 @@ fn test_combined_rules_performance() {
 
     // Should complete quickly since ctx.line_index is shared
     assert!(
-        duration.as_millis() < 500,
-        "Combined rules took {duration:?}, should be < 500ms"
+        duration.as_secs() < 2,
+        "Combined rules took {duration:?}, should be < 2s"
     );
 }
