@@ -681,8 +681,7 @@ fn setup_directory_only_pattern_project() -> (TempDir, PathBuf, PathBuf) {
 
     // Create directory structure
     fs::create_dir(&project).expect("Failed to create project dir");
-    fs::create_dir_all(project.join("content/blog/2014/archived"))
-        .expect("Failed to create 2014 dirs");
+    fs::create_dir_all(project.join("content/blog/2014/archived")).expect("Failed to create 2014 dirs");
     fs::create_dir(project.join("content/blog/2015")).expect("Failed to create 2015 dir");
     fs::create_dir(project.join("content/pages")).expect("Failed to create pages dir");
 
@@ -696,14 +695,11 @@ exclude = ["content/blog/2014"]
     let content = "# Test\n\n\n\n# Another heading\n";
 
     // Files that should be excluded (within content/blog/2014)
-    fs::write(project.join("content/blog/2014/old-post.md"), content)
-        .expect("Failed to write old-post.md");
-    fs::write(project.join("content/blog/2014/archived/deep.md"), content)
-        .expect("Failed to write deep.md");
+    fs::write(project.join("content/blog/2014/old-post.md"), content).expect("Failed to write old-post.md");
+    fs::write(project.join("content/blog/2014/archived/deep.md"), content).expect("Failed to write deep.md");
 
     // Files that should be linted
-    fs::write(project.join("content/blog/2015/new-post.md"), content)
-        .expect("Failed to write new-post.md");
+    fs::write(project.join("content/blog/2015/new-post.md"), content).expect("Failed to write new-post.md");
     fs::write(project.join("content/pages/about.md"), content).expect("Failed to write about.md");
 
     (temp_dir, parent, project)

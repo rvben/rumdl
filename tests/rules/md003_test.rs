@@ -163,16 +163,19 @@ fn test_with_front_matter() {
 }
 
 #[test]
-fn test_yaml_like_content_not_detected_as_headings() {
+fn test_yaml_like_content_detected_as_setext_heading() {
+    // Per CommonMark and markdownlint-cli: `---` in mid-document is a Setext underline,
+    // not frontmatter. This content creates a Setext heading "config: value" with the `---`.
+    // markdownlint-cli flags this as MD003 (heading style mismatch).
     let rule = MD003HeadingStyle::default();
     let content = "# Real Heading\n\n---\nconfig: value\nsetting: another value\n---\n\nMore content.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
+    // The `---` after "setting: another value" creates a Setext h2 heading,
+    // which conflicts with the ATX style used for "# Real Heading"
     assert!(
-        result.is_empty(),
-        "YAML-like content with triple dashes should not be detected as Setext headings, but got {} warnings: {:?}",
-        result.len(),
-        result
+        !result.is_empty(),
+        "Expected warning for Setext heading style mismatch, but got none"
     );
 }
 

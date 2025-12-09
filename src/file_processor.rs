@@ -28,8 +28,8 @@ fn expand_directory_pattern(pattern: &str) -> Vec<String> {
     // Transform to match both the directory and its contents
     let base = pattern.trim_end_matches('/');
     vec![
-        base.to_string(),        // Match the directory itself
-        format!("{base}/**"),    // Match everything underneath
+        base.to_string(),     // Match the directory itself
+        format!("{base}/**"), // Match everything underneath
     ]
 }
 

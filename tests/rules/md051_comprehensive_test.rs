@@ -273,9 +273,12 @@ Valid internal:
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag ambiguous patterns + missing internal = 4 warnings
-    // (3 ambiguous + 1 missing)
-    assert_eq!(result.len(), 4, "Expected 4 warnings for ambiguous + missing");
+    // Should flag ambiguous patterns + missing internal = 3 warnings
+    // - somefile#section: treated as ambiguous, flagged for #section
+    // - file.#section: treated as ambiguous, flagged for #section
+    // - .hidden#section: treated as cross-file (hidden file), NOT flagged
+    // - #missing: missing internal link
+    assert_eq!(result.len(), 3, "Expected 3 warnings (2 ambiguous + 1 missing)");
 
     // Verify one is about missing
     assert!(result.iter().any(|w| w.message.contains("missing")));

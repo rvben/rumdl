@@ -809,21 +809,27 @@ Fragment-only tests:
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag the invalid fragment-only link plus the ambiguous paths without extensions
+    // Should flag:
+    // - `somefile#section` - no extension, treated as fragment-only (ambiguous)
+    // - `#nonexistent` - invalid fragment-only link
+    // NOT flagged:
+    // - `.gitignore#rules` - has extension (hidden dotfile), treated as cross-file link
+    // - `.hidden#section` - hidden file reference, treated as cross-file link
     assert_eq!(
         result.len(),
-        4,
-        "Expected 4 warnings: 1 invalid fragment + 3 ambiguous paths"
+        2,
+        "Expected 2 warnings: 1 ambiguous path + 1 invalid fragment"
     );
 
-    // Check that we get warnings for the ambiguous paths and invalid fragment
+    // Check that we get warnings for the ambiguous path and invalid fragment
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
-    let contains_rules = warning_messages.iter().any(|msg| msg.contains("rules"));
     let contains_section = warning_messages.iter().any(|msg| msg.contains("section"));
     let contains_nonexistent = warning_messages.iter().any(|msg| msg.contains("nonexistent"));
 
-    assert!(contains_rules, "Should warn about #rules fragment");
-    assert!(contains_section, "Should warn about #section fragment");
+    assert!(
+        contains_section,
+        "Should warn about #section fragment from somefile#section"
+    );
     assert!(contains_nonexistent, "Should warn about #nonexistent fragment");
 }
 
@@ -855,11 +861,16 @@ Fragment-only (should be validated):
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag ambiguous paths without extensions plus the invalid fragment
+    // Should flag:
+    // - `somefile#section` - no extension, ambiguous
+    // - `file.#section` - trailing dot, ambiguous (appears twice)
+    // - `#invalid-heading` - invalid fragment-only
+    // NOT flagged:
+    // - `.hidden#section` - hidden file, treated as cross-file link
     assert_eq!(
         result.len(),
-        5,
-        "Expected 5 warnings: 4 ambiguous paths + 1 invalid fragment"
+        4,
+        "Expected 4 warnings: 3 ambiguous paths + 1 invalid fragment"
     );
 
     // Verify we get warnings for the expected fragments
@@ -867,7 +878,7 @@ Fragment-only (should be validated):
     let contains_section = warning_messages.iter().filter(|msg| msg.contains("section")).count();
     let contains_invalid = warning_messages.iter().any(|msg| msg.contains("invalid-heading"));
 
-    assert_eq!(contains_section, 4, "Should have 4 warnings about #section fragment");
+    assert_eq!(contains_section, 3, "Should have 3 warnings about #section fragment");
     assert!(contains_invalid, "Should warn about #invalid-heading fragment");
 }
 
