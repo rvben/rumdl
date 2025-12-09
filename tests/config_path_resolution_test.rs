@@ -647,3 +647,237 @@ exclude = ["ignored.md"]
         "ignored.md should be excluded via pyproject.toml. stdout: {stdout}"
     );
 }
+
+// =============================================================================
+// DIRECTORY-ONLY EXCLUDE PATTERN TESTS
+// =============================================================================
+// These tests verify that exclude patterns WITHOUT glob suffixes (e.g., "content/blog/2014")
+// correctly exclude all files within those directories. This was the key issue from
+// HarHarLinks' comment on issue #185 - patterns like "content/blog/2014" were not
+// matching "content/blog/2014/file.md" because globset only matches exact paths.
+//
+// The fix: expand directory-only patterns to include "/**" suffix.
+
+/// Create a project structure that mimics HarHarLinks' scenario from issue #185:
+/// ```
+/// parent/
+///   project/
+///     .rumdl.toml (with exclude = ["content/blog/2014"])
+///     content/
+///       blog/
+///         2014/
+///           old-post.md (should be excluded)
+///           archived/
+///             deep.md (should also be excluded - nested)
+///         2015/
+///           new-post.md (should be linted)
+///       pages/
+///         about.md (should be linted)
+/// ```
+fn setup_directory_only_pattern_project() -> (TempDir, PathBuf, PathBuf) {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let parent = temp_dir.path().to_path_buf();
+    let project = parent.join("project");
+
+    // Create directory structure
+    fs::create_dir(&project).expect("Failed to create project dir");
+    fs::create_dir_all(project.join("content/blog/2014/archived"))
+        .expect("Failed to create 2014 dirs");
+    fs::create_dir(project.join("content/blog/2015")).expect("Failed to create 2015 dir");
+    fs::create_dir(project.join("content/pages")).expect("Failed to create pages dir");
+
+    // Config with directory-only pattern (NO glob suffix)
+    let config_content = r#"[global]
+exclude = ["content/blog/2014"]
+"#;
+    fs::write(project.join(".rumdl.toml"), config_content).expect("Failed to write config");
+
+    // Content with lint violations (multiple blank lines - MD012)
+    let content = "# Test\n\n\n\n# Another heading\n";
+
+    // Files that should be excluded (within content/blog/2014)
+    fs::write(project.join("content/blog/2014/old-post.md"), content)
+        .expect("Failed to write old-post.md");
+    fs::write(project.join("content/blog/2014/archived/deep.md"), content)
+        .expect("Failed to write deep.md");
+
+    // Files that should be linted
+    fs::write(project.join("content/blog/2015/new-post.md"), content)
+        .expect("Failed to write new-post.md");
+    fs::write(project.join("content/pages/about.md"), content).expect("Failed to write about.md");
+
+    (temp_dir, parent, project)
+}
+
+#[test]
+fn test_directory_only_pattern_excludes_contents() {
+    // Issue #185 (HarHarLinks comment): Pattern "content/blog/2014" should exclude
+    // all files within that directory, not just the exact path
+    let (_temp_dir, _parent, project) = setup_directory_only_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg(".")
+        .arg("--no-cache")
+        .current_dir(&project)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Files in content/blog/2014/ should be excluded (the key fix!)
+    assert!(
+        !stdout.contains("old-post.md"),
+        "content/blog/2014/old-post.md should be excluded. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("deep.md"),
+        "content/blog/2014/archived/deep.md should be excluded. stdout: {stdout}"
+    );
+
+    // Files outside 2014/ should be linted
+    assert!(
+        stdout.contains("new-post.md"),
+        "content/blog/2015/new-post.md should be linted. stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("about.md"),
+        "content/pages/about.md should be linted. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_directory_only_pattern_from_parent_directory() {
+    // Same test but from parent directory (the original #185 scenario)
+    let (_temp_dir, parent, _project) = setup_directory_only_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg("project")
+        .arg("--no-cache")
+        .current_dir(&parent)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Files in content/blog/2014/ should be excluded
+    assert!(
+        !stdout.contains("old-post.md"),
+        "2014/old-post.md should be excluded from parent. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("deep.md"),
+        "2014/archived/deep.md should be excluded from parent. stdout: {stdout}"
+    );
+
+    // Files outside 2014/ should be linted
+    assert!(
+        stdout.contains("new-post.md"),
+        "2015/new-post.md should be linted. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_directory_only_pattern_with_explicit_config() {
+    // Using --config flag should also work with directory-only patterns
+    let (_temp_dir, parent, project) = setup_directory_only_pattern_project();
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg("--config")
+        .arg(project.join(".rumdl.toml").to_str().unwrap())
+        .arg("project")
+        .arg("--no-cache")
+        .current_dir(&parent)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should work the same with explicit --config
+    assert!(
+        !stdout.contains("old-post.md"),
+        "2014/old-post.md should be excluded with explicit config. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_mixed_directory_and_glob_patterns() {
+    // Test combining directory-only patterns with glob patterns
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let project = temp_dir.path().join("project");
+
+    fs::create_dir(&project).expect("Failed to create project dir");
+    fs::create_dir_all(project.join("vendor/lib")).expect("Failed to create vendor dirs");
+    fs::create_dir(project.join("docs")).expect("Failed to create docs dir");
+    fs::create_dir(project.join("generated")).expect("Failed to create generated dir");
+
+    // Mix of directory-only and glob patterns
+    let config = r#"[global]
+exclude = [
+    "vendor",
+    "docs/*.tmp.md",
+    "generated/**"
+]
+"#;
+    fs::write(project.join(".rumdl.toml"), config).expect("Failed to write config");
+
+    let content = "# Test\n\n\n\n# Violation\n";
+
+    // Files under vendor/ (directory-only pattern)
+    fs::write(project.join("vendor/external.md"), content).expect("Failed to write file");
+    fs::write(project.join("vendor/lib/nested.md"), content).expect("Failed to write file");
+
+    // Files under docs/
+    fs::write(project.join("docs/guide.md"), content).expect("Failed to write guide.md");
+    fs::write(project.join("docs/temp.tmp.md"), content).expect("Failed to write temp file");
+
+    // Files under generated/
+    fs::write(project.join("generated/output.md"), content).expect("Failed to write output");
+
+    // Regular file
+    fs::write(project.join("README.md"), content).expect("Failed to write README");
+
+    let output = Command::new(rumdl_binary())
+        .arg("check")
+        .arg(".")
+        .arg("--no-cache")
+        .current_dir(&project)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // vendor/ (directory-only) should exclude all nested files
+    assert!(
+        !stdout.contains("external.md"),
+        "vendor/external.md should be excluded. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("nested.md"),
+        "vendor/lib/nested.md should be excluded. stdout: {stdout}"
+    );
+
+    // docs/*.tmp.md (glob) should only exclude matching files
+    assert!(
+        !stdout.contains("temp.tmp.md"),
+        "docs/temp.tmp.md should be excluded. stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("guide.md"),
+        "docs/guide.md should be linted. stdout: {stdout}"
+    );
+
+    // generated/** should exclude everything
+    assert!(
+        !stdout.contains("output.md"),
+        "generated/output.md should be excluded. stdout: {stdout}"
+    );
+
+    // README.md should be linted
+    assert!(
+        stdout.contains("README.md"),
+        "README.md should be linted. stdout: {stdout}"
+    );
+}

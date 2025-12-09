@@ -13,6 +13,26 @@ use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
 use std::path::Path;
 
+/// Expands directory-style patterns to also match files within them.
+/// Pattern "dir/path" becomes ["dir/path", "dir/path/**"] to match both
+/// the directory itself and all contents recursively.
+///
+/// Patterns containing glob characters (*, ?, [) are returned unchanged.
+fn expand_directory_pattern(pattern: &str) -> Vec<String> {
+    // If pattern already has glob characters, use as-is
+    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        return vec![pattern.to_string()];
+    }
+
+    // Directory-like pattern: no glob chars
+    // Transform to match both the directory and its contents
+    let base = pattern.trim_end_matches('/');
+    vec![
+        base.to_string(),        // Match the directory itself
+        format!("{base}/**"),    // Match everything underneath
+    ]
+}
+
 pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
     // 1. Initialize all available rules using from_config only
     let all_rules: Vec<Box<dyn Rule>> = rumdl_lib::rules::all_rules(config);
@@ -252,6 +272,7 @@ pub fn find_markdown_files(
     };
 
     // Exclude patterns: CLI > Config (but disabled if --no-exclude is set)
+    // Expand directory-only patterns to also match their contents
     let final_exclude_patterns: Vec<String> = if args.no_exclude {
         Vec::new() // Disable all exclusions
     } else if let Some(cli_exclude) = args.exclude.as_deref() {
@@ -259,9 +280,15 @@ pub fn find_markdown_files(
             .split(',')
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty())
+            .flat_map(|p| expand_directory_pattern(&p))
             .collect()
     } else {
-        config.global.exclude.clone()
+        config
+            .global
+            .exclude
+            .iter()
+            .flat_map(|p| expand_directory_pattern(p))
+            .collect()
     };
 
     // Debug: Log exclude patterns
