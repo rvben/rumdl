@@ -1144,6 +1144,60 @@ line-length = 100
     );
 }
 
+#[test]
+fn test_cache_enabled_config() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let temp_path = temp_dir.path();
+
+    // Test with cache = false
+    let config_path = temp_path.join("test_cache_disabled.toml");
+    let config_content = r#"
+[global]
+cache = false
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write test config file");
+
+    let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
+    let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+        .expect("Should load config successfully");
+
+    let config: rumdl_lib::config::Config = sourced.into();
+    assert!(!config.global.cache, "cache should be false when configured as false");
+
+    // Test with cache = true (explicit)
+    let config_path2 = temp_path.join("test_cache_enabled.toml");
+    let config_content2 = r#"
+[global]
+cache = true
+"#;
+
+    fs::write(&config_path2, config_content2).expect("Failed to write test config file");
+
+    let config_path2_str = config_path2.to_str().expect("Path should be valid UTF-8");
+    let sourced2 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path2_str), None, true)
+        .expect("Should load config successfully");
+
+    let config2: rumdl_lib::config::Config = sourced2.into();
+    assert!(config2.global.cache, "cache should be true when configured as true");
+
+    // Test default (no cache specified - should default to true)
+    let config_path3 = temp_path.join("test_no_cache_setting.toml");
+    let config_content3 = r#"
+[global]
+line-length = 100
+"#;
+
+    fs::write(&config_path3, config_content3).expect("Failed to write test config file");
+
+    let config_path3_str = config_path3.to_str().expect("Path should be valid UTF-8");
+    let sourced3 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path3_str), None, true)
+        .expect("Should load config successfully");
+
+    let config3: rumdl_lib::config::Config = sourced3.into();
+    assert!(config3.global.cache, "cache should default to true when not configured");
+}
+
 /// Tests for project root detection and cache placement (issue #159)
 mod project_root_tests {
     use std::fs;

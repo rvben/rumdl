@@ -298,9 +298,18 @@ pub struct GlobalConfig {
     /// Can also be set via --cache-dir CLI flag or RUMDL_CACHE_DIR environment variable
     #[serde(default, alias = "cache_dir", skip_serializing_if = "Option::is_none")]
     pub cache_dir: Option<String>,
+
+    /// Whether caching is enabled (default: true)
+    /// Can also be disabled via --no-cache CLI flag
+    #[serde(default = "default_true")]
+    pub cache: bool,
 }
 
 fn default_respect_gitignore() -> bool {
+    true
+}
+
+fn default_true() -> bool {
     true
 }
 
@@ -321,6 +330,7 @@ impl Default for GlobalConfig {
             flavor: MarkdownFlavor::default(),
             force_exclude: false,
             cache_dir: None,
+            cache: true,
         }
     }
 }
@@ -1585,6 +1595,7 @@ pub struct SourcedGlobalConfig {
     pub flavor: SourcedValue<MarkdownFlavor>,
     pub force_exclude: SourcedValue<bool>,
     pub cache_dir: Option<SourcedValue<String>>,
+    pub cache: SourcedValue<bool>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -1602,6 +1613,7 @@ impl Default for SourcedGlobalConfig {
             flavor: SourcedValue::new(MarkdownFlavor::default(), ConfigSource::Default),
             force_exclude: SourcedValue::new(false, ConfigSource::Default),
             cache_dir: None,
+            cache: SourcedValue::new(true, ConfigSource::Default),
         }
     }
 }
@@ -1778,6 +1790,16 @@ impl SourcedConfig {
             } else {
                 self.global.cache_dir = Some(cache_dir_fragment);
             }
+        }
+
+        // Merge cache if not default (only override when explicitly set)
+        if fragment.global.cache.source != ConfigSource::Default {
+            self.global.cache.merge_override(
+                fragment.global.cache.value,
+                fragment.global.cache.source,
+                fragment.global.cache.overrides.first().and_then(|o| o.file.clone()),
+                fragment.global.cache.overrides.first().and_then(|o| o.line),
+            );
         }
 
         // Merge per_file_ignores
@@ -2251,6 +2273,7 @@ impl From<SourcedConfig> for Config {
             flavor: sourced.global.flavor.value,
             force_exclude: sourced.global.force_exclude.value,
             cache_dir: sourced.global.cache_dir.as_ref().map(|v| v.value.clone()),
+            cache: sourced.global.cache.value,
         };
         Config {
             global,
@@ -2446,6 +2469,7 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
         "force-exclude".to_string(),
         "output-format".to_string(),
         "cache-dir".to_string(),
+        "cache".to_string(),
     ];
 
     for (section, key, file_path) in &sourced.unknown_keys {
@@ -2728,6 +2752,12 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                         .push_override(value, source, file.clone(), None);
                 }
             }
+
+            if let Some(cache) = table.get("cache")
+                && let Ok(value) = bool::deserialize(cache.clone())
+            {
+                fragment.global.cache.push_override(value, source, file.clone(), None);
+            }
         };
 
         // First, check for [tool.rumdl.global] section
@@ -2789,6 +2819,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 "flavor",
                 "cache_dir",
                 "cache-dir",
+                "cache",
             ]
             .contains(&norm_rule_key.as_str())
             {
@@ -2902,6 +2933,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         || !fragment.global.unfixable.value.is_empty()
         || fragment.global.output_format.is_some()
         || fragment.global.cache_dir.is_some()
+        || !fragment.global.cache.value
         || !fragment.per_file_ignores.value.is_empty()
         || !fragment.rules.is_empty();
     if has_any { Ok(Some(fragment)) } else { Ok(None) }
@@ -3074,6 +3106,19 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                     } else {
                         log::warn!(
                             "[WARN] Expected string for global key '{}' in {}, found {}",
+                            key,
+                            path,
+                            value_item.type_name()
+                        );
+                    }
+                }
+                "cache" => {
+                    if let Some(toml_edit::Value::Boolean(b)) = value_item.as_value() {
+                        let val = *b.value();
+                        fragment.global.cache.push_override(val, source, file.clone(), None);
+                    } else {
+                        log::warn!(
+                            "[WARN] Expected boolean for global key '{}' in {}, found {}",
                             key,
                             path,
                             value_item.type_name()

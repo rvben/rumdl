@@ -1631,7 +1631,8 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     let config: rumdl_config::Config = sourced.into();
 
     // 6. Initialize cache if enabled
-    let cache_enabled = !args.no_cache;
+    // CLI --no-cache flag takes precedence over config
+    let cache_enabled = !args.no_cache && config.global.cache;
 
     // Resolve cache directory with precedence: CLI → env var → config → default
     let mut cache_dir = args
