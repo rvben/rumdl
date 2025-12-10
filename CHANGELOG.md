@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.193] - 2025-12-10
+
+### Fixed
+
+- **MD032 (blanks-around-lists): Complete fix for false positives (fixes #188, #190)**
+  - Pipes in code spans (e.g., `` `foo || bar` ``) no longer trigger false table detection
+  - Lazy continuation lines at indent=0 handled per CommonMark spec
+  - Removed ad-hoc URL/link exclusion hacks in favor of proper `is_table_line()` detection
+  - Fixed regression in v0.0.192 that affected list boundary detection
+
+- **MD057 (relative-links): Resolve links per-file instead of caching base path**
+  - Relative link resolution now correctly uses each file's directory
+  - Prevents cross-file path resolution errors in multi-file projects
+
+### Changed
+
+- **Internal: Replace naive `contains('|')` checks with `is_table_line()`**
+  - Structural separator detection now properly validates table structure
+  - Requires pipes at start/end with ≥2 total, or separator line pattern
+
 ## [0.0.192] - 2025-12-10
 
 ### Added
