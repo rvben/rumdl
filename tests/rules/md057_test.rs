@@ -336,3 +336,91 @@ fn test_combined_links() {
         );
     }
 }
+
+/// Test that each file resolves links relative to its own directory.
+/// This is a regression test for issue #190 where the base_path was being
+/// cached in the rule instance and incorrectly reused across files.
+#[test]
+fn test_multi_file_base_path_isolation() {
+    // Create a temporary directory structure:
+    // temp/
+    //   dir1/
+    //     index.md  -> [link](sub/file.md)
+    //     sub/
+    //       file.md  <- EXISTS
+    //   dir2/
+    //     index.md  -> [link](sub/file.md)
+    //     (sub/ does NOT exist)
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create dir1 structure with existing file
+    let dir1 = base_path.join("dir1");
+    let dir1_sub = dir1.join("sub");
+    std::fs::create_dir_all(&dir1_sub).unwrap();
+    File::create(dir1_sub.join("file.md"))
+        .unwrap()
+        .write_all(b"# File in dir1/sub")
+        .unwrap();
+
+    // Create dir2 structure WITHOUT the sub/file.md
+    let dir2 = base_path.join("dir2");
+    std::fs::create_dir_all(&dir2).unwrap();
+
+    // Both files have the same relative link
+    let content = "[Link](sub/file.md)\n";
+
+    // Create a single rule instance (simulating how rules are reused across files)
+    let rule = MD057ExistingRelativeLinks::new();
+
+    // Test dir1/index.md - should have NO warnings (file exists)
+    let dir1_file = dir1.join("index.md");
+    let ctx1 = LintContext::new(
+        content,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        Some(dir1_file.clone()),
+    );
+    let result1 = rule.check(&ctx1).unwrap();
+    assert_eq!(
+        result1.len(),
+        0,
+        "dir1/index.md should have no warnings because dir1/sub/file.md exists, got: {:?}",
+        result1.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+
+    // Test dir2/index.md - should have ONE warning (file does not exist)
+    let dir2_file = dir2.join("index.md");
+    let ctx2 = LintContext::new(
+        content,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        Some(dir2_file.clone()),
+    );
+    let result2 = rule.check(&ctx2).unwrap();
+    assert_eq!(
+        result2.len(),
+        1,
+        "dir2/index.md should have 1 warning because dir2/sub/file.md does NOT exist, got: {:?}",
+        result2.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+
+    // Now test in reverse order to ensure no caching issues either way
+    let rule2 = MD057ExistingRelativeLinks::new();
+
+    // Test dir2 first this time
+    let ctx2_again = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, Some(dir2_file));
+    let result2_again = rule2.check(&ctx2_again).unwrap();
+    assert_eq!(
+        result2_again.len(),
+        1,
+        "dir2 should still have 1 warning when processed first"
+    );
+
+    // Then test dir1
+    let ctx1_again = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, Some(dir1_file));
+    let result1_again = rule2.check(&ctx1_again).unwrap();
+    assert_eq!(
+        result1_again.len(),
+        0,
+        "dir1 should still have 0 warnings when processed second (regression test for issue #190)"
+    );
+}

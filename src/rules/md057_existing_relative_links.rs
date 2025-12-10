@@ -133,17 +133,20 @@ impl MD057ExistingRelativeLinks {
         url.starts_with('#')
     }
 
-    /// Resolve a relative link against the base path
-    fn resolve_link_path(&self, link: &str) -> Option<PathBuf> {
-        self.base_path
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|base_path| base_path.join(link))
+    /// Resolve a relative link against a provided base path
+    fn resolve_link_path_with_base(link: &str, base_path: &Path) -> PathBuf {
+        base_path.join(link)
     }
 
     /// Process a single link and check if it exists
-    fn process_link(&self, url: &str, line_num: usize, column: usize, warnings: &mut Vec<LintWarning>) {
+    fn process_link_with_base(
+        &self,
+        url: &str,
+        line_num: usize,
+        column: usize,
+        base_path: &Path,
+        warnings: &mut Vec<LintWarning>,
+    ) {
         // Skip empty URLs
         if url.is_empty() {
             return;
@@ -155,20 +158,19 @@ impl MD057ExistingRelativeLinks {
         }
 
         // Resolve the relative link against the base path
-        if let Some(resolved_path) = self.resolve_link_path(url) {
-            // Check if the file exists (with caching to avoid filesystem calls)
-            if !file_exists_with_cache(&resolved_path) {
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line: line_num,
-                    column,
-                    end_line: line_num,
-                    end_column: column + url.len(),
-                    message: format!("Relative link '{url}' does not exist"),
-                    severity: Severity::Warning,
-                    fix: None, // No automatic fix for missing files
-                });
-            }
+        let resolved_path = Self::resolve_link_path_with_base(url, base_path);
+        // Check if the file exists (with caching to avoid filesystem calls)
+        if !file_exists_with_cache(&resolved_path) {
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: line_num,
+                column,
+                end_line: line_num,
+                end_column: column + url.len(),
+                message: format!("Relative link '{url}' does not exist"),
+                severity: Severity::Warning,
+                fix: None, // No automatic fix for missing files
+            });
         }
     }
 }
@@ -209,31 +211,29 @@ impl Rule for MD057ExistingRelativeLinks {
         let mut warnings = Vec::new();
 
         // Determine base path for resolving relative links
-        let base_path = {
-            let mut base_path_guard = self.base_path.lock().expect("Base path mutex poisoned");
-            if base_path_guard.is_some() {
-                base_path_guard.clone()
+        // ALWAYS compute from ctx.source_file for each file - do not reuse cached base_path
+        // This ensures each file resolves links relative to its own directory
+        let base_path: Option<PathBuf> = {
+            // First check if base_path was explicitly set via with_path() (for tests)
+            let explicit_base = self.base_path.lock().expect("Base path mutex poisoned").clone();
+            if explicit_base.is_some() {
+                explicit_base
+            } else if let Some(ref source_file) = ctx.source_file {
+                // Compute base path from the source file being processed
+                source_file
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .or_else(|| Some(CURRENT_DIR.clone()))
             } else {
-                // Get the file path from LintContext
-                let computed = if let Some(ref source_file) = ctx.source_file {
-                    source_file
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .or_else(|| Some(CURRENT_DIR.clone()))
-                } else {
-                    // No source file available - cannot validate relative links
-                    None
-                };
-                // Store the computed base path so resolve_link_path can use it
-                *base_path_guard = computed.clone();
-                computed
+                // No source file available - cannot validate relative links
+                None
             }
         };
 
         // If we still don't have a base path, we can't validate relative links
-        if base_path.is_none() {
+        let Some(base_path) = base_path else {
             return Ok(warnings);
-        }
+        };
 
         // Use LintContext links instead of expensive regex parsing
         if !ctx.links.is_empty() {
@@ -283,7 +283,7 @@ impl Rule for MD057ExistingRelativeLinks {
                         let column = start_pos + 1;
 
                         // Process and validate the link
-                        self.process_link(url, link.line, column, &mut warnings);
+                        self.process_link_with_base(url, link.line, column, &base_path, &mut warnings);
                     }
                 }
             }
@@ -292,7 +292,7 @@ impl Rule for MD057ExistingRelativeLinks {
         // Also process images - they have URLs already parsed
         for image in &ctx.images {
             let url = image.url.as_ref();
-            self.process_link(url, image.line, image.start_col + 1, &mut warnings);
+            self.process_link_with_base(url, image.line, image.start_col + 1, &base_path, &mut warnings);
         }
 
         Ok(warnings)
