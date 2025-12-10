@@ -26,7 +26,7 @@ fn validate_toml_config(toml_str: &str) -> Result<(), String> {
 
     compiled
         .validate(&instance)
-        .map_err(|err| format!("{} at {}", err, err.instance_path))
+        .map_err(|err| format!("{} at {}", err, err.instance_path()))
 }
 
 #[test]

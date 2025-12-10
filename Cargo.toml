@@ -43,15 +43,15 @@ colored = { version = "3.0.0", optional = true }
 fancy-regex = "0.16.2"
 ignore = "0.4.25"
 itertools = "0.14"
-rayon = { version = "1.10.0", optional = true }
+rayon = { version = "1.11.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9.34"
+serde_yaml = "0.9.34+deprecated"
 serde_json = "1.0"
 toml = "0.9"
 thiserror = "2.0.17"
 globset = "0.4.18"
 anyhow = "1.0"
-log = "0.4.27"
+log = "0.4.29"
 pulldown-cmark = "0.13.0"
 regex = "1.12"
 toml_edit = "0.23"
@@ -65,7 +65,7 @@ memory-stats = { version = "1.2.0", optional = true }
 
 # LSP dependencies (native only)
 tower-lsp = { version = "0.20", optional = true }
-tokio = { version = "1.0", features = ["full"], optional = true }
+tokio = { version = "1.48", features = ["full"], optional = true }
 tokio-util = { version = "0.7", optional = true }
 tower = { version = "0.5.2", optional = true }
 tower-service = { version = "0.3", optional = true }
@@ -73,8 +73,8 @@ env_logger = { version = "0.11", optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 notify = { version = "8.2", optional = true }
 etcetera = { version = "0.11", optional = true }
-blake3 = { version = "1.5", optional = true }
-bincode = { version = "1.3", optional = true }
+blake3 = { version = "1.8", optional = true }
+bincode = { version = "2.0", features = ["serde"], optional = true }
 
 # WASM dependencies
 wasm-bindgen = { version = "0.2", optional = true }
@@ -104,17 +104,17 @@ native = [
 wasm = ["wasm-bindgen", "console_error_panic_hook", "js-sys", "serde-wasm-bindgen"]
 
 [dev-dependencies]
-assert_cmd = "2.0.17"
+assert_cmd = "2.1.1"
 predicates = "3.1.3"
 tempfile = "3.23"
 proptest = "1.9"
-criterion = { version = "0.7", features = ["html_reports"] }
-rand = "0.9.1"
+criterion = { version = "0.8", features = ["html_reports"] }
+rand = "0.9.2"
 pretty_assertions = "1.4"
 unicode-segmentation = "1.12"
 serial_test = "3.2"
-jsonschema = "0.33"
-ureq = "2.12"
+jsonschema = "0.37"
+ureq = "3.1"
 
 [target.'cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))'.dependencies]
 tikv-jemallocator = "0.6"

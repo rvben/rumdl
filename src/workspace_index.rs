@@ -293,8 +293,8 @@ impl WorkspaceIndex {
         // Ensure cache directory exists
         fs::create_dir_all(cache_dir)?;
 
-        // Serialize the index data
-        let encoded = bincode::serialize(self)
+        // Serialize the index data using bincode 2.x serde compatibility
+        let encoded = bincode::serde::encode_to_vec(self, bincode::config::standard())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
         // Build versioned cache file: [magic][version][data]
@@ -365,9 +365,9 @@ impl WorkspaceIndex {
             return None;
         }
 
-        // Deserialize the index data
-        match bincode::deserialize(&data[8..]) {
-            Ok(index) => {
+        // Deserialize the index data using bincode 2.x serde compatibility
+        match bincode::serde::decode_from_slice(&data[8..], bincode::config::standard()) {
+            Ok((index, _bytes_read)) => {
                 let index: Self = index;
                 log::debug!(
                     "Loaded workspace index from cache: {} files (format v{})",
