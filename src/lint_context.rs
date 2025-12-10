@@ -2395,6 +2395,10 @@ impl<'a> LintContext<'a> {
                 };
 
                 // Check for structural separators that break lists
+                // Note: Lazy continuation (indent=0) is valid in CommonMark and should NOT break lists.
+                // Only lines with indent between 1 and min_continuation_for_tracking-1 break lists,
+                // as they indicate improper indentation rather than lazy continuation.
+                let is_lazy_continuation = line_info.indent == 0 && !line_info.is_blank;
                 let breaks_list = line_info.heading.is_some()
                     || line_content.starts_with("---")
                     || line_content.starts_with("***")
@@ -2404,7 +2408,9 @@ impl<'a> LintContext<'a> {
                         && !line_content.contains("http")
                         && (pipes_outside_code > 1 || line_content.starts_with('|') || line_content.ends_with('|')))
                     || line_content.starts_with(">")
-                    || (line_info.indent < min_continuation_for_tracking);
+                    || (line_info.indent > 0
+                        && line_info.indent < min_continuation_for_tracking
+                        && !is_lazy_continuation);
 
                 if breaks_list {
                     has_list_breaking_content_since_last_item = true;
@@ -2423,11 +2429,14 @@ impl<'a> LintContext<'a> {
             // Extend block.end_line for regular continuation lines (non-list-item, non-blank,
             // properly indented lines within the list). This ensures the workaround at line 2448
             // works correctly when there are multiple continuation lines before a nested list item.
+            // Also include lazy continuation lines (indent=0) per CommonMark spec.
+            let is_valid_continuation =
+                line_info.indent >= min_continuation_for_tracking || (line_info.indent == 0 && !line_info.is_blank); // Lazy continuation
             if !line_info.in_code_span_continuation
                 && line_info.list_item.is_none()
                 && !line_info.is_blank
                 && !line_info.in_code_block
-                && line_info.indent >= min_continuation_for_tracking
+                && is_valid_continuation
                 && let Some(ref mut block) = current_block
             {
                 block.end_line = line_num;
@@ -2472,9 +2481,15 @@ impl<'a> LintContext<'a> {
                     // WORKAROUND: If items are truly consecutive (no blank lines), they MUST be in the same list
                     // This handles edge cases where content patterns might otherwise split lists incorrectly
                     if !continues_list && reasonable_distance && line_num > 0 && block.end_line == line_num - 1 {
-                        // Check if the previous line was a list item
+                        // Check if the previous line was a list item or a continuation of a list item
+                        // (including lazy continuation lines)
                         if block.item_lines.contains(&(line_num - 1)) {
                             // They're consecutive list items - force them to be in the same list
+                            continues_list = true;
+                        } else {
+                            // Previous line is a continuation line within this block
+                            // (e.g., lazy continuation with indent=0)
+                            // Since block.end_line == line_num - 1, we know line_num - 1 is part of this block
                             continues_list = true;
                         }
                     }
@@ -2675,7 +2690,7 @@ impl<'a> LintContext<'a> {
                                                 || trimmed.starts_with("***")
                                                 || trimmed.starts_with("___")
                                                 || trimmed.starts_with(">")
-                                                || trimmed.contains('|') // Tables
+                                                || crate::utils::skip_context::is_table_line(trimmed)
                                                 || between_line.heading.is_some()
                                         } else {
                                             false
@@ -2697,7 +2712,7 @@ impl<'a> LintContext<'a> {
                                                 || trimmed.starts_with("***")
                                                 || trimmed.starts_with("___")
                                                 || trimmed.starts_with(">")
-                                                || trimmed.contains('|') // Tables
+                                                || crate::utils::skip_context::is_table_line(trimmed)
                                                 || between_line.heading.is_some()
                                         } else {
                                             false
@@ -2731,6 +2746,12 @@ impl<'a> LintContext<'a> {
                     // 2. Have sufficient indentation for the list type
                     // BUT structural separators (headings, code blocks, etc.) should never be lazy continuations
                     let line_content = line_info.content(content).trim();
+
+                    // Check for table-like patterns, but exclude pipes in links and URLs
+                    let looks_like_table = crate::utils::skip_context::is_table_line(line_content)
+                        && !line_content.contains("](")
+                        && !line_content.contains("http");
+
                     let is_structural_separator = line_info.heading.is_some()
                         || line_content.starts_with("```")
                         || line_content.starts_with("~~~")
@@ -2738,12 +2759,7 @@ impl<'a> LintContext<'a> {
                         || line_content.starts_with("***")
                         || line_content.starts_with("___")
                         || line_content.starts_with(">")
-                        || (line_content.contains('|')
-                            && !line_content.contains("](")
-                            && !line_content.contains("http")
-                            && (line_content.matches('|').count() > 1
-                                || line_content.starts_with('|')
-                                || line_content.ends_with('|'))); // Tables
+                        || looks_like_table;
 
                     // Allow lazy continuation if we're still within the same list block
                     // (not just immediately after a list item)

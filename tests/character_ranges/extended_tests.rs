@@ -118,15 +118,13 @@ fn test_md031_blanks_around_fences() {
 }
 
 // MD032 - Lists should be surrounded by blank lines
+// Per markdownlint-cli: only 1 warning (missing preceding blank); "More text" is lazy continuation
 #[test]
 fn test_md032_blanks_around_lists() {
-    let test = multi_warning_test(
+    let test = simple_test(
         "MD032",
         "Text\n- List item\nMore text",
-        vec![
-            ExpectedWarning::new(2, 1, 2, 12, "- List item"),
-            ExpectedWarning::new(2, 1, 2, 12, "- List item"),
-        ],
+        ExpectedWarning::new(2, 1, 2, 12, "- List item"),
     );
     test_character_ranges(test);
 }

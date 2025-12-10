@@ -234,6 +234,8 @@ fn test_md032_list_without_blank_before() {
 
 #[test]
 fn test_md032_list_without_blank_after() {
+    // Per markdownlint-cli: trailing text without blank line is lazy continuation
+    // so NO MD032 warning is expected
     let content = r#"1. List item
 Text directly after"#;
 
@@ -245,11 +247,13 @@ Text directly after"#;
 
     assert_eq!(
         warnings.len(),
-        1,
-        "MD032 should report when list lacks blank line after"
+        0,
+        "Per markdownlint-cli, trailing text is lazy continuation - no warning expected. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(warnings[0].line, 1);
-    assert!(warnings[0].message.contains("followed"));
 }
 
 #[test]
