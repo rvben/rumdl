@@ -26,6 +26,7 @@ lines_below = 1
     let config: Config =
         SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
             .unwrap()
+            .into_validated_unchecked()
             .into();
 
     // Test that rules are properly enabled/disabled
@@ -60,6 +61,7 @@ enable = ["MD001", "MD003", "MD022"]
     let config: Config =
         SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
             .unwrap()
+            .into_validated_unchecked()
             .into();
 
     assert!(config.global.enable.contains(&"MD001".to_string()));
@@ -76,6 +78,7 @@ disable = ["MD013", "MD033"]
     let config: Config =
         SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
             .unwrap()
+            .into_validated_unchecked()
             .into();
 
     assert!(config.global.disable.contains(&"MD013".to_string()));
@@ -92,6 +95,7 @@ disable = ["MD013"]
     let config: Config =
         SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
             .unwrap()
+            .into_validated_unchecked()
             .into();
 
     assert!(config.global.enable.contains(&"MD001".to_string()));
@@ -130,6 +134,7 @@ punctuation = "!?"
     let config: Config =
         SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
             .unwrap()
+            .into_validated_unchecked()
             .into();
 
     // Test MD013 parameters
@@ -188,6 +193,7 @@ enable = ["MD022", "MD999", "INVALID_RULE"]
     let config: Config =
         SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
             .unwrap()
+            .into_validated_unchecked()
             .into();
 
     // Valid rules should still work
@@ -241,6 +247,7 @@ lines_below = 2
         let _config: Config =
             SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
                 .unwrap()
+                .into_validated_unchecked()
                 .into();
     }
 
@@ -271,6 +278,7 @@ disable = ["MD025"]
     let config: Config =
         SourcedConfig::load_with_discovery(Some(project_path.join("rumdl.toml").to_str().unwrap()), None, false)
             .unwrap()
+            .into_validated_unchecked()
             .into();
 
     // Get all available rules

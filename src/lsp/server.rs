@@ -573,7 +573,8 @@ impl RumdlLanguageServer {
         match Self::load_config_for_lsp(explicit_config_path.as_deref()) {
             Ok(sourced_config) => {
                 let loaded_files = sourced_config.loaded_files.clone();
-                *self.rumdl_config.write().await = sourced_config.into();
+                // Use into_validated_unchecked since LSP doesn't need validation warnings
+                *self.rumdl_config.write().await = sourced_config.into_validated_unchecked().into();
 
                 if !loaded_files.is_empty() {
                     let message = format!("Loaded rumdl config from: {}", loaded_files.join(", "));
@@ -688,7 +689,7 @@ impl RumdlLanguageServer {
                     // Load the config
                     if let Some(config_path_str) = config_path.to_str() {
                         if let Ok(sourced) = Self::load_config_for_lsp(Some(config_path_str)) {
-                            found_config = Some((sourced.into(), Some(config_path)));
+                            found_config = Some((sourced.into_validated_unchecked().into(), Some(config_path)));
                             break;
                         }
                     } else {

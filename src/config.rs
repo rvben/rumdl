@@ -12,9 +12,24 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
+use std::marker::PhantomData;
 use std::path::Path;
 use std::str::FromStr;
 use toml_edit::DocumentMut;
+
+// ============================================================================
+// Typestate markers for configuration pipeline
+// ============================================================================
+
+/// Marker type for configuration that has been loaded but not yet validated.
+/// This is the initial state after `load_with_discovery()`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ConfigLoaded;
+
+/// Marker type for configuration that has been validated.
+/// Only validated configs can be converted to `Config`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ConfigValidated;
 
 /// Markdown flavor/dialect enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
@@ -531,7 +546,7 @@ disable = ["MD001"]
 
         // Load the config
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Check that flavor was loaded
         assert_eq!(config.global.flavor, MarkdownFlavor::MkDocs);
@@ -560,7 +575,7 @@ respect-gitignore = true
 
         // Load the config with skip_auto_discovery to avoid environment config files
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into(); // Convert to plain config for assertions
+        let config: Config = sourced.into_validated_unchecked().into(); // Convert to plain config for assertions
 
         // Check global settings
         assert_eq!(config.global.disable, vec!["MD033".to_string()]);
@@ -591,7 +606,7 @@ respect_gitignore = true
 
         // Load the config with skip_auto_discovery to avoid environment config files
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into(); // Convert to plain config for assertions
+        let config: Config = sourced.into_validated_unchecked().into(); // Convert to plain config for assertions
 
         // Check settings were correctly loaded
         assert!(config.global.respect_gitignore);
@@ -618,7 +633,7 @@ line-length = 222
         let val = &rule_cfg.values["line-length"].value;
         assert_eq!(val.as_integer(), Some(222));
         // get_rule_config_value should retrieve the value for both snake_case and kebab-case
-        let config: Config = sourced.clone().into();
+        let config: Config = sourced.clone().into_validated_unchecked().into();
         let v1 = get_rule_config_value::<usize>(&config, "MD013", "line_length");
         let v2 = get_rule_config_value::<usize>(&config, "MD013", "line-length");
         assert_eq!(v1, Some(222));
@@ -642,7 +657,7 @@ line-length = 103
         fs::write(&config_path, config_content).unwrap();
         // Load the config with skip_auto_discovery to avoid environment config files
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.clone().into();
+        let config: Config = sourced.clone().into_validated_unchecked().into();
         // Only the last section should win, and be present
         let rule_cfg = sourced.rules.get("MD013").expect("MD013 rule config should exist");
         let keys: Vec<_> = rule_cfg.values.keys().cloned().collect();
@@ -665,7 +680,7 @@ line-length = 202
         fs::write(&config_path, config_content).unwrap();
         // Load the config with skip_auto_discovery to avoid environment config files
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.clone().into();
+        let config: Config = sourced.clone().into_validated_unchecked().into();
         let rule_cfg = sourced.rules.get("MD013").expect("MD013 rule config should exist");
         let keys: Vec<_> = rule_cfg.values.keys().cloned().collect();
         assert_eq!(keys, vec!["line-length"]);
@@ -691,7 +706,7 @@ line-length = 303
         fs::write(&config_path, config_content).unwrap();
         // Load the config with skip_auto_discovery to avoid environment config files
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.clone().into();
+        let config: Config = sourced.clone().into_validated_unchecked().into();
         // MD999 should not be present
         assert!(!sourced.rules.contains_key("MD999"));
         // MD013 should be present and correct
@@ -735,7 +750,7 @@ line-length = "not a number"
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // The value should be loaded as a string, not converted
         let rule_config = config.rules.get("MD013").unwrap();
@@ -752,7 +767,7 @@ line-length = "not a number"
         fs::write(&config_path, "").unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Should have default values
         assert_eq!(config.global.line_length.get(), 80);
@@ -790,7 +805,7 @@ disable = ["MD013"]
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Conflict resolution: enable wins over disable
         assert!(config.global.enable.contains(&"MD013".to_string()));
@@ -810,7 +825,7 @@ disable = ["MD-001", "MD_002"]
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // All values should be preserved as-is
         assert_eq!(config.global.enable.len(), 4);
@@ -832,7 +847,7 @@ value = 42
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         let rule_config = config.rules.get("MD013").unwrap();
         assert_eq!(
@@ -860,7 +875,7 @@ message = "行太长了 🚨"
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         assert_eq!(config.global.include.len(), 2);
         assert_eq!(config.global.exclude.len(), 2);
@@ -894,7 +909,7 @@ line-length = 999999999
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         assert_eq!(config.global.exclude[0].len(), 10000);
         let line_length = get_rule_config_value::<usize>(&config, "MD013", "line-length");
@@ -919,7 +934,7 @@ line-length = 100 # Set to 100 characters
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         assert_eq!(config.global.enable, vec!["MD001"]);
         assert!(config.global.disable.is_empty()); // Commented out
@@ -943,7 +958,7 @@ mixed = [1, "two", true]
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Arrays should now be properly parsed
         let rule_config = config.rules.get("MD003").expect("MD003 config should exist");
@@ -1063,7 +1078,7 @@ mixed = [1, "two", true]
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         let rule_config = config.rules.get("MD001").unwrap();
         assert_eq!(rule_config.values.len(), 100);
@@ -1086,7 +1101,7 @@ local_time = 07:32:00
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Some values might not be parsed due to parser limitations
         if let Some(rule_config) = config.rules.get("MD001") {
@@ -1162,7 +1177,7 @@ local_time = 07:32:00
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Verify per-file-ignores was loaded
         assert_eq!(config.per_file_ignores.len(), 3);
@@ -1195,7 +1210,7 @@ local_time = 07:32:00
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Test exact match
         let ignored = config.get_ignored_rules_for_file(&PathBuf::from("README.md"));
@@ -1230,7 +1245,7 @@ local_time = 07:32:00
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Verify per-file-ignores was loaded from pyproject.toml
         assert_eq!(config.per_file_ignores.len(), 2);
@@ -1259,7 +1274,7 @@ local_time = 07:32:00
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // File matches multiple patterns - should get union of all rules
         let ignored = config.get_ignored_rules_for_file(&PathBuf::from("docs/api/overview.md"));
@@ -1282,7 +1297,7 @@ local_time = 07:32:00
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // All rule names should be normalized to uppercase
         let ignored = config.get_ignored_rules_for_file(&PathBuf::from("README.md"));
@@ -1306,7 +1321,7 @@ local_time = 07:32:00
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Invalid pattern should be skipped, valid pattern should work
         let ignored = config.get_ignored_rules_for_file(&PathBuf::from("valid/test.md"));
@@ -1332,7 +1347,7 @@ disable = ["MD001"]
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Empty per-file-ignores should work fine
         assert_eq!(config.per_file_ignores.len(), 0);
@@ -1352,7 +1367,7 @@ disable = ["MD001"]
         fs::write(&config_path, config_content).unwrap();
 
         let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // Should support both per-file-ignores and per_file_ignores
         assert_eq!(config.per_file_ignores.len(), 1);
@@ -1422,7 +1437,7 @@ enable = ["MD001"]
         )
         .unwrap();
 
-        let config: Config = sourced.into();
+        let config: Config = sourced.into_validated_unchecked().into();
 
         // User config settings should be preserved
         assert!(
@@ -1439,6 +1454,100 @@ enable = ["MD001"]
             config.global.enable.contains(&"MD001".to_string()),
             "Project config enabled rules should be applied"
         );
+    }
+
+    #[test]
+    fn test_typestate_validate_method() {
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let config_path = temp_dir.path().join("test.toml");
+
+        // Create config with an unknown rule option to trigger a validation warning
+        let config_content = r#"
+[global]
+enable = ["MD001"]
+
+[MD013]
+line_length = 80
+unknown_option = true
+"#;
+        std::fs::write(&config_path, config_content).expect("Failed to write config");
+
+        // Load config - this returns SourcedConfig<ConfigLoaded>
+        let loaded = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+        // Create a rule registry for validation
+        let default_config = Config::default();
+        let all_rules = crate::rules::all_rules(&default_config);
+        let registry = RuleRegistry::from_rules(&all_rules);
+
+        // Validate - this transitions to SourcedConfig<ConfigValidated>
+        let validated = loaded.validate(&registry).expect("Should validate config");
+
+        // Check that validation warnings were captured for the unknown option
+        // Note: The validation checks rule options against the rule's schema
+        let has_unknown_option_warning = validated
+            .validation_warnings
+            .iter()
+            .any(|w| w.message.contains("unknown_option") || w.message.contains("Unknown option"));
+
+        // Print warnings for debugging if assertion fails
+        if !has_unknown_option_warning {
+            for w in &validated.validation_warnings {
+                eprintln!("Warning: {}", w.message);
+            }
+        }
+        assert!(
+            has_unknown_option_warning,
+            "Should have warning for unknown option. Got {} warnings: {:?}",
+            validated.validation_warnings.len(),
+            validated
+                .validation_warnings
+                .iter()
+                .map(|w| &w.message)
+                .collect::<Vec<_>>()
+        );
+
+        // Now we can convert to Config (this would be a compile error with ConfigLoaded)
+        let config: Config = validated.into();
+
+        // Verify the config values are correct
+        assert!(config.global.enable.contains(&"MD001".to_string()));
+    }
+
+    #[test]
+    fn test_typestate_validate_into_convenience_method() {
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let config_path = temp_dir.path().join("test.toml");
+
+        let config_content = r#"
+[global]
+enable = ["MD022"]
+
+[MD022]
+lines_above = 2
+"#;
+        std::fs::write(&config_path, config_content).expect("Failed to write config");
+
+        let loaded = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+        let default_config = Config::default();
+        let all_rules = crate::rules::all_rules(&default_config);
+        let registry = RuleRegistry::from_rules(&all_rules);
+
+        // Use the convenience method that validates and converts in one step
+        let (config, warnings) = loaded.validate_into(&registry).expect("Should validate and convert");
+
+        // Should have no warnings for valid config
+        assert!(warnings.is_empty(), "Should have no warnings for valid config");
+
+        // Config should be usable
+        assert!(config.global.enable.contains(&"MD022".to_string()));
     }
 }
 
@@ -1645,8 +1754,25 @@ impl Default for SourcedConfigFragment {
     }
 }
 
+/// Configuration with provenance tracking for values.
+///
+/// The `State` type parameter encodes the validation state:
+/// - `ConfigLoaded`: Config has been loaded but not validated
+/// - `ConfigValidated`: Config has been validated and can be converted to `Config`
+///
+/// # Typestate Pattern
+///
+/// This uses the typestate pattern to ensure validation happens before conversion:
+///
+/// ```ignore
+/// let loaded: SourcedConfig<ConfigLoaded> = SourcedConfig::load_with_discovery(...)?;
+/// let validated: SourcedConfig<ConfigValidated> = loaded.validate(&registry)?;
+/// let config: Config = validated.into();  // Only works on ConfigValidated!
+/// ```
+///
+/// Attempting to convert a `ConfigLoaded` config directly to `Config` is a compile error.
 #[derive(Debug, Clone)]
-pub struct SourcedConfig {
+pub struct SourcedConfig<State = ConfigLoaded> {
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
@@ -1654,9 +1780,13 @@ pub struct SourcedConfig {
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
     /// Project root directory (parent of config file), used for resolving relative paths
     pub project_root: Option<std::path::PathBuf>,
+    /// Validation warnings (populated after validate() is called)
+    pub validation_warnings: Vec<ConfigValidationWarning>,
+    /// Phantom data for the state type parameter
+    _state: PhantomData<State>,
 }
 
-impl Default for SourcedConfig {
+impl Default for SourcedConfig<ConfigLoaded> {
     fn default() -> Self {
         Self {
             global: SourcedGlobalConfig::default(),
@@ -1665,11 +1795,13 @@ impl Default for SourcedConfig {
             loaded_files: Vec::new(),
             unknown_keys: Vec::new(),
             project_root: None,
+            validation_warnings: Vec::new(),
+            _state: PhantomData,
         }
     }
 }
 
-impl SourcedConfig {
+impl SourcedConfig<ConfigLoaded> {
     /// Merges another SourcedConfigFragment into this SourcedConfig.
     /// Uses source precedence to determine which values take effect.
     fn merge(&mut self, fragment: SourcedConfigFragment) {
@@ -2245,10 +2377,75 @@ impl SourcedConfig {
     ) -> Result<Self, ConfigError> {
         Self::load_with_discovery_impl(config_path, cli_overrides, skip_auto_discovery, None)
     }
+
+    /// Validate the configuration against a rule registry.
+    ///
+    /// This method transitions the config from `ConfigLoaded` to `ConfigValidated` state,
+    /// enabling conversion to `Config`. Validation warnings are stored in the config
+    /// and can be displayed to the user.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let loaded = SourcedConfig::load_with_discovery(path, None, false)?;
+    /// let validated = loaded.validate(&registry)?;
+    /// let config: Config = validated.into();
+    /// ```
+    pub fn validate(self, registry: &RuleRegistry) -> Result<SourcedConfig<ConfigValidated>, ConfigError> {
+        let warnings = validate_config_sourced_internal(&self, registry);
+
+        Ok(SourcedConfig {
+            global: self.global,
+            per_file_ignores: self.per_file_ignores,
+            rules: self.rules,
+            loaded_files: self.loaded_files,
+            unknown_keys: self.unknown_keys,
+            project_root: self.project_root,
+            validation_warnings: warnings,
+            _state: PhantomData,
+        })
+    }
+
+    /// Validate and convert to Config in one step (convenience method).
+    ///
+    /// This combines `validate()` and `into()` for callers who want the
+    /// validation warnings separately.
+    pub fn validate_into(self, registry: &RuleRegistry) -> Result<(Config, Vec<ConfigValidationWarning>), ConfigError> {
+        let validated = self.validate(registry)?;
+        let warnings = validated.validation_warnings.clone();
+        Ok((validated.into(), warnings))
+    }
+
+    /// Skip validation and convert directly to ConfigValidated state.
+    ///
+    /// # Safety
+    ///
+    /// This method bypasses validation. Use only when:
+    /// - You've already validated via `validate_config_sourced()`
+    /// - You're in test code that doesn't need validation
+    /// - You're migrating legacy code and will add proper validation later
+    ///
+    /// Prefer `validate()` for new code.
+    pub fn into_validated_unchecked(self) -> SourcedConfig<ConfigValidated> {
+        SourcedConfig {
+            global: self.global,
+            per_file_ignores: self.per_file_ignores,
+            rules: self.rules,
+            loaded_files: self.loaded_files,
+            unknown_keys: self.unknown_keys,
+            project_root: self.project_root,
+            validation_warnings: Vec::new(),
+            _state: PhantomData,
+        }
+    }
 }
 
-impl From<SourcedConfig> for Config {
-    fn from(sourced: SourcedConfig) -> Self {
+/// Convert a validated configuration to the final Config type.
+///
+/// This implementation only exists for `SourcedConfig<ConfigValidated>`,
+/// ensuring that validation must occur before conversion.
+impl From<SourcedConfig<ConfigValidated>> for Config {
+    fn from(sourced: SourcedConfig<ConfigValidated>) -> Self {
         let mut rules = BTreeMap::new();
         for (rule_name, sourced_rule_cfg) in sourced.rules {
             // Normalize rule name to uppercase for case-insensitive lookup
@@ -2403,12 +2600,25 @@ pub struct ConfigValidationWarning {
     pub key: Option<String>,
 }
 
-/// Validate a loaded config against the rule registry, using SourcedConfig for unknown key tracking
-pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry) -> Vec<ConfigValidationWarning> {
+/// Internal validation function that works with any SourcedConfig state.
+/// This is used by both the public `validate_config_sourced` and the typestate `validate()` method.
+fn validate_config_sourced_internal<S>(
+    sourced: &SourcedConfig<S>,
+    registry: &RuleRegistry,
+) -> Vec<ConfigValidationWarning> {
+    validate_config_sourced_impl(&sourced.rules, &sourced.unknown_keys, registry)
+}
+
+/// Core validation implementation that doesn't depend on SourcedConfig type parameter.
+fn validate_config_sourced_impl(
+    rules: &BTreeMap<String, SourcedRuleConfig>,
+    unknown_keys: &[(String, String, Option<String>)],
+    registry: &RuleRegistry,
+) -> Vec<ConfigValidationWarning> {
     let mut warnings = Vec::new();
     let known_rules = registry.rule_names();
     // 1. Unknown rules
-    for rule in sourced.rules.keys() {
+    for rule in rules.keys() {
         if !known_rules.contains(rule) {
             warnings.push(ConfigValidationWarning {
                 message: format!("Unknown rule in config: {rule}"),
@@ -2418,7 +2628,7 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
         }
     }
     // 2. Unknown options and type mismatches
-    for (rule, rule_cfg) in &sourced.rules {
+    for (rule, rule_cfg) in rules {
         if let Some(valid_keys) = registry.config_keys_for(rule) {
             for key in rule_cfg.values.keys() {
                 if !valid_keys.contains(key) {
@@ -2472,7 +2682,7 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
         "cache".to_string(),
     ];
 
-    for (section, key, file_path) in &sourced.unknown_keys {
+    for (section, key, file_path) in unknown_keys {
         if section.contains("[global]") || section.contains("[tool.rumdl]") {
             let message = if let Some(suggestion) = suggest_similar_key(key, &known_global_keys) {
                 if let Some(path) = file_path {
@@ -2515,6 +2725,28 @@ pub fn validate_config_sourced(sourced: &SourcedConfig, registry: &RuleRegistry)
         }
     }
     warnings
+}
+
+/// Validate a loaded config against the rule registry, using SourcedConfig for unknown key tracking.
+///
+/// This is the legacy API that works with `SourcedConfig<ConfigLoaded>`.
+/// For new code, prefer using `sourced.validate(&registry)` which returns a
+/// `SourcedConfig<ConfigValidated>` that can be converted to `Config`.
+pub fn validate_config_sourced(
+    sourced: &SourcedConfig<ConfigLoaded>,
+    registry: &RuleRegistry,
+) -> Vec<ConfigValidationWarning> {
+    validate_config_sourced_internal(sourced, registry)
+}
+
+/// Validate a config that has already been validated (no-op, returns stored warnings).
+///
+/// This exists for API consistency - validated configs already have their warnings stored.
+pub fn validate_config_sourced_validated(
+    sourced: &SourcedConfig<ConfigValidated>,
+    _registry: &RuleRegistry,
+) -> Vec<ConfigValidationWarning> {
+    sourced.validation_warnings.clone()
 }
 
 fn toml_type_name(val: &toml::Value) -> &'static str {

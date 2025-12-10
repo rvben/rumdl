@@ -573,7 +573,8 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
     // Extract project_root before converting to Config (for exclude pattern resolution)
     let mut project_root = sourced.project_root.clone();
 
-    let mut config: rumdl_config::Config = sourced.clone().into();
+    // Convert to Config (watch mode doesn't need validation warnings)
+    let mut config: rumdl_config::Config = sourced.clone().into_validated_unchecked().into();
 
     // Configure the file watcher
     let (tx, rx) = channel();
@@ -668,7 +669,7 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
 
                             // Update project_root from reloaded config
                             project_root = sourced.project_root.clone();
-                            config = sourced.clone().into();
+                            config = sourced.clone().into_validated_unchecked().into();
                         }
 
                         // Build the header message before clearing

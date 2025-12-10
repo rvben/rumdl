@@ -36,7 +36,7 @@ tables = true
         sourced_result.err()
     );
 
-    let config: Config = sourced_result.unwrap().into();
+    let config: Config = sourced_result.unwrap().into_validated_unchecked().into();
 
     // Verify global settings
     assert_eq!(config.global.disable, vec!["MD013"]);
@@ -125,7 +125,7 @@ fn test_create_default_config() {
         sourced_result.err()
     );
     // Convert to Config if needed for further assertions
-    // let config: Config = sourced_result.unwrap().into();
+    // let config: Config = sourced_result.unwrap().into_validated_unchecked().into();
     // Optional: Add more assertions about the loaded default config content if needed
     // No explicit cleanup needed, tempdir handles it.
 }
@@ -151,7 +151,7 @@ style = "asterisk"
     let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config");
     // Convert to Config for rule application logic
-    let config: Config = sourced_config.into();
+    let config: Config = sourced_config.into_validated_unchecked().into();
 
     // Create a test rule with the loaded config
     let mut rules: Vec<Box<dyn rumdl_lib::rule::Rule>> = vec![
@@ -221,7 +221,7 @@ style = "backtick"
     let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config");
     // Convert to Config for rule verification
-    let config: Config = sourced_config.into();
+    let config: Config = sourced_config.into_validated_unchecked().into();
 
     // Verify multiple rule configs
     let md013_line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
@@ -283,7 +283,7 @@ style = "dash"
     let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
     let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load integration config");
-    let config: Config = sourced_config.into(); // Convert for use
+    let config: Config = sourced_config.into_validated_unchecked().into(); // Convert for use
 
     // Test MD013 behavior with line_length = 60
     let mut rules_md013: Vec<Box<dyn rumdl_lib::rule::Rule>> = vec![Box::new(MD013LineLength::default())];
@@ -437,7 +437,7 @@ indent = 2
     let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load sourced config from explicit path");
 
-    let config: Config = sourced_config.into(); // Convert to plain config for assertions
+    let config: Config = sourced_config.into_validated_unchecked().into(); // Convert to plain config for assertions
 
     // Check global settings (expect normalized keys)
     assert_eq!(config.global.disable, vec!["MD033".to_string()]);
@@ -479,7 +479,7 @@ mod config_file_parsing_tests {
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid JSON config should load successfully");
 
-        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let config: rumdl_lib::config::Config = result.unwrap().into_validated_unchecked().into();
         let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("dash".to_string()));
     }
@@ -524,7 +524,7 @@ MD013:
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid YAML config should load successfully");
 
-        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let config: rumdl_lib::config::Config = result.unwrap().into_validated_unchecked().into();
         let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("dash".to_string()));
     }
@@ -570,7 +570,7 @@ line_length = 100
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid TOML config should load successfully");
 
-        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let config: rumdl_lib::config::Config = result.unwrap().into_validated_unchecked().into();
         let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("dash".to_string()));
     }
@@ -617,7 +617,7 @@ invalid_key =
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid markdownlint JSON should load successfully");
 
-        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let config: rumdl_lib::config::Config = result.unwrap().into_validated_unchecked().into();
         let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("asterisk".to_string()));
     }
@@ -639,7 +639,7 @@ line-length:
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
         assert!(result.is_ok(), "Valid markdownlint YAML should load successfully");
 
-        let config: rumdl_lib::config::Config = result.unwrap().into();
+        let config: rumdl_lib::config::Config = result.unwrap().into_validated_unchecked().into();
         let md004_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
         assert_eq!(md004_style, Some("plus".to_string()));
     }
@@ -867,7 +867,7 @@ line-length:
         let auto_result = SourcedConfig::load_with_discovery(None, None, false);
         assert!(auto_result.is_ok(), "Auto-discovery should find .markdownlint.json");
 
-        let auto_config: rumdl_lib::config::Config = auto_result.unwrap().into();
+        let auto_config: rumdl_lib::config::Config = auto_result.unwrap().into_validated_unchecked().into();
         let auto_style = rumdl_lib::config::get_rule_config_value::<String>(&auto_config, "MD004", "style");
         assert_eq!(auto_style, Some("asterisk".to_string()));
 
@@ -880,7 +880,7 @@ line-length:
         let explicit_result = SourcedConfig::load_with_discovery(Some(explicit_path.to_str().unwrap()), None, false);
         assert!(explicit_result.is_ok(), "Explicit config should load successfully");
 
-        let explicit_config: rumdl_lib::config::Config = explicit_result.unwrap().into();
+        let explicit_config: rumdl_lib::config::Config = explicit_result.unwrap().into_validated_unchecked().into();
         let explicit_style = rumdl_lib::config::get_rule_config_value::<String>(&explicit_config, "MD004", "style");
         assert_eq!(explicit_style, Some("dash".to_string()));
 
@@ -888,7 +888,7 @@ line-length:
         let skip_result = SourcedConfig::load_with_discovery(None, None, true);
         assert!(skip_result.is_ok(), "Skip auto-discovery should succeed");
 
-        let skip_config: rumdl_lib::config::Config = skip_result.unwrap().into();
+        let skip_config: rumdl_lib::config::Config = skip_result.unwrap().into_validated_unchecked().into();
         let skip_style = rumdl_lib::config::get_rule_config_value::<String>(&skip_config, "MD004", "style");
         assert_eq!(skip_style, None, "Skip auto-discovery should not load any config");
 
@@ -933,7 +933,7 @@ indent = 4
     let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
         .expect("Should load user config");
 
-    let config: Config = sourced.into();
+    let config: Config = sourced.into_validated_unchecked().into();
 
     // Verify user config was loaded
     assert_eq!(
@@ -967,7 +967,7 @@ indent = 2
         rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
             .expect("Should load project config");
 
-    let config_with_project: Config = sourced_with_project.into();
+    let config_with_project: Config = sourced_with_project.into_validated_unchecked().into();
 
     // Verify project config takes precedence
     assert_eq!(
@@ -1037,7 +1037,7 @@ line-length = 99"#,
     let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
         .expect("Should load user config");
 
-    let config: Config = sourced.into();
+    let config: Config = sourced.into_validated_unchecked().into();
     assert_eq!(
         config.global.line_length.get(),
         77,
@@ -1050,7 +1050,7 @@ line-length = 99"#,
     let sourced2 = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
         .expect("Should load user config");
 
-    let config2: Config = sourced2.into();
+    let config2: Config = sourced2.into_validated_unchecked().into();
     assert_eq!(
         config2.global.line_length.get(),
         88,
@@ -1063,7 +1063,7 @@ line-length = 99"#,
     let sourced3 = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
         .expect("Should load user config");
 
-    let config3: Config = sourced3.into();
+    let config3: Config = sourced3.into_validated_unchecked().into();
     assert_eq!(
         config3.global.line_length.get(),
         99,
@@ -1092,7 +1092,7 @@ cache-dir = "/custom/cache/path"
     let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Should load config successfully");
 
-    let config: rumdl_lib::config::Config = sourced.into();
+    let config: rumdl_lib::config::Config = sourced.into_validated_unchecked().into();
     assert!(config.global.cache_dir.is_some(), "cache_dir should be set from config");
     assert_eq!(
         config.global.cache_dir.as_ref().unwrap(),
@@ -1113,7 +1113,7 @@ cache_dir = "/another/cache/path"
     let sourced2 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path2_str), None, true)
         .expect("Should load config successfully");
 
-    let config2: rumdl_lib::config::Config = sourced2.into();
+    let config2: rumdl_lib::config::Config = sourced2.into_validated_unchecked().into();
     assert!(
         config2.global.cache_dir.is_some(),
         "cache_dir should be set from config with snake_case"
@@ -1137,7 +1137,7 @@ line-length = 100
     let sourced3 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path3_str), None, true)
         .expect("Should load config successfully");
 
-    let config3: rumdl_lib::config::Config = sourced3.into();
+    let config3: rumdl_lib::config::Config = sourced3.into_validated_unchecked().into();
     assert!(
         config3.global.cache_dir.is_none(),
         "cache_dir should be None when not configured"
@@ -1162,7 +1162,7 @@ cache = false
     let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Should load config successfully");
 
-    let config: rumdl_lib::config::Config = sourced.into();
+    let config: rumdl_lib::config::Config = sourced.into_validated_unchecked().into();
     assert!(!config.global.cache, "cache should be false when configured as false");
 
     // Test with cache = true (explicit)
@@ -1178,7 +1178,7 @@ cache = true
     let sourced2 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path2_str), None, true)
         .expect("Should load config successfully");
 
-    let config2: rumdl_lib::config::Config = sourced2.into();
+    let config2: rumdl_lib::config::Config = sourced2.into_validated_unchecked().into();
     assert!(config2.global.cache, "cache should be true when configured as true");
 
     // Test default (no cache specified - should default to true)
@@ -1194,7 +1194,7 @@ line-length = 100
     let sourced3 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path3_str), None, true)
         .expect("Should load config successfully");
 
-    let config3: rumdl_lib::config::Config = sourced3.into();
+    let config3: rumdl_lib::config::Config = sourced3.into_validated_unchecked().into();
     assert!(config3.global.cache, "cache should default to true when not configured");
 }
 
@@ -1386,7 +1386,7 @@ line-length = 42
         // Restore original directory
         std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
-        let config: rumdl_lib::config::Config = sourced.into();
+        let config: rumdl_lib::config::Config = sourced.into_validated_unchecked().into();
         assert_eq!(
             config.global.line_length.get(),
             42,
@@ -1431,7 +1431,7 @@ line-length = 42
         // Restore original directory
         std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
-        let config: rumdl_lib::config::Config = sourced.into();
+        let config: rumdl_lib::config::Config = sourced.into_validated_unchecked().into();
         assert_eq!(
             config.global.line_length.get(),
             100,

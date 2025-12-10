@@ -40,7 +40,7 @@ fn test_markdownlint_config_mapping() {
     // Parse as MarkdownlintConfig
     let ml_config: MarkdownlintConfig = serde_json::from_str(config_str).expect("Failed to parse markdownlint config");
     let sourced = ml_config.map_to_sourced_rumdl_config(Some("test_markdownlint.json"));
-    let rumdl_config: rumdl_lib::config::Config = sourced.into();
+    let rumdl_config: rumdl_lib::config::Config = sourced.into_validated_unchecked().into();
 
     // Check that all expected rules are mapped
     let expected_rules = vec![

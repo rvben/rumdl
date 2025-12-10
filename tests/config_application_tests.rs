@@ -306,7 +306,7 @@ line_length = 20
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
     let sourced_config_1 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config 1");
-    let config_1: Config = sourced_config_1.into(); // Convert
+    let config_1: Config = sourced_config_1.into_validated_unchecked().into(); // Convert
 
     // Test content with MD001 violation and MD013 violation
     let test_content = r#"
@@ -358,7 +358,7 @@ line_length = 20 # Set a low limit to trigger it
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
     let sourced_config_2 = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config 2");
-    let config_2: Config = sourced_config_2.into(); // Convert
+    let config_2: Config = sourced_config_2.into_validated_unchecked().into(); // Convert
 
     // Get all rules and apply config
     let initial_rules_2 = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
@@ -425,7 +425,7 @@ headings = true
     // Load using SourcedConfig::load_with_discovery with skip_auto_discovery: true
     let sourced_config = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
         .expect("Failed to load config");
-    let config: Config = sourced_config.into(); // Convert
+    let config: Config = sourced_config.into_validated_unchecked().into(); // Convert
 
     // Get all rules and apply config
     let initial_rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());

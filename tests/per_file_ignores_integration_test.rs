@@ -26,7 +26,7 @@ fn test_per_file_ignores_integration_actual_linting() {
 
     // Load config
     let sourced = rumdl_lib::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
-    let config: Config = sourced.into();
+    let config: Config = sourced.into_validated_unchecked().into();
 
     // Get all rules
     let all_rules = rules::all_rules(&config);
@@ -97,7 +97,7 @@ disable = ["MD013"]
 
     // Load config
     let sourced = rumdl_lib::config::SourcedConfig::load(Some(config_path.to_str().unwrap()), None).unwrap();
-    let config: Config = sourced.into();
+    let config: Config = sourced.into_validated_unchecked().into();
 
     // Verify config was loaded correctly
     assert!(config.global.disable.contains(&"MD013".to_string()));

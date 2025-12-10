@@ -988,8 +988,8 @@ build-backend = "setuptools.build_meta"
                                 exit::tool_error();
                             }
                         };
-                        // 2. Convert to final Config once
-                        let final_config: rumdl_config::Config = sourced.clone().into();
+                        // 2. Convert to final Config once (config-get doesn't need validation warnings)
+                        let final_config: rumdl_config::Config = sourced.clone().into_validated_unchecked().into();
 
                         let normalized_field = normalize_key(field_part);
 
@@ -1220,7 +1220,8 @@ build-backend = "setuptools.build_meta"
                                 }
                             }
                         } else {
-                            let config_to_print: rumdl_config::Config = final_sourced_to_print.into();
+                            let config_to_print: rumdl_config::Config =
+                                final_sourced_to_print.into_validated_unchecked().into();
                             match toml::to_string_pretty(&config_to_print) {
                                 Ok(s) => println!("{s}"),
                                 Err(e) => {
@@ -1628,7 +1629,8 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     let project_root = sourced.project_root.clone();
 
     // 5. Convert to Config for the rest of the linter
-    let config: rumdl_config::Config = sourced.into();
+    // Validation warnings are already printed above, so we use into_validated_unchecked
+    let config: rumdl_config::Config = sourced.into_validated_unchecked().into();
 
     // 6. Initialize cache if enabled
     // CLI --no-cache flag takes precedence over config
