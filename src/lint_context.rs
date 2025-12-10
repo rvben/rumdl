@@ -2380,20 +2380,6 @@ impl<'a> LintContext<'a> {
             {
                 let line_content = line_info.content(content).trim();
 
-                // Count pipes outside of inline code spans (to avoid confusing `||` for table)
-                let pipes_outside_code = {
-                    let mut count = 0;
-                    let mut in_code = false;
-                    for ch in line_content.chars() {
-                        if ch == '`' {
-                            in_code = !in_code;
-                        } else if ch == '|' && !in_code {
-                            count += 1;
-                        }
-                    }
-                    count
-                };
-
                 // Check for structural separators that break lists
                 // Note: Lazy continuation (indent=0) is valid in CommonMark and should NOT break lists.
                 // Only lines with indent between 1 and min_continuation_for_tracking-1 break lists,
@@ -2403,10 +2389,7 @@ impl<'a> LintContext<'a> {
                     || line_content.starts_with("---")
                     || line_content.starts_with("***")
                     || line_content.starts_with("___")
-                    || (pipes_outside_code > 0
-                        && !line_content.contains("](")
-                        && !line_content.contains("http")
-                        && (pipes_outside_code > 1 || line_content.starts_with('|') || line_content.ends_with('|')))
+                    || crate::utils::skip_context::is_table_line(line_content)
                     || line_content.starts_with(">")
                     || (line_info.indent > 0
                         && line_info.indent < min_continuation_for_tracking
@@ -2747,10 +2730,8 @@ impl<'a> LintContext<'a> {
                     // BUT structural separators (headings, code blocks, etc.) should never be lazy continuations
                     let line_content = line_info.content(content).trim();
 
-                    // Check for table-like patterns, but exclude pipes in links and URLs
-                    let looks_like_table = crate::utils::skip_context::is_table_line(line_content)
-                        && !line_content.contains("](")
-                        && !line_content.contains("http");
+                    // Check for table-like patterns
+                    let looks_like_table = crate::utils::skip_context::is_table_line(line_content);
 
                     let is_structural_separator = line_info.heading.is_some()
                         || line_content.starts_with("```")
@@ -3310,17 +3291,9 @@ fn has_meaningful_content_between(content: &str, current: &ListBlock, next: &Lis
                 return true; // Has meaningful content - horizontal rules separate lists
             }
 
-            // Tables separate lists (lines containing | but not in URLs or code)
-            // Simple heuristic: tables typically have | at start/end or multiple |
-            if trimmed.contains('|') && trimmed.len() > 1 {
-                // Don't treat URLs with | as tables
-                if !trimmed.contains("](") && !trimmed.contains("http") {
-                    // More robust check: tables usually have multiple | or | at edges
-                    let pipe_count = trimmed.matches('|').count();
-                    if pipe_count > 1 || trimmed.starts_with('|') || trimmed.ends_with('|') {
-                        return true; // Has meaningful content - tables separate lists
-                    }
-                }
+            // Tables separate lists
+            if crate::utils::skip_context::is_table_line(trimmed) {
+                return true; // Has meaningful content - tables separate lists
             }
 
             // Blockquotes separate lists
