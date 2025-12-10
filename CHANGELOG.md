@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.192] - 2025-12-10
+
+### Added
+
+- **Config: `cache` option to disable caching via config file (closes #153)**
+  - Add `cache = false` to `[global]` section to persistently disable caching
+  - Eliminates need to pass `--no-cache` flag on every invocation
+  - Works in both `.rumdl.toml` and `pyproject.toml`
+
+- **MD052 (reference-links-images): User-configurable `ignore` option**
+  - Add patterns to skip specific reference links from validation
+  - Useful for links handled by external tools or preprocessors
+
+- **CI: Major version tag (`v0`) for GitHub Action**
+  - Users can now reference the action as `rvben/rumdl@v0` for automatic minor updates
+
+### Fixed
+
+- **Inline config: Cross-file rules now respect disable comments (fixes #189)**
+  - MD051 and MD057 now honor `<!-- rumdl-disable -->` and `<!-- rumdl-disable-next-line -->` comments
+  - Previously these rules ran in a separate phase that bypassed inline config filtering
+
+- **Config: Directory exclude patterns now match files within (fixes #186)**
+  - Patterns like `docs/` now correctly exclude all files in that directory
+  - Glob patterns are automatically expanded to match contained files
+
+- **MD032 (blanks-around-lists): No longer triggers on pipes in inline code (fixes #188)**
+  - Tables inside inline code blocks no longer confuse list boundary detection
+
+- **MD005/MD037/MD041: Resolve false positives**
+  - MD041: Setext headers with colons no longer cause issues
+  - MD037: List items containing asterisks handled correctly
+  - MD005: Sublist parsing improved for complex nested structures
+
+- **Text reflow: Use proper table detection**
+  - Replaced simplistic pipe check with robust table structure detection
+  - Prevents incorrect reflow of table content
+
+### Changed
+
+- **Internal: Replace `RUMDL_FILE_PATH` env var with `source_file` field**
+  - Cleaner API for accessing the current file path in rule implementations
+  - No user-facing changes
+
 ## [0.0.191] - 2025-12-08
 
 ### Fixed
