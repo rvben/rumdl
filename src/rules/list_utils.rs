@@ -165,8 +165,8 @@ impl ListUtils {
             return false;
         }
 
-        // Skip lines that are part of a Markdown table (contain |)
-        if line.contains('|') {
+        // Skip lines that are part of a Markdown table
+        if crate::utils::skip_context::is_table_line(line) {
             return false;
         }
 

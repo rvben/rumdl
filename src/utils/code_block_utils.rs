@@ -179,7 +179,7 @@ impl CodeBlockUtils {
         trimmed.starts_with("---")
             || trimmed.starts_with("***")
             || trimmed.starts_with("___")
-            || trimmed.contains('|') // Tables
+            || crate::utils::skip_context::is_table_line(trimmed)
             || trimmed.starts_with(">") // Blockquotes
     }
 }

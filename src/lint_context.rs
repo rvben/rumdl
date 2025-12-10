@@ -2661,7 +2661,7 @@ impl<'a> LintContext<'a> {
                                             || trimmed.starts_with("***")
                                             || trimmed.starts_with("___")
                                             || trimmed.starts_with(">")
-                                            || trimmed.contains('|') // Tables
+                                            || crate::utils::skip_context::is_table_line(trimmed)
                                             || between_line.heading.is_some()
                                         {
                                             return true; // These are structural separators - meaningful content that breaks lists
