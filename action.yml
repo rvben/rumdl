@@ -1,5 +1,10 @@
 name: "rumdl-action"
 description: "Lint Markdown files with rumdl"
+author: "rvben"
+
+branding:
+  icon: "check-circle"
+  color: "orange"
 
 inputs:
   version:
