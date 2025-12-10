@@ -385,6 +385,26 @@ impl InlineConfig {
     pub fn get_all_rule_configs(&self) -> &HashMap<String, JsonValue> {
         &self.file_rule_config
     }
+
+    /// Export the disabled rules data for storage in FileIndex
+    ///
+    /// Returns (file_disabled_rules, line_disabled_rules) for use in cross-file checks.
+    /// Merges both persistent disables and line-specific disables into a single map.
+    pub fn export_for_file_index(&self) -> (HashSet<String>, HashMap<usize, HashSet<String>>) {
+        let file_disabled = self.file_disabled_rules.clone();
+
+        // Merge disabled_at_line and line_disabled_rules into a single map
+        let mut line_disabled: HashMap<usize, HashSet<String>> = HashMap::new();
+
+        for (line, rules) in &self.disabled_at_line {
+            line_disabled.entry(*line).or_default().extend(rules.clone());
+        }
+        for (line, rules) in &self.line_disabled_rules {
+            line_disabled.entry(*line).or_default().extend(rules.clone());
+        }
+
+        (file_disabled, line_disabled)
+    }
 }
 
 /// Parse a disable comment and return the list of rules (empty vec means all rules)

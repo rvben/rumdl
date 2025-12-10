@@ -28,7 +28,7 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 
 /// Cache format version - increment when WorkspaceIndex serialization changes
 #[cfg(feature = "native")]
-const CACHE_FORMAT_VERSION: u32 = 2;
+const CACHE_FORMAT_VERSION: u32 = 3;
 
 /// Cache file name within the version directory
 #[cfg(feature = "native")]
@@ -66,6 +66,12 @@ pub struct FileIndex {
     /// O(1) anchor lookup: lowercased anchor → heading index
     /// Includes both auto-generated and custom anchors
     anchor_to_heading: HashMap<String, usize>,
+    /// Rules disabled for the entire file (from inline comments)
+    /// Used by cross-file rules to respect inline disable directives
+    pub file_disabled_rules: HashSet<String>,
+    /// Rules disabled at specific lines (line number -> set of rule names)
+    /// Merges both persistent disables and line-specific disables
+    pub line_disabled_rules: HashMap<usize, HashSet<String>>,
 }
 
 /// Information about a heading for cross-file lookup
@@ -490,6 +496,24 @@ impl FileIndex {
     /// Add a reference link to the index
     pub fn add_reference_link(&mut self, link: ReferenceLinkIndex) {
         self.reference_links.push(link);
+    }
+
+    /// Check if a rule is disabled at a specific line
+    ///
+    /// Used by cross-file rules to respect inline disable directives.
+    /// Checks both file-wide disables and line-specific disables.
+    pub fn is_rule_disabled_at_line(&self, rule_name: &str, line: usize) -> bool {
+        // Check file-wide disables (highest priority)
+        if self.file_disabled_rules.contains("*") || self.file_disabled_rules.contains(rule_name) {
+            return true;
+        }
+
+        // Check line-specific disables
+        if let Some(rules) = self.line_disabled_rules.get(&line) {
+            return rules.contains("*") || rules.contains(rule_name);
+        }
+
+        false
     }
 
     /// Add a cross-file link to the index (deduplicates by target_path, fragment, line, column)

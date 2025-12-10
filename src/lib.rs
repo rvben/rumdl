@@ -226,6 +226,11 @@ pub fn lint_and_index(
     // Parse inline configuration comments once
     let inline_config = crate::inline_config::InlineConfig::from_content(content);
 
+    // Export inline config data to FileIndex for cross-file rule filtering
+    let (file_disabled, line_disabled) = inline_config.export_for_file_index();
+    file_index.file_disabled_rules = file_disabled;
+    file_index.line_disabled_rules = line_disabled;
+
     // Analyze content characteristics for rule filtering
     let characteristics = ContentCharacteristics::analyze(content);
 
@@ -351,10 +356,12 @@ pub fn run_cross_file_checks(
 
         match rule.cross_file_check(file_path, file_index, workspace_index) {
             Ok(rule_warnings) => {
-                // Note: Inline config filtering is not applied to cross-file warnings
-                // since we don't have content here (by design, to avoid re-parsing).
-                // Users can disable cross-file rules via config if needed.
-                warnings.extend(rule_warnings);
+                // Filter cross-file warnings based on inline config stored in file_index
+                let filtered: Vec<_> = rule_warnings
+                    .into_iter()
+                    .filter(|w| !file_index.is_rule_disabled_at_line(rule.name(), w.line))
+                    .collect();
+                warnings.extend(filtered);
             }
             Err(e) => {
                 log::error!("Error in cross-file check for rule {}: {}", rule.name(), e);

@@ -162,3 +162,152 @@ fn test_cross_file_links_extraction() {
     assert_eq!(cross_file_links_with_fragment[0].target_path, "./guide.md");
     assert_eq!(cross_file_links_with_fragment[0].fragment, "install");
 }
+
+/// Test that inline config data is stored in FileIndex during linting.
+/// This data allows cross-file rules to respect inline disable comments.
+#[test]
+fn test_inline_config_stored_in_file_index() {
+    let content = r#"# Test Document
+
+<!-- rumdl-disable MD051 -->
+[Link to missing fragment](./other.md#nonexistent)
+<!-- rumdl-enable MD051 -->
+
+[Link to another missing fragment](./other.md#also-nonexistent)
+"#;
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
+
+    // Verify that inline config data was stored in FileIndex
+    // Line 4 should have MD051 disabled (line numbers are 1-indexed)
+    assert!(
+        file_index.is_rule_disabled_at_line("MD051", 4),
+        "MD051 should be disabled at line 4"
+    );
+
+    // Line 7 should NOT have MD051 disabled
+    assert!(
+        !file_index.is_rule_disabled_at_line("MD051", 7),
+        "MD051 should NOT be disabled at line 7"
+    );
+}
+
+/// Test that file-wide disable is stored in FileIndex.
+#[test]
+fn test_file_wide_disable_in_file_index() {
+    let content = r#"<!-- rumdl-disable-file MD051 -->
+# Test Document
+
+[Link to missing fragment](./other.md#nonexistent)
+"#;
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
+
+    // All lines should have MD051 disabled with file-wide disable
+    assert!(
+        file_index.is_rule_disabled_at_line("MD051", 1),
+        "MD051 should be disabled at line 1"
+    );
+    assert!(
+        file_index.is_rule_disabled_at_line("MD051", 4),
+        "MD051 should be disabled at line 4"
+    );
+}
+
+/// Test that disable-next-line stores data correctly.
+#[test]
+fn test_disable_next_line_in_file_index() {
+    let content = r#"# Test Document
+
+<!-- rumdl-disable-next-line MD051 -->
+[Link to missing fragment](./other.md#nonexistent)
+
+[Link to another missing fragment](./other.md#also-nonexistent)
+"#;
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
+
+    // Line 4 (the link after the disable-next-line comment) should have MD051 disabled
+    assert!(
+        file_index.is_rule_disabled_at_line("MD051", 4),
+        "MD051 should be disabled at line 4 (via disable-next-line)"
+    );
+
+    // Line 6 should NOT have MD051 disabled
+    assert!(
+        !file_index.is_rule_disabled_at_line("MD051", 6),
+        "MD051 should NOT be disabled at line 6"
+    );
+}
+
+/// Test cross-file rule filtering respects inline disable.
+/// This verifies that run_cross_file_checks() filters warnings based
+/// on inline config stored in FileIndex.
+#[test]
+fn test_cross_file_rules_respect_inline_disable() {
+    let source_content = r#"# Source
+
+<!-- rumdl-disable MD051 -->
+[disabled link](./target.md#missing)
+<!-- rumdl-enable MD051 -->
+
+[enabled link](./target.md#also-missing)
+"#;
+
+    let target_content = r#"# Target File
+
+## Features
+
+Here are the features.
+"#;
+
+    let source_path = PathBuf::from("/test/source.md");
+    let target_path = PathBuf::from("/test/target.md");
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+    // Lint and index both files
+    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+
+    // Build workspace index
+    let mut workspace_index = WorkspaceIndex::new();
+    workspace_index.insert_file(source_path.clone(), source_index.clone());
+    workspace_index.insert_file(target_path.clone(), target_index.clone());
+
+    // Run cross-file checks on source file
+    let md051 = MD051LinkFragments::default();
+    let raw_warnings = md051
+        .cross_file_check(&source_path, &source_index, &workspace_index)
+        .unwrap();
+
+    // Without filtering, should have 2 warnings (both links point to missing fragments)
+    assert_eq!(
+        raw_warnings.len(),
+        2,
+        "Raw cross_file_check should return 2 warnings before filtering"
+    );
+
+    // Filter warnings using inline config stored in FileIndex
+    let filtered_warnings: Vec<_> = raw_warnings
+        .into_iter()
+        .filter(|w| !source_index.is_rule_disabled_at_line("MD051", w.line))
+        .collect();
+
+    // After filtering, should have 1 warning (only the enabled link)
+    assert_eq!(
+        filtered_warnings.len(),
+        1,
+        "After inline config filtering, should have 1 warning. Got: {filtered_warnings:?}"
+    );
+
+    // The remaining warning should be for line 7 (the enabled link)
+    assert_eq!(
+        filtered_warnings[0].line, 7,
+        "Warning should be for line 7 (enabled link), got line {}",
+        filtered_warnings[0].line
+    );
+}

@@ -128,12 +128,21 @@ fn test_disabled_rule() {
     // Initialize rule with the base path
     let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-    // Test the rule
+    // Test the rule - note: this tests the single-file check() method
+    // which doesn't have access to inline config filtering (that happens
+    // in lint_and_index()). The cross-file check in run_cross_file_checks()
+    // now respects inline config stored in FileIndex.
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should have two warnings even with disable comment
-    assert_eq!(result.len(), 2, "Expected 2 warnings, got {}", result.len());
+    // The check() method returns all warnings; filtering happens later
+    // when running through lint_and_index() or run_cross_file_checks()
+    assert_eq!(
+        result.len(),
+        2,
+        "Expected 2 warnings from check(), got {}",
+        result.len()
+    );
 
     // Check that both links are flagged
     let has_missing = result.iter().any(|w| w.message.contains("missing.md"));
