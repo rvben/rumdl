@@ -314,7 +314,7 @@ pub struct ListBlock {
     pub max_marker_width: usize,
 }
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, OnceLock};
 
 /// Character frequency data for fast content analysis
 #[derive(Debug, Clone, Default)]
@@ -431,13 +431,13 @@ pub struct LintContext<'a> {
     pub broken_links: Vec<BrokenLinkInfo>, // Broken/undefined references
     pub footnote_refs: Vec<FootnoteRef>,  // Pre-parsed footnote references
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
-    code_spans_cache: Mutex<Option<Arc<Vec<CodeSpan>>>>, // Lazy-loaded inline code spans
+    code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>, // Lazy-loaded inline code spans
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
     pub char_frequency: CharFrequency,    // Character frequency analysis
-    html_tags_cache: Mutex<Option<Arc<Vec<HtmlTag>>>>, // Lazy-loaded HTML tags
-    emphasis_spans_cache: Mutex<Option<Arc<Vec<EmphasisSpan>>>>, // Lazy-loaded emphasis spans
-    table_rows_cache: Mutex<Option<Arc<Vec<TableRow>>>>, // Lazy-loaded table rows
-    bare_urls_cache: Mutex<Option<Arc<Vec<BareUrl>>>>, // Lazy-loaded bare URLs
+    html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded HTML tags
+    emphasis_spans_cache: OnceLock<Arc<Vec<EmphasisSpan>>>, // Lazy-loaded emphasis spans
+    table_rows_cache: OnceLock<Arc<Vec<TableRow>>>, // Lazy-loaded table rows
+    bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>, // Lazy-loaded bare URLs
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
     pub line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed line index for byte position calculations
@@ -630,13 +630,13 @@ impl<'a> LintContext<'a> {
             broken_links,
             footnote_refs,
             reference_defs,
-            code_spans_cache: Mutex::new(Some(Arc::new(code_spans))),
+            code_spans_cache: OnceLock::from(Arc::new(code_spans)),
             list_blocks,
             char_frequency,
-            html_tags_cache: Mutex::new(None),
-            emphasis_spans_cache: Mutex::new(None),
-            table_rows_cache: Mutex::new(None),
-            bare_urls_cache: Mutex::new(None),
+            html_tags_cache: OnceLock::new(),
+            emphasis_spans_cache: OnceLock::new(),
+            table_rows_cache: OnceLock::new(),
+            bare_urls_cache: OnceLock::new(),
             html_comment_ranges,
             table_blocks,
             line_index,
@@ -648,9 +648,10 @@ impl<'a> LintContext<'a> {
 
     /// Get code spans - computed lazily on first access
     pub fn code_spans(&self) -> Arc<Vec<CodeSpan>> {
-        let mut cache = self.code_spans_cache.lock().expect("Code spans cache mutex poisoned");
-
-        Arc::clone(cache.get_or_insert_with(|| Arc::new(Self::parse_code_spans(self.content, &self.lines))))
+        Arc::clone(
+            self.code_spans_cache
+                .get_or_init(|| Arc::new(Self::parse_code_spans(self.content, &self.lines))),
+        )
     }
 
     /// Get HTML comment ranges - pre-computed during LintContext construction
@@ -660,9 +661,7 @@ impl<'a> LintContext<'a> {
 
     /// Get HTML tags - computed lazily on first access
     pub fn html_tags(&self) -> Arc<Vec<HtmlTag>> {
-        let mut cache = self.html_tags_cache.lock().expect("HTML tags cache mutex poisoned");
-
-        Arc::clone(cache.get_or_insert_with(|| {
+        Arc::clone(self.html_tags_cache.get_or_init(|| {
             Arc::new(Self::parse_html_tags(
                 self.content,
                 &self.lines,
@@ -674,31 +673,25 @@ impl<'a> LintContext<'a> {
 
     /// Get emphasis spans - computed lazily on first access
     pub fn emphasis_spans(&self) -> Arc<Vec<EmphasisSpan>> {
-        let mut cache = self
-            .emphasis_spans_cache
-            .lock()
-            .expect("Emphasis spans cache mutex poisoned");
-
         Arc::clone(
-            cache.get_or_insert_with(|| {
-                Arc::new(Self::parse_emphasis_spans(self.content, &self.lines, &self.code_blocks))
-            }),
+            self.emphasis_spans_cache
+                .get_or_init(|| Arc::new(Self::parse_emphasis_spans(self.content, &self.lines, &self.code_blocks))),
         )
     }
 
     /// Get table rows - computed lazily on first access
     pub fn table_rows(&self) -> Arc<Vec<TableRow>> {
-        let mut cache = self.table_rows_cache.lock().expect("Table rows cache mutex poisoned");
-
-        Arc::clone(cache.get_or_insert_with(|| Arc::new(Self::parse_table_rows(self.content, &self.lines))))
+        Arc::clone(
+            self.table_rows_cache
+                .get_or_init(|| Arc::new(Self::parse_table_rows(self.content, &self.lines))),
+        )
     }
 
     /// Get bare URLs - computed lazily on first access
     pub fn bare_urls(&self) -> Arc<Vec<BareUrl>> {
-        let mut cache = self.bare_urls_cache.lock().expect("Bare URLs cache mutex poisoned");
-
         Arc::clone(
-            cache.get_or_insert_with(|| Arc::new(Self::parse_bare_urls(self.content, &self.lines, &self.code_blocks))),
+            self.bare_urls_cache
+                .get_or_init(|| Arc::new(Self::parse_bare_urls(self.content, &self.lines, &self.code_blocks))),
         )
     }
 
