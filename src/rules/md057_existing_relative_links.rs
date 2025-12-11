@@ -44,9 +44,11 @@ static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\
 static URL_EXTRACT_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("\\]\\(\\s*<?([^>\\)\\s#]+)(#[^)\\s]*)?\\s*(?:\"[^\"]*\")?\\s*>?\\s*\\)").unwrap());
 
-/// Regex to detect protocol and domain for external links
+/// Regex to detect URLs with explicit schemes (should not be checked as relative links)
+/// Matches: scheme:// or scheme: (per RFC 3986)
+/// This covers http, https, ftp, file, smb, mailto, tel, data, macappstores, etc.
 static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(https?://|ftp://|mailto:|www\.)").unwrap());
+    LazyLock::new(|| Regex::new(r"^([a-zA-Z][a-zA-Z0-9+.-]*://|[a-zA-Z][a-zA-Z0-9+.-]*:|www\.)").unwrap());
 
 // Current working directory
 static CURRENT_DIR: LazyLock<PathBuf> = LazyLock::new(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -503,12 +505,25 @@ mod tests {
     fn test_external_urls() {
         let rule = MD057ExistingRelativeLinks::new();
 
+        // Common web protocols
         assert!(rule.is_external_url("https://example.com"));
         assert!(rule.is_external_url("http://example.com"));
         assert!(rule.is_external_url("ftp://example.com"));
         assert!(rule.is_external_url("www.example.com"));
         assert!(rule.is_external_url("example.com"));
 
+        // Special URI schemes (issue #192)
+        assert!(rule.is_external_url("file:///path/to/file"));
+        assert!(rule.is_external_url("smb://server/share"));
+        assert!(rule.is_external_url("macappstores://apps.apple.com/"));
+        assert!(rule.is_external_url("mailto:user@example.com"));
+        assert!(rule.is_external_url("tel:+1234567890"));
+        assert!(rule.is_external_url("data:text/plain;base64,SGVsbG8="));
+        assert!(rule.is_external_url("javascript:void(0)"));
+        assert!(rule.is_external_url("ssh://git@github.com/repo"));
+        assert!(rule.is_external_url("git://github.com/repo.git"));
+
+        // Relative paths should NOT be external
         assert!(!rule.is_external_url("./relative/path.md"));
         assert!(!rule.is_external_url("relative/path.md"));
         assert!(!rule.is_external_url("../parent/path.md"));

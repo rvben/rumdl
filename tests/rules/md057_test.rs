@@ -67,6 +67,34 @@ fn test_external_links() {
 }
 
 #[test]
+fn test_special_uri_schemes() {
+    // Issue #192: Special URI schemes should not be flagged as broken relative links
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Test Document with Special URI Schemes
+
+[Local file](file:///path/to/file)
+[Network share](smb://example.com/path/to/share)
+[Mac App Store](macappstores://apps.apple.com/)
+[Phone](tel:+1234567890)
+[Data URI](data:text/plain;base64,SGVsbG8=)
+[SSH](ssh://git@github.com/repo)
+[Git](git://github.com/repo.git)
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Expected no warnings for special URI schemes, got: {result:?}"
+    );
+}
+
+#[test]
 fn test_code_blocks() {
     // Create a temporary directory for test files
     let temp_dir = tempdir().unwrap();
