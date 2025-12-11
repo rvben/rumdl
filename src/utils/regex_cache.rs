@@ -96,21 +96,43 @@ impl RegexCache {
 static GLOBAL_REGEX_CACHE: LazyLock<Arc<Mutex<RegexCache>>> = LazyLock::new(|| Arc::new(Mutex::new(RegexCache::new())));
 
 /// Get a regex from the global cache
+///
+/// If the mutex is poisoned (another thread panicked while holding the lock),
+/// this function recovers by clearing the cache and continuing. This ensures
+/// the library never panics due to mutex poisoning.
 pub fn get_cached_regex(pattern: &str) -> Result<Arc<Regex>, regex::Error> {
-    let mut cache = GLOBAL_REGEX_CACHE.lock().expect("Regex cache mutex poisoned");
+    let mut cache = GLOBAL_REGEX_CACHE.lock().unwrap_or_else(|poisoned| {
+        // Recover from poisoned mutex by clearing the cache
+        let mut guard = poisoned.into_inner();
+        guard.clear();
+        guard
+    });
     cache.get_regex(pattern)
 }
 
 /// Get a fancy regex from the global cache
+///
+/// If the mutex is poisoned (another thread panicked while holding the lock),
+/// this function recovers by clearing the cache and continuing. This ensures
+/// the library never panics due to mutex poisoning.
 pub fn get_cached_fancy_regex(pattern: &str) -> Result<Arc<FancyRegex>, Box<fancy_regex::Error>> {
-    let mut cache = GLOBAL_REGEX_CACHE.lock().expect("Regex cache mutex poisoned");
+    let mut cache = GLOBAL_REGEX_CACHE.lock().unwrap_or_else(|poisoned| {
+        // Recover from poisoned mutex by clearing the cache
+        let mut guard = poisoned.into_inner();
+        guard.clear();
+        guard
+    });
     cache.get_fancy_regex(pattern)
 }
 
 /// Get cache usage statistics
+///
+/// If the mutex is poisoned, returns an empty HashMap rather than panicking.
 pub fn get_cache_stats() -> HashMap<String, u64> {
-    let cache = GLOBAL_REGEX_CACHE.lock().expect("Regex cache mutex poisoned");
-    cache.get_stats()
+    match GLOBAL_REGEX_CACHE.lock() {
+        Ok(cache) => cache.get_stats(),
+        Err(_) => HashMap::new(),
+    }
 }
 
 /// Macro for defining a lazily-initialized, cached regex pattern.

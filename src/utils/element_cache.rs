@@ -526,26 +526,26 @@ impl ElementCache {
 static ELEMENT_CACHE: LazyLock<Arc<Mutex<Option<ElementCache>>>> = LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 /// Get or create element cache for document content
+///
+/// If the mutex is poisoned, creates a fresh cache without storing it globally.
+/// This ensures the library never panics due to mutex poisoning.
 pub fn get_element_cache(content: &str) -> ElementCache {
     // Try to get existing cache
-    {
-        let cache_guard = ELEMENT_CACHE.lock().expect("Element cache mutex poisoned");
-
+    if let Ok(cache_guard) = ELEMENT_CACHE.lock() {
         // If cache exists and content matches, return it
         if let Some(existing_cache) = &*cache_guard
             && let Some(cached_content) = &existing_cache.content
             && cached_content == content
         {
-            return existing_cache.clone(); // Keep existing cache
+            return existing_cache.clone();
         }
     }
 
-    // Content doesn't match, create new cache
+    // Content doesn't match or mutex poisoned, create new cache
     let new_cache = ElementCache::new(content);
 
-    // Store in global cache
-    {
-        let mut cache_guard = ELEMENT_CACHE.lock().expect("Element cache mutex poisoned");
+    // Store in global cache (ignore if mutex is poisoned)
+    if let Ok(mut cache_guard) = ELEMENT_CACHE.lock() {
         *cache_guard = Some(new_cache.clone());
     }
 
@@ -553,9 +553,12 @@ pub fn get_element_cache(content: &str) -> ElementCache {
 }
 
 /// Reset the element cache
+///
+/// If the mutex is poisoned, this is a no-op.
 pub fn reset_element_cache() {
-    let mut cache_guard = ELEMENT_CACHE.lock().expect("Element cache mutex poisoned");
-    *cache_guard = None;
+    if let Ok(mut cache_guard) = ELEMENT_CACHE.lock() {
+        *cache_guard = None;
+    }
 }
 
 #[cfg(test)]

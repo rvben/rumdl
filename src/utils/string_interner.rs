@@ -47,9 +47,14 @@ static GLOBAL_INTERNER: LazyLock<Arc<Mutex<StringInterner>>> =
     LazyLock::new(|| Arc::new(Mutex::new(StringInterner::new())));
 
 /// Intern a string globally
+///
+/// If the mutex is poisoned, returns a fresh Arc<str> without interning.
+/// This ensures the library never panics due to mutex poisoning.
 pub fn intern_string(s: &str) -> Arc<str> {
-    let mut interner = GLOBAL_INTERNER.lock().expect("String interner mutex poisoned");
-    interner.intern(s)
+    match GLOBAL_INTERNER.lock() {
+        Ok(mut interner) => interner.intern(s),
+        Err(_) => Arc::from(s),
+    }
 }
 
 /// Common interned strings for performance

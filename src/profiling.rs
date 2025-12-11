@@ -111,35 +111,42 @@ impl Profiler {
 }
 
 /// Start a timer for a section
+///
+/// If the mutex is poisoned, this is a no-op. Profiling failures should not crash the application.
 pub fn start_timer(section: &str) {
-    if PROFILING_ENABLED {
-        let mut profiler = PROFILER.lock().expect("Profiler mutex poisoned");
+    if PROFILING_ENABLED && let Ok(mut profiler) = PROFILER.lock() {
         profiler.start_timer(section);
     }
 }
 
 /// Stop a timer for a section
+///
+/// If the mutex is poisoned, this is a no-op. Profiling failures should not crash the application.
 pub fn stop_timer(section: &str) {
-    if PROFILING_ENABLED {
-        let mut profiler = PROFILER.lock().expect("Profiler mutex poisoned");
+    if PROFILING_ENABLED && let Ok(mut profiler) = PROFILER.lock() {
         profiler.stop_timer(section);
     }
 }
 
 /// Get a report of all measurements
+///
+/// If the mutex is poisoned, returns a message indicating the error rather than panicking.
 pub fn get_report() -> String {
     if PROFILING_ENABLED {
-        let profiler = PROFILER.lock().expect("Profiler mutex poisoned");
-        profiler.get_report()
+        match PROFILER.lock() {
+            Ok(profiler) => profiler.get_report(),
+            Err(_) => "Profiling report unavailable (mutex poisoned).".to_string(),
+        }
     } else {
         "Profiling is disabled.".to_string()
     }
 }
 
 /// Reset all measurements
+///
+/// If the mutex is poisoned, this is a no-op. Profiling failures should not crash the application.
 pub fn reset() {
-    if PROFILING_ENABLED {
-        let mut profiler = PROFILER.lock().expect("Profiler mutex poisoned");
+    if PROFILING_ENABLED && let Ok(mut profiler) = PROFILER.lock() {
         profiler.reset();
     }
 }

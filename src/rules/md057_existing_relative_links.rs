@@ -22,18 +22,17 @@ static FILE_EXISTENCE_CACHE: LazyLock<Arc<Mutex<HashMap<PathBuf, bool>>>> =
 
 // Reset the file existence cache (typically between rule runs)
 fn reset_file_existence_cache() {
-    let mut cache = FILE_EXISTENCE_CACHE
-        .lock()
-        .expect("File existence cache mutex poisoned");
-    cache.clear();
+    if let Ok(mut cache) = FILE_EXISTENCE_CACHE.lock() {
+        cache.clear();
+    }
 }
 
 // Check if a file exists with caching
 fn file_exists_with_cache(path: &Path) -> bool {
-    let mut cache = FILE_EXISTENCE_CACHE
-        .lock()
-        .expect("File existence cache mutex poisoned");
-    *cache.entry(path.to_path_buf()).or_insert_with(|| path.exists())
+    match FILE_EXISTENCE_CACHE.lock() {
+        Ok(mut cache) => *cache.entry(path.to_path_buf()).or_insert_with(|| path.exists()),
+        Err(_) => path.exists(), // Fallback to uncached check on mutex poison
+    }
 }
 
 // Regex to match the start of a link - simplified for performance
@@ -95,7 +94,9 @@ impl MD057ExistingRelativeLinks {
             Some(path.to_path_buf())
         };
 
-        *self.base_path.lock().expect("Base path mutex poisoned") = dir_path;
+        if let Ok(mut guard) = self.base_path.lock() {
+            *guard = dir_path;
+        }
         self
     }
 
@@ -217,7 +218,7 @@ impl Rule for MD057ExistingRelativeLinks {
         // This ensures each file resolves links relative to its own directory
         let base_path: Option<PathBuf> = {
             // First check if base_path was explicitly set via with_path() (for tests)
-            let explicit_base = self.base_path.lock().expect("Base path mutex poisoned").clone();
+            let explicit_base = self.base_path.lock().ok().and_then(|g| g.clone());
             if explicit_base.is_some() {
                 explicit_base
             } else if let Some(ref source_file) = ctx.source_file {

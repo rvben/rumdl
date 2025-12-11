@@ -833,10 +833,11 @@ pub fn process_file_with_index(
     // Try to get from cache first (lock briefly for cache read)
     // Note: Cache only stores single-file warnings; cross-file checks must run fresh
     if let Some(ref cache_arc) = cache {
-        let mut cache_guard = cache_arc.lock().expect("Cache mutex poisoned");
-        if let Some(cached_warnings) = cache_guard.get(&content, &config_hash, &rules_hash) {
-            drop(cache_guard); // Release lock immediately
-
+        let cache_result = cache_arc
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.get(&content, &config_hash, &rules_hash));
+        if let Some(cached_warnings) = cache_result {
             if verbose && !quiet {
                 println!("Cache hit for {file_path}");
             }
@@ -859,16 +860,16 @@ pub fn process_file_with_index(
             };
             let file_index = rumdl_lib::build_file_index_only(&content, rules, flavor);
 
+            let total_warnings = cached_warnings.len();
             return ProcessFileResult {
-                warnings: cached_warnings.clone(),
+                warnings: cached_warnings,
                 content,
-                total_warnings: cached_warnings.len(),
+                total_warnings,
                 fixable_warnings,
                 original_line_ending,
                 file_index,
             };
         }
-        // Unlock happens automatically when cache_guard goes out of scope
     }
 
     let lint_start = Instant::now();
@@ -936,11 +937,11 @@ pub fn process_file_with_index(
         println!("Total processing time for {file_path}: {total_time:?}");
     }
 
-    // Store in cache before returning (lock briefly for cache write)
-    if let Some(ref cache_arc) = cache {
-        let mut cache_guard = cache_arc.lock().expect("Cache mutex poisoned");
+    // Store in cache before returning (ignore if mutex is poisoned)
+    if let Some(ref cache_arc) = cache
+        && let Ok(mut cache_guard) = cache_arc.lock()
+    {
         cache_guard.set(&content, &config_hash, &rules_hash, all_warnings.clone());
-        // Unlock happens automatically when cache_guard goes out of scope
     }
 
     ProcessFileResult {
