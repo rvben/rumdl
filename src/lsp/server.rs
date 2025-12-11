@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
+use futures::future::join_all;
 use tokio::sync::{RwLock, mpsc};
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
@@ -16,13 +17,22 @@ use tower_lsp::{Client, LanguageServer};
 use crate::config::Config;
 use crate::lint;
 use crate::lsp::index_worker::IndexWorker;
-use crate::lsp::types::{IndexState, IndexUpdate, RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
+use crate::lsp::types::{
+    ConfigurationPreference, IndexState, IndexUpdate, LspRuleSettings, RumdlLspConfig, warning_to_code_actions,
+    warning_to_diagnostic,
+};
 use crate::rule::{FixCapability, Rule};
 use crate::rules;
 use crate::workspace_index::WorkspaceIndex;
 
 /// Supported markdown file extensions (without leading dot)
 const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"];
+
+/// Maximum number of rules in enable/disable lists (DoS protection)
+const MAX_RULE_LIST_SIZE: usize = 100;
+
+/// Maximum allowed line length value (DoS protection)
+const MAX_LINE_LENGTH: usize = 10_000;
 
 /// Check if a file extension is a markdown extension
 #[inline]
@@ -168,29 +178,249 @@ impl RumdlLanguageServer {
         None
     }
 
+    /// Check if a rule name is valid (e.g., MD001-MD062, case-insensitive)
+    ///
+    /// Zero-allocation implementation using byte comparisons.
+    fn is_valid_rule_name(name: &str) -> bool {
+        let bytes = name.as_bytes();
+
+        // Check for "all" special value (case-insensitive)
+        if bytes.len() == 3
+            && bytes[0].eq_ignore_ascii_case(&b'A')
+            && bytes[1].eq_ignore_ascii_case(&b'L')
+            && bytes[2].eq_ignore_ascii_case(&b'L')
+        {
+            return true;
+        }
+
+        // Must be exactly 5 characters: "MDnnn"
+        if bytes.len() != 5 {
+            return false;
+        }
+
+        // Check "MD" prefix (case-insensitive)
+        if !bytes[0].eq_ignore_ascii_case(&b'M') || !bytes[1].eq_ignore_ascii_case(&b'D') {
+            return false;
+        }
+
+        // Parse the 3-digit number
+        let d0 = bytes[2].wrapping_sub(b'0');
+        let d1 = bytes[3].wrapping_sub(b'0');
+        let d2 = bytes[4].wrapping_sub(b'0');
+
+        // All must be digits (0-9)
+        if d0 > 9 || d1 > 9 || d2 > 9 {
+            return false;
+        }
+
+        let num = (d0 as u32) * 100 + (d1 as u32) * 10 + (d2 as u32);
+
+        // Valid rules are MD001-MD062, with gaps (no MD002, MD006, MD008, MD015-MD017)
+        matches!(num, 1 | 3..=5 | 7 | 9..=14 | 18..=62)
+    }
+
     /// Apply LSP config overrides to the filtered rules
     fn apply_lsp_config_overrides(
         &self,
         mut filtered_rules: Vec<Box<dyn Rule>>,
         lsp_config: &RumdlLspConfig,
     ) -> Vec<Box<dyn Rule>> {
-        // Apply enable_rules override from LSP config (if specified, only these rules are active)
-        if let Some(enable) = &lsp_config.enable_rules
-            && !enable.is_empty()
+        // Collect enable rules from both top-level and settings
+        let mut enable_rules: Vec<String> = Vec::new();
+        if let Some(enable) = &lsp_config.enable_rules {
+            enable_rules.extend(enable.iter().cloned());
+        }
+        if let Some(settings) = &lsp_config.settings
+            && let Some(enable) = &settings.enable
         {
-            let enable_set: std::collections::HashSet<String> = enable.iter().cloned().collect();
+            enable_rules.extend(enable.iter().cloned());
+        }
+
+        // Apply enable_rules override (if specified, only these rules are active)
+        if !enable_rules.is_empty() {
+            let enable_set: std::collections::HashSet<String> = enable_rules.into_iter().collect();
             filtered_rules.retain(|rule| enable_set.contains(rule.name()));
         }
 
-        // Apply disable_rules override from LSP config
-        if let Some(disable) = &lsp_config.disable_rules
-            && !disable.is_empty()
+        // Collect disable rules from both top-level and settings
+        let mut disable_rules: Vec<String> = Vec::new();
+        if let Some(disable) = &lsp_config.disable_rules {
+            disable_rules.extend(disable.iter().cloned());
+        }
+        if let Some(settings) = &lsp_config.settings
+            && let Some(disable) = &settings.disable
         {
-            let disable_set: std::collections::HashSet<String> = disable.iter().cloned().collect();
+            disable_rules.extend(disable.iter().cloned());
+        }
+
+        // Apply disable_rules override
+        if !disable_rules.is_empty() {
+            let disable_set: std::collections::HashSet<String> = disable_rules.into_iter().collect();
             filtered_rules.retain(|rule| !disable_set.contains(rule.name()));
         }
 
         filtered_rules
+    }
+
+    /// Merge LSP settings into a Config based on configuration preference
+    ///
+    /// This follows Ruff's pattern where editors can pass per-rule configuration
+    /// via LSP initialization options. The `configuration_preference` controls
+    /// whether editor settings override filesystem configs or vice versa.
+    fn merge_lsp_settings(&self, mut file_config: Config, lsp_config: &RumdlLspConfig) -> Config {
+        let Some(settings) = &lsp_config.settings else {
+            return file_config;
+        };
+
+        match lsp_config.configuration_preference {
+            ConfigurationPreference::EditorFirst => {
+                // Editor settings take priority - apply them on top of file config
+                self.apply_lsp_settings_to_config(&mut file_config, settings);
+            }
+            ConfigurationPreference::FilesystemFirst => {
+                // File config takes priority - only apply settings for values not in file config
+                self.apply_lsp_settings_if_absent(&mut file_config, settings);
+            }
+            ConfigurationPreference::EditorOnly => {
+                // Ignore file config completely - start from default and apply editor settings
+                let mut default_config = Config::default();
+                self.apply_lsp_settings_to_config(&mut default_config, settings);
+                return default_config;
+            }
+        }
+
+        file_config
+    }
+
+    /// Apply all LSP settings to config, overriding existing values
+    fn apply_lsp_settings_to_config(&self, config: &mut Config, settings: &crate::lsp::types::LspRuleSettings) {
+        // Apply global line length
+        if let Some(line_length) = settings.line_length {
+            config.global.line_length = crate::types::LineLength::new(line_length);
+        }
+
+        // Apply disable list
+        if let Some(disable) = &settings.disable {
+            config.global.disable.extend(disable.iter().cloned());
+        }
+
+        // Apply enable list
+        if let Some(enable) = &settings.enable {
+            config.global.enable.extend(enable.iter().cloned());
+        }
+
+        // Apply per-rule settings (e.g., "MD013": { "lineLength": 120 })
+        for (rule_name, rule_config) in &settings.rules {
+            self.apply_rule_config(config, rule_name, rule_config);
+        }
+    }
+
+    /// Apply LSP settings to config only where file config doesn't specify values
+    fn apply_lsp_settings_if_absent(&self, config: &mut Config, settings: &crate::lsp::types::LspRuleSettings) {
+        // Apply global line length only if using default value
+        // LineLength default is 80, so we can check if it's still the default
+        if config.global.line_length.get() == 80
+            && let Some(line_length) = settings.line_length
+        {
+            config.global.line_length = crate::types::LineLength::new(line_length);
+        }
+
+        // For disable/enable lists, we merge them (filesystem values are already there)
+        if let Some(disable) = &settings.disable {
+            config.global.disable.extend(disable.iter().cloned());
+        }
+
+        if let Some(enable) = &settings.enable {
+            config.global.enable.extend(enable.iter().cloned());
+        }
+
+        // Apply per-rule settings only if not already configured in file
+        for (rule_name, rule_config) in &settings.rules {
+            self.apply_rule_config_if_absent(config, rule_name, rule_config);
+        }
+    }
+
+    /// Apply per-rule configuration from LSP settings
+    ///
+    /// Converts JSON values from LSP settings to TOML values and merges them
+    /// into the config's rule-specific BTreeMap.
+    fn apply_rule_config(&self, config: &mut Config, rule_name: &str, rule_config: &serde_json::Value) {
+        let rule_key = rule_name.to_uppercase();
+
+        // Get or create the rule config entry
+        let rule_entry = config.rules.entry(rule_key.clone()).or_default();
+
+        // Convert JSON object to TOML values and merge
+        if let Some(obj) = rule_config.as_object() {
+            for (key, value) in obj {
+                // Convert camelCase to snake_case for config compatibility
+                let config_key = Self::camel_to_snake(key);
+
+                // Convert JSON value to TOML value
+                if let Some(toml_value) = Self::json_to_toml(value) {
+                    rule_entry.values.insert(config_key, toml_value);
+                }
+            }
+        }
+    }
+
+    /// Apply per-rule configuration only if not already set in file config
+    fn apply_rule_config_if_absent(&self, config: &mut Config, rule_name: &str, rule_config: &serde_json::Value) {
+        let rule_key = rule_name.to_uppercase();
+
+        // Check if rule already has configuration in file
+        let existing_rule = config.rules.get(&rule_key);
+        let has_existing = existing_rule.map(|r| !r.values.is_empty()).unwrap_or(false);
+
+        if has_existing {
+            // Rule already configured in file, skip LSP settings for this rule
+            log::debug!("Rule {rule_key} already configured in file, skipping LSP settings");
+            return;
+        }
+
+        // No existing config, apply LSP settings
+        self.apply_rule_config(config, rule_name, rule_config);
+    }
+
+    /// Convert camelCase to snake_case
+    fn camel_to_snake(s: &str) -> String {
+        let mut result = String::new();
+        for (i, c) in s.chars().enumerate() {
+            if c.is_uppercase() && i > 0 {
+                result.push('_');
+            }
+            result.push(c.to_lowercase().next().unwrap_or(c));
+        }
+        result
+    }
+
+    /// Convert a JSON value to a TOML value
+    fn json_to_toml(json: &serde_json::Value) -> Option<toml::Value> {
+        match json {
+            serde_json::Value::Bool(b) => Some(toml::Value::Boolean(*b)),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Some(toml::Value::Integer(i))
+                } else {
+                    n.as_f64().map(toml::Value::Float)
+                }
+            }
+            serde_json::Value::String(s) => Some(toml::Value::String(s.clone())),
+            serde_json::Value::Array(arr) => {
+                let toml_arr: Vec<toml::Value> = arr.iter().filter_map(Self::json_to_toml).collect();
+                Some(toml::Value::Array(toml_arr))
+            }
+            serde_json::Value::Object(obj) => {
+                let mut table = toml::map::Map::new();
+                for (k, v) in obj {
+                    if let Some(toml_v) = Self::json_to_toml(v) {
+                        table.insert(Self::camel_to_snake(k), toml_v);
+                    }
+                }
+                Some(toml::Value::Table(table))
+            }
+            serde_json::Value::Null => None,
+        }
     }
 
     /// Check if a file URI should be excluded based on exclude patterns
@@ -268,12 +498,15 @@ impl RumdlLanguageServer {
 
         // Resolve configuration for this specific file
         let file_path = uri.to_file_path().ok();
-        let rumdl_config = if let Some(ref path) = file_path {
+        let file_config = if let Some(ref path) = file_path {
             self.resolve_config_for_file(path).await
         } else {
             // Fallback to global config for non-file URIs
             (*self.rumdl_config.read().await).clone()
         };
+
+        // Merge LSP settings with file config based on configuration_preference
+        let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
         let flavor = rumdl_config.markdown_flavor();
@@ -355,12 +588,15 @@ impl RumdlLanguageServer {
         drop(config_guard);
 
         // Resolve configuration for this specific file
-        let rumdl_config = if let Ok(file_path) = uri.to_file_path() {
+        let file_config = if let Ok(file_path) = uri.to_file_path() {
             self.resolve_config_for_file(&file_path).await
         } else {
             // Fallback to global config for non-file URIs
             (*self.rumdl_config.read().await).clone()
         };
+
+        // Merge LSP settings with file config based on configuration_preference
+        let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
         let flavor = rumdl_config.markdown_flavor();
@@ -449,12 +685,15 @@ impl RumdlLanguageServer {
         drop(config_guard);
 
         // Resolve configuration for this specific file
-        let rumdl_config = if let Ok(file_path) = uri.to_file_path() {
+        let file_config = if let Ok(file_path) = uri.to_file_path() {
             self.resolve_config_for_file(&file_path).await
         } else {
             // Fallback to global config for non-file URIs
             (*self.rumdl_config.read().await).clone()
         };
+
+        // Merge LSP settings with file config based on configuration_preference
+        let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
         let flavor = rumdl_config.markdown_flavor();
@@ -936,6 +1175,231 @@ impl LanguageServer for RumdlLanguageServer {
         }
     }
 
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        log::debug!("Configuration changed: {:?}", params.settings);
+
+        // Parse settings from the notification
+        // Neovim sends: { "rumdl": { "MD013": {...}, ... } }
+        // VSCode might send the full RumdlLspConfig or similar structure
+        let settings_value = params.settings;
+
+        // Try to extract "rumdl" key from settings (Neovim style)
+        let rumdl_settings = if let serde_json::Value::Object(ref obj) = settings_value {
+            obj.get("rumdl").cloned().unwrap_or(settings_value.clone())
+        } else {
+            settings_value
+        };
+
+        // Track if we successfully applied any configuration
+        let mut config_applied = false;
+        let mut warnings: Vec<String> = Vec::new();
+
+        // Try to parse as LspRuleSettings first (Neovim style with "disable", "enable", rule keys)
+        // We check this first because RumdlLspConfig with #[serde(default)] will accept any JSON
+        // and just ignore unknown fields, which would lose the Neovim-style settings
+        if let Ok(rule_settings) = serde_json::from_value::<LspRuleSettings>(rumdl_settings.clone())
+            && (rule_settings.disable.is_some()
+                || rule_settings.enable.is_some()
+                || rule_settings.line_length.is_some()
+                || !rule_settings.rules.is_empty())
+        {
+            // Validate rule names in disable/enable lists
+            if let Some(ref disable) = rule_settings.disable {
+                for rule in disable {
+                    if !Self::is_valid_rule_name(rule) {
+                        warnings.push(format!("Unknown rule in disable list: {rule}"));
+                    }
+                }
+            }
+            if let Some(ref enable) = rule_settings.enable {
+                for rule in enable {
+                    if !Self::is_valid_rule_name(rule) {
+                        warnings.push(format!("Unknown rule in enable list: {rule}"));
+                    }
+                }
+            }
+            // Validate rule-specific settings
+            for rule_name in rule_settings.rules.keys() {
+                if !Self::is_valid_rule_name(rule_name) {
+                    warnings.push(format!("Unknown rule in settings: {rule_name}"));
+                }
+            }
+
+            log::info!("Applied rule settings from configuration (Neovim style)");
+            let mut config = self.config.write().await;
+            config.settings = Some(rule_settings);
+            drop(config);
+            config_applied = true;
+        } else if let Ok(full_config) = serde_json::from_value::<RumdlLspConfig>(rumdl_settings.clone())
+            && (full_config.config_path.is_some()
+                || full_config.enable_rules.is_some()
+                || full_config.disable_rules.is_some()
+                || full_config.settings.is_some()
+                || !full_config.enable_linting
+                || full_config.enable_auto_fix)
+        {
+            // Validate rule names
+            if let Some(ref rules) = full_config.enable_rules {
+                for rule in rules {
+                    if !Self::is_valid_rule_name(rule) {
+                        warnings.push(format!("Unknown rule in enableRules: {rule}"));
+                    }
+                }
+            }
+            if let Some(ref rules) = full_config.disable_rules {
+                for rule in rules {
+                    if !Self::is_valid_rule_name(rule) {
+                        warnings.push(format!("Unknown rule in disableRules: {rule}"));
+                    }
+                }
+            }
+
+            log::info!("Applied full LSP configuration from settings");
+            *self.config.write().await = full_config;
+            config_applied = true;
+        } else if let serde_json::Value::Object(obj) = rumdl_settings {
+            // Otherwise, treat as per-rule settings with manual parsing
+            // Format: { "MD013": { "lineLength": 80 }, "disable": ["MD009"] }
+            let mut config = self.config.write().await;
+
+            // Manual parsing for Neovim format
+            let mut rules = std::collections::HashMap::new();
+            let mut disable = Vec::new();
+            let mut enable = Vec::new();
+            let mut line_length = None;
+
+            for (key, value) in obj {
+                match key.as_str() {
+                    "disable" => match serde_json::from_value::<Vec<String>>(value.clone()) {
+                        Ok(d) => {
+                            if d.len() > MAX_RULE_LIST_SIZE {
+                                warnings.push(format!(
+                                    "Too many rules in 'disable' ({} > {}), truncating",
+                                    d.len(),
+                                    MAX_RULE_LIST_SIZE
+                                ));
+                            }
+                            for rule in d.iter().take(MAX_RULE_LIST_SIZE) {
+                                if !Self::is_valid_rule_name(rule) {
+                                    warnings.push(format!("Unknown rule in disable: {rule}"));
+                                }
+                            }
+                            disable = d.into_iter().take(MAX_RULE_LIST_SIZE).collect();
+                        }
+                        Err(_) => {
+                            warnings.push(format!(
+                                "Invalid 'disable' value: expected array of strings, got {value}"
+                            ));
+                        }
+                    },
+                    "enable" => match serde_json::from_value::<Vec<String>>(value.clone()) {
+                        Ok(e) => {
+                            if e.len() > MAX_RULE_LIST_SIZE {
+                                warnings.push(format!(
+                                    "Too many rules in 'enable' ({} > {}), truncating",
+                                    e.len(),
+                                    MAX_RULE_LIST_SIZE
+                                ));
+                            }
+                            for rule in e.iter().take(MAX_RULE_LIST_SIZE) {
+                                if !Self::is_valid_rule_name(rule) {
+                                    warnings.push(format!("Unknown rule in enable: {rule}"));
+                                }
+                            }
+                            enable = e.into_iter().take(MAX_RULE_LIST_SIZE).collect();
+                        }
+                        Err(_) => {
+                            warnings.push(format!(
+                                "Invalid 'enable' value: expected array of strings, got {value}"
+                            ));
+                        }
+                    },
+                    "lineLength" | "line_length" | "line-length" => {
+                        if let Some(l) = value.as_u64() {
+                            match usize::try_from(l) {
+                                Ok(len) if len <= MAX_LINE_LENGTH => line_length = Some(len),
+                                Ok(len) => warnings.push(format!(
+                                    "Invalid 'lineLength' value: {len} exceeds maximum ({MAX_LINE_LENGTH})"
+                                )),
+                                Err(_) => warnings.push(format!("Invalid 'lineLength' value: {l} is too large")),
+                            }
+                        } else {
+                            warnings.push(format!("Invalid 'lineLength' value: expected number, got {value}"));
+                        }
+                    }
+                    // Rule-specific settings (e.g., "MD013": { "lineLength": 80 })
+                    _ if key.starts_with("MD") || key.starts_with("md") => {
+                        let normalized = key.to_uppercase();
+                        if !Self::is_valid_rule_name(&normalized) {
+                            warnings.push(format!("Unknown rule: {key}"));
+                        }
+                        rules.insert(normalized, value);
+                    }
+                    _ => {
+                        // Unknown key - warn and ignore
+                        warnings.push(format!("Unknown configuration key: {key}"));
+                    }
+                }
+            }
+
+            let settings = LspRuleSettings {
+                line_length,
+                disable: if disable.is_empty() { None } else { Some(disable) },
+                enable: if enable.is_empty() { None } else { Some(enable) },
+                rules,
+            };
+
+            log::info!("Applied Neovim-style rule settings (manual parse)");
+            config.settings = Some(settings);
+            drop(config);
+            config_applied = true;
+        } else {
+            log::warn!("Could not parse configuration settings: {rumdl_settings:?}");
+        }
+
+        // Log warnings for invalid configuration
+        for warning in &warnings {
+            log::warn!("{warning}");
+        }
+
+        // Notify client of configuration warnings via window/logMessage
+        if !warnings.is_empty() {
+            let message = if warnings.len() == 1 {
+                format!("rumdl: {}", warnings[0])
+            } else {
+                format!("rumdl configuration warnings:\n{}", warnings.join("\n"))
+            };
+            self.client.log_message(MessageType::WARNING, message).await;
+        }
+
+        if !config_applied {
+            log::debug!("No configuration changes applied");
+        }
+
+        // Clear config cache to pick up new settings
+        self.config_cache.write().await.clear();
+
+        // Collect all open documents first (to avoid holding lock during async operations)
+        let doc_list: Vec<_> = {
+            let documents = self.documents.read().await;
+            documents
+                .iter()
+                .map(|(uri, entry)| (uri.clone(), entry.content.clone()))
+                .collect()
+        };
+
+        // Refresh diagnostics for all open documents concurrently
+        let tasks = doc_list.into_iter().map(|(uri, text)| {
+            let server = self.clone();
+            tokio::spawn(async move {
+                server.update_diagnostics(uri, text).await;
+            })
+        });
+
+        // Wait for all diagnostics to complete
+        let _ = join_all(tasks).await;
+    }
+
     async fn shutdown(&self) -> JsonRpcResult<()> {
         log::info!("Shutting down rumdl Language Server");
 
@@ -1185,12 +1649,15 @@ impl LanguageServer for RumdlLanguageServer {
             drop(config_guard);
 
             // Resolve configuration for this specific file
-            let rumdl_config = if let Ok(file_path) = uri.to_file_path() {
+            let file_config = if let Ok(file_path) = uri.to_file_path() {
                 self.resolve_config_for_file(&file_path).await
             } else {
                 // Fallback to global config for non-file URIs
                 self.rumdl_config.read().await.clone()
             };
+
+            // Merge LSP settings with file config based on configuration_preference
+            let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
             let all_rules = rules::all_rules(&rumdl_config);
             let flavor = rumdl_config.markdown_flavor();
@@ -1314,6 +1781,53 @@ mod tests {
     fn create_test_server() -> RumdlLanguageServer {
         let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
         service.inner().clone()
+    }
+
+    #[test]
+    fn test_is_valid_rule_name() {
+        // Valid rule names - basic cases
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD001"));
+        assert!(RumdlLanguageServer::is_valid_rule_name("md001")); // lowercase
+        assert!(RumdlLanguageServer::is_valid_rule_name("Md001")); // mixed case
+        assert!(RumdlLanguageServer::is_valid_rule_name("mD001")); // mixed case
+        assert!(RumdlLanguageServer::is_valid_rule_name("all")); // special value
+        assert!(RumdlLanguageServer::is_valid_rule_name("ALL")); // case insensitive
+        assert!(RumdlLanguageServer::is_valid_rule_name("All")); // mixed case
+
+        // Valid rule names - boundary conditions for each range
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD003")); // start of 3..=5
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD005")); // end of 3..=5
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD007")); // single value
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD009")); // start of 9..=14
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD014")); // end of 9..=14
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD018")); // start of 18..=62
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD062")); // end of 18..=62
+
+        // Valid rule names - sample from middle of range
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD041")); // mid-range
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD060")); // near end
+        assert!(RumdlLanguageServer::is_valid_rule_name("MD061")); // near end
+
+        // Invalid rule names - gaps in numbering
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD002")); // doesn't exist
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD006")); // doesn't exist
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD008")); // doesn't exist
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD015")); // doesn't exist
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD016")); // doesn't exist
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD017")); // doesn't exist
+
+        // Invalid rule names - out of range
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD000")); // too low
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD063")); // too high
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD999")); // way too high
+
+        // Invalid format
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD13")); // missing leading zero
+        assert!(!RumdlLanguageServer::is_valid_rule_name("INVALID"));
+        assert!(!RumdlLanguageServer::is_valid_rule_name(""));
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD"));
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD0001")); // too many digits
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD1")); // not enough digits
     }
 
     #[tokio::test]
@@ -2382,5 +2896,31 @@ disable = ["MD022"]
             !supports_pull,
             "Should NOT detect pull diagnostic support when text_document is None"
         );
+    }
+
+    #[test]
+    fn test_resource_limit_constants() {
+        // Verify resource limit constants have expected values
+        assert_eq!(MAX_RULE_LIST_SIZE, 100);
+        assert_eq!(MAX_LINE_LENGTH, 10_000);
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_zero_alloc() {
+        // These tests verify the zero-allocation implementation works correctly
+        // by testing edge cases that might trip up byte-level parsing
+
+        // Test ASCII boundary conditions
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD/01")); // '/' is before '0'
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD:01")); // ':' is after '9'
+        assert!(!RumdlLanguageServer::is_valid_rule_name("ND001")); // 'N' instead of 'M'
+        assert!(!RumdlLanguageServer::is_valid_rule_name("ME001")); // 'E' instead of 'D'
+
+        // Test non-ASCII characters (should fail gracefully)
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD0①1")); // Unicode digit
+        assert!(!RumdlLanguageServer::is_valid_rule_name("ＭD001")); // Fullwidth M
+
+        // Test wrapping_sub edge cases
+        assert!(!RumdlLanguageServer::is_valid_rule_name("MD\x00\x00\x00")); // null bytes
     }
 }

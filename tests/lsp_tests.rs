@@ -35,6 +35,7 @@ fn test_rumdl_lsp_config_serde() {
         enable_auto_fix: false,
         enable_rules: None,
         disable_rules: None,
+        ..Default::default()
     };
 
     // Test serialization
@@ -213,6 +214,7 @@ async fn test_lsp_server_initialization_with_config() {
         enable_auto_fix: true,
         enable_rules: None,
         disable_rules: None,
+        ..Default::default()
     };
 
     let init_params = InitializeParams {

@@ -94,6 +94,7 @@ async fn test_configuration_handling() {
         enable_auto_fix: true,
         enable_rules: None,
         disable_rules: None,
+        ..Default::default()
     };
 
     // Test serialization/deserialization

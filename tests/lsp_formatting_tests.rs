@@ -276,6 +276,7 @@ async fn test_formatting_respects_config_disabled_rules() {
         enable_auto_fix: true,
         enable_rules: None,
         disable_rules: None,
+        ..Default::default()
     };
 
     let init_params = InitializeParams {

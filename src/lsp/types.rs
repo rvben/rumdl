@@ -48,9 +48,41 @@ pub enum IndexUpdate {
     Shutdown,
 }
 
+/// Controls the order in which configuration sources are merged
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfigurationPreference {
+    /// Editor settings take priority over config files (default)
+    #[default]
+    EditorFirst,
+    /// Config files take priority over editor settings
+    FilesystemFirst,
+    /// Ignore config files, use only editor settings
+    EditorOnly,
+}
+
+/// Per-rule settings that can be passed via LSP initialization options
+///
+/// This struct mirrors the rule-specific settings from Config, allowing
+/// editors to configure rules without needing a config file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LspRuleSettings {
+    /// Global line length for rules that use it
+    pub line_length: Option<usize>,
+    /// Rules to disable
+    pub disable: Option<Vec<String>>,
+    /// Rules to enable
+    pub enable: Option<Vec<String>>,
+    /// Per-rule configuration (e.g., "MD013": { "lineLength": 120 })
+    #[serde(flatten)]
+    pub rules: std::collections::HashMap<String, serde_json::Value>,
+}
+
 /// Configuration for the rumdl LSP server (from initialization options)
 ///
 /// Uses camelCase for all fields per LSP specification.
+/// Follows Ruff's LSP configuration pattern for consistency.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RumdlLspConfig {
@@ -65,6 +97,11 @@ pub struct RumdlLspConfig {
     pub enable_rules: Option<Vec<String>>,
     /// Rules to disable (overrides config file)
     pub disable_rules: Option<Vec<String>>,
+    /// Controls priority between editor settings and config files
+    pub configuration_preference: ConfigurationPreference,
+    /// Rule-specific settings passed from the editor
+    /// This allows configuring rules like MD013.lineLength directly from editor settings
+    pub settings: Option<LspRuleSettings>,
 }
 
 impl Default for RumdlLspConfig {
@@ -75,6 +112,8 @@ impl Default for RumdlLspConfig {
             enable_auto_fix: false,
             enable_rules: None,
             disable_rules: None,
+            configuration_preference: ConfigurationPreference::default(),
+            settings: None,
         }
     }
 }
@@ -455,6 +494,8 @@ mod tests {
             enable_auto_fix: true,
             enable_rules: None,
             disable_rules: None,
+            configuration_preference: ConfigurationPreference::EditorFirst,
+            settings: None,
         };
 
         // Test serialization (uses camelCase)
@@ -743,6 +784,103 @@ mod tests {
         assert!(!config.enable_linting);
         assert_eq!(config.config_path, None); // Should use default
         assert!(!config.enable_auto_fix); // Should use default
+    }
+
+    #[test]
+    fn test_configuration_preference_serialization() {
+        // Test EditorFirst (default)
+        let pref = ConfigurationPreference::EditorFirst;
+        let json = serde_json::to_string(&pref).unwrap();
+        assert_eq!(json, "\"editorFirst\"");
+
+        // Test FilesystemFirst
+        let pref = ConfigurationPreference::FilesystemFirst;
+        let json = serde_json::to_string(&pref).unwrap();
+        assert_eq!(json, "\"filesystemFirst\"");
+
+        // Test EditorOnly
+        let pref = ConfigurationPreference::EditorOnly;
+        let json = serde_json::to_string(&pref).unwrap();
+        assert_eq!(json, "\"editorOnly\"");
+
+        // Test deserialization
+        let pref: ConfigurationPreference = serde_json::from_str("\"filesystemFirst\"").unwrap();
+        assert_eq!(pref, ConfigurationPreference::FilesystemFirst);
+    }
+
+    #[test]
+    fn test_lsp_rule_settings_deserialization() {
+        // Test basic settings
+        let json = r#"{
+            "lineLength": 120,
+            "disable": ["MD001", "MD002"],
+            "enable": ["MD013"]
+        }"#;
+        let settings: LspRuleSettings = serde_json::from_str(json).unwrap();
+
+        assert_eq!(settings.line_length, Some(120));
+        assert_eq!(settings.disable, Some(vec!["MD001".to_string(), "MD002".to_string()]));
+        assert_eq!(settings.enable, Some(vec!["MD013".to_string()]));
+    }
+
+    #[test]
+    fn test_lsp_rule_settings_with_per_rule_config() {
+        // Test per-rule configuration via flattened HashMap
+        let json = r#"{
+            "lineLength": 80,
+            "MD013": {
+                "lineLength": 120,
+                "codeBlocks": false
+            },
+            "MD024": {
+                "siblingsOnly": true
+            }
+        }"#;
+        let settings: LspRuleSettings = serde_json::from_str(json).unwrap();
+
+        assert_eq!(settings.line_length, Some(80));
+
+        // Check MD013 config
+        let md013 = settings.rules.get("MD013").unwrap();
+        assert_eq!(md013.get("lineLength").unwrap().as_u64(), Some(120));
+        assert_eq!(md013.get("codeBlocks").unwrap().as_bool(), Some(false));
+
+        // Check MD024 config
+        let md024 = settings.rules.get("MD024").unwrap();
+        assert_eq!(md024.get("siblingsOnly").unwrap().as_bool(), Some(true));
+    }
+
+    #[test]
+    fn test_full_lsp_config_with_settings() {
+        // Test complete LSP config with all new fields (camelCase per LSP spec)
+        let json = r#"{
+            "configPath": "/path/to/config",
+            "enableLinting": true,
+            "enableAutoFix": false,
+            "configurationPreference": "editorFirst",
+            "settings": {
+                "lineLength": 100,
+                "disable": ["MD033"],
+                "MD013": {
+                    "lineLength": 120,
+                    "tables": false
+                }
+            }
+        }"#;
+        let config: RumdlLspConfig = serde_json::from_str(json).unwrap();
+
+        assert_eq!(config.config_path, Some("/path/to/config".to_string()));
+        assert!(config.enable_linting);
+        assert!(!config.enable_auto_fix);
+        assert_eq!(config.configuration_preference, ConfigurationPreference::EditorFirst);
+
+        let settings = config.settings.unwrap();
+        assert_eq!(settings.line_length, Some(100));
+        assert_eq!(settings.disable, Some(vec!["MD033".to_string()]));
+
+        let md013 = settings.rules.get("MD013").unwrap();
+        assert_eq!(md013.get("lineLength").unwrap().as_u64(), Some(120));
+        assert_eq!(md013.get("tables").unwrap().as_bool(), Some(false));
     }
 
     #[test]
