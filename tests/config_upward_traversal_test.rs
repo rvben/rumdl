@@ -205,3 +205,49 @@ disable = ["MD013", "MD033"]
         "Line length warning should not appear"
     );
 }
+
+#[test]
+fn test_markdownlint_yaml_upward_traversal() {
+    // Issue #193: .markdownlint.yaml should be discovered via upward traversal
+    // just like .rumdl.toml
+    let temp_dir = tempdir().unwrap();
+    let project_dir = temp_dir.path();
+
+    // Create nested directory structure
+    let nested_dir = project_dir.join("path").join("to");
+    fs::create_dir_all(&nested_dir).unwrap();
+
+    // Create .markdownlint.yaml at project root (not in nested dir)
+    let config_content = r#"
+MD013:
+  line_length: 200
+  code_blocks: false
+"#;
+    fs::write(project_dir.join(".markdownlint.yaml"), config_content).unwrap();
+
+    // Create a test markdown file in nested directory
+    let test_file = nested_dir.join("file.md");
+    fs::write(
+        &test_file,
+        "# Test\n\nThis is a line that is about 100 characters long and should not trigger MD013 due to parent config setting line_length to 200.\n",
+    )
+    .unwrap();
+
+    // Run rumdl from nested directory, checking the file
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "file.md"])
+        .current_dir(&nested_dir)
+        .output()
+        .expect("Failed to execute command");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    // MD013 should NOT trigger because line_length=200 from parent config
+    assert!(
+        !combined.contains("MD013"),
+        "MD013 should not trigger - .markdownlint.yaml at repo root should be discovered. Output: {combined}"
+    );
+}

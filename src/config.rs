@@ -2089,6 +2089,67 @@ impl SourcedConfig<ConfigLoaded> {
         None
     }
 
+    /// Discover markdownlint configuration file by traversing up the directory tree.
+    /// Similar to discover_config_upward but for .markdownlint.yaml/json files.
+    /// Returns the path to the config file if found.
+    fn discover_markdownlint_config_upward() -> Option<std::path::PathBuf> {
+        use std::env;
+
+        const MAX_DEPTH: usize = 100;
+
+        let start_dir = match env::current_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                log::debug!("[rumdl-config] Failed to get current directory for markdownlint discovery: {e}");
+                return None;
+            }
+        };
+
+        let mut current_dir = start_dir.clone();
+        let mut depth = 0;
+
+        loop {
+            if depth >= MAX_DEPTH {
+                log::debug!("[rumdl-config] Maximum traversal depth reached for markdownlint discovery");
+                break;
+            }
+
+            log::debug!(
+                "[rumdl-config] Searching for markdownlint config in: {}",
+                current_dir.display()
+            );
+
+            // Check for markdownlint config files in order of precedence
+            for config_name in MARKDOWNLINT_CONFIG_FILES {
+                let config_path = current_dir.join(config_name);
+                if config_path.exists() {
+                    log::debug!("[rumdl-config] Found markdownlint config: {}", config_path.display());
+                    return Some(config_path);
+                }
+            }
+
+            // Check for .git directory (stop boundary)
+            if current_dir.join(".git").exists() {
+                log::debug!("[rumdl-config] Stopping markdownlint search at .git directory");
+                break;
+            }
+
+            // Move to parent directory
+            match current_dir.parent() {
+                Some(parent) => {
+                    current_dir = parent.to_owned();
+                    depth += 1;
+                }
+                None => {
+                    log::debug!("[rumdl-config] Reached filesystem root during markdownlint search");
+                    break;
+                }
+            }
+        }
+
+        None
+    }
+
     /// Internal implementation that accepts config directory for testing
     fn user_configuration_path_impl(config_dir: &Path) -> Option<std::path::PathBuf> {
         let config_dir = config_dir.join("rumdl");
@@ -2304,25 +2365,19 @@ impl SourcedConfig<ConfigLoaded> {
             } else {
                 log::debug!("[rumdl-config] No configuration file found via upward traversal");
 
-                // If no project config found, fallback to markdownlint config in current directory
-                let mut found_markdownlint = false;
-                for filename in MARKDOWNLINT_CONFIG_FILES {
-                    if std::path::Path::new(filename).exists() {
-                        match load_from_markdownlint(filename) {
-                            Ok(fragment) => {
-                                sourced_config.merge(fragment);
-                                sourced_config.loaded_files.push(filename.to_string());
-                                found_markdownlint = true;
-                                break; // Load only the first one found
-                            }
-                            Err(_e) => {
-                                // Log error but continue (it's just a fallback)
-                            }
+                // If no project config found, fallback to markdownlint config via upward traversal
+                if let Some(config_path) = Self::discover_markdownlint_config_upward() {
+                    let path_str = config_path.display().to_string();
+                    match load_from_markdownlint(&path_str) {
+                        Ok(fragment) => {
+                            sourced_config.merge(fragment);
+                            sourced_config.loaded_files.push(path_str);
+                        }
+                        Err(_e) => {
+                            log::debug!("[rumdl-config] Failed to load markdownlint config");
                         }
                     }
-                }
-
-                if !found_markdownlint {
+                } else {
                     log::debug!("[rumdl-config] No markdownlint configuration file found");
                 }
             }
