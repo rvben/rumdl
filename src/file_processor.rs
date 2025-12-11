@@ -968,24 +968,24 @@ pub fn apply_fixes_coordinated(
 
     // Apply fixes iteratively (up to 100 iterations to ensure convergence, same as Ruff)
     match coordinator.apply_fixes_iterative(rules, all_warnings, content, config, 100) {
-        Ok((rules_applied, iterations, ctx_creations, fixed_rule_names, converged)) => {
+        Ok(result) => {
             let elapsed = start.elapsed();
 
             if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
                 eprintln!("DEBUG: Fix Coordinator used");
-                eprintln!("DEBUG: Iterations: {iterations}");
-                eprintln!("DEBUG: Rules applied: {rules_applied}");
-                eprintln!("DEBUG: LintContext creations: {ctx_creations}");
-                eprintln!("DEBUG: Converged: {converged}");
+                eprintln!("DEBUG: Iterations: {}", result.iterations);
+                eprintln!("DEBUG: Rules applied: {}", result.rules_fixed);
+                eprintln!("DEBUG: LintContext creations: {}", result.context_creations);
+                eprintln!("DEBUG: Converged: {}", result.converged);
                 eprintln!("DEBUG: Total time: {elapsed:?}");
             }
 
             // Warn if convergence failed (Ruff-style)
-            if !converged && !silent {
-                eprintln!("Warning: Failed to converge after {iterations} iterations.");
+            if !result.converged && !silent {
+                eprintln!("Warning: Failed to converge after {} iterations.", result.iterations);
                 eprintln!("This likely indicates a bug in rumdl.");
-                if !fixed_rule_names.is_empty() {
-                    let rule_codes: Vec<&str> = fixed_rule_names.iter().map(|s| s.as_str()).collect();
+                if !result.fixed_rule_names.is_empty() {
+                    let rule_codes: Vec<&str> = result.fixed_rule_names.iter().map(|s| s.as_str()).collect();
                     eprintln!("Rule codes: {}", rule_codes.join(", "));
                 }
                 eprintln!("Please report at: https://github.com/rvben/rumdl/issues/new");
@@ -997,7 +997,7 @@ pub fn apply_fixes_coordinated(
                 .filter(|w| {
                     w.rule_name
                         .as_ref()
-                        .map(|name| fixed_rule_names.contains(name.as_str()))
+                        .map(|name| result.fixed_rule_names.contains(name.as_str()))
                         .unwrap_or(false)
                 })
                 .count()

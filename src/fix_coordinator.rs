@@ -8,6 +8,24 @@ use std::hash::{Hash, Hasher};
 /// Maximum number of fix iterations before stopping (same as Ruff)
 const MAX_ITERATIONS: usize = 100;
 
+/// Result of applying fixes iteratively
+///
+/// This struct provides named fields instead of a tuple to prevent
+/// confusion about the meaning of each value.
+#[derive(Debug, Clone)]
+pub struct FixResult {
+    /// Total number of rules that successfully applied fixes
+    pub rules_fixed: usize,
+    /// Number of fix iterations performed
+    pub iterations: usize,
+    /// Number of LintContext instances created during fixing
+    pub context_creations: usize,
+    /// Names of rules that applied fixes
+    pub fixed_rule_names: HashSet<String>,
+    /// Whether the fix process converged (content stabilized)
+    pub converged: bool,
+}
+
 /// Calculate hash of content for convergence detection
 fn hash_content(content: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -135,7 +153,6 @@ impl FixCoordinator {
     }
 
     /// Apply fixes iteratively until no more fixes are needed or max iterations reached
-    /// Returns (rules_fixed_count, iterations, context_creations, fixed_rule_names, converged)
     pub fn apply_fixes_iterative(
         &self,
         rules: &[Box<dyn Rule>],
@@ -143,7 +160,7 @@ impl FixCoordinator {
         content: &mut String,
         config: &Config,
         max_iterations: usize,
-    ) -> Result<(usize, usize, usize, HashSet<String>, bool), String> {
+    ) -> Result<FixResult, String> {
         // Use the minimum of max_iterations parameter and MAX_ITERATIONS constant
         let max_iterations = max_iterations.min(MAX_ITERATIONS);
 
@@ -248,7 +265,13 @@ impl FixCoordinator {
             let current_hash = hash_content(content);
             if current_hash == previous_hash {
                 // Content unchanged - converged!
-                return Ok((total_fixed, iterations, total_ctx_creations, fixed_rule_names, true));
+                return Ok(FixResult {
+                    rules_fixed: total_fixed,
+                    iterations,
+                    context_creations: total_ctx_creations,
+                    fixed_rule_names,
+                    converged: true,
+                });
             }
             previous_hash = current_hash;
 
@@ -265,13 +288,13 @@ impl FixCoordinator {
 
         // If we reached here, either we hit max iterations or all rules processed
         let converged = iterations < max_iterations;
-        Ok((
-            total_fixed,
+        Ok(FixResult {
+            rules_fixed: total_fixed,
             iterations,
-            total_ctx_creations,
+            context_creations: total_ctx_creations,
             fixed_rule_names,
             converged,
-        ))
+        })
     }
 }
 
@@ -396,11 +419,11 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
 
         assert!(result.is_ok());
-        let (total_fixed, iterations, ctx_creations, _, converged) = result.unwrap();
-        assert_eq!(total_fixed, 1);
-        assert_eq!(iterations, 1);
-        assert_eq!(ctx_creations, 1);
-        assert!(converged);
+        let result = result.unwrap();
+        assert_eq!(result.rules_fixed, 1);
+        assert_eq!(result.iterations, 1);
+        assert_eq!(result.context_creations, 1);
+        assert!(result.converged);
         assert_eq!(content, "fixed content");
     }
 
@@ -472,11 +495,11 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
 
         assert!(result.is_ok());
-        let (total_fixed, iterations, ctx_creations, _, converged) = result.unwrap();
-        assert_eq!(total_fixed, 2);
-        assert_eq!(iterations, 2); // Should take 2 iterations due to dependency
-        assert!(ctx_creations >= 2);
-        assert!(converged);
+        let result = result.unwrap();
+        assert_eq!(result.rules_fixed, 2);
+        assert_eq!(result.iterations, 2); // Should take 2 iterations due to dependency
+        assert!(result.context_creations >= 2);
+        assert!(result.converged);
     }
 
     #[test]
@@ -520,9 +543,9 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
 
         assert!(result.is_ok());
-        let (total_fixed, _, _, _, converged) = result.unwrap();
-        assert_eq!(total_fixed, 0);
-        assert!(converged);
+        let result = result.unwrap();
+        assert_eq!(result.rules_fixed, 0);
+        assert!(result.converged);
         assert_eq!(content, "original"); // Should not be changed
     }
 
@@ -586,9 +609,9 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 3);
 
         assert!(result.is_ok());
-        let (_, iterations, _, _, converged) = result.unwrap();
-        assert_eq!(iterations, 1); // Should stop after first successful fix
-        assert!(converged);
+        let result = result.unwrap();
+        assert_eq!(result.iterations, 1); // Should stop after first successful fix
+        assert!(result.converged);
     }
 
     #[test]
@@ -607,11 +630,11 @@ mod tests {
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
 
         assert!(result.is_ok());
-        let (total_fixed, iterations, ctx_creations, _, converged) = result.unwrap();
-        assert_eq!(total_fixed, 0);
-        assert_eq!(iterations, 1);
-        assert_eq!(ctx_creations, 0);
-        assert!(converged);
+        let result = result.unwrap();
+        assert_eq!(result.rules_fixed, 0);
+        assert_eq!(result.iterations, 1);
+        assert_eq!(result.context_creations, 0);
+        assert!(result.converged);
         assert_eq!(content, "unchanged");
     }
 
