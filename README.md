@@ -675,6 +675,7 @@ The search follows these rules:
 - Stops at the first configuration file found
 - Stops searching when it encounters a `.git` directory (project boundary)
 - Maximum traversal depth of 100 directories
+- Falls back to markdownlint config files (`.markdownlint.yaml`, etc.) using the same upward traversal
 - Falls back to user configuration if no project configuration is found (see Global Configuration below)
 
 To disable all configuration discovery and use only built-in defaults, use the `--isolated` flag:
@@ -742,11 +743,13 @@ indent = 2
 
 rumdl provides seamless compatibility with existing markdownlint configurations:
 
-** Automatic Discovery**: rumdl automatically detects and loads markdownlint config files:
+**Automatic Discovery**: rumdl automatically detects and loads markdownlint config files by traversing up the directory tree (just like `.rumdl.toml`):
 
 - `.markdownlint.json` / `.markdownlint.jsonc`
 - `.markdownlint.yaml` / `.markdownlint.yml`
 - `markdownlint.json` / `markdownlint.yaml`
+
+This means you can place a `.markdownlint.yaml` at your project root and run rumdl from any subdirectory - it will find and use the config automatically.
 
 ** Explicit Import**: Convert markdownlint configs to rumdl format:
 
