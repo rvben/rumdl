@@ -138,11 +138,21 @@ impl MD053LinkImageReferenceDefinitions {
             return true;
         }
 
-        // Skip descriptive patterns with colon like [default: the project root]
-        // But allow simple numeric ranges which are handled above
-        // And allow patterns with backticks (valid code references)
+        // Skip descriptive prose patterns with colon like [default: the project root]
+        // But allow reference-style patterns like [RFC: 1234], [Issue: 42], [See: Section 2]
+        // These are distinguished by having a short prefix (typically 1-2 words) before the colon
         if text.contains(':') && text.contains(' ') && !text.contains('`') {
-            return true;
+            // Check if this looks like a reference pattern (short prefix before colon)
+            // vs a prose description (longer text before colon)
+            if let Some((before_colon, _)) = text.split_once(':') {
+                let before_trimmed = before_colon.trim();
+                // Count words before colon - references typically have 1-2 words
+                let word_count = before_trimmed.split_whitespace().count();
+                // If there are 3+ words before the colon, it's likely prose
+                if word_count >= 3 {
+                    return true;
+                }
+            }
         }
 
         // Skip alert/admonition patterns like [!WARN], [!NOTE], etc.
@@ -1040,6 +1050,82 @@ mod tests {
         assert!(
             !MD053LinkImageReferenceDefinitions::is_likely_comment_reference("link", "http://test.com"),
             "Real URL should not be recognized as comment"
+        );
+    }
+
+    #[test]
+    fn test_reference_with_colon_in_name() {
+        // References containing colons and spaces should be recognized as valid references
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "Check [RFC: 1234] for specs.\n\n[RFC: 1234]: https://example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Reference with colon should be recognized as used, got warnings: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_reference_with_colon_various_styles() {
+        // Test various RFC-style and similar references with colons
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = r#"See [RFC: 1234] and [Issue: 42] and [PR: 100].
+
+[RFC: 1234]: https://example.com/rfc1234
+[Issue: 42]: https://example.com/issue42
+[PR: 100]: https://example.com/pr100
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "All colon-style references should be recognized as used, got warnings: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_should_skip_pattern_allows_rfc_style() {
+        // Verify that should_skip_pattern does NOT skip RFC-style references with colons
+        // This tests the fix for the bug where references with ": " were incorrectly skipped
+        assert!(
+            !MD053LinkImageReferenceDefinitions::should_skip_pattern("RFC: 1234"),
+            "RFC-style references should NOT be skipped"
+        );
+        assert!(
+            !MD053LinkImageReferenceDefinitions::should_skip_pattern("Issue: 42"),
+            "Issue-style references should NOT be skipped"
+        );
+        assert!(
+            !MD053LinkImageReferenceDefinitions::should_skip_pattern("PR: 100"),
+            "PR-style references should NOT be skipped"
+        );
+        assert!(
+            !MD053LinkImageReferenceDefinitions::should_skip_pattern("See: Section 2"),
+            "References with 'See:' should NOT be skipped"
+        );
+        assert!(
+            !MD053LinkImageReferenceDefinitions::should_skip_pattern("foo:bar"),
+            "References without space after colon should NOT be skipped"
+        );
+    }
+
+    #[test]
+    fn test_should_skip_pattern_skips_prose() {
+        // Verify that prose-like patterns (3+ words before colon) are still skipped
+        assert!(
+            MD053LinkImageReferenceDefinitions::should_skip_pattern("default value is: something"),
+            "Prose with 3+ words before colon SHOULD be skipped"
+        );
+        assert!(
+            MD053LinkImageReferenceDefinitions::should_skip_pattern("this is a label: description"),
+            "Prose with 4 words before colon SHOULD be skipped"
+        );
+        assert!(
+            MD053LinkImageReferenceDefinitions::should_skip_pattern("the project root: path/to/dir"),
+            "Prose-like descriptions SHOULD be skipped"
         );
     }
 }
