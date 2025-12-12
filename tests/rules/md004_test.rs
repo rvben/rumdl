@@ -594,13 +594,24 @@ fn test_multiple_lists_in_blockquotes() {
 
 #[test]
 fn test_nested_blockquotes_with_lists() {
-    // Test nested blockquotes with lists
-    // TODO: Current implementation doesn't check lists inside blockquotes
+    // Test nested blockquotes with lists - should detect inconsistent markers
     let content = "> * Level 1 quote\n> > - Level 2 quote\n> > + Another level 2";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 0); // Currently doesn't check lists in blockquotes
+    // Should flag the '-' and '+' markers in nested blockquotes
+    assert_eq!(warnings.len(), 2, "Expected 2 warnings, got: {warnings:?}");
+    // Messages contain the marker symbols
+    assert!(
+        warnings[0].message.contains("'-'"),
+        "Expected dash marker in message, got: {}",
+        warnings[0].message
+    );
+    assert!(
+        warnings[1].message.contains("'+'"),
+        "Expected plus marker in message, got: {}",
+        warnings[1].message
+    );
 }
 
 #[test]

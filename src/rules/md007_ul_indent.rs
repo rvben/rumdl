@@ -73,27 +73,32 @@ impl Rule for MD007ULIndent {
                 // not the full line. This is because blockquoted lists follow the same indentation rules
                 // as regular lists, just within their blockquote context.
                 let (content_for_calculation, adjusted_marker_column) = if line_info.blockquote.is_some() {
-                    // Find the position after the blockquote prefix (> or >> etc)
-                    // We need to find where the actual content starts after all '>' characters and spaces
+                    // Find the position after ALL blockquote prefixes (handles nested > > > etc)
+                    let line_content = line_info.content(ctx.content);
+                    let mut remaining = line_content;
                     let mut content_start = 0;
-                    let mut found_gt = false;
 
-                    for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
-                        if ch == '>' {
-                            found_gt = true;
-                            content_start = i + 1;
-                        } else if found_gt && ch == ' ' {
-                            // Skip the space after '>'
-                            content_start = i + 1;
+                    loop {
+                        let trimmed = remaining.trim_start();
+                        if !trimmed.starts_with('>') {
                             break;
-                        } else if found_gt {
-                            // No space after '>', content starts here
-                            break;
+                        }
+                        // Account for leading whitespace
+                        content_start += remaining.len() - trimmed.len();
+                        // Account for '>'
+                        content_start += 1;
+                        let after_gt = &trimmed[1..];
+                        // Handle optional single space after '>'
+                        if let Some(stripped) = after_gt.strip_prefix(' ') {
+                            content_start += 1;
+                            remaining = stripped;
+                        } else {
+                            remaining = after_gt;
                         }
                     }
 
                     // Extract the content after the blockquote prefix
-                    let content_after_prefix = &line_info.content(ctx.content)[content_start..];
+                    let content_after_prefix = &line_content[content_start..];
                     // Adjust the marker column to be relative to the content after the prefix
                     let adjusted_col = if list_item.marker_column >= content_start {
                         list_item.marker_column - content_start
