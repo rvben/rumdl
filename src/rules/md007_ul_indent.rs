@@ -88,8 +88,11 @@ impl Rule for MD007ULIndent {
                         // Account for '>'
                         content_start += 1;
                         let after_gt = &trimmed[1..];
-                        // Handle optional single space after '>'
+                        // Handle optional whitespace after '>' (space or tab)
                         if let Some(stripped) = after_gt.strip_prefix(' ') {
+                            content_start += 1;
+                            remaining = stripped;
+                        } else if let Some(stripped) = after_gt.strip_prefix('\t') {
                             content_start += 1;
                             remaining = stripped;
                         } else {
@@ -942,6 +945,56 @@ tags:
         assert!(
             result.is_empty(),
             "Expected no warnings for standard bullet nesting, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_with_tab_after_marker() {
+        let rule = MD007ULIndent::default();
+        let content = ">\t* List item\n>\t  * Nested\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Tab after blockquote marker should be handled correctly, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_with_space_then_tab_after_marker() {
+        let rule = MD007ULIndent::default();
+        let content = "> \t* List item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // First-level list item at any indentation is allowed when start_indented=false (default)
+        assert!(
+            result.is_empty(),
+            "First-level list item at any indentation is allowed when start_indented=false, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_with_multiple_tabs() {
+        let rule = MD007ULIndent::default();
+        let content = ">\t\t* List item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // First-level list item at any indentation is allowed when start_indented=false (default)
+        assert!(
+            result.is_empty(),
+            "First-level list item at any indentation is allowed when start_indented=false, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_nested_blockquote_with_tab() {
+        let rule = MD007ULIndent::default();
+        let content = ">\t>\t* List item\n>\t>\t  * Nested\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Nested blockquotes with tabs should work correctly, got: {result:?}"
         );
     }
 }

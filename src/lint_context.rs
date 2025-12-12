@@ -1562,8 +1562,11 @@ impl<'a> LintContext<'a> {
 
             let after_gt = &trimmed[1..];
 
-            // Handle optional single space after '>'
+            // Handle optional whitespace after '>' (space or tab)
             if let Some(stripped) = after_gt.strip_prefix(' ') {
+                total_prefix_len += 1;
+                remaining = stripped;
+            } else if let Some(stripped) = after_gt.strip_prefix('\t') {
                 total_prefix_len += 1;
                 remaining = stripped;
             } else {
