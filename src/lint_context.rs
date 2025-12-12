@@ -1755,9 +1755,14 @@ impl<'a> LintContext<'a> {
             // Detect list items (skip if in frontmatter, in mkdocstrings block, or in HTML comment)
             let in_mkdocstrings = flavor == MarkdownFlavor::MkDocs
                 && crate::utils::mkdocstrings_refs::is_within_autodoc_block_ranges(autodoc_ranges, byte_offset);
-            // Use pre-computed ranges for efficiency (O(log n) vs O(file_size))
-            let in_html_comment =
-                crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, byte_offset);
+            // Check if the ENTIRE line is within an HTML comment (not just the line start)
+            // This ensures content after `-->` on the same line is not incorrectly skipped
+            let line_end_offset = byte_offset + line.len();
+            let in_html_comment = crate::utils::skip_context::is_line_entirely_in_html_comment(
+                html_comment_ranges,
+                byte_offset,
+                line_end_offset,
+            );
             let list_item = if !(in_code_block
                 || is_blank
                 || in_mkdocstrings

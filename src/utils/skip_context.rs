@@ -55,6 +55,18 @@ pub fn is_in_html_comment_ranges(ranges: &[ByteRange], byte_pos: usize) -> bool 
         .is_ok()
 }
 
+/// Check if a line is ENTIRELY within a single HTML comment
+/// Returns true only if both the line start AND end are within the same comment range
+pub fn is_line_entirely_in_html_comment(ranges: &[ByteRange], line_start: usize, line_end: usize) -> bool {
+    for range in ranges {
+        // If line start is within this range, check if line end is also within it
+        if line_start >= range.start && line_start < range.end {
+            return line_end <= range.end;
+        }
+    }
+    false
+}
+
 /// Check if a line is within front matter (both YAML and TOML)
 pub fn is_in_front_matter(content: &str, line_num: usize) -> bool {
     let lines: Vec<&str> = content.lines().collect();
@@ -291,6 +303,37 @@ mod tests {
         assert!(is_in_html_comment(content, 10)); // Inside comment
         assert!(!is_in_html_comment(content, 0)); // Before comment
         assert!(!is_in_html_comment(content, 25)); // After comment
+    }
+
+    #[test]
+    fn test_is_line_entirely_in_html_comment() {
+        // Test 1: Multi-line comment with content after closing
+        let content = "<!--\ncomment\n--> Content after comment";
+        let ranges = compute_html_comment_ranges(content);
+        // Line 0: "<!--" (bytes 0-4) - entirely in comment
+        assert!(is_line_entirely_in_html_comment(&ranges, 0, 4));
+        // Line 1: "comment" (bytes 5-12) - entirely in comment
+        assert!(is_line_entirely_in_html_comment(&ranges, 5, 12));
+        // Line 2: "--> Content after comment" (bytes 13-38) - NOT entirely in comment
+        assert!(!is_line_entirely_in_html_comment(&ranges, 13, 38));
+
+        // Test 2: Single-line comment with content after
+        let content2 = "<!-- comment --> Not a comment";
+        let ranges2 = compute_html_comment_ranges(content2);
+        // The entire line is NOT entirely in the comment
+        assert!(!is_line_entirely_in_html_comment(&ranges2, 0, 30));
+
+        // Test 3: Single-line comment alone
+        let content3 = "<!-- comment -->";
+        let ranges3 = compute_html_comment_ranges(content3);
+        // The entire line IS entirely in the comment
+        assert!(is_line_entirely_in_html_comment(&ranges3, 0, 16));
+
+        // Test 4: Content before comment
+        let content4 = "Text before <!-- comment -->";
+        let ranges4 = compute_html_comment_ranges(content4);
+        // Line start is NOT in the comment range
+        assert!(!is_line_entirely_in_html_comment(&ranges4, 0, 28));
     }
 
     #[test]
