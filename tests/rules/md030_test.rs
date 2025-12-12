@@ -321,12 +321,13 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_preserves_blockquotes() {
+    fn test_fix_blockquotes() {
         let rule = MD030ListMarkerSpace::default();
         let content = "*  Normal item\n> *  Blockquote item\n> 1.   Blockquote ordered\n-   Another normal item";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Normal item\n> *  Blockquote item\n> 1.   Blockquote ordered\n- Another normal item";
+        // Blockquoted list items should also be fixed to correct spacing
+        let expected = "* Normal item\n> * Blockquote item\n> 1. Blockquote ordered\n- Another normal item";
         assert_eq!(fixed, expected);
     }
 

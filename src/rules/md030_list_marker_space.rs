@@ -74,7 +74,6 @@ impl Rule for MD030ListMarkerSpace {
 
         // Collect lines once instead of in every is_multi_line_list_item call
         let lines: Vec<&str> = ctx.content.lines().collect();
-        let mut in_blockquote = false;
 
         for line_num in list_item_lines {
             let line = lines[line_num - 1];
@@ -84,18 +83,9 @@ impl Rule for MD030ListMarkerSpace {
                 continue;
             }
 
-            // Track blockquotes (for now, just skip lines starting with >)
-            let mut l = line;
-            while l.trim_start().starts_with('>') {
-                l = l.trim_start().trim_start_matches('>').trim_start();
-                in_blockquote = true;
-            }
-            if in_blockquote {
-                in_blockquote = false;
-                continue;
-            }
-
             // Use pre-computed list item information
+            // LintContext already handles blockquotes by stripping prefixes and
+            // storing correct marker_column/content_column values
             if let Some(line_info) = ctx.line_info(line_num)
                 && let Some(list_info) = &line_info.list_item
             {
@@ -239,13 +229,7 @@ impl Rule for MD030ListMarkerSpace {
                 continue;
             }
 
-            // Skip blockquotes for now (conservative approach)
-            if line.trim_start().starts_with('>') {
-                result_lines.push(line.to_string());
-                continue;
-            }
-
-            // Try to fix list marker spacing
+            // Try to fix list marker spacing (handles blockquotes internally)
             let is_multi_line = self.is_multi_line_list_item(ctx, line_num, &lines);
             if let Some(fixed_line) = self.try_fix_list_marker_spacing_with_context(line, is_multi_line) {
                 result_lines.push(fixed_line);
@@ -351,14 +335,17 @@ impl MD030ListMarkerSpace {
 
     /// Fix list marker spacing with context - handles tabs, multiple spaces, and mixed whitespace
     fn try_fix_list_marker_spacing_with_context(&self, line: &str, is_multi_line: bool) -> Option<String> {
-        let trimmed = line.trim_start();
-        let indent = &line[..line.len() - trimmed.len()];
+        // Extract blockquote prefix if present
+        let (blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
+
+        let trimmed = content.trim_start();
+        let indent = &content[..content.len() - trimmed.len()];
 
         // Check for unordered list markers
         for marker in &["*", "-", "+"] {
             if let Some(after_marker) = trimmed.strip_prefix(marker) {
                 if let Some(fixed) = self.fix_marker_spacing(marker, after_marker, indent, is_multi_line, false) {
-                    return Some(fixed);
+                    return Some(format!("{blockquote_prefix}{fixed}"));
                 }
                 break; // Found a marker, don't check others
             }
@@ -371,12 +358,38 @@ impl MD030ListMarkerSpace {
                 let after_dot = &trimmed[dot_pos + 1..];
                 let marker = format!("{before_dot}.");
                 if let Some(fixed) = self.fix_marker_spacing(&marker, after_dot, indent, is_multi_line, true) {
-                    return Some(fixed);
+                    return Some(format!("{blockquote_prefix}{fixed}"));
                 }
             }
         }
 
         None
+    }
+
+    /// Strip blockquote prefix from a line, returning (prefix, content)
+    fn strip_blockquote_prefix(line: &str) -> (String, &str) {
+        let mut prefix = String::new();
+        let mut remaining = line;
+
+        loop {
+            let trimmed = remaining.trim_start();
+            if !trimmed.starts_with('>') {
+                break;
+            }
+            // Add leading spaces to prefix
+            let leading_spaces = remaining.len() - trimmed.len();
+            prefix.push_str(&remaining[..leading_spaces]);
+            prefix.push('>');
+            remaining = &trimmed[1..];
+
+            // Handle optional space after >
+            if remaining.starts_with(' ') {
+                prefix.push(' ');
+                remaining = &remaining[1..];
+            }
+        }
+
+        (prefix, remaining)
     }
 
     /// Fix list marker spacing - handles tabs, multiple spaces, and mixed whitespace
