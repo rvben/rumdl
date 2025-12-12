@@ -1537,7 +1537,7 @@ impl<'a> LintContext<'a> {
     }
 
     /// Fast blockquote prefix parser - replaces regex for 5-10x speedup
-    /// Matches: ^(\s*>\s*)(.*)
+    /// Handles nested blockquotes like `> > > content`
     /// Returns: Some((prefix_with_ws, content_after_prefix)) or None
     #[inline]
     fn parse_blockquote_prefix(line: &str) -> Option<(&str, &str)> {
@@ -1546,13 +1546,32 @@ impl<'a> LintContext<'a> {
             return None;
         }
 
-        let leading_ws_len = line.len() - trimmed_start.len();
-        let after_gt = &trimmed_start[1..];
-        let content = after_gt.trim_start();
-        let ws_after_gt_len = after_gt.len() - content.len();
-        let prefix_len = leading_ws_len + 1 + ws_after_gt_len;
+        // Track total prefix length to handle nested blockquotes
+        let mut remaining = line;
+        let mut total_prefix_len = 0;
 
-        Some((&line[..prefix_len], content))
+        loop {
+            let trimmed = remaining.trim_start();
+            if !trimmed.starts_with('>') {
+                break;
+            }
+
+            // Add leading whitespace + '>' to prefix
+            let leading_ws_len = remaining.len() - trimmed.len();
+            total_prefix_len += leading_ws_len + 1;
+
+            let after_gt = &trimmed[1..];
+
+            // Handle optional single space after '>'
+            if let Some(stripped) = after_gt.strip_prefix(' ') {
+                total_prefix_len += 1;
+                remaining = stripped;
+            } else {
+                remaining = after_gt;
+            }
+        }
+
+        Some((&line[..total_prefix_len], remaining))
     }
 
     /// Fast unordered list parser - replaces regex for 5-10x speedup
@@ -2178,18 +2197,42 @@ impl<'a> LintContext<'a> {
             return;
         }
 
+        let mut in_multiline_comment = false;
+
         for line in lines.iter_mut() {
-            // Skip blank lines and comments at the start
+            // Skip blank lines and HTML comments
             if line.is_blank || line.in_html_comment {
                 continue;
             }
 
-            // Check if line starts with import or export
             let trimmed = line.content(content).trim_start();
+
+            // Handle continuation of multi-line JS comments
+            if in_multiline_comment {
+                if trimmed.contains("*/") {
+                    in_multiline_comment = false;
+                }
+                continue;
+            }
+
+            // Skip single-line JS comments (// and ///)
+            if trimmed.starts_with("//") {
+                continue;
+            }
+
+            // Handle start of multi-line JS comment
+            if trimmed.starts_with("/*") {
+                if !trimmed.contains("*/") {
+                    in_multiline_comment = true;
+                }
+                continue;
+            }
+
+            // Check if line starts with import or export
             if trimmed.starts_with("import ") || trimmed.starts_with("export ") {
                 line.in_esm_block = true;
             } else {
-                // Once we hit a non-ESM line, we're done with the ESM block
+                // Once we hit a non-ESM, non-comment line, we're done with the ESM block
                 break;
             }
         }
