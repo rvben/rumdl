@@ -35,6 +35,28 @@ fn file_exists_with_cache(path: &Path) -> bool {
     }
 }
 
+/// Check if a file exists, also trying markdown extensions for extensionless links.
+/// This supports wiki-style links like `[Link](page)` that resolve to `page.md`.
+fn file_exists_or_markdown_extension(path: &Path) -> bool {
+    // First, check exact path
+    if file_exists_with_cache(path) {
+        return true;
+    }
+
+    // If the path has no extension, try adding markdown extensions
+    if path.extension().is_none() {
+        for ext in MARKDOWN_EXTENSIONS {
+            // MARKDOWN_EXTENSIONS includes the dot, e.g., ".md"
+            let path_with_ext = path.with_extension(&ext[1..]);
+            if file_exists_with_cache(&path_with_ext) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 // Regex to match the start of a link - simplified for performance
 static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\]]*\]").unwrap());
 
@@ -104,7 +126,7 @@ impl MD057ExistingRelativeLinks {
         Self::default()
     }
 
-    /// Check if a URL is external (optimized version)
+    /// Check if a URL is external or should be skipped for validation
     #[inline]
     fn is_external_url(&self, url: &str) -> bool {
         if url.is_empty() {
@@ -113,6 +135,12 @@ impl MD057ExistingRelativeLinks {
 
         // Quick checks for common external URL patterns
         if PROTOCOL_DOMAIN_REGEX.is_match(url) || url.starts_with("www.") {
+            return true;
+        }
+
+        // Skip template variables (Handlebars/Mustache/Jinja2 syntax)
+        // Examples: {{URL}}, {{#URL}}, {{> partial}}, {{% include %}}, {{ variable }}
+        if url.starts_with("{{") || url.starts_with("{%") {
             return true;
         }
 
@@ -162,8 +190,8 @@ impl MD057ExistingRelativeLinks {
 
         // Resolve the relative link against the base path
         let resolved_path = Self::resolve_link_path_with_base(url, base_path);
-        // Check if the file exists (with caching to avoid filesystem calls)
-        if !file_exists_with_cache(&resolved_path) {
+        // Check if the file exists, also trying markdown extensions for extensionless links
+        if !file_exists_or_markdown_extension(&resolved_path) {
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line: line_num,
@@ -371,11 +399,13 @@ impl Rule for MD057ExistingRelativeLinks {
                 {
                     let file_path = url_group.as_str().trim();
 
-                    // Skip empty, external, or fragment-only URLs
+                    // Skip empty, external, template variables, or fragment-only URLs
                     if file_path.is_empty()
                         || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
                         || file_path.starts_with("www.")
                         || file_path.starts_with('#')
+                        || file_path.starts_with("{{")
+                        || file_path.starts_with("{%")
                     {
                         continue;
                     }
@@ -523,6 +553,14 @@ mod tests {
         assert!(rule.is_external_url("javascript:void(0)"));
         assert!(rule.is_external_url("ssh://git@github.com/repo"));
         assert!(rule.is_external_url("git://github.com/repo.git"));
+
+        // Template variables should be skipped (not checked as relative links)
+        assert!(rule.is_external_url("{{URL}}")); // Handlebars/Mustache
+        assert!(rule.is_external_url("{{#URL}}")); // Handlebars block helper
+        assert!(rule.is_external_url("{{> partial}}")); // Handlebars partial
+        assert!(rule.is_external_url("{{ variable }}")); // Mustache with spaces
+        assert!(rule.is_external_url("{{% include %}}")); // Jinja2/Hugo shortcode
+        assert!(rule.is_external_url("{{")); // Even partial matches (regex edge case)
 
         // Relative paths should NOT be external
         assert!(!rule.is_external_url("./relative/path.md"));
@@ -692,6 +730,39 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
         assert!(
             !result.iter().any(|w| w.message.contains("yet-another-missing.md")),
             "Should not warn about link in inline code"
+        );
+    }
+
+    #[test]
+    fn test_extensionless_link_resolution() {
+        // Create a temporary directory for test files
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create a markdown file WITHOUT specifying .md extension in the link
+        let page_path = base_path.join("page.md");
+        File::create(&page_path).unwrap().write_all(b"# Page").unwrap();
+
+        // Test content with extensionless link that should resolve to page.md
+        let content = r#"
+# Test Document
+
+[Link without extension](page)
+[Link with extension](page.md)
+[Missing link](nonexistent)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only have warning for nonexistent link
+        // Both "page" and "page.md" should resolve to the same file
+        assert_eq!(result.len(), 1, "Should only warn about nonexistent link");
+        assert!(
+            result[0].message.contains("nonexistent"),
+            "Warning should be for 'nonexistent' not 'page'"
         );
     }
 
