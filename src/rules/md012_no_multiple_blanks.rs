@@ -121,69 +121,16 @@ impl Rule for MD012NoMultipleBlanks {
         // Single-pass algorithm with immediate counter reset
         let mut blank_count = 0;
         let mut blank_start = 0;
-        let mut in_code_block = false;
-        let mut code_fence_marker = "";
 
         // Use HashSet for O(1) lookups of lines that need to be checked
         let mut lines_to_check: HashSet<usize> = HashSet::new();
 
-        // Use filtered_lines to automatically skip front-matter lines
-        for filtered_line in ctx.filtered_lines().skip_front_matter() {
+        // Use filtered_lines to automatically skip front-matter and code blocks
+        // The in_code_block field in LineInfo is pre-computed using pulldown-cmark
+        // and correctly handles both fenced code blocks and indented code blocks
+        for filtered_line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
             let line_num = filtered_line.line_num - 1; // Convert 1-based to 0-based for internal tracking
             let line = filtered_line.content;
-            let trimmed = line.trim_start();
-
-            // Check for code block boundaries
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                // Check for excess blanks before entering/exiting code block
-                if blank_count > self.config.maximum.get() {
-                    warnings.extend(self.generate_excess_warnings(
-                        blank_start,
-                        blank_count,
-                        &lines,
-                        &lines_to_check,
-                        line_index,
-                    ));
-                }
-
-                if !in_code_block {
-                    // Entering code block
-                    in_code_block = true;
-                    code_fence_marker = if trimmed.starts_with("```") { "```" } else { "~~~" };
-                } else if trimmed.starts_with(code_fence_marker) {
-                    // Exiting code block
-                    in_code_block = false;
-                    code_fence_marker = "";
-                }
-                blank_count = 0;
-                lines_to_check.clear();
-                continue;
-            }
-
-            // Skip lines in code blocks
-            if in_code_block {
-                // Reset counter to prevent counting across boundaries
-                blank_count = 0;
-                continue;
-            }
-
-            // Check for indented code blocks (4+ spaces)
-            let is_indented_code = line.len() >= 4 && line.starts_with("    ") && !line.trim().is_empty();
-            if is_indented_code {
-                // Check for excess blanks before indented code block
-                if blank_count > self.config.maximum.get() {
-                    warnings.extend(self.generate_excess_warnings(
-                        blank_start,
-                        blank_count,
-                        &lines,
-                        &lines_to_check,
-                        line_index,
-                    ));
-                }
-                blank_count = 0;
-                lines_to_check.clear();
-                continue;
-            }
 
             if line.trim().is_empty() {
                 if blank_count == 0 {
@@ -512,14 +459,46 @@ mod tests {
 
     #[test]
     fn test_indented_code_blocks() {
+        // Per markdownlint-cli reference: blank lines inside indented code blocks are valid
         let rule = MD012NoMultipleBlanks::default();
         let content = "Text\n\n    code\n    \n    \n    more code\n\nText";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // The recent changes to MD012 now detect blank lines even in indented code blocks
-        // This is actually correct behavior - we should flag the extra blank line
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].line, 5); // Line 5 is the second blank line in the code block
+        assert!(result.is_empty(), "Should not flag blanks inside indented code blocks");
+    }
+
+    #[test]
+    fn test_blanks_in_indented_code_block() {
+        // Per markdownlint-cli reference: blank lines inside indented code blocks are valid
+        let content = "    code line 1\n\n\n    code line 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD012NoMultipleBlanks::default();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(warnings.is_empty(), "Should not flag blanks in indented code");
+    }
+
+    #[test]
+    fn test_blanks_in_indented_code_block_with_heading() {
+        // Per markdownlint-cli reference: blank lines inside indented code blocks are valid
+        let content = "# Heading\n\n    code line 1\n\n\n    code line 2\n\nMore text\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD012NoMultipleBlanks::default();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Should not flag blanks in indented code after heading"
+        );
+    }
+
+    #[test]
+    fn test_blanks_after_indented_code_block_flagged() {
+        // Blanks AFTER an indented code block end should still be flagged
+        let content = "# Heading\n\n    code line\n\n\n\nMore text\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD012NoMultipleBlanks::default();
+        let warnings = rule.check(&ctx).unwrap();
+        // There are 3 blank lines after the code block, so 2 extra should be flagged
+        assert_eq!(warnings.len(), 2, "Should flag blanks after indented code block ends");
     }
 
     #[test]
