@@ -1961,39 +1961,51 @@ impl<'a> LintContext<'a> {
 
                     // Now look for closing hashes in the part before the custom ID
                     let trimmed_rest = rest_without_id.trim_end();
-                    if let Some(last_hash_pos) = trimmed_rest.rfind('#') {
-                        // Look for the start of the hash sequence
-                        let mut start_of_hashes = last_hash_pos;
-                        while start_of_hashes > 0 && trimmed_rest.chars().nth(start_of_hashes - 1) == Some('#') {
-                            start_of_hashes -= 1;
-                        }
+                    if let Some(last_hash_byte_pos) = trimmed_rest.rfind('#') {
+                        // Find the start of the hash sequence by walking backwards
+                        // Use char_indices to get byte positions at char boundaries
+                        let char_positions: Vec<(usize, char)> = trimmed_rest.char_indices().collect();
 
-                        // Check if there's at least one space before the closing hashes
-                        let has_space_before = start_of_hashes == 0
-                            || trimmed_rest
-                                .chars()
-                                .nth(start_of_hashes - 1)
-                                .is_some_and(|c| c.is_whitespace());
+                        // Find which char index corresponds to last_hash_byte_pos
+                        let last_hash_char_idx = char_positions
+                            .iter()
+                            .position(|(byte_pos, _)| *byte_pos == last_hash_byte_pos);
 
-                        // Check if this is a valid closing sequence (all hashes to end of trimmed part)
-                        let potential_closing = &trimmed_rest[start_of_hashes..];
-                        let is_all_hashes = potential_closing.chars().all(|c| c == '#');
+                        if let Some(mut char_idx) = last_hash_char_idx {
+                            // Walk backwards to find start of hash sequence
+                            while char_idx > 0 && char_positions[char_idx - 1].1 == '#' {
+                                char_idx -= 1;
+                            }
 
-                        if is_all_hashes && has_space_before {
-                            // This is a closing sequence
-                            let closing_hashes = potential_closing.to_string();
-                            // The text is everything before the closing hashes
-                            // Don't include the custom ID here - it will be extracted later
-                            let text_part = if !custom_id_part.is_empty() {
-                                // If we have a custom ID, append it back to get the full rest
-                                // This allows the extract_header_id function to handle it properly
-                                format!("{}{}", rest_without_id[..start_of_hashes].trim_end(), custom_id_part)
+                            // Get the byte position of the start of hashes
+                            let start_of_hashes = char_positions[char_idx].0;
+
+                            // Check if there's at least one space before the closing hashes
+                            let has_space_before = char_idx == 0 || char_positions[char_idx - 1].1.is_whitespace();
+
+                            // Check if this is a valid closing sequence (all hashes to end of trimmed part)
+                            let potential_closing = &trimmed_rest[start_of_hashes..];
+                            let is_all_hashes = potential_closing.chars().all(|c| c == '#');
+
+                            if is_all_hashes && has_space_before {
+                                // This is a closing sequence
+                                let closing_hashes = potential_closing.to_string();
+                                // The text is everything before the closing hashes
+                                // Don't include the custom ID here - it will be extracted later
+                                let text_part = if !custom_id_part.is_empty() {
+                                    // If we have a custom ID, append it back to get the full rest
+                                    // This allows the extract_header_id function to handle it properly
+                                    format!("{}{}", trimmed_rest[..start_of_hashes].trim_end(), custom_id_part)
+                                } else {
+                                    trimmed_rest[..start_of_hashes].trim_end().to_string()
+                                };
+                                (text_part, true, closing_hashes)
                             } else {
-                                rest_without_id[..start_of_hashes].trim_end().to_string()
-                            };
-                            (text_part, true, closing_hashes)
+                                // Not a valid closing sequence, return the full content
+                                (rest.to_string(), false, String::new())
+                            }
                         } else {
-                            // Not a valid closing sequence, return the full content
+                            // Couldn't find char boundary, return the full content
                             (rest.to_string(), false, String::new())
                         }
                     } else {

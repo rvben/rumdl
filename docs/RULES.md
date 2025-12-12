@@ -48,6 +48,7 @@ These gaps in numbering are maintained for compatibility with markdownlint rule 
 | [MD036](md036.md) | No emphasis as heading    | Emphasis used instead of a heading                        |
 | [MD041](md041.md) | First line h1             | First line in a file should be a top-level heading        |
 | [MD043](md043.md) | Required headings         | Required heading structure                                |
+| [MD063](md063.md) | Heading capitalization    | Heading text capitalization style                         |
 
 ## List Rules
 

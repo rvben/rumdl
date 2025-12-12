@@ -41,7 +41,7 @@ Python linting, rumdl brings similar speed and developer experience improvements
 It offers:
 
 - ⚡️ **Built for speed** with Rust - significantly faster than alternatives
-- 🔍 **54 lint rules** covering common Markdown issues
+- 🔍 **57 lint rules** covering common Markdown issues
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
