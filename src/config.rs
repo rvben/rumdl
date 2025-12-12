@@ -73,15 +73,10 @@ impl FromStr for MarkdownFlavor {
             "mkdocs" => Ok(MarkdownFlavor::MkDocs),
             "mdx" => Ok(MarkdownFlavor::MDX),
             "quarto" | "qmd" | "rmd" | "rmarkdown" => Ok(MarkdownFlavor::Quarto),
-            // Accept but warn about unimplemented flavors
-            "gfm" | "github" => {
-                eprintln!("Warning: GFM flavor not yet implemented, using standard");
-                Ok(MarkdownFlavor::Standard)
-            }
-            "commonmark" => {
-                eprintln!("Warning: CommonMark flavor not yet implemented, using standard");
-                Ok(MarkdownFlavor::Standard)
-            }
+            // GFM and CommonMark are aliases for Standard since the base parser
+            // (pulldown-cmark) already supports GFM extensions (tables, task lists,
+            // strikethrough, autolinks, etc.) which are a superset of CommonMark
+            "gfm" | "github" | "commonmark" => Ok(MarkdownFlavor::Standard),
             _ => Err(format!("Unknown markdown flavor: {s}")),
         }
     }
@@ -405,7 +400,7 @@ exclude = [
 respect-gitignore = true
 
 # Markdown flavor/dialect (uncomment to enable)
-# Options: mkdocs, gfm, commonmark
+# Options: standard (default), gfm, commonmark, mkdocs, mdx, quarto
 # flavor = "mkdocs"
 
 # Rule-specific configurations (uncomment and modify as needed)
