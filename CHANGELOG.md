@@ -5,6 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.194] - 2025-12-12
+
+### Added
+
+- **LSP: workspace/didChangeConfiguration support**
+  - LSP server now responds to configuration change notifications
+  - Improved robustness and error handling in language server
+
+- **Config: Typestate pattern for configuration validation**
+  - Compile-time guarantees for configuration correctness
+  - Invalid configurations are caught earlier in the pipeline
+
+- **CI: GitHub Marketplace branding for GitHub Action**
+  - Action now has proper branding for Marketplace visibility
+
+### Fixed
+
+- **MD057 (relative-links): Handle template variables and extensionless links**
+  - Template syntax (Handlebars, Mustache, Jinja2) like `{{URL}}` now recognized and skipped
+  - Extensionless links like `[Page](page)` now resolve to `page.md`
+  - All URI schemes (file://, smb://, macappstores://, etc.) properly excluded (fixes #192)
+
+- **Config: Remove misleading GFM/CommonMark warnings (fixes #195)**
+  - `gfm` and `commonmark` flavors now silently work as expected
+  - Parser already supports GFM extensions (tables, task lists, strikethrough)
+
+- **Config: Discover markdownlint config via upward directory traversal**
+  - `.markdownlint.yaml` and similar files now found in parent directories
+  - Matches behavior of other linting tools
+
+- **MD007 (ul-indent): Handle tab characters after blockquote markers**
+  - Tab indentation after `>` marker now calculated correctly
+  - Fixes false positives for lists in blockquotes with tabs
+
+- **MD012 (no-multiple-blanks): Skip blank lines inside indented code blocks**
+  - Blank lines within indented code blocks no longer trigger warnings
+
+- **MD030 (list-marker-space): Analyze blockquoted list content correctly**
+  - Lists inside blockquotes now properly analyzed instead of skipped
+
+- **MD053 (link-image-reference-definitions): Recognize colons in reference labels**
+  - Reference definitions with colons in the label (e.g., `[foo:bar]:`) now detected
+
+- **lint_context: Check entire line for HTML comment marking**
+  - Lines with inline comments (`<!-- comment --> content`) now handled correctly
+  - Content after `-->` on the same line is properly processed
+
+- **lint_context: Add missing HTML5 block elements**
+  - Added: audio, video, source, track, canvas, svg, iframe, embed, object, menu, summary, noscript, search, template
+
+- **lint_context: Handle nested blockquotes and JS comments in ESM blocks**
+  - Improved parsing for complex nested structures
+
+- **table_utils: Exclude list items from table row detection**
+  - List items containing pipes no longer confused with table rows
+
+- **lib: Handle mutex poisoning gracefully instead of panicking**
+  - Recovers from poisoned mutexes for better stability
+
+### Changed
+
+- **Internal: Replace `Mutex<Option<Arc<T>>>` with `OnceLock`**
+  - Cleaner initialization pattern for shared state
+
+- **Internal: Replace tuple return with `FixResult` struct**
+  - More descriptive return type for fix operations
+
+### Documentation
+
+- **README: Clarify markdownlint config upward traversal behavior**
+
 ## [0.0.193] - 2025-12-10
 
 ### Fixed
