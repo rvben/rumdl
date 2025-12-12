@@ -24,8 +24,29 @@ impl TableUtils {
         }
 
         // Skip lines that are clearly not table rows
-        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+        // Unordered list items with space or tab after marker
+        if trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("+ ")
+            || trimmed.starts_with("-\t")
+            || trimmed.starts_with("*\t")
+            || trimmed.starts_with("+\t")
+        {
             return false;
+        }
+
+        // Skip ordered list items: digits followed by . or ) then space/tab
+        if let Some(first_non_digit) = trimmed.find(|c: char| !c.is_ascii_digit())
+            && first_non_digit > 0
+        {
+            let after_digits = &trimmed[first_non_digit..];
+            if after_digits.starts_with(". ")
+                || after_digits.starts_with(".\t")
+                || after_digits.starts_with(") ")
+                || after_digits.starts_with(")\t")
+            {
+                return false;
+            }
         }
 
         // Skip lines that are clearly code or inline code
@@ -476,6 +497,39 @@ mod tests {
         assert!(TableUtils::is_potential_table_row("|||")); // Two empty cells
         assert!(TableUtils::is_potential_table_row("||||")); // Three empty cells
         assert!(TableUtils::is_potential_table_row("| | |")); // Two empty cells with spaces
+    }
+
+    #[test]
+    fn test_list_items_with_pipes_not_table_rows() {
+        // Ordered list items should NOT be detected as table rows
+        assert!(!TableUtils::is_potential_table_row("1. Item with | pipe"));
+        assert!(!TableUtils::is_potential_table_row("10. Item with | pipe"));
+        assert!(!TableUtils::is_potential_table_row("999. Item with | pipe"));
+        assert!(!TableUtils::is_potential_table_row("1) Item with | pipe"));
+        assert!(!TableUtils::is_potential_table_row("10) Item with | pipe"));
+
+        // Unordered list items with tabs
+        assert!(!TableUtils::is_potential_table_row("-\tItem with | pipe"));
+        assert!(!TableUtils::is_potential_table_row("*\tItem with | pipe"));
+        assert!(!TableUtils::is_potential_table_row("+\tItem with | pipe"));
+
+        // Indented list items (the trim_start normalizes indentation)
+        assert!(!TableUtils::is_potential_table_row("  - Indented | pipe"));
+        assert!(!TableUtils::is_potential_table_row("    * Deep indent | pipe"));
+        assert!(!TableUtils::is_potential_table_row("  1. Ordered indent | pipe"));
+
+        // Task list items
+        assert!(!TableUtils::is_potential_table_row("- [ ] task | pipe"));
+        assert!(!TableUtils::is_potential_table_row("- [x] done | pipe"));
+
+        // Multiple pipes in list items
+        assert!(!TableUtils::is_potential_table_row("1. foo | bar | baz"));
+        assert!(!TableUtils::is_potential_table_row("- alpha | beta | gamma"));
+
+        // These SHOULD still be detected as potential table rows
+        assert!(TableUtils::is_potential_table_row("| cell | cell |"));
+        assert!(TableUtils::is_potential_table_row("cell | cell"));
+        assert!(TableUtils::is_potential_table_row("| Header | Header |"));
     }
 
     #[test]
