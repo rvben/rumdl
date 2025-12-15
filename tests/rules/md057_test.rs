@@ -452,3 +452,55 @@ fn test_multi_file_base_path_isolation() {
         "dir1 should still have 0 warnings when processed second (regression test for issue #190)"
     );
 }
+
+#[test]
+fn test_query_parameters_stripped() {
+    // Issue #198: URLs with query parameters like ?raw=true should be handled correctly
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create an existing image file
+    let image_path = base_path.join("image.png");
+    File::create(&image_path)
+        .unwrap()
+        .write_all(b"fake image data")
+        .unwrap();
+
+    // Test content with query parameters
+    let content = r#"
+# Test Document
+
+![Embed link to raw image](image.png?raw=true)
+![Another image](path/to/image.jpg?raw=true&version=1)
+[Link with query](document.md?raw=true)
+[Link with fragment](document.md#section)
+[Link with both](document.md?raw=true#section)
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only warn about missing files, not about image.png?raw=true (file exists)
+    // Should warn about path/to/image.jpg?raw=true (file doesn't exist)
+    // Should warn about document.md (file doesn't exist)
+    let messages: Vec<_> = result.iter().map(|w| w.message.as_str()).collect();
+
+    // image.png exists, so no warning for that
+    assert!(
+        !messages.iter().any(|m| m.contains("image.png?raw=true")),
+        "Should not warn about existing file with query parameter"
+    );
+
+    // path/to/image.jpg doesn't exist
+    assert!(
+        messages.iter().any(|m| m.contains("path/to/image.jpg?raw=true")),
+        "Should warn about missing file with query parameter"
+    );
+
+    // document.md doesn't exist (should warn regardless of query/fragment)
+    assert!(
+        messages.iter().any(|m| m.contains("document.md")),
+        "Should warn about missing document.md"
+    );
+}

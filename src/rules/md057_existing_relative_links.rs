@@ -164,6 +164,30 @@ impl MD057ExistingRelativeLinks {
         url.starts_with('#')
     }
 
+    /// Strip query parameters and fragments from a URL for file existence checking.
+    /// URLs like `path/to/image.png?raw=true` or `file.md#section` should check
+    /// for `path/to/image.png` or `file.md` respectively.
+    ///
+    /// Note: In standard URLs, query parameters (`?`) come before fragments (`#`),
+    /// so we check for `?` first. If a URL has both, only the query is stripped here
+    /// (fragments are handled separately by the regex in `contribute_to_index`).
+    fn strip_query_and_fragment(url: &str) -> &str {
+        // Find the first occurrence of '?' or '#', whichever comes first
+        // This handles both standard URLs (? before #) and edge cases (# before ?)
+        let query_pos = url.find('?');
+        let fragment_pos = url.find('#');
+
+        match (query_pos, fragment_pos) {
+            (Some(q), Some(f)) => {
+                // Both exist - strip at whichever comes first
+                &url[..q.min(f)]
+            }
+            (Some(q), None) => &url[..q],
+            (None, Some(f)) => &url[..f],
+            (None, None) => url,
+        }
+    }
+
     /// Resolve a relative link against a provided base path
     fn resolve_link_path_with_base(link: &str, base_path: &Path) -> PathBuf {
         base_path.join(link)
@@ -188,8 +212,12 @@ impl MD057ExistingRelativeLinks {
             return;
         }
 
+        // Strip query parameters and fragments before checking file existence
+        // URLs like `path/to/image.png?raw=true` should check for `path/to/image.png`
+        let file_path = Self::strip_query_and_fragment(url);
+
         // Resolve the relative link against the base path
-        let resolved_path = Self::resolve_link_path_with_base(url, base_path);
+        let resolved_path = Self::resolve_link_path_with_base(file_path, base_path);
         // Check if the file exists, also trying markdown extensions for extensionless links
         if !file_exists_or_markdown_extension(&resolved_path) {
             warnings.push(LintWarning {
@@ -410,6 +438,9 @@ impl Rule for MD057ExistingRelativeLinks {
                         continue;
                     }
 
+                    // Strip query parameters before indexing (e.g., `file.md?raw=true` -> `file.md`)
+                    let file_path = Self::strip_query_and_fragment(file_path);
+
                     // Get fragment from capture group 2 (includes # prefix)
                     let fragment = caps.get(2).map(|m| m.as_str().trim_start_matches('#')).unwrap_or("");
 
@@ -531,6 +562,61 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_strip_query_and_fragment() {
+        // Test query parameter stripping
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("file.png?raw=true"),
+            "file.png"
+        );
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("file.png?raw=true&version=1"),
+            "file.png"
+        );
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("file.png?"),
+            "file.png"
+        );
+
+        // Test fragment stripping
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("file.md#section"),
+            "file.md"
+        );
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("file.md#"),
+            "file.md"
+        );
+
+        // Test both query and fragment (query comes first, per RFC 3986)
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("file.md?raw=true#section"),
+            "file.md"
+        );
+
+        // Test no query or fragment
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("file.png"),
+            "file.png"
+        );
+
+        // Test with path
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("path/to/image.png?raw=true"),
+            "path/to/image.png"
+        );
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("path/to/image.png?raw=true#anchor"),
+            "path/to/image.png"
+        );
+
+        // Edge case: fragment before query (non-standard but possible)
+        assert_eq!(
+            MD057ExistingRelativeLinks::strip_query_and_fragment("file.md#section?query"),
+            "file.md"
+        );
+    }
 
     #[test]
     fn test_external_urls() {

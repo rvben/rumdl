@@ -245,8 +245,8 @@ fn test_output_format_with_fix_mode() {
         .arg("text")
         .arg(&test_file);
 
-    // In fix mode, rumdl exits with code 1 even if all issues were fixed
-    cmd.assert().failure().stdout(predicate::str::contains("Fixed:"));
+    // In fix mode, rumdl exits with code 0 if all issues were fixed
+    cmd.assert().success().stdout(predicate::str::contains("Fixed:"));
 
     // Verify the file was actually fixed
     let fixed_content = fs::read_to_string(&test_file).unwrap();
