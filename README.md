@@ -26,7 +26,7 @@ rumdl check .
 # Format files (exits 0 on success, even if unfixable violations remain)
 rumdl fmt .
 
-# Auto-fix and report unfixable violations (exits 1 if violations remain)
+# Auto-fix and report unfixable violations (exits 0 if all fixed, 1 if violations remain)
 rumdl check --fix .
 
 # Create a default configuration file
@@ -582,12 +582,12 @@ These options are available for all commands:
 
 ### Exit Codes
 
-- `0`: Success
+- `0`: Success (no violations found, or all violations were fixed)
 - `1`: Violations found (or remain after `--fix`)
 - `2`: Tool error
 
-**Note:** `rumdl fmt` exits 0 on successful formatting (even if unfixable violations remain), making it compatible with editor integrations. `rumdl check --fix` exits 1 if violations remain, useful
-for pre-commit hooks.
+**Note:** `rumdl fmt` exits 0 on successful formatting (even if unfixable violations remain), making it compatible with editor integrations. `rumdl check --fix` exits 0 if all violations are fixed, or
+1 if violations remain after fixing (useful for pre-commit hooks and CI/CD).
 
 ### Usage Examples
 
@@ -598,7 +598,7 @@ rumdl check .
 # Format files (exits 0 on success, even if unfixable violations remain)
 rumdl fmt .
 
-# Auto-fix and report unfixable violations (exits 1 if violations remain)
+# Auto-fix and report unfixable violations (exits 0 if all fixed, 1 if violations remain)
 rumdl check --fix .
 
 # Preview what would be fixed without modifying files

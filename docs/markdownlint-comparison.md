@@ -92,7 +92,7 @@ Both tools support auto-fixing, but with different philosophies:
 
 **rumdl:**
 
-- Two modes: `rumdl fmt` (formatter-style, exits 0) and `rumdl check --fix` (linter-style, exits 1 if violations remain)
+- Two modes: `rumdl fmt` (formatter-style, exits 0) and `rumdl check --fix` (linter-style, exits 0 if all violations fixed, 1 if violations remain)
 - `--diff` mode to preview changes
 - Parallel file fixing (4.8x faster on multi-file projects)
 

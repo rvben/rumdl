@@ -665,18 +665,19 @@ pub fn process_file_with_formatter(
             }
         }
 
+        // Re-lint the fixed content to see which warnings remain
+        // This is needed both for display and to determine exit code (following Ruff's convention)
+        let fixed_ctx = LintContext::new(&content, config.markdown_flavor(), None);
+        let mut remaining_warnings = Vec::new();
+
+        for rule in rules {
+            if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
+                remaining_warnings.extend(rule_warnings);
+            }
+        }
+
         // In fix mode, show warnings with [fixed] for issues that were fixed
         if !silent {
-            // Re-lint the fixed content to see which warnings remain
-            let fixed_ctx = LintContext::new(&content, config.markdown_flavor(), None);
-            let mut remaining_warnings = Vec::new();
-
-            for rule in rules {
-                if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
-                    remaining_warnings.extend(rule_warnings);
-                }
-            }
-
             // Create a custom formatter that shows [fixed] instead of [*]
             let mut output = String::new();
             for warning in &all_warnings {
@@ -726,6 +727,17 @@ pub fn process_file_with_formatter(
                 });
             }
         }
+
+        // Return false (no issues) if no warnings remain after fixing, true otherwise
+        // This follows Ruff's convention: exit 0 if all violations are fixed
+        return (
+            !remaining_warnings.is_empty(),
+            total_warnings,
+            warnings_fixed,
+            fixable_warnings,
+            all_warnings,
+            file_index,
+        );
     }
 
     (
