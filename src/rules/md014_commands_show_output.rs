@@ -57,40 +57,40 @@ impl MD014CommandsShowOutput {
     fn is_no_output_command(&self, cmd: &str) -> bool {
         let cmd = cmd.trim().to_lowercase();
 
-        // Basic shell commands that typically don't produce output
-        cmd.contains("cd ")
-            || cmd.contains("mkdir ")
-            || cmd.contains("touch ")
-            || cmd.contains("rm ")
-            || cmd.contains("mv ")
-            || cmd.contains("cp ")
-            || cmd.contains("export ")
-            || cmd.contains("set ")
-            || cmd.contains("alias ")
-            || cmd.contains("unset ")
-            || cmd.contains("source ")
-            || cmd.contains(". ")
+        // Only skip commands that produce NO output by design.
+        // Commands that produce output (even if verbose) should NOT be skipped -
+        // the rule's intent is to encourage showing output when using $ prompts.
 
-            // Package manager install/update commands (usually have output)
-            // Keeping these commented as they typically DO show output
-            // || cmd.contains("npm install")
-            // || cmd.contains("yarn add")
-            // || cmd.contains("pnpm install")
-            // || cmd.contains("bun install")
-            // || cmd.contains("cargo build")
-            // || cmd.contains("pip install")
+        // Shell built-ins and commands that produce no terminal output
+        cmd.starts_with("cd ")
+            || cmd == "cd"
+            || cmd.starts_with("mkdir ")
+            || cmd.starts_with("touch ")
+            || cmd.starts_with("rm ")
+            || cmd.starts_with("mv ")
+            || cmd.starts_with("cp ")
+            || cmd.starts_with("export ")
+            || cmd.starts_with("set ")
+            || cmd.starts_with("alias ")
+            || cmd.starts_with("unset ")
+            || cmd.starts_with("source ")
+            || cmd.starts_with(". ")
+            || cmd == "true"
+            || cmd == "false"
+            || cmd.starts_with("sleep ")
+            || cmd.starts_with("wait ")
+            || cmd.starts_with("pushd ")
+            || cmd.starts_with("popd")
 
-            // Git commands that don't produce output in normal operation
-            || cmd.contains("git add ")
-            || cmd.contains("git commit ")
-            || cmd.contains("git push ")
-            || cmd.contains("git checkout ")
-            || cmd.contains("git branch -d")
-            || cmd.contains("git stash")
+            // Shell redirects (output goes to file, not terminal)
+            || cmd.contains(" > ")
+            || cmd.contains(" >> ")
 
-            // Make targets that might not produce output
-            || cmd == "make clean"
-            || cmd.contains("make install")
+            // Git commands that produce no output on success
+            || cmd.starts_with("git add ")
+            || cmd.starts_with("git checkout ")
+            || cmd.starts_with("git stash")
+            || cmd.starts_with("git reset ")
     }
 
     fn is_command_without_output(&self, block: &[&str], lang: &str) -> bool {
@@ -98,24 +98,36 @@ impl MD014CommandsShowOutput {
             return false;
         }
 
-        let mut has_command = false;
-        let mut has_output = false;
-        let mut last_command = String::new();
-
-        for line in block {
-            let trimmed = line.trim();
-            if self.is_command_line(line) {
-                has_command = true;
-                last_command = trimmed[1..].trim().to_string();
-            } else if self.is_output_line(line) {
-                has_output = true;
-            }
+        // Check if block has any output
+        let has_output = block.iter().any(|line| self.is_output_line(line));
+        if has_output {
+            return false; // Has output, don't flag
         }
 
-        has_command && !has_output && !self.is_no_output_command(&last_command)
+        // Flag if there's at least one command that should produce output
+        self.get_first_output_command(block).is_some()
+    }
+
+    /// Returns the first command in the block that should produce output.
+    /// Skips no-output commands like cd, mkdir, etc.
+    fn get_first_output_command(&self, block: &[&str]) -> Option<(usize, String)> {
+        for (i, line) in block.iter().enumerate() {
+            if self.is_command_line(line) {
+                let cmd = line.trim()[1..].trim().to_string();
+                if !self.is_no_output_command(&cmd) {
+                    return Some((i, cmd));
+                }
+            }
+        }
+        None // All commands are no-output commands
     }
 
     fn get_command_from_block(&self, block: &[&str]) -> String {
+        // Return the first command that should produce output
+        if let Some((_, cmd)) = self.get_first_output_command(block) {
+            return cmd;
+        }
+        // Fallback to first command (for backwards compatibility)
         for line in block {
             let trimmed = line.trim();
             if self.is_command_line(line) {
@@ -152,10 +164,15 @@ impl MD014CommandsShowOutput {
             .to_string()
     }
 
+    /// Find the first command line that should produce output.
+    /// Skips no-output commands (cd, mkdir, etc.) to report the correct position.
     fn find_first_command_line<'a>(&self, block: &[&'a str]) -> Option<(usize, &'a str)> {
         for (i, line) in block.iter().enumerate() {
             if self.is_command_line(line) {
-                return Some((i, line));
+                let cmd = line.trim()[1..].trim();
+                if !self.is_no_output_command(cmd) {
+                    return Some((i, line));
+                }
             }
         }
         None
@@ -387,7 +404,10 @@ mod tests {
     #[test]
     fn test_is_no_output_command() {
         let rule = MD014CommandsShowOutput::new();
+
+        // Shell built-ins that produce no output
         assert!(rule.is_no_output_command("cd /home"));
+        assert!(rule.is_no_output_command("cd"));
         assert!(rule.is_no_output_command("mkdir test"));
         assert!(rule.is_no_output_command("touch file.txt"));
         assert!(rule.is_no_output_command("rm -rf dir"));
@@ -395,11 +415,58 @@ mod tests {
         assert!(rule.is_no_output_command("cp src dst"));
         assert!(rule.is_no_output_command("export VAR=value"));
         assert!(rule.is_no_output_command("set -e"));
+        assert!(rule.is_no_output_command("source ~/.bashrc"));
+        assert!(rule.is_no_output_command(". ~/.profile"));
+        assert!(rule.is_no_output_command("alias ll='ls -la'"));
+        assert!(rule.is_no_output_command("unset VAR"));
+        assert!(rule.is_no_output_command("true"));
+        assert!(rule.is_no_output_command("false"));
+        assert!(rule.is_no_output_command("sleep 5"));
+        assert!(rule.is_no_output_command("pushd /tmp"));
+        assert!(rule.is_no_output_command("popd"));
+
+        // Case insensitive (lowercased internally)
         assert!(rule.is_no_output_command("CD /HOME"));
         assert!(rule.is_no_output_command("MKDIR TEST"));
+
+        // Shell redirects (output goes to file)
+        assert!(rule.is_no_output_command("echo 'test' > file.txt"));
+        assert!(rule.is_no_output_command("cat input.txt > output.txt"));
+        assert!(rule.is_no_output_command("echo 'append' >> log.txt"));
+
+        // Git commands that produce no output on success
+        assert!(rule.is_no_output_command("git add ."));
+        assert!(rule.is_no_output_command("git checkout main"));
+        assert!(rule.is_no_output_command("git stash"));
+        assert!(rule.is_no_output_command("git reset HEAD~1"));
+
+        // Commands that PRODUCE output (should NOT be skipped)
         assert!(!rule.is_no_output_command("ls -la"));
-        assert!(!rule.is_no_output_command("echo test"));
+        assert!(!rule.is_no_output_command("echo test")); // echo without redirect
         assert!(!rule.is_no_output_command("pwd"));
+        assert!(!rule.is_no_output_command("cat file.txt")); // cat without redirect
+        assert!(!rule.is_no_output_command("grep pattern file"));
+
+        // Installation commands PRODUCE output (should NOT be skipped)
+        assert!(!rule.is_no_output_command("pip install requests"));
+        assert!(!rule.is_no_output_command("npm install express"));
+        assert!(!rule.is_no_output_command("cargo install ripgrep"));
+        assert!(!rule.is_no_output_command("brew install git"));
+
+        // Build commands PRODUCE output (should NOT be skipped)
+        assert!(!rule.is_no_output_command("cargo build"));
+        assert!(!rule.is_no_output_command("npm run build"));
+        assert!(!rule.is_no_output_command("make"));
+
+        // Docker commands PRODUCE output (should NOT be skipped)
+        assert!(!rule.is_no_output_command("docker ps"));
+        assert!(!rule.is_no_output_command("docker compose up"));
+        assert!(!rule.is_no_output_command("docker run myimage"));
+
+        // Git commands that PRODUCE output (should NOT be skipped)
+        assert!(!rule.is_no_output_command("git status"));
+        assert!(!rule.is_no_output_command("git log"));
+        assert!(!rule.is_no_output_command("git diff"));
     }
 
     #[test]
@@ -504,6 +571,67 @@ mod tests {
         let ctx3 = LintContext::new(minimal, crate::config::MarkdownFlavor::Standard, None);
         let result3 = rule.check(&ctx3).unwrap();
         assert_eq!(result3.len(), 1, "Minimal command should be flagged");
+    }
+
+    #[test]
+    fn test_mixed_silent_and_output_commands() {
+        let rule = MD014CommandsShowOutput::new();
+
+        // Block with only silent commands should NOT be flagged
+        let silent_only = "```bash\n$ cd /home\n$ mkdir test\n```";
+        let ctx1 = LintContext::new(silent_only, crate::config::MarkdownFlavor::Standard, None);
+        let result1 = rule.check(&ctx1).unwrap();
+        assert!(
+            result1.is_empty(),
+            "Block with only silent commands should not be flagged"
+        );
+
+        // Block with silent commands followed by output-producing command
+        // should flag with the OUTPUT-PRODUCING command in the message
+        let mixed_silent_first = "```bash\n$ cd /home\n$ ls -la\n```";
+        let ctx2 = LintContext::new(mixed_silent_first, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert_eq!(result2.len(), 1, "Mixed block should be flagged once");
+        assert!(
+            result2[0].message.contains("ls -la"),
+            "Message should mention 'ls -la', not 'cd /home'. Got: {}",
+            result2[0].message
+        );
+
+        // Block with mkdir followed by cat (which produces output)
+        let mixed_mkdir_cat = "```bash\n$ mkdir test\n$ cat file.txt\n```";
+        let ctx3 = LintContext::new(mixed_mkdir_cat, crate::config::MarkdownFlavor::Standard, None);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert_eq!(result3.len(), 1, "Mixed block should be flagged once");
+        assert!(
+            result3[0].message.contains("cat file.txt"),
+            "Message should mention 'cat file.txt', not 'mkdir'. Got: {}",
+            result3[0].message
+        );
+
+        // Block with silent command followed by pip install (which produces output)
+        // pip install is NOT a silent command - it produces verbose output
+        let mkdir_pip = "```bash\n$ mkdir test\n$ pip install something\n```";
+        let ctx3b = LintContext::new(mkdir_pip, crate::config::MarkdownFlavor::Standard, None);
+        let result3b = rule.check(&ctx3b).unwrap();
+        assert_eq!(result3b.len(), 1, "Block with pip install should be flagged");
+        assert!(
+            result3b[0].message.contains("pip install"),
+            "Message should mention 'pip install'. Got: {}",
+            result3b[0].message
+        );
+
+        // Block with output-producing command followed by silent command
+        // should still flag with the FIRST output-producing command
+        let mixed_output_first = "```bash\n$ echo hello\n$ cd /home\n```";
+        let ctx4 = LintContext::new(mixed_output_first, crate::config::MarkdownFlavor::Standard, None);
+        let result4 = rule.check(&ctx4).unwrap();
+        assert_eq!(result4.len(), 1, "Mixed block should be flagged once");
+        assert!(
+            result4[0].message.contains("echo hello"),
+            "Message should mention 'echo hello'. Got: {}",
+            result4[0].message
+        );
     }
 
     #[test]
