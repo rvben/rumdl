@@ -18,6 +18,10 @@ static BOLD_TEXT_PATTERN: LazyLock<Regex> =
 static QUICK_DOC_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\*\s+\*").unwrap());
 static QUICK_BOLD_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*[^*\s]").unwrap());
 
+// Template/shortcode syntax pattern - {* ... *} used by documentation systems like FastAPI/MkDocs
+// These are not emphasis markers but template directives for code inclusion/highlighting
+static TEMPLATE_SHORTCODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{\*.*\*\}").unwrap());
+
 /// Represents an emphasis marker found in text
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmphasisMarker {
@@ -321,6 +325,12 @@ pub fn is_likely_list_line(line: &str) -> bool {
 
 /// Check if line has documentation patterns that should be preserved
 pub fn has_doc_patterns(line: &str) -> bool {
+    // Check for template/shortcode syntax like {* ... *} used by FastAPI/MkDocs
+    // These contain asterisks that are not emphasis markers
+    if line.contains("{*") && TEMPLATE_SHORTCODE_PATTERN.is_match(line) {
+        return true;
+    }
+
     (QUICK_DOC_CHECK.is_match(line) || QUICK_BOLD_CHECK.is_match(line))
         && (DOC_METADATA_PATTERN.is_match(line) || BOLD_TEXT_PATTERN.is_match(line))
 }
@@ -365,5 +375,26 @@ mod tests {
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].opening.as_char(), '*');
         assert_eq!(spans[1].opening.as_char(), '_');
+    }
+
+    #[test]
+    fn test_template_shortcode_detection() {
+        // FastAPI/MkDocs style template syntax should be detected as doc pattern
+        assert!(has_doc_patterns(
+            "{* ../../docs_src/cookie_param_models/tutorial001.py hl[9:12,16] *}"
+        ));
+        assert!(has_doc_patterns(
+            "{* ../../docs_src/conditional_openapi/tutorial001.py hl[6,11] *}"
+        ));
+        // Simple shortcode
+        assert!(has_doc_patterns("{* file.py *}"));
+        // With path and options
+        assert!(has_doc_patterns("{* ../path/to/file.py ln[1-10] *}"));
+
+        // Regular emphasis should NOT match
+        assert!(!has_doc_patterns("This has *emphasis* text"));
+        assert!(!has_doc_patterns("This has * spaces * in emphasis"));
+        // Only opening brace without closing should not match
+        assert!(!has_doc_patterns("{* incomplete"));
     }
 }

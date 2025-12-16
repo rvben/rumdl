@@ -514,4 +514,44 @@ This has * real spaced emphasis * that should be flagged."#;
         let result = rule.check(&ctx);
         assert!(result.is_ok(), "Emoji text should not panic");
     }
+
+    #[test]
+    fn test_template_shortcode_syntax_not_flagged() {
+        // Test for FastAPI/MkDocs style template syntax {* ... *}
+        // These should NOT be flagged as emphasis with spaces
+        let rule = MD037NoSpaceInEmphasis;
+
+        // FastAPI style code inclusion
+        let content = "{* ../../docs_src/cookie_param_models/tutorial001.py hl[9:12,16] *}";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Template shortcode syntax should not be flagged. Got: {result:?}"
+        );
+
+        // Another FastAPI example
+        let content = "{* ../../docs_src/conditional_openapi/tutorial001.py hl[6,11] *}";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Template shortcode syntax should not be flagged. Got: {result:?}"
+        );
+
+        // Multiple shortcodes on different lines
+        let content = "# Header\n\n{* file1.py *}\n\nSome text.\n\n{* file2.py hl[1-5] *}";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multiple template shortcodes should not be flagged. Got: {result:?}"
+        );
+
+        // But actual emphasis with spaces should still be flagged
+        let content = "This has * real spaced emphasis * here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(!result.is_empty(), "Real spaced emphasis should still be flagged");
+    }
 }
