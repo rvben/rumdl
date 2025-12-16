@@ -60,10 +60,16 @@ fn file_exists_or_markdown_extension(path: &Path) -> bool {
 // Regex to match the start of a link - simplified for performance
 static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\]]*\]").unwrap());
 
-/// Regex to extract the URL from a markdown link
+/// Regex to extract the URL from an angle-bracketed markdown link
+/// Format: `](<URL>)` or `](<URL> "title")`
+/// This handles URLs with parentheses like `](<path/(with)/parens.md>)`
+static URL_EXTRACT_ANGLE_BRACKET_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\]\(\s*<([^>]+)>(#[^\)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
+
+/// Regex to extract the URL from a normal markdown link (without angle brackets)
 /// Format: `](URL)` or `](URL "title")`
 static URL_EXTRACT_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new("\\]\\(\\s*<?([^>\\)\\s#]+)(#[^)\\s]*)?\\s*(?:\"[^\"]*\")?\\s*>?\\s*\\)").unwrap());
+    LazyLock::new(|| Regex::new("\\]\\(\\s*([^>\\)\\s#]+)(#[^)\\s]*)?\\s*(?:\"[^\"]*\")?\\s*\\)").unwrap());
 
 /// Regex to detect URLs with explicit schemes (should not be checked as relative links)
 /// Matches: scheme:// or scheme: (per RFC 3986)
@@ -73,6 +79,18 @@ static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
 
 // Current working directory
 static CURRENT_DIR: LazyLock<PathBuf> = LazyLock::new(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+/// Convert a hex digit (0-9, a-f, A-F) to its numeric value.
+/// Returns None for non-hex characters.
+#[inline]
+fn hex_digit_to_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
 
 /// Supported markdown file extensions
 const MARKDOWN_EXTENSIONS: &[&str] = &[
@@ -154,6 +172,11 @@ impl MD057ExistingRelativeLinks {
         }
 
         // Bare domain check (e.g., "example.com")
+        // Note: We intentionally DON'T skip all TLDs like .org, .net, etc.
+        // Links like [text](nodejs.org/path) without a protocol are broken -
+        // they'll be treated as relative paths by markdown renderers.
+        // Flagging them helps users find missing protocols.
+        // We only skip .com as a minimal safety net for the most common case.
         if url.ends_with(".com") {
             return true;
         }
@@ -165,6 +188,13 @@ impl MD057ExistingRelativeLinks {
             return true;
         }
 
+        // Framework path aliases (resolved by build tools like Vite, webpack, etc.)
+        // These are not filesystem paths but module/asset aliases
+        // Examples: ~/assets/image.png, @images/photo.jpg, @/components/Button.vue
+        if url.starts_with('~') || url.starts_with('@') {
+            return true;
+        }
+
         // All other cases (relative paths, etc.) are not external
         false
     }
@@ -173,6 +203,38 @@ impl MD057ExistingRelativeLinks {
     #[inline]
     fn is_fragment_only_link(&self, url: &str) -> bool {
         url.starts_with('#')
+    }
+
+    /// Decode URL percent-encoded sequences in a path.
+    /// Converts `%20` to space, `%2F` to `/`, etc.
+    /// Returns the original string if decoding fails or produces invalid UTF-8.
+    fn url_decode(path: &str) -> String {
+        // Quick check: if no percent sign, return as-is
+        if !path.contains('%') {
+            return path.to_string();
+        }
+
+        let bytes = path.as_bytes();
+        let mut result = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                // Try to parse the two hex digits following %
+                let hex1 = bytes[i + 1];
+                let hex2 = bytes[i + 2];
+                if let (Some(d1), Some(d2)) = (hex_digit_to_value(hex1), hex_digit_to_value(hex2)) {
+                    result.push(d1 * 16 + d2);
+                    i += 3;
+                    continue;
+                }
+            }
+            result.push(bytes[i]);
+            i += 1;
+        }
+
+        // Convert to UTF-8, falling back to original if invalid
+        String::from_utf8(result).unwrap_or_else(|_| path.to_string())
     }
 
     /// Strip query parameters and fragments from a URL for file existence checking.
@@ -227,8 +289,12 @@ impl MD057ExistingRelativeLinks {
         // URLs like `path/to/image.png?raw=true` should check for `path/to/image.png`
         let file_path = Self::strip_query_and_fragment(url);
 
+        // URL-decode the path to handle percent-encoded characters
+        // e.g., `penguin%20with%20space.jpg` -> `penguin with space.jpg`
+        let decoded_path = Self::url_decode(file_path);
+
         // Resolve the relative link against the base path
-        let resolved_path = Self::resolve_link_path_with_base(file_path, base_path);
+        let resolved_path = Self::resolve_link_path_with_base(&decoded_path, base_path);
         // Check if the file exists, also trying markdown extensions for extensionless links
         if !file_exists_or_markdown_extension(&resolved_path) {
             warnings.push(LintWarning {
@@ -344,9 +410,18 @@ impl Rule for MD057ExistingRelativeLinks {
                     }
 
                     // Find the URL part after the link text
-                    if let Some(caps) = URL_EXTRACT_REGEX.captures_at(line, end_pos - 1)
-                        && let Some(url_group) = caps.get(1)
-                    {
+                    // Try angle-bracket regex first (handles URLs with parens like `<path/(with)/parens.md>`)
+                    // Then fall back to normal URL regex
+                    let caps_and_url = URL_EXTRACT_ANGLE_BRACKET_REGEX
+                        .captures_at(line, end_pos - 1)
+                        .and_then(|caps| caps.get(1).map(|g| (caps, g)))
+                        .or_else(|| {
+                            URL_EXTRACT_REGEX
+                                .captures_at(line, end_pos - 1)
+                                .and_then(|caps| caps.get(1).map(|g| (caps, g)))
+                        });
+
+                    if let Some((_caps, url_group)) = caps_and_url {
                         let url = url_group.as_str().trim();
 
                         // Calculate column position
@@ -433,12 +508,18 @@ impl Rule for MD057ExistingRelativeLinks {
 
                 // Extract the URL (group 1) and fragment (group 2)
                 // The regex separates URL and fragment: group 1 excludes #, group 2 captures #fragment
-                if let Some(caps) = URL_EXTRACT_REGEX.captures_at(line, end_pos - 1)
+                // Try angle-bracket regex first (handles URLs with parens)
+                let caps_result = URL_EXTRACT_ANGLE_BRACKET_REGEX
+                    .captures_at(line, end_pos - 1)
+                    .or_else(|| URL_EXTRACT_REGEX.captures_at(line, end_pos - 1));
+
+                if let Some(caps) = caps_result
                     && let Some(url_group) = caps.get(1)
                 {
                     let file_path = url_group.as_str().trim();
 
-                    // Skip empty, external, template variables, absolute URL paths, or fragment-only URLs
+                    // Skip empty, external, template variables, absolute URL paths,
+                    // framework aliases, or fragment-only URLs
                     if file_path.is_empty()
                         || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
                         || file_path.starts_with("www.")
@@ -446,6 +527,8 @@ impl Rule for MD057ExistingRelativeLinks {
                         || file_path.starts_with("{{")
                         || file_path.starts_with("{%")
                         || file_path.starts_with('/')
+                        || file_path.starts_with('~')
+                        || file_path.starts_with('@')
                     {
                         continue;
                     }
@@ -631,6 +714,126 @@ mod tests {
     }
 
     #[test]
+    fn test_url_decode() {
+        // Simple space encoding
+        assert_eq!(
+            MD057ExistingRelativeLinks::url_decode("penguin%20with%20space.jpg"),
+            "penguin with space.jpg"
+        );
+
+        // Path with encoded spaces
+        assert_eq!(
+            MD057ExistingRelativeLinks::url_decode("assets/my%20file%20name.png"),
+            "assets/my file name.png"
+        );
+
+        // Multiple encoded characters
+        assert_eq!(
+            MD057ExistingRelativeLinks::url_decode("hello%20world%21.md"),
+            "hello world!.md"
+        );
+
+        // Lowercase hex
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("%2f%2e%2e"), "/..");
+
+        // Uppercase hex
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("%2F%2E%2E"), "/..");
+
+        // Mixed case hex
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("%2f%2E%2e"), "/..");
+
+        // No encoding - return as-is
+        assert_eq!(
+            MD057ExistingRelativeLinks::url_decode("normal-file.md"),
+            "normal-file.md"
+        );
+
+        // Incomplete percent encoding - leave as-is
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("file%2.txt"), "file%2.txt");
+
+        // Percent at end - leave as-is
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("file%"), "file%");
+
+        // Invalid hex digits - leave as-is
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("file%GG.txt"), "file%GG.txt");
+
+        // Plus sign (should NOT be decoded - that's form encoding, not URL encoding)
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("file+name.txt"), "file+name.txt");
+
+        // Empty string
+        assert_eq!(MD057ExistingRelativeLinks::url_decode(""), "");
+
+        // UTF-8 multi-byte characters (é = C3 A9 in UTF-8)
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("caf%C3%A9.md"), "café.md");
+
+        // Multiple consecutive encoded characters
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("%20%20%20"), "   ");
+
+        // Encoded path separators
+        assert_eq!(
+            MD057ExistingRelativeLinks::url_decode("path%2Fto%2Ffile.md"),
+            "path/to/file.md"
+        );
+
+        // Mixed encoded and non-encoded
+        assert_eq!(
+            MD057ExistingRelativeLinks::url_decode("hello%20world/foo%20bar.md"),
+            "hello world/foo bar.md"
+        );
+
+        // Special characters that are commonly encoded
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("file%5B1%5D.md"), "file[1].md");
+
+        // Percent at position that looks like encoding but isn't valid
+        assert_eq!(MD057ExistingRelativeLinks::url_decode("100%pure.md"), "100%pure.md");
+    }
+
+    #[test]
+    fn test_url_encoded_filenames() {
+        // Create a temporary directory for test files
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create a file with spaces in the name
+        let file_with_spaces = base_path.join("penguin with space.jpg");
+        File::create(&file_with_spaces)
+            .unwrap()
+            .write_all(b"image data")
+            .unwrap();
+
+        // Create a subdirectory with spaces
+        let subdir = base_path.join("my images");
+        std::fs::create_dir(&subdir).unwrap();
+        let nested_file = subdir.join("photo 1.png");
+        File::create(&nested_file).unwrap().write_all(b"photo data").unwrap();
+
+        // Test content with URL-encoded links
+        let content = r#"
+# Test Document with URL-Encoded Links
+
+![Penguin](penguin%20with%20space.jpg)
+![Photo](my%20images/photo%201.png)
+![Missing](missing%20file.jpg)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only have one warning for the missing file
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about missing%20file.jpg. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("missing%20file.jpg"),
+            "Warning should mention the URL-encoded filename"
+        );
+    }
+
+    #[test]
     fn test_external_urls() {
         let rule = MD057ExistingRelativeLinks::new();
 
@@ -670,10 +873,122 @@ mod tests {
         assert!(rule.is_external_url("/index.html"));
         assert!(rule.is_external_url("/assets/logo.png"));
 
+        // Framework path aliases should be skipped (resolved by build tools)
+        // Tilde prefix (common in Vite, Nuxt, Astro for project root)
+        assert!(rule.is_external_url("~/assets/image.png"));
+        assert!(rule.is_external_url("~/components/Button.vue"));
+        assert!(rule.is_external_url("~assets/logo.svg")); // Nuxt style without /
+
+        // @ prefix (common in Vue, webpack, Vite aliases)
+        assert!(rule.is_external_url("@/components/Header.vue"));
+        assert!(rule.is_external_url("@images/photo.jpg"));
+        assert!(rule.is_external_url("@assets/styles.css"));
+
         // Relative paths should NOT be external (should be validated)
         assert!(!rule.is_external_url("./relative/path.md"));
         assert!(!rule.is_external_url("relative/path.md"));
         assert!(!rule.is_external_url("../parent/path.md"));
+    }
+
+    #[test]
+    fn test_framework_path_aliases() {
+        // Create a temporary directory for test files
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Test content with framework path aliases (should all be skipped)
+        let content = r#"
+# Framework Path Aliases
+
+![Image 1](~/assets/penguin.jpg)
+![Image 2](~assets/logo.svg)
+![Image 3](@images/photo.jpg)
+![Image 4](@/components/icon.svg)
+[Link](@/pages/about.md)
+
+This is a [real missing link](missing.md) that should be flagged.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only have one warning for the real missing link
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about missing.md, not framework aliases. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("missing.md"),
+            "Warning should be for missing.md"
+        );
+    }
+
+    #[test]
+    fn test_url_decode_security_path_traversal() {
+        // Ensure URL decoding doesn't enable path traversal attacks
+        // The decoded path is still validated against the base path
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create a file in the temp directory
+        let file_in_base = base_path.join("safe.md");
+        File::create(&file_in_base).unwrap().write_all(b"# Safe").unwrap();
+
+        // Test with encoded path traversal attempt
+        // Even if decoded, the path should be validated correctly
+        let content = r#"
+[Traversal attempt](..%2F..%2Fetc%2Fpasswd)
+[Double encoded](..%252F..%252Fetc%252Fpasswd)
+[Safe link](safe.md)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // The traversal attempts should still be flagged as missing
+        // (they don't exist relative to base_path after decoding)
+        assert_eq!(
+            result.len(),
+            2,
+            "Should have warnings for traversal attempts. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_url_encoded_utf8_filenames() {
+        // Test with actual UTF-8 encoded filenames
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create files with unicode names
+        let cafe_file = base_path.join("café.md");
+        File::create(&cafe_file).unwrap().write_all(b"# Cafe").unwrap();
+
+        let content = r#"
+[Café link](caf%C3%A9.md)
+[Missing unicode](r%C3%A9sum%C3%A9.md)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only warn about the missing file
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about missing résumé.md. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("r%C3%A9sum%C3%A9.md"),
+            "Warning should mention the URL-encoded filename"
+        );
     }
 
     #[test]
@@ -753,6 +1068,49 @@ mod tests {
         assert!(
             result[0].message.contains("missing.md"),
             "Warning should mention missing.md"
+        );
+    }
+
+    #[test]
+    fn test_angle_bracket_links_with_parens() {
+        // Create a temporary directory for test files
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create directory structure with parentheses in path
+        let app_dir = base_path.join("app");
+        std::fs::create_dir(&app_dir).unwrap();
+        let upload_dir = app_dir.join("(upload)");
+        std::fs::create_dir(&upload_dir).unwrap();
+        let page_file = upload_dir.join("page.tsx");
+        File::create(&page_file)
+            .unwrap()
+            .write_all(b"export default function Page() {}")
+            .unwrap();
+
+        // Create test content with angle bracket links containing parentheses
+        let content = r#"
+# Test Document with Paths Containing Parens
+
+[Upload Page](<app/(upload)/page.tsx>)
+[Unix pipe](<https://en.wikipedia.org/wiki/Pipeline_(Unix)>)
+[Missing](<app/(missing)/file.md>)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only have one warning for the missing file
+        assert_eq!(
+            result.len(),
+            1,
+            "Should have exactly one warning for missing file. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("app/(missing)/file.md"),
+            "Warning should mention app/(missing)/file.md"
         );
     }
 
