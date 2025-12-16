@@ -126,7 +126,16 @@ impl MD057ExistingRelativeLinks {
         Self::default()
     }
 
-    /// Check if a URL is external or should be skipped for validation
+    /// Check if a URL is external or should be skipped for validation.
+    ///
+    /// Returns `true` (skip validation) for:
+    /// - URLs with protocols: `https://`, `http://`, `ftp://`, `mailto:`, etc.
+    /// - Bare domains: `www.example.com`, `example.com`
+    /// - Template variables: `{{URL}}`, `{{% include %}}`
+    /// - Absolute web URL paths: `/api/docs`, `/blog/post.html`
+    ///
+    /// Returns `false` (validate) for:
+    /// - Relative filesystem paths: `./file.md`, `../parent/file.md`, `file.md`
     #[inline]
     fn is_external_url(&self, url: &str) -> bool {
         if url.is_empty() {
@@ -149,9 +158,11 @@ impl MD057ExistingRelativeLinks {
             return true;
         }
 
-        // Absolute paths within the site are not external
+        // Absolute URL paths (e.g., /api/docs, /blog/post.html) are treated as web paths
+        // and skipped. These are typically routes for published documentation sites,
+        // not filesystem paths that can be validated locally.
         if url.starts_with('/') {
-            return false;
+            return true;
         }
 
         // All other cases (relative paths, etc.) are not external
@@ -427,13 +438,14 @@ impl Rule for MD057ExistingRelativeLinks {
                 {
                     let file_path = url_group.as_str().trim();
 
-                    // Skip empty, external, template variables, or fragment-only URLs
+                    // Skip empty, external, template variables, absolute URL paths, or fragment-only URLs
                     if file_path.is_empty()
                         || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
                         || file_path.starts_with("www.")
                         || file_path.starts_with('#')
                         || file_path.starts_with("{{")
                         || file_path.starts_with("{%")
+                        || file_path.starts_with('/')
                     {
                         continue;
                     }
@@ -648,7 +660,17 @@ mod tests {
         assert!(rule.is_external_url("{{% include %}}")); // Jinja2/Hugo shortcode
         assert!(rule.is_external_url("{{")); // Even partial matches (regex edge case)
 
-        // Relative paths should NOT be external
+        // Absolute web URL paths should be skipped (not validated)
+        // These are typically routes for published documentation sites
+        assert!(rule.is_external_url("/api/v1/users"));
+        assert!(rule.is_external_url("/blog/2024/release.html"));
+        assert!(rule.is_external_url("/react/hooks/use-state.html"));
+        assert!(rule.is_external_url("/pkg/runtime"));
+        assert!(rule.is_external_url("/doc/go1compat"));
+        assert!(rule.is_external_url("/index.html"));
+        assert!(rule.is_external_url("/assets/logo.png"));
+
+        // Relative paths should NOT be external (should be validated)
         assert!(!rule.is_external_url("./relative/path.md"));
         assert!(!rule.is_external_url("relative/path.md"));
         assert!(!rule.is_external_url("../parent/path.md"));
