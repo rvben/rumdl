@@ -270,21 +270,16 @@ impl Rule for MD033NoInlineHtml {
             // Reconstruct tag string from byte offsets
             let tag = &content[html_tag.byte_offset..html_tag.byte_end];
 
-            // Skip tags in code blocks
+            // Skip tags in code blocks (uses proper code block detection from LintContext)
             if ctx.line_info(line_num).is_some_and(|info| info.in_code_block) {
                 continue;
             }
 
-            // Skip lines that are indented code blocks (4+ spaces or tab)
-            if let Some(line) = lines.get(line_num.saturating_sub(1)) {
-                if line.starts_with("    ") || line.starts_with('\t') {
-                    continue;
-                }
-
-                // Skip Kramdown extensions and block attributes
-                if is_kramdown_extension(line) || is_kramdown_block_attribute(line) {
-                    continue;
-                }
+            // Skip Kramdown extensions and block attributes
+            if let Some(line) = lines.get(line_num.saturating_sub(1))
+                && (is_kramdown_extension(line) || is_kramdown_block_attribute(line))
+            {
+                continue;
             }
 
             // Skip lines inside nomarkdown blocks
