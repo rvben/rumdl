@@ -27,6 +27,24 @@ impl Rule for MD023HeadingStartLeft {
         // Process all headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
+                // Skip hashtag-like patterns (e.g., #tag, #123, #29039) for ATX level 1
+                // These are likely issue refs or social hashtags, not intended headings
+                if heading.level == 1 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                    // Get first "word" of heading text (up to space, comma, or closing paren)
+                    let first_word: String = heading
+                        .text
+                        .trim()
+                        .chars()
+                        .take_while(|c| !c.is_whitespace() && *c != ',' && *c != ')')
+                        .collect();
+                    if let Some(first_char) = first_word.chars().next() {
+                        // Skip if first word starts with lowercase or number
+                        if first_char.is_lowercase() || first_char.is_numeric() {
+                            continue;
+                        }
+                    }
+                }
+
                 let indentation = line_info.indent;
 
                 // If the heading is indented, add a warning
@@ -243,5 +261,67 @@ mod tests {
         assert_eq!(result.len(), 2); // Should flag the indented heading and underline
         assert_eq!(result[0].line, 3);
         assert_eq!(result[1].line, 4);
+    }
+
+    #[test]
+    fn test_issue_refs_skipped_but_real_headings_caught() {
+        let rule = MD023HeadingStartLeft;
+
+        // Issue refs should NOT be flagged (starts with number)
+        let content = "- fix: issue\n  #29039)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "#29039) should not be flagged as indented heading. Got: {result:?}"
+        );
+
+        // Hashtags should NOT be flagged (starts with lowercase)
+        let content = "Some text\n  #hashtag";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "#hashtag should not be flagged as indented heading. Got: {result:?}"
+        );
+
+        // But uppercase single-# SHOULD be flagged (likely intended heading)
+        let content = "Some text\n  #Summary";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "#Summary SHOULD be flagged as indented heading. Got: {result:?}"
+        );
+
+        // Multi-hash patterns SHOULD always be flagged
+        let content = "Some text\n  ##introduction";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "##introduction SHOULD be flagged as indented heading. Got: {result:?}"
+        );
+
+        // Multi-hash with numbers SHOULD be flagged
+        let content = "Some text\n  ##123";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "##123 SHOULD be flagged as indented heading. Got: {result:?}"
+        );
+
+        // Properly aligned headings should pass
+        let content = "# Summary\n## Details";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Properly aligned headings should pass. Got: {result:?}"
+        );
     }
 }
