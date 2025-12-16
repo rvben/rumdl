@@ -940,6 +940,7 @@ build-backend = "setuptools.build_meta"
                     Box::new(MD060TableFormat::default()),
                     Box::new(MD061ForbiddenTerms::default()),
                     Box::new(MD062LinkDestinationWhitespace::new()),
+                    Box::new(MD063HeadingCapitalization::default()),
                 ];
                 if let Some(rule_query) = rule {
                     let rule_query = rule_query.to_ascii_uppercase();
@@ -1746,6 +1747,9 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD058BlanksAroundTables::default()),
         Box::new(MD059LinkText::default()),
         Box::new(MD060TableFormat::default()),
+        Box::new(MD061ForbiddenTerms::default()),
+        Box::new(MD062LinkDestinationWhitespace::new()),
+        Box::new(MD063HeadingCapitalization::default()),
     ];
 
     // Find the rule

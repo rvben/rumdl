@@ -57,7 +57,8 @@ pub struct MD063Config {
 fn default_lowercase_words() -> Vec<String> {
     // Standard title case lowercase words (Chicago Manual of Style inspired)
     vec![
-        "a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "so", "the", "to", "up", "yet",
+        "a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "nor", "of", "off", "on", "or", "per",
+        "so", "the", "to", "up", "via", "with", "yet",
     ]
     .into_iter()
     .map(String::from)

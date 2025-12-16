@@ -86,6 +86,35 @@ impl MD063HeadingCapitalization {
         has_upper && has_lower
     }
 
+    /// Check if a word is an all-caps acronym (2+ consecutive uppercase letters)
+    /// Examples: "API", "GPU", "HTTP2", "IO" return true
+    /// Examples: "A", "iPhone", "npm" return false
+    fn is_all_caps_acronym(&self, word: &str) -> bool {
+        // Skip single-letter words (handled by title case rules)
+        if word.len() < 2 {
+            return false;
+        }
+
+        let mut consecutive_upper = 0;
+        let mut max_consecutive = 0;
+
+        for c in word.chars() {
+            if c.is_uppercase() {
+                consecutive_upper += 1;
+                max_consecutive = max_consecutive.max(consecutive_upper);
+            } else if c.is_lowercase() {
+                // Any lowercase letter means not all-caps
+                return false;
+            } else {
+                // Non-letter (number, punctuation) - reset counter but don't fail
+                consecutive_upper = 0;
+            }
+        }
+
+        // Must have at least 2 consecutive uppercase letters
+        max_consecutive >= 2
+    }
+
     /// Check if a word should be preserved as-is
     fn should_preserve_word(&self, word: &str) -> bool {
         // Check ignore_words list (case-sensitive exact match)
@@ -95,6 +124,11 @@ impl MD063HeadingCapitalization {
 
         // Check if word has internal capitals and preserve_cased_words is enabled
         if self.config.preserve_cased_words && self.has_internal_capitals(word) {
+            return true;
+        }
+
+        // Check if word is an all-caps acronym (2+ consecutive uppercase)
+        if self.config.preserve_cased_words && self.is_all_caps_acronym(word) {
             return true;
         }
 
@@ -149,19 +183,31 @@ impl MD063HeadingCapitalization {
         // Use the titlecase crate for the base transformation
         let base_result = titlecase::titlecase(text);
 
-        // Now apply our customizations on top
-        let words: Vec<&str> = base_result.split_whitespace().collect();
-        let total_words = words.len();
+        // Get words from both original and transformed text to compare
+        let original_words: Vec<&str> = text.split_whitespace().collect();
+        let transformed_words: Vec<&str> = base_result.split_whitespace().collect();
+        let total_words = transformed_words.len();
 
-        let result_words: Vec<String> = words
+        let result_words: Vec<String> = transformed_words
             .iter()
             .enumerate()
             .map(|(i, word)| {
                 let is_first = i == 0;
                 let is_last = i == total_words - 1;
 
+                // Check if the ORIGINAL word should be preserved (for acronyms like "API")
+                if let Some(original_word) = original_words.get(i)
+                    && self.should_preserve_word(original_word)
+                {
+                    return (*original_word).to_string();
+                }
+
                 // Handle hyphenated words
                 if word.contains('-') {
+                    // Also check original for hyphenated preservation
+                    if let Some(original_word) = original_words.get(i) {
+                        return self.handle_hyphenated_word_with_original(word, original_word, is_first, is_last);
+                    }
                     return self.handle_hyphenated_word(word, is_first, is_last);
                 }
 
@@ -181,6 +227,39 @@ impl MD063HeadingCapitalization {
             .iter()
             .enumerate()
             .map(|(i, part)| {
+                // First part of first word and last part of last word get special treatment
+                let part_is_first = is_first && i == 0;
+                let part_is_last = is_last && i == total_parts - 1;
+                self.title_case_word(part, part_is_first, part_is_last)
+            })
+            .collect();
+
+        result_parts.join("-")
+    }
+
+    /// Handle hyphenated words with original text for acronym preservation
+    fn handle_hyphenated_word_with_original(
+        &self,
+        word: &str,
+        original: &str,
+        is_first: bool,
+        is_last: bool,
+    ) -> String {
+        let parts: Vec<&str> = word.split('-').collect();
+        let original_parts: Vec<&str> = original.split('-').collect();
+        let total_parts = parts.len();
+
+        let result_parts: Vec<String> = parts
+            .iter()
+            .enumerate()
+            .map(|(i, part)| {
+                // Check if the original part should be preserved (for acronyms)
+                if let Some(original_part) = original_parts.get(i)
+                    && self.should_preserve_word(original_part)
+                {
+                    return (*original_part).to_string();
+                }
+
                 // First part of first word and last part of last word get special treatment
                 let part_is_first = is_first && i == 0;
                 let part_is_last = is_last && i == total_parts - 1;
@@ -914,5 +993,121 @@ mod tests {
         // Should return content unchanged when disabled
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content);
+    }
+
+    // Acronym preservation tests
+    #[test]
+    fn test_preserve_all_caps_acronyms() {
+        let rule = create_rule();
+        let ctx = |c| LintContext::new(c, crate::config::MarkdownFlavor::Standard, None);
+
+        // Basic acronyms should be preserved
+        let fixed = rule.fix(&ctx("# using API in production\n")).unwrap();
+        assert_eq!(fixed, "# Using API in Production\n");
+
+        // Multiple acronyms
+        let fixed = rule.fix(&ctx("# API and GPU integration\n")).unwrap();
+        assert_eq!(fixed, "# API and GPU Integration\n");
+
+        // Two-letter acronyms
+        let fixed = rule.fix(&ctx("# IO performance guide\n")).unwrap();
+        assert_eq!(fixed, "# IO Performance Guide\n");
+
+        // Acronyms with numbers
+        let fixed = rule.fix(&ctx("# HTTP2 and MD5 hashing\n")).unwrap();
+        assert_eq!(fixed, "# HTTP2 and MD5 Hashing\n");
+    }
+
+    #[test]
+    fn test_preserve_acronyms_in_hyphenated_words() {
+        let rule = create_rule();
+        let ctx = |c| LintContext::new(c, crate::config::MarkdownFlavor::Standard, None);
+
+        // Acronyms at start of hyphenated word
+        let fixed = rule.fix(&ctx("# API-driven architecture\n")).unwrap();
+        assert_eq!(fixed, "# API-Driven Architecture\n");
+
+        // Multiple acronyms with hyphens
+        let fixed = rule.fix(&ctx("# GPU-accelerated CPU-intensive tasks\n")).unwrap();
+        assert_eq!(fixed, "# GPU-Accelerated CPU-Intensive Tasks\n");
+    }
+
+    #[test]
+    fn test_single_letters_not_treated_as_acronyms() {
+        let rule = create_rule();
+        let ctx = |c| LintContext::new(c, crate::config::MarkdownFlavor::Standard, None);
+
+        // Single uppercase letters should follow title case rules, not be preserved
+        let fixed = rule.fix(&ctx("# i am a heading\n")).unwrap();
+        assert_eq!(fixed, "# I Am a Heading\n");
+    }
+
+    #[test]
+    fn test_lowercase_terms_need_ignore_words() {
+        let ctx = |c| LintContext::new(c, crate::config::MarkdownFlavor::Standard, None);
+
+        // Without ignore_words: npm gets capitalized
+        let rule = create_rule();
+        let fixed = rule.fix(&ctx("# using npm packages\n")).unwrap();
+        assert_eq!(fixed, "# Using Npm Packages\n");
+
+        // With ignore_words: npm preserved
+        let config = MD063Config {
+            enabled: true,
+            ignore_words: vec!["npm".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+        let fixed = rule.fix(&ctx("# using npm packages\n")).unwrap();
+        assert_eq!(fixed, "# Using npm Packages\n");
+    }
+
+    #[test]
+    fn test_acronyms_with_mixed_case_preserved() {
+        let rule = create_rule();
+        let ctx = |c| LintContext::new(c, crate::config::MarkdownFlavor::Standard, None);
+
+        // Both acronyms (API, GPU) and mixed-case (GitHub) should be preserved
+        let fixed = rule.fix(&ctx("# using API with GitHub\n")).unwrap();
+        assert_eq!(fixed, "# Using API with GitHub\n");
+    }
+
+    #[test]
+    fn test_real_world_acronyms() {
+        let rule = create_rule();
+        let ctx = |c| LintContext::new(c, crate::config::MarkdownFlavor::Standard, None);
+
+        // Common technical acronyms from tested repositories
+        let content = "# FFI bindings for CPU optimization\n";
+        let fixed = rule.fix(&ctx(content)).unwrap();
+        assert_eq!(fixed, "# FFI Bindings for CPU Optimization\n");
+
+        let content = "# DOM manipulation and SSR rendering\n";
+        let fixed = rule.fix(&ctx(content)).unwrap();
+        assert_eq!(fixed, "# DOM Manipulation and SSR Rendering\n");
+
+        let content = "# CVE security and RNN models\n";
+        let fixed = rule.fix(&ctx(content)).unwrap();
+        assert_eq!(fixed, "# CVE Security and RNN Models\n");
+    }
+
+    #[test]
+    fn test_is_all_caps_acronym() {
+        let rule = create_rule();
+
+        // Should return true for all-caps with 2+ letters
+        assert!(rule.is_all_caps_acronym("API"));
+        assert!(rule.is_all_caps_acronym("IO"));
+        assert!(rule.is_all_caps_acronym("GPU"));
+        assert!(rule.is_all_caps_acronym("HTTP2")); // Numbers don't break it
+
+        // Should return false for single letters
+        assert!(!rule.is_all_caps_acronym("A"));
+        assert!(!rule.is_all_caps_acronym("I"));
+
+        // Should return false for words with lowercase
+        assert!(!rule.is_all_caps_acronym("Api"));
+        assert!(!rule.is_all_caps_acronym("npm"));
+        assert!(!rule.is_all_caps_acronym("iPhone"));
     }
 }
