@@ -224,6 +224,10 @@ pub struct ReferenceDef {
     pub byte_offset: usize,
     /// Byte offset where the reference definition ends
     pub byte_end: usize,
+    /// Byte offset where the title starts (if present, includes quote)
+    pub title_byte_start: Option<usize>,
+    /// Byte offset where the title ends (if present, includes quote)
+    pub title_byte_end: Option<usize>,
 }
 
 /// Parsed code span information
@@ -848,6 +852,17 @@ impl<'a> LintContext<'a> {
         self.jinja_ranges
             .iter()
             .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+    }
+
+    /// Check if a byte position is within a link reference definition title
+    pub fn is_in_link_title(&self, byte_pos: usize) -> bool {
+        self.reference_defs.iter().any(|def| {
+            if let (Some(start), Some(end)) = (def.title_byte_start, def.title_byte_end) {
+                byte_pos >= start && byte_pos < end
+            } else {
+                false
+            }
+        })
     }
 
     /// Check if content has any instances of a specific character (fast)
@@ -1514,13 +1529,24 @@ impl<'a> LintContext<'a> {
             if let Some(cap) = REF_DEF_PATTERN.captures(line) {
                 let id = cap.get(1).unwrap().as_str().to_lowercase();
                 let url = cap.get(2).unwrap().as_str().to_string();
-                let title = cap.get(3).or_else(|| cap.get(4)).map(|m| m.as_str().to_string());
+                let title_match = cap.get(3).or_else(|| cap.get(4));
+                let title = title_match.map(|m| m.as_str().to_string());
 
                 // Calculate byte positions
                 // The match starts at the beginning of the line (0) and extends to the end
                 let match_obj = cap.get(0).unwrap();
                 let byte_offset = line_info.byte_offset + match_obj.start();
                 let byte_end = line_info.byte_offset + match_obj.end();
+
+                // Calculate title byte positions (includes the quote character before content)
+                let (title_byte_start, title_byte_end) = if let Some(m) = title_match {
+                    // The match is the content inside quotes, so we include the quote before
+                    let start = line_info.byte_offset + m.start().saturating_sub(1);
+                    let end = line_info.byte_offset + m.end() + 1; // Include closing quote
+                    (Some(start), Some(end))
+                } else {
+                    (None, None)
+                };
 
                 refs.push(ReferenceDef {
                     line: line_num,
@@ -1529,6 +1555,8 @@ impl<'a> LintContext<'a> {
                     title,
                     byte_offset,
                     byte_end,
+                    title_byte_start,
+                    title_byte_end,
                 });
             }
         }

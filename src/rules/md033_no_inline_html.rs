@@ -300,6 +300,12 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
+            // Skip angle brackets inside link reference definition titles
+            // e.g., [ref]: url "Title with <angle brackets>"
+            if ctx.is_in_link_title(tag_byte_start) {
+                continue;
+            }
+
             // Skip JSX components in MDX files (e.g., <Chart />, <MyComponent>)
             if ctx.flavor.supports_jsx() && html_tag.tag_name.chars().next().is_some_and(|c| c.is_uppercase()) {
                 continue;
@@ -619,5 +625,47 @@ mod tests {
         let fix2 = result[1].fix.as_ref().unwrap();
         assert_eq!(&content[fix2.range.clone()], "<strong>second</strong>");
         assert_eq!(fix2.replacement, "second");
+    }
+
+    #[test]
+    fn test_md033_skip_angle_brackets_in_link_titles() {
+        // Angle brackets inside link reference definition titles should not be flagged as HTML
+        // This matches markdownlint behavior
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"# Test
+
+[example]: <https://example.com> "Title with <Angle Brackets> inside"
+
+Regular text with <actual> HTML tag.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag <actual>, not <Angle Brackets> in the title
+        assert_eq!(result.len(), 1, "Should find exactly one HTML tag");
+        assert!(
+            result[0].message.contains("<actual>"),
+            "Should flag <actual>, got: {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_md033_skip_angle_brackets_in_link_title_single_quotes() {
+        // Test with single-quoted title
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"[ref]: url 'Title <Help Wanted> here'
+
+<real> tag here
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should find exactly one HTML tag");
+        assert!(
+            result[0].message.contains("<real>"),
+            "Should flag <real>, got: {}",
+            result[0].message
+        );
     }
 }
