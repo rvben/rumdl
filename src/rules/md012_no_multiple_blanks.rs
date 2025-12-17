@@ -121,6 +121,7 @@ impl Rule for MD012NoMultipleBlanks {
         // Single-pass algorithm with immediate counter reset
         let mut blank_count = 0;
         let mut blank_start = 0;
+        let mut last_line_num: Option<usize> = None;
 
         // Use HashSet for O(1) lookups of lines that need to be checked
         let mut lines_to_check: HashSet<usize> = HashSet::new();
@@ -131,6 +132,27 @@ impl Rule for MD012NoMultipleBlanks {
         for filtered_line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
             let line_num = filtered_line.line_num - 1; // Convert 1-based to 0-based for internal tracking
             let line = filtered_line.content;
+
+            // Detect when lines were skipped (e.g., code block content)
+            // If we jump more than 1 line, there was content between, which breaks blank sequences
+            if let Some(last) = last_line_num
+                && line_num > last + 1
+            {
+                // Lines were skipped (code block or similar)
+                // Generate warnings for any accumulated blanks before the skip
+                if blank_count > self.config.maximum.get() {
+                    warnings.extend(self.generate_excess_warnings(
+                        blank_start,
+                        blank_count,
+                        &lines,
+                        &lines_to_check,
+                        line_index,
+                    ));
+                }
+                blank_count = 0;
+                lines_to_check.clear();
+            }
+            last_line_num = Some(line_num);
 
             if line.trim().is_empty() {
                 if blank_count == 0 {
@@ -156,39 +178,29 @@ impl Rule for MD012NoMultipleBlanks {
             }
         }
 
+        // Handle trailing blanks at EOF
+        // Main loop only reports mid-document blanks (between content)
+        // EOF handler reports trailing blanks with stricter rules (any blank at EOF is flagged)
+        //
+        // The blank_count at end of loop might include blanks BEFORE a code block at EOF,
+        // which aren't truly "trailing blanks". We need to verify the actual last line is blank.
+        let last_line_is_blank = lines.last().is_some_and(|l| l.trim().is_empty());
+
         // Check for trailing blank lines
-        // Special handling: lines() doesn't create an empty string for a final trailing newline
-        // So we need to check the raw content for multiple trailing newlines
-
-        // Count consecutive newlines at the end of the file
-        let mut consecutive_newlines_at_end: usize = 0;
-        for ch in content.chars().rev() {
-            if ch == '\n' {
-                consecutive_newlines_at_end += 1;
-            } else if ch == '\r' {
-                // Skip carriage returns in CRLF
-                continue;
-            } else {
-                break;
-            }
-        }
-
-        // To have N blank lines at EOF, you need N+1 trailing newlines
-        // For example: "content\n\n" has 1 blank line (2 newlines)
-        let blank_lines_at_eof = consecutive_newlines_at_end.saturating_sub(1);
-
-        // At EOF, blank lines are always enforced to be 0 (POSIX/Prettier standard)
-        // The `maximum` config only applies to in-document blank lines
-        if blank_lines_at_eof > 0 {
+        // EOF semantics: ANY blank line at EOF should be flagged (stricter than mid-document)
+        // Only fire if the actual last line(s) of the file are blank
+        if blank_count > 0 && last_line_is_blank {
             let location = "at end of file";
 
             // Report on the last line (which is blank)
             let report_line = lines.len();
 
-            // Calculate how many newlines to remove
-            // Always keep exactly 1 newline at EOF (0 blank lines)
-            let target_newlines = 1;
-            let excess_newlines = consecutive_newlines_at_end - target_newlines;
+            // Calculate fix: remove all trailing blank lines
+            // Find where the trailing blanks start (blank_count tells us how many consecutive blanks)
+            let fix_start = line_index
+                .get_line_start_byte(report_line - blank_count + 1)
+                .unwrap_or(0);
+            let fix_end = content.len();
 
             // Report one warning for the excess blank lines at EOF
             warnings.push(LintWarning {
@@ -200,23 +212,13 @@ impl Rule for MD012NoMultipleBlanks {
                 end_line: report_line,
                 end_column: 1,
                 fix: Some(Fix {
-                    range: {
-                        // Remove excess trailing newlines
-                        let keep_chars = content.len() - excess_newlines;
-                        log::debug!(
-                            "MD012 EOF: consecutive_newlines_at_end={}, blank_lines_at_eof={}, target_newlines={}, excess_newlines={}, content_len={}, keep_chars={}, range={}..{}",
-                            consecutive_newlines_at_end,
-                            blank_lines_at_eof,
-                            target_newlines,
-                            excess_newlines,
-                            content.len(),
-                            keep_chars,
-                            keep_chars,
-                            content.len()
-                        );
-                        keep_chars..content.len()
+                    range: fix_start..fix_end,
+                    // Keep exactly one newline if content had newlines
+                    replacement: if content.ends_with('\n') {
+                        "\n".to_string()
+                    } else {
+                        String::new()
                     },
-                    replacement: String::new(),
                 }),
             });
         }
@@ -591,6 +593,66 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         // With the new EOF handling, we report once at EOF
         assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("at end of file"));
+    }
+
+    // Regression tests for blanks after code blocks (GitHub issue #199 related)
+
+    #[test]
+    fn test_blanks_after_fenced_code_block_mid_document() {
+        // This is the pattern from React repo test files that was being missed
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "## Input\n\n```javascript\ncode\n```\n\n\n## Error\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag the double blank between code block and next heading
+        assert_eq!(result.len(), 1, "Should detect blanks after code block");
+        assert_eq!(result[0].line, 7, "Warning should be on line 7 (second blank)");
+        assert!(result[0].message.contains("between content"));
+    }
+
+    #[test]
+    fn test_blanks_after_code_block_at_eof() {
+        // Trailing blanks after code block at end of file
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Heading\n\n```\ncode\n```\n\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag the trailing blanks at EOF
+        assert_eq!(result.len(), 1, "Should detect trailing blanks after code block");
+        assert!(result[0].message.contains("at end of file"));
+    }
+
+    #[test]
+    fn test_single_blank_after_code_block_allowed() {
+        // Single blank after code block is allowed (default max=1)
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "## Input\n\n```\ncode\n```\n\n## Output\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Single blank after code block should be allowed");
+    }
+
+    #[test]
+    fn test_multiple_code_blocks_with_blanks() {
+        // Multiple code blocks, each followed by blanks
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "```\ncode1\n```\n\n\n```\ncode2\n```\n\n\nEnd\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag both double-blank sequences
+        assert_eq!(result.len(), 2, "Should detect blanks after both code blocks");
+    }
+
+    #[test]
+    fn test_whitespace_only_lines_after_code_block_at_eof() {
+        // Whitespace-only lines (not just empty) after code block at EOF
+        // This matches the React repo pattern where lines have trailing spaces
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "```\ncode\n```\n   \n   \n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should detect whitespace-only trailing blanks");
         assert!(result[0].message.contains("at end of file"));
     }
 }
