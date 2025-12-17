@@ -941,10 +941,12 @@ This is a [real missing link](missing.md) that should be flagged.
         File::create(&file_in_base).unwrap().write_all(b"# Safe").unwrap();
 
         // Test with encoded path traversal attempt
-        // Even if decoded, the path should be validated correctly
+        // Use a path that definitely won't exist on any platform (not /etc/passwd which exists on Linux)
+        // %2F = /, so ..%2F..%2Fnonexistent%2Ffile = ../../nonexistent/file
+        // %252F = %2F (double encoded), so ..%252F..%252F = ..%2F..%2F (literal, won't decode to ..)
         let content = r#"
-[Traversal attempt](..%2F..%2Fetc%2Fpasswd)
-[Double encoded](..%252F..%252Fetc%252Fpasswd)
+[Traversal attempt](..%2F..%2Fnonexistent_dir_12345%2Fmissing.md)
+[Double encoded](..%252F..%252Fnonexistent%252Ffile.md)
 [Safe link](safe.md)
 "#;
 
