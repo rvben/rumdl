@@ -934,3 +934,70 @@ fn test_unicode_multibyte_chars_before_inline_code_url() {
         );
     }
 }
+
+#[test]
+fn test_reference_definitions_with_titles_not_flagged() {
+    let rule = MD034NoBareUrls;
+
+    // Reference definitions should NOT be flagged - they are valid markdown link syntax
+    let test_cases = [
+        // Basic reference definition without title
+        "[example]: https://example.com",
+        // Reference definition with double-quoted title
+        "[example]: https://example.com \"Title here\"",
+        // Reference definition with single-quoted title
+        "[example]: https://example.com 'Title here'",
+        // Reference definition with parenthesized title
+        "[example]: https://example.com (Title here)",
+        // Reference with backticks in label
+        "[`maturin`]: https://github.com/PyO3/maturin \"Build and publish crates\"",
+        // Reference with angle brackets
+        "[example]: <https://example.com> \"Title\"",
+        // Real-world example from pyo3
+        "[feature flags]: https://doc.rust-lang.org/cargo/reference/features.html \"Features - The Cargo Book\"",
+        // Multiple reference definitions
+        "[ref1]: https://example.com\n[ref2]: https://test.com \"Test title\"",
+        // Indented reference definition
+        "  [example]: https://example.com \"Indented\"",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Reference definition should NOT be flagged as bare URL:\n{content}\nGot: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_bare_urls_still_flagged_with_reference_definitions() {
+    let rule = MD034NoBareUrls;
+
+    // Mix of reference definitions (ok) and bare URLs (should be flagged)
+    let content = r#"# Test Document
+
+This has a bare URL: https://bare.example.com
+
+[example]: https://example.com "This is fine"
+
+Another bare URL: https://another.bare.url
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag exactly 2 bare URLs, not the reference definition
+    assert_eq!(
+        result.len(),
+        2,
+        "Expected 2 bare URLs flagged, got {}:\n{:?}",
+        result.len(),
+        result
+    );
+
+    // Verify the flagged URLs
+    assert!(result[0].message.contains("https://bare.example.com"));
+    assert!(result[1].message.contains("https://another.bare.url"));
+}
