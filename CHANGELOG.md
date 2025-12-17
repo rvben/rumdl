@@ -5,6 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.195] - 2025-12-17
+
+### Added
+
+- **MD063 (heading-capitalization): New rule for heading capitalization style**
+  - Enforces consistent capitalization in headings (Title Case, Sentence case, or lowercase)
+  - Preserves all-caps acronyms (e.g., "API", "HTTP", "AWS") in title case mode
+  - Configurable via `MD063.style` option
+
+### Fixed
+
+- **MD012 (no-multiple-blanks): Detect blank lines across skipped regions**
+  - Fixed detection of consecutive blank lines when frontmatter or code blocks are between them
+
+- **MD013 (line-length): Check individual line lengths in reflow default mode**
+  - Each line is now checked separately when reflow-mode is enabled
+
+- **MD014 (commands-show-output): Improve message accuracy**
+  - Better error messages and principled skip list for code blocks
+
+- **MD018/MD023: Skip GitHub issue refs and hashtags in heading detection**
+  - Lines like `#123` or `#hashtag` no longer falsely detected as ATX headings
+
+- **MD033 (no-inline-html): Fix false positives**
+  - Skip angle brackets inside link reference definition titles
+  - Remove incorrect indentation-based code block skip
+
+- **MD034 (no-bare-urls): Fix multiple edge cases**
+  - Detect `www.example.com` as bare URL
+  - Handle link reference definitions with titles
+  - Resolve false positives in code spans
+
+- **MD037 (no-space-in-emphasis): Skip template shortcode syntax**
+  - Template syntax like `{* ... *}` no longer triggers false positives
+
+- **MD042 (no-empty-links): Only flag empty URLs**
+  - Links with text but empty URL are flagged; empty text is no longer an error
+
+- **MD049 (emphasis-style): Report both opening and closing markers**
+  - Warnings now point to both `*` or `_` markers in emphasis pairs
+
+- **MD056 (table-column-count): Escape pipes in inline code**
+  - Pipes inside inline code in tables no longer cause column count errors
+
+- **MD057 (relative-links): Multiple path handling improvements**
+  - Handle URL-encoded filenames (e.g., `%20` for spaces)
+  - Support framework aliases (e.g., `@/` for src directory)
+  - Handle angle-bracket paths (e.g., `<path/to/file.md>`)
+  - Skip validation of absolute URL paths
+  - Strip query parameters from URLs before file existence check
+
+- **MD063: Preserve all-caps acronyms in title case headings**
+  - Words like "API", "HTTP", "URL" maintain uppercase in title case mode
+
+- **CLI: Fix exit code and messaging**
+  - Return exit code 0 when all violations are fixed
+  - Show accurate message when all violations are fixed
+
+- **Heading detection: Skip multiline link syntax**
+  - Lines inside multiline link definitions no longer falsely detected as headings
+
+- **Internal: Add is_valid field and iterator for CommonMark headings**
+  - Improved heading validation for rules that depend on heading structure
+
+### Changed
+
+- **MD059: Update alias to 'descriptive-link-text'** (thanks @martimlobao in #201)
+  - Rule can now be referenced as `descriptive-link-text` in configurations
+
+### Documentation
+
+- **MD050: Document intentional deviation from markdownlint**
+  - Clarified differences in emphasis style checking behavior
+
 ## [0.0.194] - 2025-12-12
 
 ### Added

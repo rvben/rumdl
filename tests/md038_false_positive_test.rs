@@ -35,11 +35,12 @@ fn test_md038_no_false_positive_for_commands() {
 
 #[test]
 fn test_md038_correctly_flags_actual_spaces() {
-    // These SHOULD be flagged
+    // CommonMark: Single space at BOTH ends is valid (spaces are stripped)
+    // Space at only ONE end should be flagged
     let test_cases = vec![
-        ("` pyproject.toml`", 1),  // Leading space
-        ("`pyproject.toml `", 1),  // Trailing space
-        ("` pyproject.toml `", 1), // Both leading and trailing
+        ("` pyproject.toml`", 1),  // Leading space only - SHOULD be flagged
+        ("`pyproject.toml `", 1),  // Trailing space only - SHOULD be flagged
+        ("` pyproject.toml `", 0), // Both leading and trailing - valid CommonMark (stripped)
     ];
 
     let config = Config::default();
@@ -52,7 +53,7 @@ fn test_md038_correctly_flags_actual_spaces() {
         assert_eq!(
             warnings.len(),
             expected_warnings,
-            "MD038 should flag code spans with leading/trailing spaces. Content: '{content}'"
+            "MD038 CommonMark space-stripping behavior. Content: '{content}'"
         );
     }
 }

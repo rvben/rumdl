@@ -200,8 +200,8 @@ fn test_md034_edge_cases() {
         ("http://example.com:8080", 1),
         // Valid URL with query string and fragment - should be flagged
         ("https://example.com/path?query=1#frag", 1),
-        // URL with missing scheme - should not be flagged
-        ("www.example.com", 0),
+        // URL with missing scheme - should be flagged (markdownlint flags www.example.com)
+        ("www.example.com", 1),
         // URL in table cell - should be flagged
         ("| https://example.com |", 1),
         // URL in heading - should be flagged

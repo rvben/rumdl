@@ -92,10 +92,12 @@ fn test_md037_spaces_around_emphasis() {
 
 #[test]
 fn test_md038_spaces_around_code() {
+    // CommonMark: Single space at BOTH ends is valid (spaces are stripped)
+    // Test a case with space at only one end (which should be flagged)
     let test = simple_test(
         "MD038",
-        "This is ` code with spaces `",
-        ExpectedWarning::new(1, 9, 1, 28, "` code with spaces "),
+        "This is ` code with spaces` without trailing",
+        ExpectedWarning::new(1, 9, 1, 27, "` code with spaces"),
     );
     test_character_ranges(test);
 }

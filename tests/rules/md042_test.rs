@@ -13,13 +13,13 @@ fn test_valid_links() {
 
 #[test]
 fn test_empty_link_text() {
+    // MD042 only flags empty URLs, not empty text
+    // Empty text with valid URL is an accessibility concern, not an "empty link"
     let rule = MD042NoEmptyLinks::new();
     let content = "[](https://example.com)";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "[Link text](https://example.com)");
+    assert!(result.is_empty(), "Empty text with valid URL should not be flagged");
 }
 
 #[test]
@@ -50,19 +50,15 @@ fn test_empty_link_both() {
 
 #[test]
 fn test_multiple_empty_links() {
+    // MD042 only flags empty URLs, not empty text
     let rule = MD042NoEmptyLinks::new();
     let content = "[Link]() and []() and [](url)";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3);
-    // [Link]() - not fixable (non-URL text, no URL)
-    // []() - not fixable (both empty)
-    // [](url) - fixable (has URL, can add placeholder text)
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed, "[Link]() and []() and [Link text](url)",
-        "Should only fix the link with a URL"
-    );
+    // [Link]() - flagged (empty URL)
+    // []() - flagged (empty URL)
+    // [](url) - NOT flagged (has URL, empty text is not an error)
+    assert_eq!(result.len(), 2, "Should only flag links with empty URLs");
 }
 
 #[test]
@@ -95,9 +91,10 @@ fn test_mixed_valid_and_empty_links() {
 
 #[test]
 fn test_md042_ignores_links_in_fenced_code_blocks() {
+    // MD042 only flags empty URLs, not empty text
     let content = r#"# Test Document
 
-Regular empty link: [](https://example.com)
+Regular empty link: [empty text]()
 
 Fenced code block with empty links:
 
@@ -112,7 +109,7 @@ Another regular empty link: [empty text]()"#;
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should only flag the two regular empty links, not the ones in the code block
+    // Should only flag the two regular empty links (empty URLs), not the ones in the code block
     assert_eq!(warnings.len(), 2);
     assert_eq!(warnings[0].line, 3); // Regular empty link
     assert_eq!(warnings[1].line, 12); // Another regular empty link
@@ -120,9 +117,10 @@ Another regular empty link: [empty text]()"#;
 
 #[test]
 fn test_md042_ignores_links_in_indented_code_blocks() {
+    // MD042 only flags empty URLs, not empty text
     let content = r#"# Test Document
 
-Regular empty link: [](https://example.com)
+Regular empty link: [empty text]()
 
 Indented code block with empty links:
 
@@ -135,7 +133,7 @@ Another regular empty link: [empty text]()"#;
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should only flag the two regular empty links, not the ones in the indented code block
+    // Should only flag the two regular empty links (empty URLs), not the ones in the indented code block
     assert_eq!(warnings.len(), 2);
     assert_eq!(warnings[0].line, 3); // Regular empty link
     assert_eq!(warnings[1].line, 10); // Another regular empty link
@@ -143,9 +141,10 @@ Another regular empty link: [empty text]()"#;
 
 #[test]
 fn test_md042_ignores_links_in_code_spans() {
+    // MD042 only flags empty URLs, not empty text
     let content = r#"# Test Document
 
-Regular empty link: [](https://example.com)
+Regular empty link: [empty text]()
 
 Inline code with empty link: `[empty link]()`
 
@@ -157,7 +156,7 @@ More inline code: `Check this [empty]() link`"#;
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should only flag the two regular empty links, not the ones in code spans
+    // Should only flag the two regular empty links (empty URLs), not the ones in code spans
     assert_eq!(warnings.len(), 2);
     assert_eq!(warnings[0].line, 3); // Regular empty link
     assert_eq!(warnings[1].line, 7); // Another regular empty link
@@ -165,9 +164,10 @@ More inline code: `Check this [empty]() link`"#;
 
 #[test]
 fn test_md042_complex_nested_scenarios() {
+    // MD042 only flags empty URLs, not empty text
     let content = r#"# Test Document
 
-Regular empty link: [](https://example.com)
+Regular empty link: [empty text]()
 
 ## Code blocks in lists
 
@@ -198,7 +198,7 @@ Final empty link: []()"#;
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should flag: line 3 (regular), line 21 (in blockquote), line 28 (final)
+    // Should flag: line 3 (empty URL), line 21 (empty URL in blockquote), line 28 (empty URL)
     // Should NOT flag: lines 10, 15, 17, 25 (all in code blocks)
     assert_eq!(warnings.len(), 3);
     assert_eq!(warnings[0].line, 3); // Regular empty link
@@ -208,9 +208,10 @@ Final empty link: []()"#;
 
 #[test]
 fn test_md042_mixed_code_block_types() {
+    // MD042 only flags empty URLs, not empty text
     let content = r#"# Test Document
 
-Empty link: [](https://example.com)
+Empty link: [empty text]()
 
 Fenced with language:
 ```javascript
@@ -237,7 +238,7 @@ Final empty: [empty text]()"#;
     let rule = MD042NoEmptyLinks::new();
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should only flag the first and last empty links
+    // Should only flag the first and last empty links (both have empty URLs)
     assert_eq!(warnings.len(), 2);
     assert_eq!(warnings[0].line, 3); // Empty link
     assert_eq!(warnings[1].line, 24); // Final empty
@@ -298,6 +299,7 @@ Final: []()"#;
 
 #[test]
 fn test_md042_reference_links() {
+    // MD042 only flags empty URLs, not empty text
     let rule = MD042NoEmptyLinks::new();
 
     // Test valid reference link
@@ -306,17 +308,23 @@ fn test_md042_reference_links() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 
-    // Test empty text reference link
+    // Test empty text reference link with valid URL - NOT flagged (empty text is not an error)
     let content = "[][ref]\n\n[ref]: https://example.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert!(
+        result.is_empty(),
+        "Empty text with valid reference should not be flagged"
+    );
 
-    // Test reference link with missing definition
+    // Test reference link with missing definition - handled by MD052, not MD042
     let content = "[text][missing]";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1); // Empty URL due to missing reference
+    assert!(
+        result.is_empty(),
+        "Undefined references are handled by MD052, not MD042"
+    );
 
     // Test empty text with implicit reference
     let content = "[text][]\n\n[text]: https://example.com";
@@ -328,7 +336,7 @@ fn test_md042_reference_links() {
     let content = "[][]";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1); // Empty text and no matching reference
+    assert_eq!(result.len(), 1); // Empty URL (no matching reference)
 }
 
 #[test]
@@ -363,24 +371,22 @@ fn test_md042_mkdocs_backtick_wrapped_auto_references() {
         "Should not flag single-word backtick-wrapped identifiers in MkDocs mode (issue #97). Got: {result:?}"
     );
 
-    // Plain single words without backticks should still be flagged
+    // Plain single words without backticks - undefined reference handled by MD052
     let content = "[str][]";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Should flag [str][] (without backticks) as empty. Got: {result:?}"
+    assert!(
+        result.is_empty(),
+        "Undefined references are handled by MD052, not MD042. Got: {result:?}"
     );
 
-    // Should still flag in standard mode
+    // Undefined references in standard mode are handled by MD052, not MD042
     let content = "[`str`][]";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Should flag [`str`][] as empty in Standard mode (no auto-refs). Got: {result:?}"
+    assert!(
+        result.is_empty(),
+        "Undefined references are handled by MD052, not MD042. Got: {result:?}"
     );
 
     // Test with text in reference ID position
@@ -474,18 +480,19 @@ Also email me at <user@example.com>.";
 
 #[test]
 fn test_brackets_in_html_href_not_flagged() {
+    // MD042 only flags empty URLs, not empty text
     let rule = MD042NoEmptyLinks::new();
     // Regression test for false positive: MD042 should not flag brackets in HTML href attributes
     // Found in free-programming-books repository (334k stars)
     let content = r#"Check this out:
 <a href="https://example.com?p[images][0]=test&title=Example">Share on Example</a>
 
-This is a real markdown link that should be flagged:
-[](https://example.com)"#;
+This is a real markdown link that should be flagged (empty URL):
+[empty text]()"#;
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should only flag the actual markdown empty link, not the brackets in HTML href
+    // Should only flag the actual markdown empty link (empty URL), not the brackets in HTML href
     assert_eq!(
         result.len(),
         1,

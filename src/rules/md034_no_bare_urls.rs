@@ -27,7 +27,6 @@ const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\]
 // Reference definition pattern - matches [label]: URL with optional title
 // Supports: [ref]: https://... or [ref]: <https://...> or [ref]: https://... "title"
 const REFERENCE_DEF_RE_STR: &str = r"^\s*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)";
-const HTML_TAG_PATTERN_STR: &str = r#"<[^>]*>"#;
 const MULTILINE_LINK_CONTINUATION_STR: &str = r#"^[^\[]*\]\(.*\)"#;
 // Pattern to match shortcut/collapsed reference links: [text] or [text][]
 // This includes [URL] which should not be flagged as a bare URL
@@ -108,19 +107,6 @@ impl MD034NoBareUrls {
         get_cached_regex(REFERENCE_DEF_RE_STR)
             .map(|re| re.is_match(line))
             .unwrap_or(false)
-    }
-
-    /// Check if a position in a line is inside an HTML tag
-    fn is_in_html_tag(&self, line: &str, pos: usize) -> bool {
-        // Find all HTML tags in the line
-        if let Ok(re) = get_cached_regex(HTML_TAG_PATTERN_STR) {
-            for mat in re.find_iter(line) {
-                if pos >= mat.start() && pos < mat.end() {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     fn check_line(
@@ -268,6 +254,7 @@ impl MD034NoBareUrls {
             for mat in re.find_iter(line) {
                 let url_str = mat.as_str();
                 let start_pos = mat.start();
+                let end_pos = mat.end();
 
                 // Skip if preceded by / or @ (likely part of a full URL)
                 if start_pos > 0 {
@@ -277,7 +264,16 @@ impl MD034NoBareUrls {
                     }
                 }
 
-                buffers.urls_found.push((start_pos, mat.end(), url_str.to_string()));
+                // Skip if inside angle brackets (autolink syntax like <www.example.com>)
+                if start_pos > 0 && end_pos < line.len() {
+                    let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                    let next_char = line.as_bytes().get(end_pos).copied();
+                    if prev_char == Some(b'<') && next_char == Some(b'>') {
+                        continue;
+                    }
+                }
+
+                buffers.urls_found.push((start_pos, end_pos, url_str.to_string()));
             }
         }
 
@@ -311,14 +307,16 @@ impl MD034NoBareUrls {
                 continue;
             }
 
-            // Check if URL is inside an HTML tag
-            if self.is_in_html_tag(line, start) {
+            // Calculate absolute byte position for context-aware checks
+            let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
+            let absolute_pos = line_start_byte + start;
+
+            // Check if URL is inside an HTML tag (handles multiline tags correctly)
+            if ctx.is_in_html_tag(absolute_pos) {
                 continue;
             }
 
             // Check if we're inside an HTML comment
-            let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
-            let absolute_pos = line_start_byte + start;
             if ctx.is_in_html_comment(absolute_pos) {
                 continue;
             }
@@ -368,8 +366,12 @@ impl MD034NoBareUrls {
                 }
 
                 if !is_inside_construct {
-                    // Check if email is inside an HTML tag
-                    if self.is_in_html_tag(line, start) {
+                    // Calculate absolute byte position for context-aware checks
+                    let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
+                    let absolute_pos = line_start_byte + start;
+
+                    // Check if email is inside an HTML tag (handles multiline tags)
+                    if ctx.is_in_html_tag(absolute_pos) {
                         continue;
                     }
 
@@ -392,10 +394,7 @@ impl MD034NoBareUrls {
                             message: format!("Email address without angle brackets or link formatting: '{email}'"),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: {
-                                    let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
-                                    (line_start_byte + start)..(line_start_byte + end)
-                                },
+                                range: (line_start_byte + start)..(line_start_byte + end),
                                 replacement: format!("<{email}>"),
                             }),
                         });

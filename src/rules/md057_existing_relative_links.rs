@@ -355,8 +355,11 @@ impl Rule for MD057ExistingRelativeLinks {
             if explicit_base.is_some() {
                 explicit_base
             } else if let Some(ref source_file) = ctx.source_file {
-                // Compute base path from the source file being processed
-                source_file
+                // Resolve symlinks to get the actual file location
+                // This ensures relative links are resolved from the target's directory,
+                // not the symlink's directory
+                let resolved_file = source_file.canonicalize().unwrap_or_else(|_| source_file.clone());
+                resolved_file
                     .parent()
                     .map(|p| p.to_path_buf())
                     .or_else(|| Some(CURRENT_DIR.clone()))

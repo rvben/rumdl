@@ -254,21 +254,35 @@ fn test_anchors_in_code_blocks_ignored() {
 
 #[test]
 fn test_actual_empty_links_still_flagged() {
+    // MD042 only flags empty URLs, not empty text
     let rule = MD042NoEmptyLinks::new();
 
-    // Various actual empty links that should still be flagged
-    let test_cases = vec![
-        "[]()",                    // Plain empty link
-        "[]()  ",                  // Empty link with trailing spaces
-        "[](https://example.com)", // Empty text with URL
-        "[text]()",                // Text with empty URL
-        "[]() no attributes",      // Empty link followed by text (no braces)
+    // Links with empty URLs should be flagged
+    let flagged_cases = vec![
+        "[]()",               // Plain empty link
+        "[]()  ",             // Empty link with trailing spaces
+        "[text]()",           // Text with empty URL
+        "[]() no attributes", // Empty link followed by text (no braces)
     ];
 
-    for content in test_cases {
+    for content in flagged_cases {
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should flag actual empty link: {content}");
+        assert_eq!(result.len(), 1, "Should flag empty URL link: {content}");
+    }
+
+    // Links with empty text but valid URL should NOT be flagged
+    let not_flagged_cases = vec![
+        "[](https://example.com)", // Empty text with URL - not flagged
+    ];
+
+    for content in not_flagged_cases {
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should NOT flag empty text with valid URL: {content}"
+        );
     }
 }
 

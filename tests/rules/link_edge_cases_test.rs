@@ -371,9 +371,11 @@ fn test_md039_unicode_spaces() {
 
 #[test]
 fn test_md042_empty_text_variations() {
+    // MD042 only flags empty URLs, not empty text
+    // Empty text with valid URL is an accessibility concern, not an "empty link"
     let rule = MD042NoEmptyLinks::new();
 
-    // Test 1: Various empty text scenarios
+    // Test 1: Various empty text scenarios - all have valid URLs
     let content = "\
 [](https://example.com)
 [   ](https://example.com)
@@ -383,13 +385,7 @@ fn test_md042_empty_text_variations() {
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 5, "Should detect all empty text variations");
-
-    // Verify fix suggestions
-    let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("[Link text](https://example.com)"));
-    assert!(!fixed.contains("[](https://example.com)"));
-    assert!(!fixed.contains("[   ](https://example.com)"));
+    assert!(result.is_empty(), "Empty text with valid URL should not be flagged");
 }
 
 #[test]
@@ -513,9 +509,11 @@ Not a link \\[\\]()";
 
 #[test]
 fn test_md042_links_in_context() {
+    // MD042 only flags empty URLs, not empty text
     let rule = MD042NoEmptyLinks::new();
 
     // Test 8: Empty links in various contexts
+    // Only []() with empty URL should be flagged
     let content = "\
 - List item with [](url)
 > Blockquote with []()
@@ -530,7 +528,8 @@ fn test_md042_links_in_context() {
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 5, "Should detect empty links in all contexts");
+    // Only []() links (empty URL) should be flagged - lines 2 and 9
+    assert_eq!(result.len(), 2, "Should only flag empty URLs, not empty text");
 }
 
 #[test]
@@ -551,6 +550,7 @@ fn test_md042_unicode_empty() {
 
 #[test]
 fn test_md042_nested_links() {
+    // MD042 only flags empty URLs, not empty text
     let rule = MD042NoEmptyLinks::new();
 
     // Test 10: Nested link-like structures
@@ -566,14 +566,12 @@ fn test_md042_nested_links() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Only [](url) should be flagged - wiki-link [[Double brackets]] is valid
-    // Wiki-links derive their display text from the page name, so empty text is expected
-    assert_eq!(
-        result.len(),
-        1,
-        "Should only flag [](url), not wiki-link [[Double brackets]]. Got: {result:?}"
+    // [](url) has a valid URL (empty text only) - not flagged
+    // All links in this test have valid URLs, so none should be flagged
+    assert!(
+        result.is_empty(),
+        "Empty text with valid URL should not be flagged. Got: {result:?}"
     );
-    assert!(result.iter().any(|w| w.message.contains("[](url)")));
 }
 
 #[test]

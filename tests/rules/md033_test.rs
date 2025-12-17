@@ -296,6 +296,7 @@ fn test_edge_case_urls() {
     let rule = MD033NoInlineHtml::default();
 
     // Test edge cases that might be confused
+    // Now MD033 only flags actual HTML elements, not placeholder syntax like <notaurl>
     let content = "Not a URL: <notaurl>\n\
                    Real URL: <https://example.com>\n\
                    Fake tag: <https>\n\
@@ -303,15 +304,13 @@ fn test_edge_case_urls() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag <notaurl>, <https>, and <div> but not the real URL <https://example.com>
-    assert_eq!(result.len(), 3); // Only opening tags
+    // Should only flag <div> - the only actual HTML element
+    // <notaurl> and <https> are placeholder syntax, not HTML elements
+    // <https://example.com> is a valid autolink URL
+    assert_eq!(result.len(), 1);
 
     let flagged_positions: Vec<(usize, usize)> = result.iter().map(|w| (w.line, w.column)).collect();
 
-    // <notaurl> should be flagged (line 1)
-    assert!(flagged_positions.contains(&(1, 12)));
-    // <https> should be flagged (line 3) - not a valid URL, looks like HTML tag
-    assert!(flagged_positions.contains(&(3, 11)));
     // <div> should be flagged (line 4)
     assert!(flagged_positions.contains(&(4, 11)));
 }
@@ -524,6 +523,10 @@ Regular: <em>flagged</em>"#;
 
 #[test]
 fn test_md033_edge_cases_indentation() {
+    // Per CommonMark spec, an indented code block requires:
+    // 1. A blank line before it (or start of document)
+    // 2. 4+ spaces of indentation
+    // If a non-indented line appears, it breaks the code block
     let content = r#"# Test Document
 
 Regular: <div>flagged</div>
@@ -533,7 +536,7 @@ Mixed indentation levels:
     <div>4 spaces - code block</div>
         <p>8 spaces - still code block</p>
    <span>3 spaces - NOT code block</span>
-    <em>4 spaces again - code block</em>
+    <em>4 spaces - but code block was broken by line 9</em>
 
 Regular: <strong>flagged</strong>"#;
 
@@ -543,15 +546,15 @@ Regular: <strong>flagged</strong>"#;
 
     let flagged_lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
 
-    // Should flag regular HTML and 3-space indented
+    // Should flag regular HTML, 3-space indented, and line 10 (code block broken by line 9)
     assert!(flagged_lines.contains(&3)); // Regular
-    assert!(flagged_lines.contains(&9)); // 3 spaces (not code block)
+    assert!(flagged_lines.contains(&9)); // 3 spaces breaks code block
+    assert!(flagged_lines.contains(&10)); // 4 spaces but code block was broken
     assert!(flagged_lines.contains(&12)); // Regular
 
-    // Should NOT flag 4+ space indented (code blocks)
-    assert!(!flagged_lines.contains(&7)); // 4 spaces
-    assert!(!flagged_lines.contains(&8)); // 8 spaces
-    assert!(!flagged_lines.contains(&10)); // 4 spaces again
+    // Should NOT flag 4+ space indented within code block
+    assert!(!flagged_lines.contains(&7)); // 4 spaces - starts code block
+    assert!(!flagged_lines.contains(&8)); // 8 spaces - continues code block
 }
 
 #[test]

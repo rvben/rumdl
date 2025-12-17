@@ -64,6 +64,162 @@ impl MD033NoInlineHtml {
         tag.starts_with("<!--") && tag.ends_with("-->")
     }
 
+    /// Check if a tag name is a valid HTML element or custom element.
+    /// Returns false for placeholder syntax like `<NAME>`, `<resource>`, `<actual>`.
+    ///
+    /// Per HTML spec, custom elements must contain a hyphen (e.g., `<my-component>`).
+    #[inline]
+    fn is_html_element_or_custom(tag_name: &str) -> bool {
+        const HTML_ELEMENTS: &[&str] = &[
+            // Document structure
+            "html",
+            "head",
+            "body",
+            "title",
+            "base",
+            "link",
+            "meta",
+            "style",
+            // Sections
+            "article",
+            "section",
+            "nav",
+            "aside",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "hgroup",
+            "header",
+            "footer",
+            "address",
+            "main",
+            "search",
+            // Grouping
+            "p",
+            "hr",
+            "pre",
+            "blockquote",
+            "ol",
+            "ul",
+            "menu",
+            "li",
+            "dl",
+            "dt",
+            "dd",
+            "figure",
+            "figcaption",
+            "div",
+            // Text-level
+            "a",
+            "em",
+            "strong",
+            "small",
+            "s",
+            "cite",
+            "q",
+            "dfn",
+            "abbr",
+            "ruby",
+            "rt",
+            "rp",
+            "data",
+            "time",
+            "code",
+            "var",
+            "samp",
+            "kbd",
+            "sub",
+            "sup",
+            "i",
+            "b",
+            "u",
+            "mark",
+            "bdi",
+            "bdo",
+            "span",
+            "br",
+            "wbr",
+            // Edits
+            "ins",
+            "del",
+            // Embedded
+            "picture",
+            "source",
+            "img",
+            "iframe",
+            "embed",
+            "object",
+            "param",
+            "video",
+            "audio",
+            "track",
+            "map",
+            "area",
+            "svg",
+            "math",
+            "canvas",
+            // Tables
+            "table",
+            "caption",
+            "colgroup",
+            "col",
+            "tbody",
+            "thead",
+            "tfoot",
+            "tr",
+            "td",
+            "th",
+            // Forms
+            "form",
+            "label",
+            "input",
+            "button",
+            "select",
+            "datalist",
+            "optgroup",
+            "option",
+            "textarea",
+            "output",
+            "progress",
+            "meter",
+            "fieldset",
+            "legend",
+            // Interactive
+            "details",
+            "summary",
+            "dialog",
+            // Scripting
+            "script",
+            "noscript",
+            "template",
+            "slot",
+            // Deprecated but recognized
+            "acronym",
+            "applet",
+            "basefont",
+            "big",
+            "center",
+            "dir",
+            "font",
+            "frame",
+            "frameset",
+            "isindex",
+            "noframes",
+            "strike",
+            "tt",
+        ];
+
+        let lower = tag_name.to_ascii_lowercase();
+        if HTML_ELEMENTS.contains(&lower.as_str()) {
+            return true;
+        }
+        // Custom elements must contain a hyphen per HTML spec
+        tag_name.contains('-')
+    }
+
     // Check if a tag is likely a programming type annotation rather than HTML
     #[inline]
     fn is_likely_type_annotation(&self, tag: &str) -> bool {
@@ -308,6 +464,11 @@ impl Rule for MD033NoInlineHtml {
 
             // Skip JSX components in MDX files (e.g., <Chart />, <MyComponent>)
             if ctx.flavor.supports_jsx() && html_tag.tag_name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                continue;
+            }
+
+            // Skip non-HTML elements (placeholder syntax like <NAME>, <resource>)
+            if !Self::is_html_element_or_custom(&html_tag.tag_name) {
                 continue;
             }
 
@@ -630,22 +791,22 @@ mod tests {
     #[test]
     fn test_md033_skip_angle_brackets_in_link_titles() {
         // Angle brackets inside link reference definition titles should not be flagged as HTML
-        // This matches markdownlint behavior
         let rule = MD033NoInlineHtml::default();
         let content = r#"# Test
 
 [example]: <https://example.com> "Title with <Angle Brackets> inside"
 
-Regular text with <actual> HTML tag.
+Regular text with <div>content</div> HTML tag.
 "#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // Should only flag <actual>, not <Angle Brackets> in the title
-        assert_eq!(result.len(), 1, "Should find exactly one HTML tag");
+        // Should only flag <div>, not <Angle Brackets> in the title (not a valid HTML element)
+        // Opening tag only (markdownlint behavior)
+        assert_eq!(result.len(), 1, "Should find opening div tag");
         assert!(
-            result[0].message.contains("<actual>"),
-            "Should flag <actual>, got: {}",
+            result[0].message.contains("<div>"),
+            "Should flag <div>, got: {}",
             result[0].message
         );
     }
@@ -656,15 +817,17 @@ Regular text with <actual> HTML tag.
         let rule = MD033NoInlineHtml::default();
         let content = r#"[ref]: url 'Title <Help Wanted> here'
 
-<real> tag here
+<span>text</span> here
 "#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 1, "Should find exactly one HTML tag");
+        // <Help Wanted> is not a valid HTML element, so only <span> is flagged
+        // Opening tag only (markdownlint behavior)
+        assert_eq!(result.len(), 1, "Should find opening span tag");
         assert!(
-            result[0].message.contains("<real>"),
-            "Should flag <real>, got: {}",
+            result[0].message.contains("<span>"),
+            "Should flag <span>, got: {}",
             result[0].message
         );
     }

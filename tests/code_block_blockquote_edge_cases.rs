@@ -229,14 +229,19 @@ fn test_multiple_fences_same_blockquote() {
 
 #[test]
 fn test_tab_indentation_in_blockquote() {
-    // Test tab vs space handling - needs blank line before
+    // Test tab vs space handling in blockquote
+    // Per CommonMark spec, HTML blocks have higher priority than indented code blocks
+    // When a line starts with an HTML tag like <div>, it's parsed as HtmlBlock, not CodeBlock
     let rule = MD033NoInlineHtml::default();
 
-    let content = "> text\n>\n> \t<tab-indented>code</tab-indented>\n";
+    // Structure: blockquote text, blank blockquote line, tab-indented HTML
+    // pulldown-cmark parses this as HtmlBlock, not indented CodeBlock
+    let content = "> text\n>\n> \t<div>code</div>\n";
 
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Tab after blank line should be treated as indented code
-    assert_eq!(result.len(), 0, "Should handle tab indentation as code");
+    // HTML block is flagged by MD033 (HTML takes precedence over indented code)
+    assert_eq!(result.len(), 1, "HTML block inside blockquote should be flagged");
+    assert!(result.iter().any(|w| w.message.contains("<div>")));
 }

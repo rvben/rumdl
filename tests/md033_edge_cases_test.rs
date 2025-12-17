@@ -104,7 +104,7 @@ fn test_md033_mixed_backticks_and_html() {
 #[test]
 fn test_md033_unclosed_backticks() {
     let rule = MD033NoInlineHtml::default();
-    let content = "Start `<tag> but no closing backtick <div>test</div>";
+    let content = "Start `<span> but no closing backtick <div>test</div>";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Unclosed backticks don't create code spans, so both opening tags should be flagged
@@ -136,7 +136,7 @@ fn test_md033_code_span_with_spaces() {
 #[test]
 fn test_md033_multiline_with_code_spans() {
     let rule = MD033NoInlineHtml::default();
-    let content = "Line 1 `<code>`\n<div>html</div>\nLine 3 `<more>` test";
+    let content = "Line 1 `<code>`\n<div>html</div>\nLine 3 `<em>` test";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // HTML block on line 2 breaks paragraph parsing, so line 3 code span isn't detected
@@ -148,7 +148,7 @@ fn test_md033_multiline_with_code_spans() {
         "Should flag HTML on line 2 and line 3 (opening tags only)"
     );
     assert_eq!(result[0].line, 2); // <div>
-    assert_eq!(result[1].line, 3); // <more> (not in code span due to HTML block)
+    assert_eq!(result[1].line, 3); // <em> (not in code span due to HTML block)
 }
 
 #[test]

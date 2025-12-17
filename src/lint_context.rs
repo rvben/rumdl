@@ -908,6 +908,15 @@ impl<'a> LintContext<'a> {
             .any(|range| byte_pos >= range.start && byte_pos < range.end)
     }
 
+    /// Check if a byte position is within an HTML tag (including multiline tags)
+    /// Uses the pre-parsed html_tags which correctly handles tags spanning multiple lines
+    #[inline]
+    pub fn is_in_html_tag(&self, byte_pos: usize) -> bool {
+        self.html_tags()
+            .iter()
+            .any(|tag| byte_pos >= tag.byte_offset && byte_pos < tag.byte_end)
+    }
+
     /// Check if a byte position is within a Jinja template ({{ }} or {% %})
     pub fn is_in_jinja_range(&self, byte_pos: usize) -> bool {
         self.jinja_ranges
@@ -3044,7 +3053,7 @@ impl<'a> LintContext<'a> {
         flavor: MarkdownFlavor,
     ) -> Vec<HtmlTag> {
         static HTML_TAG_REGEX: LazyLock<regex::Regex> =
-            LazyLock::new(|| regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap());
+            LazyLock::new(|| regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap());
 
         let mut html_tags = Vec::with_capacity(content.matches('<').count());
 

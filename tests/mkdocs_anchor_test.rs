@@ -100,16 +100,16 @@ fn test_actual_empty_links_still_flagged_in_mkdocs() {
 }
 
 #[test]
-fn test_empty_link_with_url_still_flagged_in_mkdocs() {
+fn test_empty_link_with_url_not_flagged_in_mkdocs() {
+    // MD042 only flags empty URLs, not empty text
     let rule = MD042NoEmptyLinks::new();
 
-    // Empty text with URL (not an anchor) should still be flagged
+    // Empty text with valid URL is not flagged (accessibility concern, not "empty link")
     let content = "[](https://example.com)";
     let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Should still flag empty text with URL in MkDocs mode. Got: {result:?}"
+    assert!(
+        result.is_empty(),
+        "Empty text with valid URL should not be flagged. Got: {result:?}"
     );
 }
