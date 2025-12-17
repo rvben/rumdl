@@ -342,11 +342,13 @@ pub fn perform_check_run(
         {
             total_issues_fixed += issues_fixed;
             total_fixable_issues += fixable_issues;
+            // Always accumulate total_issues from initial count (issues_found), regardless of whether
+            // all issues were fixed. This is needed for the summary message "Fixed X/Y issues".
+            total_issues += issues_found;
 
             if file_has_issues {
                 has_issues = true;
                 files_with_issues += 1;
-                total_issues += issues_found;
             }
 
             if args.statistics {
@@ -405,11 +407,13 @@ pub fn perform_check_run(
             total_files_processed += 1;
             total_issues_fixed += issues_fixed;
             total_fixable_issues += fixable_issues;
+            // Always accumulate total_issues from initial count (issues_found), regardless of whether
+            // all issues were fixed. This is needed for the summary message "Fixed X/Y issues".
+            total_issues += issues_found;
 
             if file_has_issues {
                 has_issues = true;
                 files_with_issues += 1;
-                total_issues += issues_found;
             }
 
             if args.statistics {

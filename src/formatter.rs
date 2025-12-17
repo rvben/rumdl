@@ -33,9 +33,13 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
     let file_with_issues_text = if files_with_issues == 1 { "file" } else { "files" };
 
     // Show results summary
+    // In fix mode, show "Fixed" message if we fixed any issues, even if all are now resolved
+    let all_issues_fixed = total_issues > 0 && total_issues_fixed == total_issues;
+    let should_show_fixed_message = args.fix_mode != crate::FixMode::Check && total_issues_fixed > 0;
+
     if has_issues {
         // If fix mode is enabled, only show the fixed summary
-        if args.fix_mode != crate::FixMode::Check && total_issues_fixed > 0 {
+        if should_show_fixed_message {
             println!(
                 "\n{} Fixed {}/{} issues in {} {} ({}ms)",
                 "Fixed:".green().bold(),
@@ -69,6 +73,18 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
                 println!("Run `rumdl fmt` to automatically fix {total_fixable_issues} of the {total_issues} issues");
             }
         }
+    } else if all_issues_fixed {
+        // All issues were fixed - show success message with fix count
+        // This matches markdownlint behavior: show that fixes were applied, exit 0
+        println!(
+            "\n{} Fixed {}/{} issues in {} {} ({}ms)",
+            "Fixed:".green().bold(),
+            total_issues_fixed,
+            total_issues,
+            total_files_processed,
+            file_text,
+            duration_ms
+        );
     } else {
         println!(
             "\n{} No issues found in {} {} ({}ms)",
