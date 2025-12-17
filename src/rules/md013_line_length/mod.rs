@@ -1025,8 +1025,10 @@ impl MD013LineLength {
                         sentences.len() > 1
                     }
                     ReflowMode::Default => {
-                        // In default mode, only reflow if lines exceed limit
-                        self.calculate_effective_length(&full_line) > config.line_length.get()
+                        // In default mode, only reflow if any individual line exceeds limit
+                        // Check the original lines, not the combined content
+                        (list_start..i)
+                            .any(|line_idx| self.calculate_effective_length(lines[line_idx]) > config.line_length.get())
                     }
                 };
 
