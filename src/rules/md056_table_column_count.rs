@@ -24,6 +24,39 @@ impl MD056TableColumnCount {
             return None;
         }
 
+        // For standard flavor with too many cells, first try escaping pipes in inline code.
+        // This preserves content and produces valid GitHub-compatible output.
+        if flavor == crate::config::MarkdownFlavor::Standard && current_count > expected_count {
+            let escaped_row = TableUtils::escape_pipes_in_inline_code(row);
+            let escaped_count = TableUtils::count_cells_with_flavor(&escaped_row, flavor);
+
+            // If escaping pipes in inline code fixes the cell count, use that
+            if escaped_count == expected_count {
+                return Some(escaped_row.trim().to_string());
+            }
+
+            // If escaping reduced cell count, continue fixing with escaped version
+            if escaped_count < current_count {
+                return self.fix_row_by_truncation(&escaped_row, expected_count, flavor);
+            }
+        }
+
+        self.fix_row_by_truncation(row, expected_count, flavor)
+    }
+
+    /// Fix a table row by truncating or adding cells
+    fn fix_row_by_truncation(
+        &self,
+        row: &str,
+        expected_count: usize,
+        flavor: crate::config::MarkdownFlavor,
+    ) -> Option<String> {
+        let current_count = TableUtils::count_cells_with_flavor(row, flavor);
+
+        if current_count == expected_count || current_count == 0 {
+            return None;
+        }
+
         let trimmed = row.trim();
         let has_leading_pipe = trimmed.starts_with('|');
         let has_trailing_pipe = trimmed.ends_with('|');
@@ -77,8 +110,8 @@ impl MD056TableColumnCount {
 
     /// Split a table row into cells, respecting flavor-specific behavior
     ///
-    /// For MkDocs flavor, pipes inside inline code are NOT cell delimiters.
-    /// For Standard/GFM flavor, all pipes are cell delimiters.
+    /// For Standard/GFM flavor, pipes in inline code ARE cell delimiters.
+    /// For MkDocs flavor, pipes in inline code are NOT cell delimiters.
     fn split_row_into_cells(row: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
         // First, mask escaped pipes (same for all flavors)
         let masked = TableUtils::mask_pipes_for_table_parsing(row);

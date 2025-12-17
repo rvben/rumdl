@@ -224,20 +224,14 @@ impl TableUtils {
     }
 
     /// Count the number of cells in a table row
-    /// Uses Standard/GFM behavior where pipes in inline code ARE cell delimiters
     pub fn count_cells(row: &str) -> usize {
         Self::count_cells_with_flavor(row, crate::config::MarkdownFlavor::Standard)
     }
 
     /// Count the number of cells in a table row with flavor-specific behavior
     ///
-    /// Different Markdown flavors handle pipes inside inline code differently:
-    /// - Standard/GFM: Pipes in backticks ARE cell delimiters (GitHub behavior)
-    /// - MkDocs: Pipes in backticks are NOT cell delimiters (Python-Markdown behavior)
-    ///
-    /// This difference is due to Python-Markdown (used by MkDocs) fixing the parsing
-    /// to handle inline code spans before splitting by pipes, while GitHub GFM
-    /// splits by pipes first.
+    /// For Standard/GFM flavor, pipes in inline code ARE cell delimiters (matches GitHub).
+    /// For MkDocs flavor, pipes in inline code are NOT cell delimiters.
     pub fn count_cells_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> usize {
         Self::split_table_row_with_flavor(row, flavor).len()
     }
@@ -310,6 +304,69 @@ impl TableUtils {
         result
     }
 
+    /// Escape pipes inside inline code blocks with backslash.
+    /// Converts `|` to `\|` inside backtick spans.
+    /// Used by auto-fix to preserve content while making tables valid.
+    pub fn escape_pipes_in_inline_code(text: &str) -> String {
+        let mut result = String::new();
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == '`' {
+                let start = i;
+                let mut backtick_count = 0;
+                while i < chars.len() && chars[i] == '`' {
+                    backtick_count += 1;
+                    i += 1;
+                }
+
+                let mut found_closing = false;
+                let mut j = i;
+
+                while j < chars.len() {
+                    if chars[j] == '`' {
+                        let close_start = j;
+                        let mut close_count = 0;
+                        while j < chars.len() && chars[j] == '`' {
+                            close_count += 1;
+                            j += 1;
+                        }
+
+                        if close_count == backtick_count {
+                            found_closing = true;
+                            result.extend(chars[start..i].iter());
+
+                            for &ch in chars.iter().take(close_start).skip(i) {
+                                if ch == '|' {
+                                    result.push('\\');
+                                    result.push('|');
+                                } else {
+                                    result.push(ch);
+                                }
+                            }
+
+                            result.extend(chars[close_start..j].iter());
+                            i = j;
+                            break;
+                        }
+                    } else {
+                        j += 1;
+                    }
+                }
+
+                if !found_closing {
+                    result.extend(chars[start..i].iter());
+                }
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+
+        result
+    }
+
     /// Mask escaped pipes for accurate table cell parsing
     ///
     /// In GFM tables, escape handling happens BEFORE cell boundary detection:
@@ -359,9 +416,8 @@ impl TableUtils {
     /// Returns a Vec of cell content strings (not trimmed - preserves original spacing).
     /// This is the foundation for both cell counting and cell content extraction.
     ///
-    /// Different Markdown flavors handle pipes inside inline code differently:
-    /// - Standard/GFM: Pipes in backticks ARE cell delimiters (GitHub behavior)
-    /// - MkDocs: Pipes in backticks are NOT cell delimiters (Python-Markdown behavior)
+    /// For Standard/GFM flavor, pipes in inline code ARE cell delimiters (matches GitHub).
+    /// For MkDocs flavor, pipes in inline code are NOT cell delimiters.
     pub fn split_table_row_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
         let trimmed = row.trim();
 
