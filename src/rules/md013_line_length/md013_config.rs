@@ -45,7 +45,11 @@ pub struct MD013Config {
     #[serde(default = "default_code_blocks", alias = "code_blocks")]
     pub code_blocks: bool,
 
-    /// Check tables for line length (default: true)
+    /// Check tables for line length (default: false)
+    ///
+    /// Note: markdownlint defaults to true, but rumdl defaults to false to avoid
+    /// conflicts with MD060 (table formatting). Tables often require specific widths
+    /// for alignment, which can conflict with line length limits.
     #[serde(default = "default_tables")]
     pub tables: bool,
 

@@ -613,11 +613,14 @@ impl<'a> LintContext<'a> {
             Self::detect_esm_blocks(content, &mut lines, flavor)
         );
 
+        // Collect link byte ranges early for heading detection (to skip lines inside link syntax)
+        let link_byte_ranges = profile_section!("Link byte ranges", profile, Self::collect_link_byte_ranges(content));
+
         // Now detect headings and blockquotes
         profile_section!(
             "Headings & blockquotes",
             profile,
-            Self::detect_headings_and_blockquotes(content, &mut lines, flavor, &html_comment_ranges)
+            Self::detect_headings_and_blockquotes(content, &mut lines, flavor, &html_comment_ranges, &link_byte_ranges)
         );
 
         // Parse code spans early so we can exclude them from link/image parsing
@@ -1082,6 +1085,37 @@ impl<'a> LintContext<'a> {
         }
 
         false
+    }
+
+    /// Collect byte ranges of all links using pulldown-cmark
+    /// This is used to skip heading detection for lines that fall within link syntax
+    /// (e.g., multiline links like `[text](url\n#fragment)`)
+    fn collect_link_byte_ranges(content: &str) -> Vec<(usize, usize)> {
+        use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+        let mut link_ranges = Vec::new();
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_WIKILINKS);
+        options.insert(Options::ENABLE_FOOTNOTES);
+
+        let parser = Parser::new_ext(content, options).into_offset_iter();
+        let mut link_stack: Vec<usize> = Vec::new();
+
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::Link { .. }) => {
+                    link_stack.push(range.start);
+                }
+                Event::End(TagEnd::Link) => {
+                    if let Some(start_pos) = link_stack.pop() {
+                        link_ranges.push((start_pos, range.end));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        link_ranges
     }
 
     /// Parse all links in the content
@@ -1942,6 +1976,7 @@ impl<'a> LintContext<'a> {
         lines: &mut [LineInfo],
         flavor: MarkdownFlavor,
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+        link_byte_ranges: &[(usize, usize)],
     ) {
         // Regex for heading detection
         static ATX_HEADING_REGEX: LazyLock<regex::Regex> =
@@ -2020,6 +2055,15 @@ impl<'a> LintContext<'a> {
             if !is_snippet_line && let Some(caps) = ATX_HEADING_REGEX.captures(line) {
                 // Skip headings inside HTML comments (using pre-computed ranges for efficiency)
                 if crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, lines[i].byte_offset) {
+                    continue;
+                }
+                // Skip lines that fall within link syntax (e.g., multiline links like `[text](url\n#fragment)`)
+                // This prevents false positives where `#fragment` is detected as a heading
+                let line_offset = lines[i].byte_offset;
+                if link_byte_ranges
+                    .iter()
+                    .any(|&(start, end)| line_offset > start && line_offset < end)
+                {
                     continue;
                 }
                 let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
