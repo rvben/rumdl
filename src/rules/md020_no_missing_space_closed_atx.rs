@@ -3,12 +3,13 @@
 /// See [docs/md020.md](../../docs/md020.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_single_line_range;
-use crate::utils::regex_cache::get_cached_regex;
+use crate::utils::regex_cache::get_cached_fancy_regex;
 
 // Closed ATX heading patterns
-const CLOSED_ATX_NO_SPACE_PATTERN_STR: &str = r"^(\s*)(#+)([^#\s].*?)([^#\s])(#+)(\s*(?:\{#[^}]+\})?\s*)$";
-const CLOSED_ATX_NO_SPACE_START_PATTERN_STR: &str = r"^(\s*)(#+)([^#\s].*?)\s(#+)(\s*(?:\{#[^}]+\})?\s*)$";
-const CLOSED_ATX_NO_SPACE_END_PATTERN_STR: &str = r"^(\s*)(#+)\s(.*?)([^#\s])(#+)(\s*(?:\{#[^}]+\})?\s*)$";
+// Use negative lookbehind (?<!\\) to avoid matching escaped hashes like C\# (C-sharp)
+const CLOSED_ATX_NO_SPACE_PATTERN_STR: &str = r"^(\s*)(#+)([^#\s].*?)([^#\s\\])(?<!\\)(#+)(\s*(?:\{#[^}]+\})?\s*)$";
+const CLOSED_ATX_NO_SPACE_START_PATTERN_STR: &str = r"^(\s*)(#+)([^#\s].*?)\s(?<!\\)(#+)(\s*(?:\{#[^}]+\})?\s*)$";
+const CLOSED_ATX_NO_SPACE_END_PATTERN_STR: &str = r"^(\s*)(#+)\s(.*?)([^#\s\\])(?<!\\)(#+)(\s*(?:\{#[^}]+\})?\s*)$";
 
 #[derive(Clone)]
 pub struct MD020NoMissingSpaceClosedAtx;
@@ -25,21 +26,21 @@ impl MD020NoMissingSpaceClosedAtx {
     }
 
     fn is_closed_atx_heading_without_space(&self, line: &str) -> bool {
-        get_cached_regex(CLOSED_ATX_NO_SPACE_PATTERN_STR)
-            .map(|re| re.is_match(line))
+        get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_PATTERN_STR)
+            .map(|re| re.is_match(line).unwrap_or(false))
             .unwrap_or(false)
-            || get_cached_regex(CLOSED_ATX_NO_SPACE_START_PATTERN_STR)
-                .map(|re| re.is_match(line))
+            || get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_START_PATTERN_STR)
+                .map(|re| re.is_match(line).unwrap_or(false))
                 .unwrap_or(false)
-            || get_cached_regex(CLOSED_ATX_NO_SPACE_END_PATTERN_STR)
-                .map(|re| re.is_match(line))
+            || get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_END_PATTERN_STR)
+                .map(|re| re.is_match(line).unwrap_or(false))
                 .unwrap_or(false)
     }
 
     fn fix_closed_atx_heading(&self, line: &str) -> String {
-        if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_PATTERN_STR)
+        if let Some(captures) = get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line))
+            .and_then(|re| re.captures(line).ok().flatten())
         {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
@@ -48,9 +49,9 @@ impl MD020NoMissingSpaceClosedAtx {
             let closing_hashes = &captures[5];
             let custom_id = &captures[6];
             format!("{indentation}{opening_hashes} {content}{last_char} {closing_hashes}{custom_id}")
-        } else if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_START_PATTERN_STR)
+        } else if let Some(captures) = get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_START_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line))
+            .and_then(|re| re.captures(line).ok().flatten())
         {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
@@ -58,9 +59,9 @@ impl MD020NoMissingSpaceClosedAtx {
             let closing_hashes = &captures[4];
             let custom_id = &captures[5];
             format!("{indentation}{opening_hashes} {content} {closing_hashes}{custom_id}")
-        } else if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_END_PATTERN_STR)
+        } else if let Some(captures) = get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_END_PATTERN_STR)
             .ok()
-            .and_then(|re| re.captures(line))
+            .and_then(|re| re.captures(line).ok().flatten())
         {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
@@ -109,9 +110,9 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                         let mut length = 1;
                         let mut message = String::new();
 
-                        if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_PATTERN_STR)
+                        if let Some(captures) = get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_PATTERN_STR)
                             .ok()
-                            .and_then(|re| re.captures(line))
+                            .and_then(|re| re.captures(line).ok().flatten())
                         {
                             // Missing space at both start and end: #Heading#
                             let opening_hashes = captures.get(2).unwrap();
@@ -122,9 +123,9 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                             // Highlight the position right after the opening hashes
                             start_col = opening_hashes.end() + 1;
                             length = 1;
-                        } else if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_START_PATTERN_STR)
+                        } else if let Some(captures) = get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_START_PATTERN_STR)
                             .ok()
-                            .and_then(|re| re.captures(line))
+                            .and_then(|re| re.captures(line).ok().flatten())
                         {
                             // Missing space at start: #Heading #
                             let opening_hashes = captures.get(2).unwrap();
@@ -135,9 +136,9 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                             // Highlight the position right after the opening hashes
                             start_col = opening_hashes.end() + 1;
                             length = 1;
-                        } else if let Some(captures) = get_cached_regex(CLOSED_ATX_NO_SPACE_END_PATTERN_STR)
+                        } else if let Some(captures) = get_cached_fancy_regex(CLOSED_ATX_NO_SPACE_END_PATTERN_STR)
                             .ok()
-                            .and_then(|re| re.captures(line))
+                            .and_then(|re| re.captures(line).ok().flatten())
                         {
                             // Missing space at end: # Heading#
                             let content = captures.get(3).unwrap();

@@ -125,6 +125,26 @@ impl Rule for MD038NoSpaceInCode {
 
             // Check if there are leading or trailing spaces
             if code_content != trimmed {
+                // CommonMark behavior: if there is exactly ONE space at start AND ONE at end,
+                // and the content after trimming is non-empty, those spaces are stripped.
+                // We should NOT flag this case since the spaces are intentionally stripped.
+                // See: https://spec.commonmark.org/0.31.2/#code-spans
+                //
+                // Examples:
+                // ` text ` → "text" (spaces stripped, NOT flagged)
+                // `  text ` → " text" (extra leading space remains, FLAGGED)
+                // ` text  ` → "text " (extra trailing space remains, FLAGGED)
+                // ` text` → " text" (no trailing space to balance, FLAGGED)
+                // `text ` → "text " (no leading space to balance, FLAGGED)
+                if has_leading_space && has_trailing_space && !trimmed.is_empty() {
+                    let leading_spaces = code_content.len() - code_content.trim_start().len();
+                    let trailing_spaces = code_content.len() - code_content.trim_end().len();
+
+                    // Exactly one space on each side - CommonMark strips them
+                    if leading_spaces == 1 && trailing_spaces == 1 {
+                        continue;
+                    }
+                }
                 // Check if the content itself contains backticks - if so, skip to avoid
                 // breaking nested backtick structures
                 if trimmed.contains('`') {
@@ -272,19 +292,21 @@ mod tests {
     #[test]
     fn test_md038_invalid() {
         let rule = MD038NoSpaceInCode::new();
-        // All spaces should be flagged (matching markdownlint behavior)
+        // Flag cases that violate CommonMark:
+        // - Space only at start (no matching end space)
+        // - Space only at end (no matching start space)
+        // - Multiple spaces at start or end (extra space will remain after CommonMark stripping)
         let invalid_cases = vec![
-            "Type ` y ` to confirm.",
-            "Use ` git commit -m \"message\" ` to commit.",
-            "The variable ` $HOME ` contains home path.",
-            "The pattern ` *.txt ` matches text files.",
-            "This is ` random word ` with unnecessary spaces.",
-            "Text with ` plain text ` should be flagged.",
-            "Code with ` just code ` here.",
-            "Multiple ` word ` spans with ` text ` in one line.",
+            // Unbalanced: only leading space
             "This is ` code` with leading space.",
+            // Unbalanced: only trailing space
             "This is `code ` with trailing space.",
-            "This is ` code ` with both leading and trailing space.",
+            // Multiple leading spaces (one will remain after CommonMark strips one)
+            "This is `  code ` with double leading space.",
+            // Multiple trailing spaces (one will remain after CommonMark strips one)
+            "This is ` code  ` with double trailing space.",
+            // Multiple spaces both sides
+            "This is `  code  ` with double spaces both sides.",
         ];
         for case in invalid_cases {
             let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
@@ -294,21 +316,62 @@ mod tests {
     }
 
     #[test]
+    fn test_md038_valid_commonmark_stripping() {
+        let rule = MD038NoSpaceInCode::new();
+        // These cases have exactly ONE space at start AND ONE at end.
+        // CommonMark strips both, so these should NOT be flagged.
+        // See: https://spec.commonmark.org/0.31.2/#code-spans
+        let valid_cases = vec![
+            "Type ` y ` to confirm.",
+            "Use ` git commit -m \"message\" ` to commit.",
+            "The variable ` $HOME ` contains home path.",
+            "The pattern ` *.txt ` matches text files.",
+            "This is ` random word ` with unnecessary spaces.",
+            "Text with ` plain text ` is valid.",
+            "Code with ` just code ` here.",
+            "Multiple ` word ` spans with ` text ` in one line.",
+            "This is ` code ` with both leading and trailing single space.",
+            "Use ` - ` as separator.",
+        ];
+        for case in valid_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Single space on each side should not be flagged (CommonMark strips them): {case}"
+            );
+        }
+    }
+
+    #[test]
     fn test_md038_fix() {
         let rule = MD038NoSpaceInCode::new();
+        // Only cases that violate CommonMark should be fixed
         let test_cases = vec![
+            // Unbalanced: only leading space - should be fixed
             (
                 "This is ` code` with leading space.",
                 "This is `code` with leading space.",
             ),
+            // Unbalanced: only trailing space - should be fixed
             (
                 "This is `code ` with trailing space.",
                 "This is `code` with trailing space.",
             ),
-            ("This is ` code ` with both spaces.", "This is `code` with both spaces."),
+            // Single space on both sides - NOT fixed (valid per CommonMark)
+            (
+                "This is ` code ` with both spaces.",
+                "This is ` code ` with both spaces.", // unchanged
+            ),
+            // Double leading space - should be fixed
+            (
+                "This is `  code ` with double leading space.",
+                "This is `code` with double leading space.",
+            ),
+            // Mixed: one valid (single space both), one invalid (trailing only)
             (
                 "Multiple ` code ` and `spans ` to fix.",
-                "Multiple `code` and `spans` to fix.",
+                "Multiple ` code ` and `spans` to fix.", // only spans is fixed
             ),
         ];
         for (input, expected) in test_cases {
@@ -377,8 +440,9 @@ mod tests {
             result_quarto.len()
         );
 
-        // Test that other code with spaces still gets flagged in Quarto
-        let content_other = "This has ` plain text ` with spaces.";
+        // Test that invalid code spans (not matching CommonMark stripping) still get flagged in Quarto
+        // Use only trailing space - this violates CommonMark (no balanced stripping)
+        let content_other = "This has `plain text ` with trailing space.";
         let ctx_other =
             crate::lint_context::LintContext::new(content_other, crate::config::MarkdownFlavor::Quarto, None);
         let result_other = rule.check(&ctx_other).unwrap();

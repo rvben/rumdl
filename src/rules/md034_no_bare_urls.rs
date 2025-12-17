@@ -3,7 +3,7 @@
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_url_range};
-use crate::utils::regex_cache::{EMAIL_PATTERN, get_cached_regex};
+use crate::utils::regex_cache::{EMAIL_PATTERN, get_cached_fancy_regex, get_cached_regex};
 
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
@@ -25,6 +25,9 @@ const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\]
 const REFERENCE_DEF_RE_STR: &str = r"^\s*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)";
 const HTML_TAG_PATTERN_STR: &str = r#"<[^>]*>"#;
 const MULTILINE_LINK_CONTINUATION_STR: &str = r#"^[^\[]*\]\(.*\)"#;
+// Pattern to match shortcut/collapsed reference links: [text] or [text][]
+// This includes [URL] which should not be flagged as a bare URL
+const SHORTCUT_REF_PATTERN_STR: &str = r#"\[([^\[\]]+)\](?!\s*[\[(])"#;
 
 /// Reusable buffers for check_line to reduce allocations
 #[derive(Default)]
@@ -169,6 +172,15 @@ impl MD034NoBareUrls {
 
         if let Ok(re) = get_cached_regex(MARKDOWN_EMPTY_REF_PATTERN_STR) {
             for mat in re.find_iter(line) {
+                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
+            }
+        }
+
+        // Also exclude shortcut reference links like [URL] - even if no definition exists,
+        // the brackets indicate user intent to use markdown formatting
+        // Uses fancy_regex for negative lookahead support
+        if let Ok(re) = get_cached_fancy_regex(SHORTCUT_REF_PATTERN_STR) {
+            for mat in re.find_iter(line).flatten() {
                 buffers.markdown_link_ranges.push((mat.start(), mat.end()));
             }
         }
