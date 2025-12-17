@@ -121,7 +121,8 @@ impl MD022BlanksAroundHeadings {
         let heading_at_start_idx = {
             let mut found_non_blank = false;
             ctx.lines.iter().enumerate().find_map(|(i, line)| {
-                if line.heading.is_some() && !found_non_blank {
+                // Only count valid headings (skip malformed ones like `#NoSpace`)
+                if line.heading.as_ref().is_some_and(|h| h.is_valid) && !found_non_blank {
                     Some(i)
                 } else {
                     if !line.is_blank {
@@ -146,6 +147,12 @@ impl MD022BlanksAroundHeadings {
 
             // Check if it's a heading
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    result.push(line.to_string());
+                    continue;
+                }
+
                 // This is a heading line (ATX or Setext content)
                 let is_first_heading = Some(i) == heading_at_start_idx;
                 let heading_level = heading.level as usize;
@@ -323,7 +330,8 @@ impl Rule for MD022BlanksAroundHeadings {
         let heading_at_start_idx = {
             let mut found_non_blank = false;
             ctx.lines.iter().enumerate().find_map(|(i, line)| {
-                if line.heading.is_some() && !found_non_blank {
+                // Only count valid headings (skip malformed ones like `#NoSpace`)
+                if line.heading.as_ref().is_some_and(|h| h.is_valid) && !found_non_blank {
                     Some(i)
                 } else {
                     if !line.is_blank {
@@ -345,6 +353,12 @@ impl Rule for MD022BlanksAroundHeadings {
             }
 
             let heading = line_info.heading.as_ref().unwrap();
+
+            // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+            if !heading.is_valid {
+                continue;
+            }
+
             let heading_level = heading.level as usize;
 
             // For Setext headings, skip the underline line (we process from the content line)

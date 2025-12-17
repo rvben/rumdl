@@ -274,6 +274,64 @@ pub struct HeadingInfo {
     pub has_closing_sequence: bool,
     /// The closing sequence if present
     pub closing_sequence: String,
+    /// Whether this is a valid CommonMark heading (ATX headings require space after #)
+    /// False for malformed headings like `#NoSpace` that MD018 should flag
+    pub is_valid: bool,
+}
+
+/// A valid heading from a filtered iteration
+///
+/// Only includes headings that are CommonMark-compliant (have space after #).
+/// Hashtag-like patterns (`#tag`, `#123`) are excluded.
+#[derive(Debug, Clone)]
+pub struct ValidHeading<'a> {
+    /// The 1-indexed line number in the document
+    pub line_num: usize,
+    /// Reference to the heading information
+    pub heading: &'a HeadingInfo,
+    /// Reference to the full line info (for rules that need additional context)
+    pub line_info: &'a LineInfo,
+}
+
+/// Iterator over valid CommonMark headings in a document
+///
+/// Filters out malformed headings like `#NoSpace` that should be flagged by MD018
+/// but should not be processed by other heading rules.
+pub struct ValidHeadingsIter<'a> {
+    lines: &'a [LineInfo],
+    current_index: usize,
+}
+
+impl<'a> ValidHeadingsIter<'a> {
+    fn new(lines: &'a [LineInfo]) -> Self {
+        Self {
+            lines,
+            current_index: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for ValidHeadingsIter<'a> {
+    type Item = ValidHeading<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current_index < self.lines.len() {
+            let idx = self.current_index;
+            self.current_index += 1;
+
+            let line_info = &self.lines[idx];
+            if let Some(heading) = &line_info.heading
+                && heading.is_valid
+            {
+                return Some(ValidHeading {
+                    line_num: idx + 1, // Convert 0-indexed to 1-indexed
+                    heading,
+                    line_info,
+                });
+            }
+        }
+        None
+    }
 }
 
 /// Information about a blockquote line
@@ -2060,6 +2118,20 @@ impl<'a> LintContext<'a> {
                     }
                 }
 
+                // ATX heading is "valid" for processing by heading rules if:
+                // 1. Has space after # (CommonMark compliant): `# Heading`
+                // 2. Is empty (just hashes): `#`
+                // 3. Has multiple hashes (##intro is likely intended heading, not hashtag)
+                // 4. Content starts with uppercase (likely intended heading, not social hashtag)
+                //
+                // Invalid patterns (hashtag-like) are skipped by most heading rules:
+                // - `#tag` - single # with lowercase (social hashtag)
+                // - `#123` - single # with number (GitHub issue ref)
+                let is_valid = !spaces_after.is_empty()
+                    || rest.is_empty()
+                    || level > 1
+                    || rest.trim().chars().next().is_some_and(|c| c.is_uppercase());
+
                 lines[i].heading = Some(HeadingInfo {
                     level,
                     style: HeadingStyle::ATX,
@@ -2071,6 +2143,7 @@ impl<'a> LintContext<'a> {
                     raw_text,
                     has_closing_sequence: has_closing,
                     closing_sequence: closing_seq,
+                    is_valid,
                 });
             }
             // Check for Setext headings (need to look at next line)
@@ -2124,6 +2197,7 @@ impl<'a> LintContext<'a> {
                         raw_text,
                         has_closing_sequence: false,
                         closing_sequence: String::new(),
+                        is_valid: true, // Setext headings are always valid
                     });
                 }
             }
@@ -3215,6 +3289,40 @@ impl<'a> LintContext<'a> {
         }
 
         bare_urls
+    }
+
+    /// Get an iterator over valid CommonMark headings
+    ///
+    /// This iterator filters out malformed headings like `#NoSpace` (hashtag-like patterns)
+    /// that should be flagged by MD018 but should not be processed by other heading rules.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rumdl_lib::lint_context::LintContext;
+    /// use rumdl_lib::config::MarkdownFlavor;
+    ///
+    /// let content = "# Valid Heading\n#NoSpace\n## Another Valid";
+    /// let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    ///
+    /// for heading in ctx.valid_headings() {
+    ///     println!("Line {}: {} (level {})", heading.line_num, heading.heading.text, heading.heading.level);
+    /// }
+    /// // Only prints valid headings, skips `#NoSpace`
+    /// ```
+    #[must_use]
+    pub fn valid_headings(&self) -> ValidHeadingsIter<'_> {
+        ValidHeadingsIter::new(&self.lines)
+    }
+
+    /// Check if the document contains any valid CommonMark headings
+    ///
+    /// Returns `true` if there is at least one heading with proper space after `#`.
+    #[must_use]
+    pub fn has_valid_headings(&self) -> bool {
+        self.lines
+            .iter()
+            .any(|line| line.heading.as_ref().is_some_and(|h| h.is_valid))
     }
 }
 

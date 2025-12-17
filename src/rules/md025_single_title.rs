@@ -213,6 +213,8 @@ impl Rule for MD025SingleTitle {
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading
                 && heading.level as usize == self.config.level.as_usize()
+                && heading.is_valid
+            // Skip malformed headings like `#NoSpace`
             {
                 // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
                 if line_info.indent >= 4 || line_info.in_code_block {

@@ -73,6 +73,11 @@ impl MD043RequiredHeadings {
 
         for line_info in &ctx.lines {
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    continue;
+                }
+
                 // Reconstruct the full heading format with the hash symbols
                 let full_heading = format!("{} {}", heading.marker, heading.text.trim());
                 result.push(full_heading);

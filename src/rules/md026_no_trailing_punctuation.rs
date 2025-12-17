@@ -206,6 +206,11 @@ impl Rule for MD026NoTrailingPunctuation {
         // Use pre-computed heading information from LintContext
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    continue;
+                }
+
                 // Skip deeply indented headings (they're code blocks)
                 if line_info.indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     continue;
@@ -299,6 +304,11 @@ impl Rule for MD026NoTrailingPunctuation {
         // Use pre-computed heading information from LintContext
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    continue;
+                }
+
                 // Skip deeply indented headings (they're code blocks)
                 if line_info.indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     continue;

@@ -46,6 +46,11 @@ impl MD003HeadingStyle {
 
         for line_info in &ctx.lines {
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    continue;
+                }
+
                 // Map from LintContext heading style to rules heading style and count
                 let style = match heading.style {
                     crate::lint_context::HeadingStyle::ATX => {
@@ -105,6 +110,11 @@ impl Rule for MD003HeadingStyle {
         // Process headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    continue;
+                }
+
                 let level = heading.level;
 
                 // Map the cached heading style to the rule's HeadingStyle

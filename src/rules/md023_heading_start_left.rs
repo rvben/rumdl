@@ -27,6 +27,11 @@ impl Rule for MD023HeadingStartLeft {
         // Process all headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    continue;
+                }
+
                 // Skip hashtag-like patterns (e.g., #tag, #123, #29039) for ATX level 1
                 // These are likely issue refs or social hashtags, not intended headings
                 if heading.level == 1 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
@@ -162,6 +167,12 @@ impl Rule for MD023HeadingStartLeft {
 
             // Check if this line is a heading
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    fixed_lines.push(line_info.content(ctx.content).to_string());
+                    continue;
+                }
+
                 let indentation = line_info.indent;
                 let is_setext = matches!(
                     heading.style,

@@ -74,6 +74,11 @@ impl Rule for MD024NoDuplicateHeading {
             }
 
             if let Some(heading) = &line_info.heading {
+                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
+                if !heading.is_valid {
+                    continue;
+                }
+
                 // Skip empty headings
                 if heading.text.is_empty() {
                     continue;
