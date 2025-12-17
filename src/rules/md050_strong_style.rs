@@ -256,14 +256,17 @@ impl Rule for MD050StrongStyle {
 
                 if !self.is_escaped(line, m.start()) {
                     let text = &line[m.start() + 2..m.end() - 2];
+
+                    // NOTE: Intentional deviation from markdownlint behavior.
+                    // markdownlint reports two warnings per emphasis (one for opening marker,
+                    // one for closing marker). We report one warning per emphasis block because:
+                    // 1. The markers are semantically one unit - you can't fix one without the other
+                    // 2. Cleaner output - "10 issues" vs "20 issues" for 10 bold words
+                    // 3. The fix is atomic - replacing the entire emphasis at once
                     let message = match target_style {
                         StrongStyle::Asterisk => "Strong emphasis should use ** instead of __",
                         StrongStyle::Underscore => "Strong emphasis should use __ instead of **",
-                        StrongStyle::Consistent => {
-                            // This case is handled separately in the calling code
-                            // but fallback to asterisk style for safety
-                            "Strong emphasis should use ** instead of __"
-                        }
+                        StrongStyle::Consistent => "Strong emphasis should use ** instead of __",
                     };
 
                     // Calculate precise character range for the entire strong emphasis
@@ -283,11 +286,7 @@ impl Rule for MD050StrongStyle {
                             replacement: match target_style {
                                 StrongStyle::Asterisk => format!("**{text}**"),
                                 StrongStyle::Underscore => format!("__{text}__"),
-                                StrongStyle::Consistent => {
-                                    // This case is handled separately in the calling code
-                                    // but fallback to asterisk style for safety
-                                    format!("**{text}**")
-                                }
+                                StrongStyle::Consistent => format!("**{text}**"),
                             },
                         }),
                     });
