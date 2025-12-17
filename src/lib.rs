@@ -84,7 +84,8 @@ impl ContentCharacteristics {
                 && (line.contains('[')
                     || line.contains("http://")
                     || line.contains("https://")
-                    || line.contains("ftp://"))
+                    || line.contains("ftp://")
+                    || line.contains("www."))
             {
                 chars.has_links = true;
             }

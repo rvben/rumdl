@@ -9,7 +9,7 @@ use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 
 // URL detection patterns
-const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?)://|@"#;
+const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?)://|@|www\."#;
 const CUSTOM_PROTOCOL_PATTERN_STR: &str = r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#;
 const MARKDOWN_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
 const MARKDOWN_EMPTY_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(\)"#;
@@ -19,6 +19,10 @@ const ANGLE_LINK_PATTERN_STR: &str =
 const BADGE_LINK_LINE_STR: &str = r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#;
 const MARKDOWN_IMAGE_PATTERN_STR: &str = r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
 const SIMPLE_URL_REGEX_STR: &str = r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`\]]+)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
+// Pattern to detect www URLs without protocol (e.g., www.example.com)
+// Matches www. followed by domain name with at least one dot and a valid TLD
+// Note: Uses standard regex. Negative lookbehind (no / or @ before www) is checked in code.
+const WWW_URL_REGEX_STR: &str = r#"www\.(?:[a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}(?:/[^\s<>\[\]()\\'\"`]*)?"#;
 const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
 // Reference definition pattern - matches [label]: URL with optional title
 // Supports: [ref]: https://... or [ref]: <https://...> or [ref]: https://... "title"
@@ -46,7 +50,10 @@ impl MD034NoBareUrls {
         // Skip if content has no URLs and no email addresses
         // Fast byte scanning for common URL/email indicators
         let bytes = content.as_bytes();
-        !bytes.contains(&b':') && !bytes.contains(&b'@')
+        let has_colon = bytes.contains(&b':');
+        let has_at = bytes.contains(&b'@');
+        let has_www = content.contains("www.");
+        !has_colon && !has_at && !has_www
     }
 
     /// Remove trailing punctuation that is likely sentence punctuation, not part of the URL
@@ -146,10 +153,13 @@ impl MD034NoBareUrls {
         }
 
         // Quick check - does this line potentially have a URL or email?
-        if let Ok(re) = get_cached_regex(URL_QUICK_CHECK_STR)
-            && !re.is_match(line)
-            && !line.contains('@')
-        {
+        let has_quick_check = get_cached_regex(URL_QUICK_CHECK_STR)
+            .map(|re| re.is_match(line))
+            .unwrap_or(false);
+        let has_www = line.contains("www.");
+        let has_at = line.contains('@');
+
+        if !has_quick_check && !has_at && !has_www {
             return warnings;
         }
 
@@ -250,6 +260,24 @@ impl MD034NoBareUrls {
                 }
 
                 buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
+            }
+        }
+
+        // Find www URLs without protocol (e.g., www.example.com)
+        if let Ok(re) = get_cached_regex(WWW_URL_REGEX_STR) {
+            for mat in re.find_iter(line) {
+                let url_str = mat.as_str();
+                let start_pos = mat.start();
+
+                // Skip if preceded by / or @ (likely part of a full URL)
+                if start_pos > 0 {
+                    let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                    if prev_char == Some(b'/') || prev_char == Some(b'@') {
+                        continue;
+                    }
+                }
+
+                buffers.urls_found.push((start_pos, mat.end(), url_str.to_string()));
             }
         }
 

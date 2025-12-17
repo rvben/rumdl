@@ -1001,3 +1001,24 @@ Another bare URL: https://another.bare.url
     assert!(result[0].message.contains("https://bare.example.com"));
     assert!(result[1].message.contains("https://another.bare.url"));
 }
+
+#[test]
+fn test_www_urls_without_protocol() {
+    let rule = MD034NoBareUrls;
+
+    // www URLs should be detected as bare URLs (matching markdownlint behavior)
+    let content = "# Test\n\nVisit www.example.com for info.";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "www URL should be flagged as bare URL. Got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("www.example.com"),
+        "Message should contain the www URL"
+    );
+}
