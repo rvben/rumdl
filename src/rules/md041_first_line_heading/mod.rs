@@ -88,7 +88,91 @@ impl MD041FirstLineHeading {
             return true;
         }
 
+        // Skip badge/shield images - common pattern at top of READMEs
+        // Matches: ![badge](url) or [![badge](url)](url)
+        if Self::is_badge_image_line(trimmed) {
+            return true;
+        }
+
         false
+    }
+
+    /// Check if a line consists only of badge/shield images
+    /// Common patterns:
+    /// - `![badge](url)`
+    /// - `[![badge](url)](url)` (linked badge)
+    /// - Multiple badges on one line
+    fn is_badge_image_line(line: &str) -> bool {
+        if line.is_empty() {
+            return false;
+        }
+
+        // Must start with image syntax
+        if !line.starts_with('!') && !line.starts_with('[') {
+            return false;
+        }
+
+        // Check if line contains only image/link patterns and whitespace
+        let mut remaining = line;
+        while !remaining.is_empty() {
+            remaining = remaining.trim_start();
+            if remaining.is_empty() {
+                break;
+            }
+
+            // Linked image: [![alt](img-url)](link-url)
+            if remaining.starts_with("[![") {
+                if let Some(end) = Self::find_linked_image_end(remaining) {
+                    remaining = &remaining[end..];
+                    continue;
+                }
+                return false;
+            }
+
+            // Simple image: ![alt](url)
+            if remaining.starts_with("![") {
+                if let Some(end) = Self::find_image_end(remaining) {
+                    remaining = &remaining[end..];
+                    continue;
+                }
+                return false;
+            }
+
+            // Not an image pattern
+            return false;
+        }
+
+        true
+    }
+
+    /// Find the end of an image pattern ![alt](url)
+    fn find_image_end(s: &str) -> Option<usize> {
+        if !s.starts_with("![") {
+            return None;
+        }
+        // Find ]( after ![
+        let alt_end = s[2..].find("](")?;
+        let paren_start = 2 + alt_end + 2; // Position after ](
+        // Find closing )
+        let paren_end = s[paren_start..].find(')')?;
+        Some(paren_start + paren_end + 1)
+    }
+
+    /// Find the end of a linked image pattern [![alt](img-url)](link-url)
+    fn find_linked_image_end(s: &str) -> Option<usize> {
+        if !s.starts_with("[![") {
+            return None;
+        }
+        // Find the inner image first
+        let inner_end = Self::find_image_end(&s[1..])?;
+        let after_inner = 1 + inner_end;
+        // Should be followed by ](url)
+        if !s[after_inner..].starts_with("](") {
+            return None;
+        }
+        let link_start = after_inner + 2;
+        let link_end = s[link_start..].find(')')?;
+        Some(link_start + link_end + 1)
     }
 
     /// Check if a line is an HTML heading using the centralized HTML parser
@@ -913,5 +997,76 @@ mod tests {
             result.is_empty(),
             "Picture tag inside multi-line HTML heading should be recognized"
         );
+    }
+
+    #[test]
+    fn test_badge_images_before_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Single badge before heading
+        let content = "![badge](https://img.shields.io/badge/test-passing-green)\n\n# My Project";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Badge image should be skipped");
+
+        // Multiple badges on one line
+        let content = "![badge1](url1) ![badge2](url2)\n\n# My Project";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Multiple badges should be skipped");
+
+        // Linked badge (clickable)
+        let content = "[![badge](https://img.shields.io/badge/test-pass-green)](https://example.com)\n\n# My Project";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Linked badge should be skipped");
+    }
+
+    #[test]
+    fn test_multiple_badge_lines_before_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multiple lines of badges
+        let content = "[![Crates.io](https://img.shields.io/crates/v/example)](https://crates.io)\n[![docs.rs](https://img.shields.io/docsrs/example)](https://docs.rs)\n\n# My Project";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Multiple badge lines should be skipped");
+    }
+
+    #[test]
+    fn test_badges_without_heading_still_warns() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Badges followed by paragraph (not heading)
+        let content = "![badge](url)\n\nThis is not a heading.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should warn when badges followed by non-heading");
+    }
+
+    #[test]
+    fn test_mixed_content_not_badge_line() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Image with text is not a badge line
+        let content = "![badge](url) Some text here\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Mixed content line should not be skipped");
+    }
+
+    #[test]
+    fn test_is_badge_image_line_unit() {
+        // Unit tests for is_badge_image_line
+        assert!(MD041FirstLineHeading::is_badge_image_line("![badge](url)"));
+        assert!(MD041FirstLineHeading::is_badge_image_line("[![badge](img)](link)"));
+        assert!(MD041FirstLineHeading::is_badge_image_line("![a](b) ![c](d)"));
+        assert!(MD041FirstLineHeading::is_badge_image_line("[![a](b)](c) [![d](e)](f)"));
+
+        // Not badge lines
+        assert!(!MD041FirstLineHeading::is_badge_image_line(""));
+        assert!(!MD041FirstLineHeading::is_badge_image_line("Some text"));
+        assert!(!MD041FirstLineHeading::is_badge_image_line("![badge](url) text"));
+        assert!(!MD041FirstLineHeading::is_badge_image_line("# Heading"));
     }
 }
