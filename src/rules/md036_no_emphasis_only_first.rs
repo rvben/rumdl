@@ -109,11 +109,12 @@ impl MD036NoEmphasisAsHeading {
             return None;
         }
 
-        // Skip if line is in a list, blockquote, or code block
+        // Skip if line is in a list, blockquote, code block, or HTML comment
         if LIST_MARKER.is_match(line)
             || BLOCKQUOTE_MARKER.is_match(line)
-            || ctx.line_info(line_num + 1).is_some_and(|info| info.in_code_block)
-        // line_num is 0-based, but LintContext expects 1-based
+            || ctx
+                .line_info(line_num + 1)
+                .is_some_and(|info| info.in_code_block || info.in_html_comment)
         {
             return None;
         }
@@ -370,6 +371,21 @@ mod tests {
 
         // Should not flag emphasis in code blocks
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_emphasis_in_html_comment() {
+        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+        let content = "<!--\n**bigger**\ncomment\n-->";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag emphasis in HTML comments (matches markdownlint)
+        assert_eq!(
+            result.len(),
+            0,
+            "Expected no warnings for emphasis in HTML comment, got: {result:?}"
+        );
     }
 
     #[test]
