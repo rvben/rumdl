@@ -6,6 +6,34 @@ use std::sync::LazyLock;
 // Detects ordered list items starting with a number other than 1
 static ORDERED_LIST_NON_ONE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([2-9]|\d{2,})\.\s").unwrap());
 
+/// Check if a line is a thematic break (horizontal rule)
+/// Per CommonMark: 0-3 spaces, then 3+ of same char (-, *, _), optionally with spaces between
+fn is_thematic_break(line: &str) -> bool {
+    let leading_spaces = line.len() - line.trim_start_matches(' ').len();
+    if leading_spaces > 3 || line.starts_with('\t') {
+        return false;
+    }
+
+    let trimmed = line.trim();
+    if trimmed.len() < 3 {
+        return false;
+    }
+
+    let chars: Vec<char> = trimmed.chars().collect();
+    let first_non_space = chars.iter().find(|&&c| c != ' ');
+
+    if let Some(&marker) = first_non_space {
+        if marker != '-' && marker != '*' && marker != '_' {
+            return false;
+        }
+        let marker_count = chars.iter().filter(|&&c| c == marker).count();
+        let other_count = chars.iter().filter(|&&c| c != marker && c != ' ').count();
+        marker_count >= 3 && other_count == 0
+    } else {
+        false
+    }
+}
+
 /// Rule MD032: Lists should be surrounded by blank lines
 ///
 /// This rule enforces that lists are surrounded by blank lines, which improves document
@@ -225,6 +253,7 @@ impl MD032BlanksAroundLists {
                     for check_line in (*end + 1)..=block.end_line {
                         if check_line - 1 < ctx.lines.len() {
                             let line = &ctx.lines[check_line - 1];
+                            let line_content = line.content(ctx.content);
                             // Stop at next list item or non-continuation content
                             if block.item_lines.contains(&check_line) || line.heading.is_some() {
                                 break;
@@ -238,9 +267,12 @@ impl MD032BlanksAroundLists {
                                 actual_end = check_line;
                             }
                             // Include lazy continuation lines (multiple consecutive lines without indent)
+                            // Per CommonMark, only paragraph text can be lazy continuation
+                            // Thematic breaks, code fences, etc. cannot be lazy continuations
                             else if !line.is_blank
                                 && line.heading.is_none()
                                 && !block.item_lines.contains(&check_line)
+                                && !is_thematic_break(line_content)
                             {
                                 // This is a lazy continuation line - check if we're still in the same paragraph
                                 // Allow multiple consecutive lazy continuation lines
@@ -1297,5 +1329,84 @@ mod tests {
             0,
             "Both lists should be properly separated by blank lines. Got: {md032_warnings:?}"
         );
+    }
+
+    #[test]
+    fn test_thematic_break_not_lazy_continuation() {
+        // Thematic breaks (HRs) cannot be lazy continuation per CommonMark
+        // List followed by HR without blank line should warn
+        let content = r#"- Item 1
+- Item 2
+***
+
+More text.
+"#;
+
+        let warnings = lint(content);
+        let md032_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD032"))
+            .collect();
+        assert_eq!(
+            md032_warnings.len(),
+            1,
+            "Should warn for list not followed by blank line before thematic break. Got: {md032_warnings:?}"
+        );
+        assert!(
+            md032_warnings[0].message.contains("followed by blank line"),
+            "Warning should be about missing blank after list"
+        );
+    }
+
+    #[test]
+    fn test_thematic_break_with_blank_line() {
+        // List followed by blank line then HR should NOT warn
+        let content = r#"- Item 1
+- Item 2
+
+***
+
+More text.
+"#;
+
+        let warnings = lint(content);
+        let md032_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD032"))
+            .collect();
+        assert_eq!(
+            md032_warnings.len(),
+            0,
+            "Should not warn when list is properly followed by blank line. Got: {md032_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_various_thematic_break_styles() {
+        // Test different HR styles are all recognized
+        // Note: Spaced styles like "- - -" and "* * *" are excluded because they start
+        // with list markers ("- " or "* ") which get parsed as list items by the
+        // upstream CommonMark parser. That's a separate parsing issue.
+        for hr in ["---", "***", "___"] {
+            let content = format!(
+                r#"- Item 1
+- Item 2
+{hr}
+
+More text.
+"#
+            );
+
+            let warnings = lint(&content);
+            let md032_warnings: Vec<_> = warnings
+                .iter()
+                .filter(|w| w.rule_name.as_deref() == Some("MD032"))
+                .collect();
+            assert_eq!(
+                md032_warnings.len(),
+                1,
+                "Should warn for HR style '{hr}' without blank line. Got: {md032_warnings:?}"
+            );
+        }
     }
 }
