@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **MD064 (no-multiple-consecutive-spaces): New rule to collapse multiple consecutive spaces** (thanks @mawkler in #202)
+  - Flags multiple consecutive spaces (2+) in markdown prose
+  - Provides auto-fix to collapse them to single space
+  - Skips spaces in code, tables, HTML, front matter, and markdown syntax markers
+
 ## [0.0.195] - 2025-12-17
 
 ### Added
