@@ -113,7 +113,7 @@ fn is_markdown_file(path: &str) -> bool {
 }
 
 /// Rule MD057: Existing relative links should point to valid files or directories.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MD057ExistingRelativeLinks {
     /// Base directory for resolving relative links
     base_path: Arc<Mutex<Option<PathBuf>>>,
@@ -140,7 +140,8 @@ impl MD057ExistingRelativeLinks {
         self
     }
 
-    pub fn from_config_struct(_config: MD057Config) -> Self {
+    #[allow(unused_variables)]
+    pub fn from_config_struct(config: MD057Config) -> Self {
         Self::default()
     }
 
@@ -295,19 +296,40 @@ impl MD057ExistingRelativeLinks {
 
         // Resolve the relative link against the base path
         let resolved_path = Self::resolve_link_path_with_base(&decoded_path, base_path);
+
         // Check if the file exists, also trying markdown extensions for extensionless links
-        if !file_exists_or_markdown_extension(&resolved_path) {
-            warnings.push(LintWarning {
-                rule_name: Some(self.name().to_string()),
-                line: line_num,
-                column,
-                end_line: line_num,
-                end_column: column + url.len(),
-                message: format!("Relative link '{url}' does not exist"),
-                severity: Severity::Warning,
-                fix: None, // No automatic fix for missing files
-            });
+        if file_exists_or_markdown_extension(&resolved_path) {
+            return; // File exists, no warning needed
         }
+
+        // For .html/.htm links, check if a corresponding markdown source exists
+        // This handles doc sites where .md is compiled to .html at build time
+        if let Some(ext) = resolved_path.extension().and_then(|e| e.to_str())
+            && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+            && let (Some(stem), Some(parent)) = (
+                resolved_path.file_stem().and_then(|s| s.to_str()),
+                resolved_path.parent(),
+            )
+        {
+            for md_ext in MARKDOWN_EXTENSIONS {
+                let source_path = parent.join(format!("{stem}{md_ext}"));
+                if file_exists_with_cache(&source_path) {
+                    return; // Markdown source exists, link is valid
+                }
+            }
+        }
+
+        // File doesn't exist and no source file found
+        warnings.push(LintWarning {
+            rule_name: Some(self.name().to_string()),
+            line: line_num,
+            column,
+            end_line: line_num,
+            end_column: column + url.len(),
+            message: format!("Relative link '{url}' does not exist"),
+            severity: Severity::Warning,
+            fix: None,
+        });
     }
 }
 
@@ -1429,5 +1451,102 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
         // Test: file that doesn't exist should not resolve (returns path relative to file's dir)
         let nonexistent = resolve_absolute_link(&readme, "NONEXISTENT.md");
         assert!(!nonexistent.exists(), "Should not find nonexistent file");
+    }
+
+    #[test]
+    fn test_html_link_with_md_source() {
+        // Links to .html files should pass if corresponding .md source exists
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create guide.md (source file)
+        let md_file = base_path.join("guide.md");
+        File::create(&md_file).unwrap().write_all(b"# Guide").unwrap();
+
+        let content = r#"
+[Read the guide](guide.html)
+[Also here](getting-started.html)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // guide.html passes (guide.md exists), getting-started.html fails
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about missing source. Got: {result:?}"
+        );
+        assert!(result[0].message.contains("getting-started.html"));
+    }
+
+    #[test]
+    fn test_htm_link_with_md_source() {
+        // .htm extension should also check for markdown source
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let md_file = base_path.join("page.md");
+        File::create(&md_file).unwrap().write_all(b"# Page").unwrap();
+
+        let content = "[Page](page.htm)";
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should not warn when .md source exists for .htm link"
+        );
+    }
+
+    #[test]
+    fn test_html_link_finds_various_markdown_extensions() {
+        // Should find .mdx, .markdown, etc. as source files
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        File::create(base_path.join("doc.md")).unwrap();
+        File::create(base_path.join("tutorial.mdx")).unwrap();
+        File::create(base_path.join("guide.markdown")).unwrap();
+
+        let content = r#"
+[Doc](doc.html)
+[Tutorial](tutorial.html)
+[Guide](guide.html)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should find all markdown variants as source files. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_html_link_in_subdirectory() {
+        // Should find markdown source in subdirectories
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let docs_dir = base_path.join("docs");
+        std::fs::create_dir(&docs_dir).unwrap();
+        File::create(docs_dir.join("guide.md"))
+            .unwrap()
+            .write_all(b"# Guide")
+            .unwrap();
+
+        let content = "[Guide](docs/guide.html)";
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "Should find markdown source in subdirectory");
     }
 }
