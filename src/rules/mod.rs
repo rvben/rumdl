@@ -58,6 +58,7 @@ mod md061_forbidden_terms;
 mod md062_link_destination_whitespace;
 mod md063_heading_capitalization;
 mod md064_no_multiple_consecutive_spaces;
+mod md065_blanks_around_horizontal_rules;
 
 pub use md001_heading_increment::MD001HeadingIncrement;
 pub use md003_heading_style::MD003HeadingStyle;
@@ -110,6 +111,7 @@ pub use md061_forbidden_terms::MD061ForbiddenTerms;
 pub use md062_link_destination_whitespace::MD062LinkDestinationWhitespace;
 pub use md063_heading_capitalization::MD063HeadingCapitalization;
 pub use md064_no_multiple_consecutive_spaces::MD064NoMultipleConsecutiveSpaces;
+pub use md065_blanks_around_horizontal_rules::MD065BlanksAroundHorizontalRules;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -199,6 +201,7 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD062", MD062LinkDestinationWhitespace::from_config),
         ("MD063", MD063HeadingCapitalization::from_config),
         ("MD064", MD064NoMultipleConsecutiveSpaces::from_config),
+        ("MD065", MD065BlanksAroundHorizontalRules::from_config),
     ];
     RULES.iter().map(|(_, ctor)| ctor(config)).collect()
 }
