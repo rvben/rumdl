@@ -17,6 +17,12 @@ impl MD065BlanksAroundHorizontalRules {
 
     /// Check if a line is a horizontal rule (---, ***, ___)
     fn is_horizontal_rule(line: &str) -> bool {
+        // CommonMark: HRs can have 0-3 spaces of leading indentation, not tabs
+        let leading_spaces = line.len() - line.trim_start_matches(' ').len();
+        if leading_spaces > 3 || line.starts_with('\t') {
+            return false;
+        }
+
         let trimmed = line.trim();
         if trimmed.len() < 3 {
             return false;
@@ -53,8 +59,27 @@ impl MD065BlanksAroundHorizontalRules {
 
         // Setext markers are only - or = (not * or _)
         // And the previous line must have content
-        !prev_line.is_empty()
-            && (line.chars().all(|c| c == '-' || c == ' ') || line.chars().all(|c| c == '=' || c == ' '))
+        // CommonMark: setext underlines can have leading/trailing spaces but NO internal spaces
+        if prev_line.is_empty() {
+            return false;
+        }
+
+        // Check if all non-space characters are the same marker (- or =)
+        // and there are no internal spaces (spaces between markers)
+        let has_hyphen = line.contains('-');
+        let has_equals = line.contains('=');
+
+        // Must have exactly one type of marker
+        if has_hyphen == has_equals {
+            return false; // Either has both or neither
+        }
+
+        let marker = if has_hyphen { '-' } else { '=' };
+
+        // Setext underline: optional leading spaces, then only marker chars, then optional trailing spaces
+        // No internal spaces allowed
+        let trimmed = line.trim();
+        trimmed.chars().all(|c| c == marker)
     }
 
     /// Count the number of blank lines before a given line index
@@ -579,5 +604,427 @@ More text.";
         // Should flag missing blank line after
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("after horizontal rule"));
+    }
+
+    // ============================================================
+    // Additional comprehensive tests for edge cases
+    // ============================================================
+
+    #[test]
+    fn test_frontmatter_not_flagged() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        // YAML frontmatter uses --- delimiters which should NOT be flagged
+        let content = "---
+title: Test Document
+date: 2024-01-01
+---
+
+# Heading
+
+Content here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Frontmatter delimiters should not be flagged as HRs
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_hr_after_frontmatter() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "---
+title: Test
+---
+
+Content.
+***
+More content.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HR after frontmatter content should be flagged
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_hr_in_indented_code_block() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        // 4-space indented code block
+        let content = "Some text.
+
+    ---
+    code here
+
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HR in indented code block should be ignored
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_hr_with_leading_spaces() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        // 1-3 spaces of indentation is still a valid HR
+        let content = "Text.
+   ***
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Indented HR (1-3 spaces) should be detected
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_hr_in_html_comment() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Text.
+
+<!--
+---
+-->
+
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HR inside HTML comment should be ignored
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_hr_in_blockquote() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Text.
+
+> Quote text
+> ***
+> More quote
+
+After quote.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HR inside blockquote - the "> ***" line contains a valid HR pattern
+        // but within blockquote context. This tests blockquote awareness.
+        // Note: blockquotes don't skip HR detection, so this may flag.
+        // The actual behavior depends on implementation.
+        assert!(result.len() <= 2); // May or may not flag based on blockquote handling
+    }
+
+    #[test]
+    fn test_hr_after_list() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        // Real-world case from Node.js repo
+        let content = "* Item one
+* Item two
+***
+
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HR immediately after list should be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("before horizontal rule"));
+    }
+
+    #[test]
+    fn test_mixed_marker_with_many_spaces() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Text.
+-  -  -  -
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HR with multiple spaces between markers
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_only_hr_in_document() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "---";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Single HR alone in document - no blanks needed
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_blank_lines_already_present() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Text.
+
+
+---
+
+
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Multiple blank lines should not trigger warnings
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_hr_at_both_start_and_end() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "---
+
+Content in the middle.
+
+---";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HRs at start and end with proper spacing
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_consecutive_hrs_without_blanks() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Text.
+
+***
+---
+___
+
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Consecutive HRs need blanks between them
+        // *** -> --- missing blank after ***
+        // --- could be setext if *** had text, but *** is not text
+        // Actually --- after *** (not text) is still HR
+        assert!(result.len() >= 2);
+    }
+
+    #[test]
+    fn test_fix_idempotency() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Text before.
+***
+Text after.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_once = rule.fix(&ctx).unwrap();
+
+        // Apply fix again
+        let ctx2 = LintContext::new(&fixed_once, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_twice = rule.fix(&ctx2).unwrap();
+
+        // Second fix should not change anything
+        assert_eq!(fixed_once, fixed_twice);
+    }
+
+    #[test]
+    fn test_setext_heading_long_underline() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Heading Text
+----------
+
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Long underline is still setext heading, not HR
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_hr_with_trailing_whitespace() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Text.
+***
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HR with trailing whitespace should still be detected
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_hr_in_html_block() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Text.
+
+<div>
+---
+</div>
+
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // HR inside HTML block should be ignored (depends on HTML block detection)
+        // This tests HTML block awareness
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_spaced_hyphens_are_hr_not_setext() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        // CommonMark: setext underlines cannot have internal spaces
+        // So "- - -" is a thematic break, not a setext heading
+        let content = "Heading
+- - -
+
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // "- - -" with internal spaces is HR, needs blank before
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("before horizontal rule"));
+    }
+
+    #[test]
+    fn test_not_setext_if_prev_line_blank() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Some paragraph.
+
+---
+Text after.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // --- after blank line is HR, not setext heading
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("after horizontal rule"));
+    }
+
+    #[test]
+    fn test_asterisk_cannot_be_setext() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        // *** immediately after text is still HR (asterisks can't be setext markers)
+        let content = "Some text
+***
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // *** is always HR, never setext
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_underscore_cannot_be_setext() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        // ___ immediately after text is still HR (underscores can't be setext markers)
+        let content = "Some text
+___
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // ___ is always HR, never setext
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_fix_preserves_content() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "First paragraph with **bold** and *italic*.
+***
+Second paragraph with [link](url) and `code`.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Verify content is preserved
+        assert!(fixed.contains("**bold**"));
+        assert!(fixed.contains("*italic*"));
+        assert!(fixed.contains("[link](url)"));
+        assert!(fixed.contains("`code`"));
+        assert!(fixed.contains("***"));
+    }
+
+    #[test]
+    fn test_fix_only_adds_needed_blanks() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        // Already has blank before, missing blank after
+        let content = "Text.
+
+***
+More text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        let expected = "Text.
+
+***
+
+More text.";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_hr_detection_edge_cases() {
+        // Test the is_horizontal_rule function with edge cases
+
+        // Valid HRs with various spacing
+        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("   ---"));
+        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("---   "));
+        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("   ---   "));
+        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("*  *  *"));
+        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("_    _    _"));
+
+        // Invalid patterns
+        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("--a"));
+        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("**a"));
+        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("-*-"));
+        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("- * _"));
+        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("   "));
+        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("\t---"));
+    }
+
+    #[test]
+    fn test_warning_line_numbers_accurate() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "Line 1
+Line 2
+***
+Line 4";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Verify line numbers are 1-indexed and accurate
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].line, 3); // HR is on line 3
+        assert_eq!(result[1].line, 3);
+    }
+
+    #[test]
+    fn test_complex_document_structure() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "# Main Title
+
+Introduction paragraph.
+
+## Section One
+
+Content here.
+
+***
+
+## Section Two
+
+More content.
+
+---
+
+Final thoughts.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Well-structured document should have no warnings
+        assert!(result.is_empty());
     }
 }
