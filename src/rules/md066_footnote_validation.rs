@@ -7,16 +7,17 @@ use std::sync::LazyLock;
 /// Pattern to match footnote definitions: [^id]: content
 /// Matches at start of line, with 0-3 leading spaces, caret in brackets
 /// Also handles definitions inside blockquotes (after stripping > prefixes)
-static FOOTNOTE_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[\^([^\]]+)\]:").unwrap());
+pub static FOOTNOTE_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[\^([^\]]+)\]:").unwrap());
 
 /// Pattern to match footnote references in text: [^id]
 /// Must NOT be followed by : (which would make it a definition)
 /// Uses fancy_regex for negative lookahead support
-static FOOTNOTE_REF_PATTERN: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"\[\^([^\]]+)\](?!:)").unwrap());
+pub static FOOTNOTE_REF_PATTERN: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\[\^([^\]]+)\](?!:)").unwrap());
 
 /// Strip blockquote prefixes from a line to check for footnote definitions
 /// Handles nested blockquotes like `> > > ` and variations with/without spaces
-fn strip_blockquote_prefix(line: &str) -> &str {
+pub fn strip_blockquote_prefix(line: &str) -> &str {
     let mut chars = line.chars().peekable();
     let mut last_content_start = 0;
     let mut pos = 0;
