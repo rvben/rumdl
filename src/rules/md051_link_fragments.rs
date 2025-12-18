@@ -11,6 +11,12 @@ use std::sync::LazyLock;
 static HTML_ANCHOR_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\b(?:id|name)\s*=\s*["']([^"']+)["']"#).unwrap());
 
+// Attribute anchor pattern for kramdown/MkDocs { #id } syntax
+// Matches {#id} or { #id } with optional spaces, supports multiple anchors
+// Also supports classes and attributes: { #id .class key=value }
+static ATTR_ANCHOR_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\{\s*#([a-zA-Z][a-zA-Z0-9_-]*)[^}]*\}"#).unwrap());
+
 /// Normalize a path by resolving . and .. components
 fn normalize_path(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
@@ -72,42 +78,55 @@ impl MD051LinkFragments {
                 continue;
             }
 
+            // Skip code blocks for anchor extraction
+            if line_info.in_code_block {
+                continue;
+            }
+
+            let content = line_info.content(ctx.content);
+            let bytes = content.as_bytes();
+
             // Extract HTML anchor tags with id/name attributes
-            if !line_info.in_code_block {
-                let content = line_info.content(ctx.content);
-                let bytes = content.as_bytes();
+            if bytes.contains(&b'<') && (content.contains("id=") || content.contains("name=")) {
+                // HTML spec: only the first id attribute per element is valid
+                // Process element by element to handle multiple id attributes correctly
+                let mut pos = 0;
+                while pos < content.len() {
+                    if let Some(start) = content[pos..].find('<') {
+                        let tag_start = pos + start;
+                        if let Some(end) = content[tag_start..].find('>') {
+                            let tag_end = tag_start + end + 1;
+                            let tag = &content[tag_start..tag_end];
 
-                // Skip lines without HTML tags or id/name attributes
-                if bytes.contains(&b'<') && (content.contains("id=") || content.contains("name=")) {
-                    // HTML spec: only the first id attribute per element is valid
-                    // Process element by element to handle multiple id attributes correctly
-                    let mut pos = 0;
-                    while pos < content.len() {
-                        if let Some(start) = content[pos..].find('<') {
-                            let tag_start = pos + start;
-                            if let Some(end) = content[tag_start..].find('>') {
-                                let tag_end = tag_start + end + 1;
-                                let tag = &content[tag_start..tag_end];
-
-                                // Extract first id or name attribute from this tag
-                                if let Some(caps) = HTML_ANCHOR_PATTERN.find(tag) {
-                                    let matched_text = caps.as_str();
-                                    if let Some(caps) = HTML_ANCHOR_PATTERN.captures(matched_text)
-                                        && let Some(id_match) = caps.get(1)
-                                    {
-                                        let id = id_match.as_str();
-                                        if !id.is_empty() {
-                                            html_anchors.insert(id.to_string());
-                                        }
+                            // Extract first id or name attribute from this tag
+                            if let Some(caps) = HTML_ANCHOR_PATTERN.find(tag) {
+                                let matched_text = caps.as_str();
+                                if let Some(caps) = HTML_ANCHOR_PATTERN.captures(matched_text)
+                                    && let Some(id_match) = caps.get(1)
+                                {
+                                    let id = id_match.as_str();
+                                    if !id.is_empty() {
+                                        html_anchors.insert(id.to_string());
                                     }
                                 }
-                                pos = tag_end;
-                            } else {
-                                break;
                             }
+                            pos = tag_end;
                         } else {
                             break;
                         }
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            // Extract attribute anchors { #id } from non-heading lines
+            // Headings already have custom_id extracted below
+            if line_info.heading.is_none() && content.contains('{') && content.contains('#') {
+                for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
+                    if let Some(id_match) = caps.get(1) {
+                        // Add to markdown_headings (lowercased for case-insensitive matching)
+                        markdown_headings.insert(id_match.as_str().to_lowercase());
                     }
                 }
             }
@@ -379,12 +398,55 @@ impl Rule for MD051LinkFragments {
     fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, file_index: &mut FileIndex) {
         let mut fragment_counts = HashMap::new();
 
-        // Extract headings (for other files to reference)
+        // Extract headings, HTML anchors, and attribute anchors (for other files to reference)
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             if line_info.in_front_matter {
                 continue;
             }
 
+            // Skip code blocks for anchor extraction
+            if line_info.in_code_block {
+                continue;
+            }
+
+            let content = line_info.content(ctx.content);
+
+            // Extract HTML anchors (id or name attributes on any element)
+            if content.contains('<') && (content.contains("id=") || content.contains("name=")) {
+                let mut pos = 0;
+                while pos < content.len() {
+                    if let Some(start) = content[pos..].find('<') {
+                        let tag_start = pos + start;
+                        if let Some(end) = content[tag_start..].find('>') {
+                            let tag_end = tag_start + end + 1;
+                            let tag = &content[tag_start..tag_end];
+
+                            if let Some(caps) = HTML_ANCHOR_PATTERN.captures(tag)
+                                && let Some(id_match) = caps.get(1)
+                            {
+                                file_index.add_html_anchor(id_match.as_str().to_string());
+                            }
+                            pos = tag_end;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            // Extract attribute anchors { #id } on non-heading lines
+            // Headings already have custom_id extracted via heading.custom_id
+            if line_info.heading.is_none() && content.contains("{") && content.contains("#") {
+                for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
+                    if let Some(id_match) = caps.get(1) {
+                        file_index.add_attribute_anchor(id_match.as_str().to_string());
+                    }
+                }
+            }
+
+            // Extract heading anchors
             if let Some(heading) = &line_info.heading {
                 let fragment = self.anchor_style.generate_fragment(&heading.text);
 

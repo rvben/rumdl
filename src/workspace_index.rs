@@ -28,7 +28,7 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 
 /// Cache format version - increment when WorkspaceIndex serialization changes
 #[cfg(feature = "native")]
-const CACHE_FORMAT_VERSION: u32 = 3;
+const CACHE_FORMAT_VERSION: u32 = 4;
 
 /// Cache file name within the version directory
 #[cfg(feature = "native")]
@@ -66,6 +66,13 @@ pub struct FileIndex {
     /// O(1) anchor lookup: lowercased anchor → heading index
     /// Includes both auto-generated and custom anchors
     anchor_to_heading: HashMap<String, usize>,
+    /// HTML anchors defined via <a id="..."> or <element id="..."> tags
+    /// Stored lowercase for case-insensitive matching
+    html_anchors: HashSet<String>,
+    /// Attribute anchors defined via { #id } syntax (kramdown/MkDocs attr_list)
+    /// Can appear on any element, not just headings
+    /// Stored lowercase for case-insensitive matching
+    attribute_anchors: HashSet<String>,
     /// Rules disabled for the entire file (from inline comments)
     /// Used by cross-file rules to respect inline disable directives
     pub file_disabled_rules: HashSet<String>,
@@ -478,10 +485,32 @@ impl FileIndex {
 
     /// Check if an anchor exists in this file (O(1) lookup)
     ///
-    /// Returns true if the anchor matches either an auto-generated or custom anchor.
+    /// Returns true if the anchor matches any of:
+    /// - Auto-generated heading anchors
+    /// - Custom heading anchors (from {#id} syntax on headings)
+    /// - HTML anchors (from <a id="..."> or <element id="...">)
+    /// - Attribute anchors (from { #id } syntax on non-heading elements)
+    ///
     /// Matching is case-insensitive.
     pub fn has_anchor(&self, anchor: &str) -> bool {
-        self.anchor_to_heading.contains_key(&anchor.to_lowercase())
+        let lower = anchor.to_lowercase();
+        self.anchor_to_heading.contains_key(&lower)
+            || self.html_anchors.contains(&lower)
+            || self.attribute_anchors.contains(&lower)
+    }
+
+    /// Add an HTML anchor (from <a id="..."> or <element id="..."> tags)
+    pub fn add_html_anchor(&mut self, anchor: String) {
+        if !anchor.is_empty() {
+            self.html_anchors.insert(anchor.to_lowercase());
+        }
+    }
+
+    /// Add an attribute anchor (from { #id } syntax on non-heading elements)
+    pub fn add_attribute_anchor(&mut self, anchor: String) {
+        if !anchor.is_empty() {
+            self.attribute_anchors.insert(anchor.to_lowercase());
+        }
     }
 
     /// Get the heading index for an anchor (O(1) lookup)

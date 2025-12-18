@@ -311,3 +311,380 @@ Here are the features.
         filtered_warnings[0].line
     );
 }
+
+/// FP-003: Test that HTML anchors (<a id="...">) are indexed for cross-file validation.
+///
+/// HTML anchors defined via `<a id="anchor-name">` or `<element id="...">` should be
+/// recognized as valid anchor targets when other files link to them.
+#[test]
+fn test_cross_file_html_anchors_indexed() {
+    // Source file links to HTML anchor in target
+    let source_content = r#"# Source Document
+
+See [free vs bound](./other.md#free-vs-bound) for explanation.
+"#;
+
+    // Target file has HTML anchor (not a heading)
+    let target_content = r#"# Other Document
+
+<a id="free-vs-bound"></a>
+## Free vs Bound Variables
+
+Content here.
+"#;
+
+    let source_path = PathBuf::from("/test/main.md");
+    let target_path = PathBuf::from("/test/other.md");
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+
+    let mut workspace_index = WorkspaceIndex::new();
+    workspace_index.insert_file(source_path.clone(), source_index.clone());
+    workspace_index.insert_file(target_path.clone(), target_index.clone());
+
+    // Verify the HTML anchor is indexed
+    let target_file_index = workspace_index.get_file(&target_path).unwrap();
+    assert!(
+        target_file_index.has_anchor("free-vs-bound"),
+        "HTML anchor 'free-vs-bound' should be indexed"
+    );
+
+    // Run cross-file checks - should NOT report a warning for the valid HTML anchor
+    let md051 = MD051LinkFragments::default();
+    let warnings = md051
+        .cross_file_check(&source_path, &source_index, &workspace_index)
+        .unwrap();
+
+    assert!(
+        warnings.is_empty(),
+        "Should not flag link to valid HTML anchor. Got: {warnings:?}"
+    );
+}
+
+/// FP-003: Test various HTML anchor patterns for cross-file validation.
+#[test]
+fn test_cross_file_html_anchor_variants() {
+    let source_content = r#"# Source
+
+[anchor via id](./target.md#anchor-id)
+[anchor via name](./target.md#anchor-name)
+[div anchor](./target.md#section-one)
+[span anchor](./target.md#inline-anchor)
+"#;
+
+    let target_content = r#"# Target
+
+<a id="anchor-id"></a>
+<a name="anchor-name"></a>
+<div id="section-one">Section content</div>
+Some text with <span id="inline-anchor">inline</span> anchor.
+"#;
+
+    let source_path = PathBuf::from("/test/source.md");
+    let target_path = PathBuf::from("/test/target.md");
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+
+    let mut workspace_index = WorkspaceIndex::new();
+    workspace_index.insert_file(source_path.clone(), source_index.clone());
+    workspace_index.insert_file(target_path.clone(), target_index.clone());
+
+    // Verify all HTML anchors are indexed
+    let target_file_index = workspace_index.get_file(&target_path).unwrap();
+    assert!(target_file_index.has_anchor("anchor-id"), "Should index id attribute");
+    assert!(
+        target_file_index.has_anchor("anchor-name"),
+        "Should index name attribute"
+    );
+    assert!(target_file_index.has_anchor("section-one"), "Should index div id");
+    assert!(target_file_index.has_anchor("inline-anchor"), "Should index span id");
+
+    // No warnings expected - all links are valid
+    let md051 = MD051LinkFragments::default();
+    let warnings = md051
+        .cross_file_check(&source_path, &source_index, &workspace_index)
+        .unwrap();
+
+    assert!(
+        warnings.is_empty(),
+        "All links to HTML anchors should be valid. Got: {warnings:?}"
+    );
+}
+
+/// FP-001: Test that attribute anchors ({ #id }) on non-heading elements are indexed.
+///
+/// MkDocs and kramdown support `{ #custom-id }` syntax on any element, not just headings.
+/// These attribute anchors should be recognized as valid link targets.
+#[test]
+fn test_cross_file_attribute_anchors_on_list_items() {
+    let source_content = r#"# Documentation
+
+See the [locale setting](./config.md#mkdocs-locale) for configuration.
+"#;
+
+    // Target file has attribute anchor on list item (MkDocs style)
+    let target_content = r#"# Configuration Reference
+
+*   **`locale`**{ #mkdocs-locale }: The locale (language/location) used.
+*   **`name`**{ #mkdocs-name }: The name of the theme.
+"#;
+
+    let source_path = PathBuf::from("/test/docs.md");
+    let target_path = PathBuf::from("/test/config.md");
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+
+    let mut workspace_index = WorkspaceIndex::new();
+    workspace_index.insert_file(source_path.clone(), source_index.clone());
+    workspace_index.insert_file(target_path.clone(), target_index.clone());
+
+    // Verify attribute anchors are indexed
+    let target_file_index = workspace_index.get_file(&target_path).unwrap();
+    assert!(
+        target_file_index.has_anchor("mkdocs-locale"),
+        "Attribute anchor 'mkdocs-locale' should be indexed"
+    );
+    assert!(
+        target_file_index.has_anchor("mkdocs-name"),
+        "Attribute anchor 'mkdocs-name' should be indexed"
+    );
+
+    // No warnings expected - link to attribute anchor is valid
+    let md051 = MD051LinkFragments::default();
+    let warnings = md051
+        .cross_file_check(&source_path, &source_index, &workspace_index)
+        .unwrap();
+
+    assert!(
+        warnings.is_empty(),
+        "Link to attribute anchor should be valid. Got: {warnings:?}"
+    );
+}
+
+/// FP-001: Test various attribute anchor patterns.
+#[test]
+fn test_attribute_anchor_pattern_variants() {
+    let source_content = r#"# Links
+
+[no space](./target.md#compact)
+[with spaces](./target.md#spaced-out)
+[with class](./target.md#styled)
+[definition](./target.md#term-api)
+"#;
+
+    let target_content = r#"# Target
+
+Text{#compact} with compact syntax.
+
+Paragraph{ #spaced-out } with spaces.
+
+Item{ #styled .highlight } with class.
+
+API
+:   Definition{ #term-api } in a definition list.
+"#;
+
+    let source_path = PathBuf::from("/test/links.md");
+    let target_path = PathBuf::from("/test/target.md");
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+
+    let mut workspace_index = WorkspaceIndex::new();
+    workspace_index.insert_file(source_path.clone(), source_index.clone());
+    workspace_index.insert_file(target_path.clone(), target_index.clone());
+
+    // Verify all attribute anchors are indexed
+    let target_file_index = workspace_index.get_file(&target_path).unwrap();
+    assert!(
+        target_file_index.has_anchor("compact"),
+        "Should index {{#id}} without spaces"
+    );
+    assert!(
+        target_file_index.has_anchor("spaced-out"),
+        "Should index {{ #id }} with spaces"
+    );
+    assert!(target_file_index.has_anchor("styled"), "Should index {{ #id .class }}");
+    assert!(
+        target_file_index.has_anchor("term-api"),
+        "Should index anchor in definition list"
+    );
+
+    // No warnings expected
+    let md051 = MD051LinkFragments::default();
+    let warnings = md051
+        .cross_file_check(&source_path, &source_index, &workspace_index)
+        .unwrap();
+
+    assert!(
+        warnings.is_empty(),
+        "All attribute anchor links should be valid. Got: {warnings:?}"
+    );
+}
+
+/// Test same-file link to attribute anchor on non-heading element.
+#[test]
+fn test_same_file_attribute_anchor_link() {
+    let content = r#"# Test Document
+
+See the [locale setting](#mkdocs-locale) for configuration.
+
+*   **`locale`**{ #mkdocs-locale }: The locale (language/location) used.
+*   **`name`**{ #mkdocs-name }: The name of the theme.
+
+## More Content
+
+Link to [locale](#mkdocs-locale) again.
+"#;
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default()).unwrap();
+
+    // Filter to MD051 only
+    let md051_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD051"))
+        .collect();
+
+    assert!(
+        md051_warnings.is_empty(),
+        "Same-file links to attribute anchors should be valid. Got: {md051_warnings:?}"
+    );
+}
+
+/// Test same-file link to HTML anchor.
+#[test]
+fn test_same_file_html_anchor_link() {
+    let content = r#"# Document
+
+Jump to [section one](#section-one).
+
+<a id="section-one"></a>
+## Section One
+
+Content here.
+"#;
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default()).unwrap();
+
+    let md051_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD051"))
+        .collect();
+
+    assert!(
+        md051_warnings.is_empty(),
+        "Same-file links to HTML anchors should be valid. Got: {md051_warnings:?}"
+    );
+}
+
+/// Test that attribute anchors are case-insensitive for matching.
+#[test]
+fn test_anchor_case_insensitivity() {
+    let source_content = r#"# Links
+
+[upper](./target.md#ANCHOR-ID)
+[mixed](./target.md#Anchor-Id)
+[lower](./target.md#anchor-id)
+"#;
+
+    let target_content = r#"# Target
+
+Text{ #anchor-id } here.
+"#;
+
+    let source_path = PathBuf::from("/test/source.md");
+    let target_path = PathBuf::from("/test/target.md");
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+
+    let mut workspace_index = WorkspaceIndex::new();
+    workspace_index.insert_file(source_path.clone(), source_index.clone());
+    workspace_index.insert_file(target_path.clone(), target_index.clone());
+
+    // All case variants should match
+    let target_file_index = workspace_index.get_file(&target_path).unwrap();
+    assert!(target_file_index.has_anchor("ANCHOR-ID"), "Should match uppercase");
+    assert!(target_file_index.has_anchor("Anchor-Id"), "Should match mixed case");
+    assert!(target_file_index.has_anchor("anchor-id"), "Should match lowercase");
+
+    // No warnings expected
+    let md051 = MD051LinkFragments::default();
+    let warnings = md051
+        .cross_file_check(&source_path, &source_index, &workspace_index)
+        .unwrap();
+
+    assert!(
+        warnings.is_empty(),
+        "Case-insensitive anchor matching should work. Got: {warnings:?}"
+    );
+}
+
+/// Test that anchors inside code blocks are NOT indexed.
+#[test]
+fn test_anchors_in_code_blocks_not_indexed() {
+    let source_content = r#"# Source
+
+[code anchor](./target.md#not-real)
+"#;
+
+    let target_content = r#"# Target
+
+```markdown
+Text{ #not-real } in code block.
+<a id="also-not-real"></a>
+```
+
+Regular text.
+"#;
+
+    let source_path = PathBuf::from("/test/source.md");
+    let target_path = PathBuf::from("/test/target.md");
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+
+    let mut workspace_index = WorkspaceIndex::new();
+    workspace_index.insert_file(source_path.clone(), source_index.clone());
+    workspace_index.insert_file(target_path.clone(), target_index.clone());
+
+    // Anchors in code blocks should NOT be indexed
+    let target_file_index = workspace_index.get_file(&target_path).unwrap();
+    assert!(
+        !target_file_index.has_anchor("not-real"),
+        "Attribute anchor in code block should NOT be indexed"
+    );
+    assert!(
+        !target_file_index.has_anchor("also-not-real"),
+        "HTML anchor in code block should NOT be indexed"
+    );
+
+    // Should have 1 warning for the broken link
+    let md051 = MD051LinkFragments::default();
+    let warnings = md051
+        .cross_file_check(&source_path, &source_index, &workspace_index)
+        .unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Link to anchor in code block should be flagged as broken. Got: {warnings:?}"
+    );
+}
