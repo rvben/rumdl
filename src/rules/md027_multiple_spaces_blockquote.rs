@@ -63,7 +63,12 @@ impl Rule for MD027MultipleSpacesBlockquote {
             // Check if this line is a blockquote using cached info
             if let Some(blockquote) = &line_info.blockquote {
                 // Part 1: Check for multiple spaces after the blockquote marker
-                if blockquote.has_multiple_spaces_after_marker {
+                // Skip if line is in a list block - extra spaces may be list continuation indent
+                // Also skip if previous line in same blockquote context had a list item
+                // (covers cases where list block detection doesn't catch all continuation lines)
+                let is_likely_list_continuation =
+                    ctx.is_in_list_block(line_num) || self.previous_blockquote_line_had_list(ctx, line_idx);
+                if blockquote.has_multiple_spaces_after_marker && !is_likely_list_continuation {
                     // Find where the extra spaces start in the line
                     // We need to find the position after the markers and first space/tab
                     let mut byte_pos = 0;
@@ -148,10 +153,14 @@ impl Rule for MD027MultipleSpacesBlockquote {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let mut result = Vec::with_capacity(ctx.lines.len());
 
-        for line_info in &ctx.lines {
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            let line_num = line_idx + 1;
             if let Some(blockquote) = &line_info.blockquote {
                 // Fix blockquotes with multiple spaces after the marker
-                if blockquote.has_multiple_spaces_after_marker {
+                // Skip if line is in a list block - extra spaces are list continuation indent
+                let is_likely_list_continuation =
+                    ctx.is_in_list_block(line_num) || self.previous_blockquote_line_had_list(ctx, line_idx);
+                if blockquote.has_multiple_spaces_after_marker && !is_likely_list_continuation {
                     // Rebuild the line with exactly one space after the markers
                     // But don't add a space if the content is empty to avoid MD009 conflicts
                     let fixed_line = if blockquote.content.is_empty() {
@@ -203,6 +212,33 @@ impl Rule for MD027MultipleSpacesBlockquote {
 }
 
 impl MD027MultipleSpacesBlockquote {
+    /// Check if a previous line in the same blockquote context had a list item
+    /// This helps identify list continuation lines even when list block detection
+    /// doesn't catch all continuation lines
+    fn previous_blockquote_line_had_list(&self, ctx: &crate::lint_context::LintContext, line_idx: usize) -> bool {
+        // Look backwards for a blockquote line with a list item
+        // Stop when we hit a non-blockquote line or find a list item
+        for prev_idx in (0..line_idx).rev() {
+            let prev_line = &ctx.lines[prev_idx];
+
+            // If previous line is not a blockquote, stop searching
+            if prev_line.blockquote.is_none() {
+                return false;
+            }
+
+            // If previous line has a list item, this could be list continuation
+            if prev_line.list_item.is_some() {
+                return true;
+            }
+
+            // If it's in a list block, that's also good enough
+            if ctx.is_in_list_block(prev_idx + 1) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Detect malformed blockquote attempts where user intent is clear
     fn detect_malformed_blockquote_attempts(&self, line: &str) -> Vec<(usize, usize, String, String)> {
         let mut results = Vec::new();
@@ -600,5 +636,54 @@ mod tests {
         let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
         let fixed2 = rule.fix(&ctx2).unwrap();
         assert_eq!(fixed2, "> Four spaces");
+    }
+
+    #[test]
+    fn test_list_continuation_inside_blockquote_not_flagged() {
+        // List continuation indentation inside blockquotes should NOT be flagged
+        // This matches markdownlint-cli behavior
+        let rule = MD027MultipleSpacesBlockquote;
+
+        // List with continuation inside blockquote
+        let content = "> - Item starts here\n>   This continues the item\n> - Another item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "List continuation inside blockquote should not be flagged, got: {result:?}"
+        );
+
+        // Multiple list items with continuations
+        let content2 = "> * First item\n>   First item continuation\n>   Still continuing\n> * Second item";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "List continuations should not be flagged, got: {result2:?}"
+        );
+    }
+
+    #[test]
+    fn test_list_continuation_fix_preserves_indentation() {
+        // Ensure fix doesn't break list continuation indentation
+        let rule = MD027MultipleSpacesBlockquote;
+
+        let content = "> - Item\n>   continuation";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should preserve the list continuation indentation
+        assert_eq!(fixed, "> - Item\n>   continuation");
+    }
+
+    #[test]
+    fn test_non_list_multiple_spaces_still_flagged() {
+        // Non-list lines with multiple spaces should still be flagged
+        let rule = MD027MultipleSpacesBlockquote;
+
+        // Just extra spaces, not a list
+        let content = ">  This has extra spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Non-list line should be flagged");
     }
 }
