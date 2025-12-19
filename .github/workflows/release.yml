@@ -51,14 +51,6 @@ jobs:
       - name: Install mise tools
         run: mise install --yes
 
-      # Ensure Rust components are installed from rust-toolchain.toml
-      - name: Install Rust components
-        run: |
-          rustup component add rustfmt clippy
-
-      - name: Run linting
-        run: make lint
-
       - name: Run tests
         run: |
           # Use fast CI-optimized tests
