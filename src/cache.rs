@@ -289,12 +289,13 @@ mod tests {
 
         let content = "# Test";
         let config_hash = "abc123";
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
         // Should return None when disabled
-        assert!(cache.get(content, config_hash, "test_rules_hash").is_none());
+        assert!(cache.get(content, config_hash, rules_hash).is_none());
 
         // Set should be no-op when disabled
-        cache.set(content, config_hash, "test_rules_hash", vec![]);
+        cache.set(content, config_hash, rules_hash, vec![]);
         assert_eq!(cache.stats().writes, 0);
     }
 
@@ -305,9 +306,10 @@ mod tests {
 
         let content = "# Test";
         let config_hash = "abc123";
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
         // First access should be a miss
-        assert!(cache.get(content, config_hash, "test_rules_hash").is_none());
+        assert!(cache.get(content, config_hash, rules_hash).is_none());
         assert_eq!(cache.stats().misses, 1);
         assert_eq!(cache.stats().hits, 0);
     }
@@ -320,13 +322,14 @@ mod tests {
 
         let content = "# Test";
         let config_hash = "abc123";
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let warnings = vec![];
 
         // Store in cache
-        cache.set(content, config_hash, "test_rules_hash", warnings.clone());
+        cache.set(content, config_hash, rules_hash, warnings.clone());
 
         // Should hit cache
-        let cached = cache.get(content, config_hash, "test_rules_hash");
+        let cached = cache.get(content, config_hash, rules_hash);
         assert!(cached.is_some());
         assert_eq!(cached.unwrap(), warnings);
         assert_eq!(cache.stats().hits, 1);
@@ -341,12 +344,13 @@ mod tests {
         let content1 = "# Test 1";
         let content2 = "# Test 2";
         let config_hash = "abc123";
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
         // Cache content1
-        cache.set(content1, config_hash, "test_rules_hash", vec![]);
+        cache.set(content1, config_hash, rules_hash, vec![]);
 
         // content2 should miss (different content)
-        assert!(cache.get(content2, config_hash, "test_rules_hash").is_none());
+        assert!(cache.get(content2, config_hash, rules_hash).is_none());
     }
 
     #[test]
@@ -358,12 +362,13 @@ mod tests {
         let content = "# Test";
         let config_hash1 = "abc123";
         let config_hash2 = "def456";
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
         // Cache with config1
-        cache.set(content, config_hash1, "test_rules_hash", vec![]);
+        cache.set(content, config_hash1, rules_hash, vec![]);
 
         // Should miss with config2 (different config)
-        assert!(cache.get(content, config_hash2, "test_rules_hash").is_none());
+        assert!(cache.get(content, config_hash2, rules_hash).is_none());
     }
 
     #[test]
@@ -391,18 +396,19 @@ mod tests {
 
         let content = "# Test";
         let config_hash = "abc123";
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
         // Miss
-        cache.get(content, config_hash, "test_rules_hash");
+        cache.get(content, config_hash, rules_hash);
         assert_eq!(cache.stats().misses, 1);
         assert_eq!(cache.stats().hits, 0);
 
         // Write
-        cache.set(content, config_hash, "test_rules_hash", vec![]);
+        cache.set(content, config_hash, rules_hash, vec![]);
         assert_eq!(cache.stats().writes, 1);
 
         // Hit
-        cache.get(content, config_hash, "test_rules_hash");
+        cache.get(content, config_hash, rules_hash);
         assert_eq!(cache.stats().hits, 1);
 
         // Hit rate
@@ -415,8 +421,10 @@ mod tests {
         let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
         cache.init().unwrap();
 
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
         // Add something to cache
-        cache.set("# Test", "abc", "test_rules_hash", vec![]);
+        cache.set("# Test", "abc", rules_hash, vec![]);
 
         // Clear cache
         cache.clear().unwrap();
