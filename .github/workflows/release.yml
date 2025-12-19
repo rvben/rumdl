@@ -118,29 +118,36 @@ jobs:
       # Build wheel
       - name: Build wheel
         run: |
-          if [[ "${{ matrix.target }}" == *"-musl" ]]; then
-            # Use musllinux_1_2 with zig for static Linux binaries (Alpine)
-            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility musllinux_1_2 --zig
-          elif [[ "${{ matrix.target }}" == *"-gnu" ]]; then
-            # Use manylinux2014 for standard glibc Linux distributions
-            mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
-          else
-            # Native compilation for Windows and macOS
-            mise exec -- maturin build --release --target ${{ matrix.target }}
-          fi
+          case "${{ matrix.target }}" in
+            *-musl)
+              # Use musllinux_1_2 with zig for static Linux binaries (Alpine)
+              mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility musllinux_1_2 --zig
+              ;;
+            *-gnu)
+              # Use manylinux2014 for standard glibc Linux distributions
+              mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
+              ;;
+            *)
+              # Native compilation for Windows and macOS
+              mise exec -- maturin build --release --target ${{ matrix.target }}
+              ;;
+          esac
         shell: bash
 
       # Build binary
       - name: Build binary
         run: |
-          if [[ "${{ matrix.target }}" == *"-linux-"* ]]; then
-            # Use cargo-zigbuild for all Linux builds (both musl and gnu)
-            cargo install cargo-zigbuild --locked
-            mise exec -- cargo zigbuild --release --target ${{ matrix.target }} --bin rumdl
-          else
-            # Native compilation for Windows and macOS
-            cargo build --release --target ${{ matrix.target }} --bin rumdl
-          fi
+          case "${{ matrix.target }}" in
+            *-linux-*)
+              # Use cargo-zigbuild for all Linux builds (both musl and gnu)
+              cargo install cargo-zigbuild --locked
+              mise exec -- cargo zigbuild --release --target ${{ matrix.target }} --bin rumdl
+              ;;
+            *)
+              # Native compilation for Windows and macOS
+              cargo build --release --target ${{ matrix.target }} --bin rumdl
+              ;;
+          esac
         shell: bash
 
       # Create release archives
@@ -154,7 +161,7 @@ jobs:
 
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             # Windows: Create a zip archive
-            cp target/${{ matrix.target }}/release/rumdl.exe release-package/rumdl.exe
+            cp "target/${{ matrix.target }}/release/rumdl.exe" release-package/rumdl.exe
 
             # Create zip archive (using PowerShell via bash)
             cd release-package
@@ -162,19 +169,19 @@ jobs:
             cd ..
 
             # Calculate SHA256 for zip
-            powershell -command "Get-FileHash -Path rumdl-${VERSION}-${{ matrix.target }}.zip -Algorithm SHA256 | Select-Object -ExpandProperty Hash" > rumdl-${VERSION}-${{ matrix.target }}.zip.sha256
+            powershell -command "Get-FileHash -Path 'rumdl-${VERSION}-${{ matrix.target }}.zip' -Algorithm SHA256 | Select-Object -ExpandProperty Hash" > "rumdl-${VERSION}-${{ matrix.target }}.zip.sha256"
           else
             # Unix: Create tar.gz archive
-            cp target/${{ matrix.target }}/release/rumdl release-package/rumdl
+            cp "target/${{ matrix.target }}/release/rumdl" release-package/rumdl
 
             # Create tar.gz archive
-            tar -czf rumdl-${VERSION}-${{ matrix.target }}.tar.gz -C release-package rumdl
+            tar -czf "rumdl-${VERSION}-${{ matrix.target }}.tar.gz" -C release-package rumdl
 
             # Calculate SHA256
             if [[ "${{ runner.os }}" == "macOS" ]]; then
-              shasum -a 256 rumdl-${VERSION}-${{ matrix.target }}.tar.gz > rumdl-${VERSION}-${{ matrix.target }}.tar.gz.sha256
+              shasum -a 256 "rumdl-${VERSION}-${{ matrix.target }}.tar.gz" > "rumdl-${VERSION}-${{ matrix.target }}.tar.gz.sha256"
             else
-              sha256sum rumdl-${VERSION}-${{ matrix.target }}.tar.gz > rumdl-${VERSION}-${{ matrix.target }}.tar.gz.sha256
+              sha256sum "rumdl-${VERSION}-${{ matrix.target }}.tar.gz" > "rumdl-${VERSION}-${{ matrix.target }}.tar.gz.sha256"
             fi
           fi
 
@@ -434,7 +441,7 @@ jobs:
 
       - name: Create Release
         if: ${{ inputs.dry_run != true }}
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           body_path: release-notes.md
           files: |
@@ -442,8 +449,6 @@ jobs:
             artifacts/release-*/rumdl-*.tar.gz.sha256
             artifacts/release-*/rumdl-*.zip
             artifacts/release-*/rumdl-*.zip.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test Release Creation (dry run)
         if: ${{ inputs.dry_run == true }}
@@ -458,7 +463,7 @@ jobs:
         run: |
           # Extract major version (e.g., v0 from v0.0.191)
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          MAJOR_VERSION=$(echo "$TAG_NAME" | sed 's/\(v[0-9]*\).*/\1/')
+          MAJOR_VERSION=${TAG_NAME%%.*}
 
           echo "Updating $MAJOR_VERSION tag to point to $TAG_NAME"
 
@@ -476,7 +481,7 @@ jobs:
         if: ${{ inputs.dry_run == true }}
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          MAJOR_VERSION=$(echo "$TAG_NAME" | sed 's/\(v[0-9]*\).*/\1/')
+          MAJOR_VERSION=${TAG_NAME%%.*}
           echo "DRY RUN: Would update $MAJOR_VERSION tag to point to $TAG_NAME"
 
       - name: Notify rumdl-pre-commit

@@ -52,6 +52,14 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      - id: actionlint
+        name: actionlint (GitHub Actions)
+        entry: actionlint
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # General file quality checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0

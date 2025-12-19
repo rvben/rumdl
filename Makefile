@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help benchmark benchmark-run benchmark-chart
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help benchmark benchmark-run benchmark-chart lint-actions
 
 # Development environment setup
 setup-mise:
@@ -114,11 +114,16 @@ fmt:
 	cargo clippy --fix --allow-dirty --allow-staged -- -D clippy::uninlined_format_args
 	cargo fix --allow-dirty --allow-staged
 
+lint-actions:
+	actionlint
+
 lint:
 	CARGO_INCREMENTAL=1 cargo clippy --workspace --lib --bins --tests -- -D warnings -D clippy::uninlined_format_args
+	$(MAKE) lint-actions
 
 lint-all:
 	CARGO_INCREMENTAL=1 cargo clippy --all-targets --all-features -- -D warnings -D clippy::uninlined_format_args
+	$(MAKE) lint-actions
 
 lint-fast:
 	CARGO_INCREMENTAL=1 cargo clippy --workspace --lib --bins -- -D warnings -D clippy::uninlined_format_args
