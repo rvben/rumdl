@@ -298,6 +298,13 @@ impl MD046CodeBlockStyle {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
 
+            // Skip lines inside HTML comments - code block examples in comments are not real code blocks
+            if let Some(line_info) = ctx.lines.get(i)
+                && line_info.in_html_comment
+            {
+                continue;
+            }
+
             // Check for fence markers (``` or ~~~)
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
@@ -700,6 +707,11 @@ impl Rule for MD046CodeBlockStyle {
 
             // Skip lines that are in HTML blocks - they shouldn't be treated as indented code
             if ctx.line_info(i + 1).is_some_and(|info| info.in_html_block) {
+                continue;
+            }
+
+            // Skip lines inside HTML comments - code block examples in comments are not real code blocks
+            if ctx.line_info(i + 1).is_some_and(|info| info.in_html_comment) {
                 continue;
             }
 
@@ -1634,5 +1646,113 @@ Regular paragraph ends footnote context.
         assert!(!rule.is_footnote_definition("[^test#name]: text")); // Hash
         assert!(!rule.is_footnote_definition("[^test$name]: text")); // Dollar
         assert!(!rule.is_footnote_definition("[^test%name]: text")); // Percent
+    }
+
+    #[test]
+    fn test_code_block_inside_html_comment() {
+        // Regression test: code blocks inside HTML comments should not be flagged
+        // Found in denoland/deno test fixture during sanity testing
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+Some text.
+
+<!--
+Example code block in comment:
+
+```typescript
+console.log("Hello");
+```
+
+More comment text.
+-->
+
+More content."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Code blocks inside HTML comments should not be flagged as unclosed"
+        );
+    }
+
+    #[test]
+    fn test_unclosed_fence_inside_html_comment() {
+        // Even an unclosed fence inside an HTML comment should be ignored
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+<!--
+Example with intentionally unclosed fence:
+
+```
+code without closing
+-->
+
+More content."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Unclosed fences inside HTML comments should be ignored"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_comment_with_indented_code() {
+        // Indented code inside HTML comments should also be ignored
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+<!--
+Example:
+
+    indented code
+    more code
+
+End of comment.
+-->
+
+Regular text."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Indented code inside HTML comments should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_code_block_after_html_comment() {
+        // Code blocks after HTML comments should still be detected
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+<!-- comment -->
+
+Text before.
+
+    indented code should be flagged
+
+More text."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Code blocks after HTML comments should still be detected"
+        );
+        assert!(result[0].message.contains("Use fenced code blocks"));
     }
 }
