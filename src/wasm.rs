@@ -24,13 +24,67 @@
 //! const fixed = linter.fix(content);
 //! ```
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+
+use crate::rule::{LintWarning, Severity};
+use crate::utils::utf8_offsets::byte_offset_to_char_offset;
 
 use crate::config::{Config, MarkdownFlavor};
 use crate::fix_coordinator::FixCoordinator;
 use crate::rules::{all_rules, filter_rules};
 use crate::types::LineLength;
+
+/// Warning with fix range converted to character offsets for JavaScript
+#[derive(Serialize)]
+struct JsWarning {
+    message: String,
+    line: usize,
+    column: usize,
+    end_line: usize,
+    end_column: usize,
+    severity: Severity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix: Option<JsFix>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rule_name: Option<String>,
+}
+
+/// Fix with character offsets instead of byte offsets
+#[derive(Serialize)]
+struct JsFix {
+    range: JsRange,
+    replacement: String,
+}
+
+/// Range with character offsets for JavaScript
+#[derive(Serialize)]
+struct JsRange {
+    start: usize,
+    end: usize,
+}
+
+/// Convert a LintWarning to a JsWarning with character offsets
+fn convert_warning_for_js(warning: &LintWarning, content: &str) -> JsWarning {
+    let js_fix = warning.fix.as_ref().map(|fix| JsFix {
+        range: JsRange {
+            start: byte_offset_to_char_offset(content, fix.range.start),
+            end: byte_offset_to_char_offset(content, fix.range.end),
+        },
+        replacement: fix.replacement.clone(),
+    });
+
+    JsWarning {
+        message: warning.message.clone(),
+        line: warning.line,
+        column: warning.column,
+        end_line: warning.end_line,
+        end_column: warning.end_column,
+        severity: warning.severity,
+        fix: js_fix,
+        rule_name: warning.rule_name.clone(),
+    }
+}
 
 /// Initialize the WASM module with better panic messages
 #[wasm_bindgen(start)]
@@ -142,12 +196,19 @@ impl Linter {
     /// - `line`: 1-indexed line number
     /// - `column`: 1-indexed column number
     /// - `fix`: Optional fix object with `range.start`, `range.end`, `replacement`
+    ///
+    /// Note: Fix ranges use character offsets (not byte offsets) for JavaScript compatibility.
+    /// This is important for multi-byte UTF-8 characters like `æ` or emoji.
     pub fn check(&self, content: &str) -> String {
         let all = all_rules(&self.config);
         let rules = filter_rules(&all, &self.config.global);
 
         match crate::lint(content, &rules, false, self.flavor) {
-            Ok(warnings) => serde_json::to_string(&warnings).unwrap_or_else(|_| "[]".to_string()),
+            Ok(warnings) => {
+                // Convert byte offsets to character offsets for JavaScript
+                let js_warnings: Vec<JsWarning> = warnings.iter().map(|w| convert_warning_for_js(w, content)).collect();
+                serde_json::to_string(&js_warnings).unwrap_or_else(|_| "[]".to_string())
+            }
             Err(e) => format!(r#"[{{"error": "{}"}}]"#, e),
         }
     }
@@ -405,5 +466,62 @@ mod tests {
                 .unwrap()
                 .contains(&serde_json::Value::String("MD041".to_string()))
         );
+    }
+
+    // byte_offset_to_char_offset tests are in utils/utf8_offsets.rs
+
+    #[test]
+    fn test_check_norwegian_letter_fix_offset() {
+        // This is the exact bug case: Norwegian letter at end of file without trailing newline
+        let content = "# Heading\n\nContent with Norwegian letter \"æ\".";
+        assert_eq!(content.len(), 46); // 46 bytes (æ is 2 bytes)
+        assert_eq!(content.chars().count(), 45); // 45 characters (æ is 1 char)
+
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        let result = linter.check(content);
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+
+        // Should have MD047 warning (missing trailing newline)
+        let md047 = warnings.iter().find(|w| w["rule_name"] == "MD047");
+        assert!(md047.is_some(), "Should have MD047 warning");
+
+        // The fix range should use character offsets, not byte offsets
+        let fix = md047.unwrap()["fix"].as_object().unwrap();
+        let range = fix["range"].as_object().unwrap();
+
+        // Character offset should be 45 (not byte offset 46)
+        assert_eq!(
+            range["start"].as_u64().unwrap(),
+            45,
+            "Fix start should be character offset 45, not byte offset 46"
+        );
+        assert_eq!(
+            range["end"].as_u64().unwrap(),
+            45,
+            "Fix end should be character offset 45"
+        );
+    }
+
+    #[test]
+    fn test_fix_norwegian_letter() {
+        // Verify the fix() method works correctly with Norwegian letters
+        let content = "# Heading\n\nContent with Norwegian letter \"æ\".";
+
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        let fixed = linter.fix(content);
+
+        // Should add trailing newline
+        assert!(fixed.ends_with('\n'), "Should end with newline");
+        assert_eq!(fixed, "# Heading\n\nContent with Norwegian letter \"æ\".\n");
     }
 }
