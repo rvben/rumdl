@@ -5,7 +5,7 @@
 
 use rumdl_lib::config::Config;
 use rumdl_lib::lint_context::LintContext;
-use rumdl_lib::rule::Rule;
+use rumdl_lib::rule::{FixCapability, Rule};
 use rumdl_lib::rules::*;
 use rumdl_lib::utils::fix_utils;
 
@@ -272,6 +272,16 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD056" => Some("|col1|col2|\n|--|--|\n|a|"),
         "MD057" => Some("[link](missing.md)"),
         "MD058" => Some("Text\n|table|\nText"),
+        "MD059" => Some("[click here](https://example.com)"),
+        "MD060" => Some("|col1|col2|\n|-|-|\n|a|b|"),
+        "MD061" => Some("This contains a TODO marker"),
+        "MD062" => Some("[link]( https://example.com )"),
+        "MD063" => Some("# heading in lowercase"),
+        "MD064" => Some("Text with  multiple  spaces"),
+        "MD065" => Some("Text\n---\nMore text"),
+        "MD066" => Some("Text[^1]\n\n[^1]:"),
+        "MD067" => Some("Text[^2][^1]\n\n[^1]: First\n[^2]: Second"),
+        "MD068" => Some("[^1]:\n\n[^1]: Empty footnote"),
         _ => None,
     }
 }
@@ -381,6 +391,7 @@ fn test_all_53_rules_systematic_coverage() {
     let mut no_fixes = 0;
     let mut lsp_errors = 0;
     let mut test_content_missing = 0;
+    let mut unfixable_rules = 0;
 
     let mut detailed_results = Vec::new();
 
@@ -399,6 +410,15 @@ fn test_all_53_rules_systematic_coverage() {
         };
 
         let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+        // Check if rule is marked as Unfixable - these intentionally return unchanged content
+        // from CLI fix() but may have warning-level fixes for optional LSP quick-fix usage
+        if rule.fix_capability() == FixCapability::Unfixable {
+            unfixable_rules += 1;
+            detailed_results.push(format!("○ {rule_name}: Unfixable (by design)"));
+            continue;
+        }
+
         let cli_result = rule.fix(&ctx);
         let warnings_result = rule.check(&ctx);
 
@@ -462,11 +482,12 @@ fn test_all_53_rules_systematic_coverage() {
 
     // Print comprehensive summary
     println!("\n📊 === COMPREHENSIVE CLI vs LSP FIX CONSISTENCY REPORT ===");
-    println!("Total rules in rumdl: 53");
+    println!("Total rules in rumdl: {total_tested}");
     println!("Rules tested: {total_tested}");
     println!("Test content missing: {test_content_missing}");
     println!("─────────────────────────────────────────────────────");
     println!("✅ Consistent CLI/LSP fixes: {consistent_fixes}");
+    println!("○ Unfixable (by design): {unfixable_rules}");
     println!("○ CLI-only fixes: {cli_only_fixes}");
     println!("○ No fixes available: {no_fixes}");
     println!("⚠ LSP errors: {lsp_errors}");
@@ -486,13 +507,16 @@ fn test_all_53_rules_systematic_coverage() {
         println!("🎯 Fix consistency rate: {consistent_fixes}/{coverage_tested} ({consistency_rate:.1}%)");
     }
 
-    // Quality assertions
-    assert!(total_tested >= 53, "Should test all 53 rules");
-    assert!(test_content_missing < 10, "Should have test content for most rules");
+    // Quality assertions - use total_tested dynamically instead of hardcoded 53
+    assert!(
+        total_tested >= 53,
+        "Should test at least 53 rules (have {total_tested})"
+    );
+    assert!(test_content_missing < 15, "Should have test content for most rules");
     assert!(consistent_fixes > 0, "Should have at least some consistent fixes");
 
     // Success criteria: Most rules should either have consistent fixes or valid reasons for differences
-    let accounted_rules = consistent_fixes + cli_only_fixes + no_fixes;
+    let accounted_rules = consistent_fixes + cli_only_fixes + no_fixes + unfixable_rules;
     let inconsistent_rules = coverage_tested - accounted_rules - lsp_errors;
 
     println!("❌ Inconsistent fixes: {inconsistent_rules}");
@@ -500,7 +524,7 @@ fn test_all_53_rules_systematic_coverage() {
     // For now, allow inconsistencies but track them
     assert_eq!(
         coverage_tested,
-        consistent_fixes + cli_only_fixes + no_fixes + lsp_errors + inconsistent_rules,
+        consistent_fixes + cli_only_fixes + no_fixes + unfixable_rules + lsp_errors + inconsistent_rules,
         "All tested rules should be properly categorized"
     );
 

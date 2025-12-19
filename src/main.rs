@@ -895,6 +895,7 @@ build-backend = "setuptools.build_meta"
                     Box::new(MD011NoReversedLinks {}),
                     Box::new(MD012NoMultipleBlanks::default()),
                     Box::new(MD013LineLength::default()),
+                    Box::new(MD014CommandsShowOutput::default()),
                     Box::new(MD018NoMissingSpaceAtx {}),
                     Box::new(MD019NoMultipleSpaceAtx {}),
                     Box::new(MD020NoMissingSpaceClosedAtx {}),
@@ -941,6 +942,11 @@ build-backend = "setuptools.build_meta"
                     Box::new(MD061ForbiddenTerms::default()),
                     Box::new(MD062LinkDestinationWhitespace::new()),
                     Box::new(MD063HeadingCapitalization::default()),
+                    Box::new(MD064NoMultipleConsecutiveSpaces),
+                    Box::new(MD065BlanksAroundHorizontalRules),
+                    Box::new(MD066FootnoteValidation),
+                    Box::new(MD067FootnoteDefinitionOrder),
+                    Box::new(MD068EmptyFootnoteDefinition),
                 ];
                 if let Some(rule_query) = rule {
                     let rule_query = rule_query.to_ascii_uppercase();
@@ -1704,6 +1710,7 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD011NoReversedLinks {}),
         Box::new(MD012NoMultipleBlanks::default()),
         Box::new(MD013LineLength::default()),
+        Box::new(MD014CommandsShowOutput::default()),
         Box::new(MD018NoMissingSpaceAtx {}),
         Box::new(MD019NoMultipleSpaceAtx {}),
         Box::new(MD020NoMissingSpaceClosedAtx {}),
@@ -1750,6 +1757,11 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD061ForbiddenTerms::default()),
         Box::new(MD062LinkDestinationWhitespace::new()),
         Box::new(MD063HeadingCapitalization::default()),
+        Box::new(MD064NoMultipleConsecutiveSpaces),
+        Box::new(MD065BlanksAroundHorizontalRules),
+        Box::new(MD066FootnoteValidation),
+        Box::new(MD067FootnoteDefinitionOrder),
+        Box::new(MD068EmptyFootnoteDefinition),
     ];
 
     // Find the rule
