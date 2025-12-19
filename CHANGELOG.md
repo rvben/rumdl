@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.197] - 2025-12-19
+
+### Fixed
+
+- **Config: Resolve per-file-ignores paths relative to project root** (fixes #208)
+  - Previously, per-file-ignores patterns only matched with relative paths
+  - Now works correctly in GitHub Actions where absolute paths are used
+  - Patterns like `.github/file.md` now match `/home/runner/work/repo/.github/file.md`
+
+- **MD007 (ul-indent): Remove auto-switch to fixed indentation style** (fixes #209)
+  - Fixed oscillation between MD005/MD007 when formatting mixed ordered/unordered lists
+  - Previously, setting `indent = 3` would auto-switch to fixed style, causing conflicts
+  - Text-aligned style (default) now correctly handles mixed lists, matching markdownlint behavior
+  - `rumdl fmt` now converges in a single pass for all list configurations
+
+### Performance
+
+- **Core: Reduce memory allocations and improve cache reliability**
+  - Optimized internal data structures for better memory efficiency
+
 ## [0.0.196] - 2025-12-19
 
 ### Added
