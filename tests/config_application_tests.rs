@@ -25,6 +25,7 @@ fn create_test_config() -> Config {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
         rules,
+        project_root: None,
     }
 }
 
@@ -224,6 +225,7 @@ fn test_partial_rule_config() {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
         rules: rules_map,
+        project_root: None,
     };
 
     // Apply configs using LOCAL helper, getting a NEW vector
@@ -261,6 +263,7 @@ fn test_partial_rule_config() {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
         rules: rules_map,
+        project_root: None,
     };
 
     // Apply configs using LOCAL helper with modified config, getting ANOTHER NEW vector

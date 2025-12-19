@@ -181,6 +181,10 @@ pub struct Config {
     /// See https://github.com/rvben/rumdl for full rule documentation.
     #[serde(flatten)]
     pub rules: BTreeMap<String, RuleConfig>,
+
+    /// Project root directory, used for resolving relative paths in per-file-ignores
+    #[serde(skip)]
+    pub project_root: Option<std::path::PathBuf>,
 }
 
 impl Config {
@@ -214,6 +218,26 @@ impl Config {
             return ignored_rules;
         }
 
+        // Normalize the file path to be relative to project_root for pattern matching
+        // This ensures patterns like ".github/file.md" work with absolute paths
+        let path_for_matching: std::borrow::Cow<'_, Path> = if let Some(ref root) = self.project_root {
+            if let Ok(canonical_path) = file_path.canonicalize() {
+                if let Ok(canonical_root) = root.canonicalize() {
+                    if let Ok(relative) = canonical_path.strip_prefix(&canonical_root) {
+                        std::borrow::Cow::Owned(relative.to_path_buf())
+                    } else {
+                        std::borrow::Cow::Borrowed(file_path)
+                    }
+                } else {
+                    std::borrow::Cow::Borrowed(file_path)
+                }
+            } else {
+                std::borrow::Cow::Borrowed(file_path)
+            }
+        } else {
+            std::borrow::Cow::Borrowed(file_path)
+        };
+
         // Build a globset for efficient matching
         let mut builder = GlobSetBuilder::new();
         let mut pattern_to_rules: Vec<(usize, &Vec<String>)> = Vec::new();
@@ -236,7 +260,7 @@ impl Config {
         };
 
         // Match the file path against all patterns
-        for match_idx in globset.matches(file_path) {
+        for match_idx in globset.matches(path_for_matching.as_ref()) {
             if let Some((_, rules)) = pattern_to_rules.get(match_idx) {
                 for rule in rules.iter() {
                     // Normalize rule names to uppercase (MD033, md033 -> MD033)
@@ -1370,6 +1394,46 @@ disable = ["MD001"]
             config.per_file_ignores.get("README.md"),
             Some(&vec!["MD033".to_string()])
         );
+    }
+
+    #[test]
+    fn test_per_file_ignores_absolute_path_matching() {
+        // Regression test for issue #208: per-file-ignores should work with absolute paths
+        // This is critical for GitHub Actions which uses absolute paths like $GITHUB_WORKSPACE
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+
+        // Create a subdirectory and file to match against
+        let github_dir = temp_dir.path().join(".github");
+        fs::create_dir_all(&github_dir).unwrap();
+        let test_file = github_dir.join("pull_request_template.md");
+        fs::write(&test_file, "Test content").unwrap();
+
+        let config_content = r#"
+[per-file-ignores]
+".github/pull_request_template.md" = ["MD041"]
+"docs/**/*.md" = ["MD013"]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Test with absolute path (like GitHub Actions would use)
+        let absolute_path = test_file.canonicalize().unwrap();
+        let ignored = config.get_ignored_rules_for_file(&absolute_path);
+        assert!(
+            ignored.contains("MD041"),
+            "Should match absolute path {absolute_path:?} against relative pattern"
+        );
+        assert_eq!(ignored.len(), 1);
+
+        // Also verify relative path still works
+        let relative_path = PathBuf::from(".github/pull_request_template.md");
+        let ignored = config.get_ignored_rules_for_file(&relative_path);
+        assert!(ignored.contains("MD041"), "Should match relative path");
     }
 
     #[test]
@@ -2526,6 +2590,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             global,
             per_file_ignores: sourced.per_file_ignores.value,
             rules,
+            project_root: sourced.project_root,
         }
     }
 }

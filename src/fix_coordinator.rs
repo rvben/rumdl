@@ -414,6 +414,7 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
+            project_root: None,
         };
 
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
@@ -490,6 +491,7 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
+            project_root: None,
         };
 
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
@@ -537,6 +539,7 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
+            project_root: None,
         };
         config.global.unfixable = vec!["MD001".to_string()];
 
@@ -604,6 +607,7 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
+            project_root: None,
         };
 
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 3);
@@ -625,6 +629,7 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
+            project_root: None,
         };
 
         let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
