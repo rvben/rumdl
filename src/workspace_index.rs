@@ -15,7 +15,7 @@
 //! ```text
 //! [4 bytes: magic "RWSI" - Rumdl Workspace Index]
 //! [4 bytes: format version (u32 little-endian)]
-//! [N bytes: bincode-serialized WorkspaceIndex]
+//! [N bytes: postcard-serialized WorkspaceIndex]
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,7 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 
 /// Cache format version - increment when WorkspaceIndex serialization changes
 #[cfg(feature = "native")]
-const CACHE_FORMAT_VERSION: u32 = 4;
+const CACHE_FORMAT_VERSION: u32 = 5;
 
 /// Cache file name within the version directory
 #[cfg(feature = "native")]
@@ -288,7 +288,7 @@ impl WorkspaceIndex {
 
     /// Save the workspace index to a cache file
     ///
-    /// Uses bincode for efficient binary serialization with:
+    /// Uses postcard for efficient binary serialization with:
     /// - Magic header for file type validation
     /// - Format version for compatibility detection
     /// - Atomic writes (temp file + rename) to prevent corruption
@@ -300,8 +300,8 @@ impl WorkspaceIndex {
         // Ensure cache directory exists
         fs::create_dir_all(cache_dir)?;
 
-        // Serialize the index data using bincode 2.x serde compatibility
-        let encoded = bincode::serde::encode_to_vec(self, bincode::config::standard())
+        // Serialize the index data using postcard
+        let encoded = postcard::to_allocvec(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
         // Build versioned cache file: [magic][version][data]
@@ -372,10 +372,9 @@ impl WorkspaceIndex {
             return None;
         }
 
-        // Deserialize the index data using bincode 2.x serde compatibility
-        match bincode::serde::decode_from_slice(&data[8..], bincode::config::standard()) {
-            Ok((index, _bytes_read)) => {
-                let index: Self = index;
+        // Deserialize the index data using postcard
+        match postcard::from_bytes::<Self>(&data[8..]) {
+            Ok(index) => {
                 log::debug!(
                     "Loaded workspace index from cache: {} files (format v{})",
                     index.files.len(),
