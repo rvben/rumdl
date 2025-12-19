@@ -136,7 +136,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": {
-    "$ref": "#/definitions/RuleConfig"
+    "$ref": "#/$defs/RuleConfig"
   },
   "description": "rumdl configuration for linting Markdown files. Rules can be configured individually using [MD###] sections with rule-specific options.",
   "properties": {

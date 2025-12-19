@@ -72,7 +72,7 @@ fn handle_schema_command(action: SchemaAction) {
         schema_obj.insert(
             "additionalProperties".to_string(),
             serde_json::json!({
-                "$ref": "#/definitions/RuleConfig"
+                "$ref": "#/$defs/RuleConfig"
             }),
         );
     }
