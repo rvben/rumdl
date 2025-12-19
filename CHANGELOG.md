@@ -7,12 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.196] - 2025-12-19
+
 ### Added
 
 - **MD064 (no-multiple-consecutive-spaces): New rule to collapse multiple consecutive spaces** (thanks @mawkler in #202)
   - Flags multiple consecutive spaces (2+) in markdown prose
   - Provides auto-fix to collapse them to single space
   - Skips spaces in code, tables, HTML, front matter, and markdown syntax markers
+
+- **MD065 (blanks-around-horizontal-rules): New rule to enforce blank lines around horizontal rules**
+  - Ensures horizontal rules have blank lines before and after
+  - Provides auto-fix to add missing blank lines
+  - Skips Setext heading underlines
+
+- **MD066 (valid-footnote-definition): New rule to validate footnote definitions**
+  - Checks footnote definitions have proper syntax
+  - Validates footnote labels are non-empty
+
+- **MD067 (no-empty-footnote-ref): New rule to flag empty footnote references**
+  - Detects footnote references with empty labels like `[^]`
+
+- **MD068 (no-space-in-footnote-ref): New rule to flag spaces in footnote references**
+  - Detects footnote references with spaces like `[^ note]`
+
+### Fixed
+
+- **WASM: Convert byte offsets to character offsets for JavaScript**
+  - Fixes crashes in Obsidian plugin when applying fixes to content with multi-byte UTF-8 characters (Norwegian letters, emoji, etc.)
+
+- **MD027 (no-multiple-space-blockquote): Skip list continuation indentation**
+  - No longer reports false positives for properly indented list continuations in blockquotes
+
+- **MD032 (blanks-around-lists): Detect thematic breaks as list terminators**
+  - Thematic breaks (horizontal rules) now correctly terminate lists
+
+- **MD036 (no-emphasis-as-heading): Skip emphasis inside HTML comments**
+  - No longer reports false positives for emphasis markers in HTML comments
+
+- **MD041 (first-line-heading): Skip badge images before headings**
+  - Badge images at the start of a file no longer prevent heading detection
+
+- **MD046 (code-block-style): Skip code blocks inside HTML comments**
+  - No longer reports false positives for code blocks in HTML comments
+
+- **MD051 (link-fragments): Recognize HTML and attribute anchors**
+  - Cross-file fragment validation now recognizes anchors from HTML id attributes
+
+- **MD057 (relative-links): Check for markdown source when .html link doesn't exist**
+  - Links to `.html` files now check for corresponding `.md` source files
 
 ## [0.0.195] - 2025-12-17
 
