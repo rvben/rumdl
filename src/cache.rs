@@ -104,8 +104,9 @@ impl LintCache {
     /// Get the cache file path for a given content and config hash
     /// Includes rules_hash in filename to separate different rule configurations
     fn cache_file_path(&self, file_hash: &str, rules_hash: &str) -> PathBuf {
-        // Include first 8 chars of rules_hash to keep filenames reasonable
-        let short_rules_hash = &rules_hash[..8];
+        // Use 16 chars of rules_hash to reduce collision probability
+        // (8 chars = 2^32 combinations, 16 chars = 2^64 combinations)
+        let short_rules_hash = &rules_hash[..16];
         self.cache_dir
             .join(VERSION)
             .join(format!("{file_hash}_{short_rules_hash}.json"))
@@ -179,10 +180,12 @@ impl LintCache {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        // Write to cache (ignore errors - cache is optional)
+        // Write to cache (log errors but don't fail - cache is optional)
         if let Ok(json) = serde_json::to_string_pretty(&entry) {
-            let _ = fs::write(&cache_path, json);
-            self.stats.writes += 1;
+            match fs::write(&cache_path, &json) {
+                Ok(()) => self.stats.writes += 1,
+                Err(e) => log::debug!("Cache write failed for {}: {}", cache_path.display(), e),
+            }
         }
     }
 

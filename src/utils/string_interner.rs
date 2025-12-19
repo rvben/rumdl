@@ -22,13 +22,7 @@ impl StringInterner {
 
     /// Intern a string, returning an `Arc<str>` that can be shared
     pub fn intern(&mut self, s: &str) -> Arc<str> {
-        if let Some(interned) = self.strings.get(s) {
-            interned.clone()
-        } else {
-            let arc_str: Arc<str> = Arc::from(s);
-            self.strings.insert(s.to_string(), arc_str.clone());
-            arc_str
-        }
+        Arc::clone(self.strings.entry(s.to_string()).or_insert_with(|| Arc::from(s)))
     }
 
     /// Get the number of interned strings

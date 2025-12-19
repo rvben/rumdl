@@ -487,11 +487,14 @@ pub fn contains_url(content: &str) -> bool {
 
 /// Escapes a string to be used in a regex pattern
 pub fn escape_regex(s: &str) -> String {
-    let special_chars = ['.', '+', '*', '?', '^', '$', '(', ')', '[', ']', '{', '}', '|', '\\'];
     let mut result = String::with_capacity(s.len() * 2);
 
     for c in s.chars() {
-        if special_chars.contains(&c) {
+        // Use matches! for O(1) lookup instead of array.contains() which is O(n)
+        if matches!(
+            c,
+            '.' | '+' | '*' | '?' | '^' | '$' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\'
+        ) {
             result.push('\\');
         }
         result.push(c);
