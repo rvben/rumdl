@@ -346,21 +346,7 @@ impl Rule for MD007ULIndent {
     where
         Self: Sized,
     {
-        let mut rule_config = crate::rule_config_serde::load_rule_config::<MD007Config>(config);
-
-        // For markdownlint compatibility: if indent is explicitly configured and style is not,
-        // default to "fixed" style (markdownlint behavior) instead of "text-aligned"
-        if let Some(rule_cfg) = config.rules.get("MD007") {
-            let has_explicit_indent = rule_cfg.values.contains_key("indent");
-            let has_explicit_style = rule_cfg.values.contains_key("style");
-
-            if has_explicit_indent && !has_explicit_style && rule_config.indent.get() != 2 {
-                // User set indent explicitly but not style, and it's not the default value
-                // Use fixed style for markdownlint compatibility
-                rule_config.style = md007_config::IndentStyle::Fixed;
-            }
-        }
-
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD007Config>(config);
         Box::new(Self::from_config_struct(rule_config))
     }
 }
