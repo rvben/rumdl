@@ -3,6 +3,11 @@
     "GlobalConfig": {
       "description": "Global configuration options",
       "properties": {
+        "cache": {
+          "default": true,
+          "description": "Whether caching is enabled (default: true)\nCan also be disabled via --no-cache CLI flag",
+          "type": "boolean"
+        },
         "cache-dir": {
           "description": "Directory to store cache files (default: .rumdl_cache)\nCan also be set via --cache-dir CLI flag or RUMDL_CACHE_DIR environment variable",
           "type": [
@@ -62,11 +67,9 @@
           "type": "array"
         },
         "line-length": {
+          "$ref": "#/$defs/LineLength",
           "default": 80,
-          "description": "Global line length setting (used by MD013 and other rules if not overridden)",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
+          "description": "Global line length setting (used by MD013 and other rules if not overridden)"
         },
         "output-format": {
           "description": "Output format for linting results (e.g., \"text\", \"json\", \"pylint\", etc.)",
@@ -90,6 +93,15 @@
         }
       },
       "type": "object"
+    },
+    "LineLength": {
+      "description": "A line length value that can be 0 (meaning no limit) or a positive value (≥1)\n\nMany configuration values for line length need to support both:\n- 0: Special value meaning \"no line length limit\"\n- ≥1: Actual line length limit\n\nThis type enforces those constraints at deserialization time.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "MarkdownFlavor": {
       "description": "Markdown flavor/dialect enumeration",
@@ -124,13 +136,14 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": {
-    "$ref": "#/$defs/RuleConfig"
+    "$ref": "#/definitions/RuleConfig"
   },
   "description": "rumdl configuration for linting Markdown files. Rules can be configured individually using [MD###] sections with rule-specific options.",
   "properties": {
     "global": {
       "$ref": "#/$defs/GlobalConfig",
       "default": {
+        "cache": true,
         "disable": [],
         "enable": [],
         "exclude": [],

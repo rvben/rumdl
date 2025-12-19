@@ -405,7 +405,7 @@ jobs:
         if: ${{ inputs.dry_run == true && inputs.skip_npm != true }}
         run: |
           echo "DRY RUN: Would publish to npm:"
-          cat wasm-pkg/package.json | jq '{name, version}'
+          jq '{name, version}' wasm-pkg/package.json
 
       - name: Skip npm publishing
         if: ${{ inputs.skip_npm == true }}
