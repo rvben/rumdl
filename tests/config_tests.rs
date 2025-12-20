@@ -1748,3 +1748,65 @@ style = "dash"
         warnings[0].message
     );
 }
+
+#[test]
+fn test_md007_style_explicit_from_config_file() {
+    // Test that style_explicit is correctly set when loading from config file
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Config with explicit style setting
+    let config_content = r#"
+[MD007]
+indent = 4
+style = "fixed"
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify indent is loaded
+    let indent = rumdl_lib::config::get_rule_config_value::<u8>(&config, "MD007", "indent");
+    assert_eq!(indent, Some(4), "indent should be 4");
+
+    // Verify style is loaded
+    let style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD007", "style");
+    assert_eq!(style, Some("fixed".to_string()), "style should be fixed");
+}
+
+#[test]
+fn test_md007_indent_only_config() {
+    // Test that indent-only config (no explicit style) works correctly
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Config with only indent setting (no style)
+    let config_content = r#"
+[MD007]
+indent = 4
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify indent is loaded
+    let indent = rumdl_lib::config::get_rule_config_value::<u8>(&config, "MD007", "indent");
+    assert_eq!(indent, Some(4), "indent should be 4");
+
+    // Verify style is NOT in the config (should allow auto-detection)
+    let style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD007", "style");
+    assert!(
+        style.is_none(),
+        "style should not be set when only indent is configured"
+    );
+}

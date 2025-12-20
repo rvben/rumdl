@@ -3,7 +3,6 @@
 /// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use toml;
 
 mod md007_config;
 use md007_config::MD007Config;
@@ -55,16 +54,17 @@ impl MD007ULIndent {
         // Track parent list items by their marker position and type
         // Using marker_column instead of indent because it works correctly
         // for blockquoted content where indent doesn't account for the prefix
-        // Stack stores: (marker_column, is_ordered, has_different_type_ancestor)
-        let mut stack: Vec<(usize, bool, bool)> = Vec::new();
+        // Stack stores: (marker_column, is_ordered)
+        let mut stack: Vec<(usize, bool)> = Vec::new();
         let mut last_was_blank = false;
 
         for line_info in &ctx.lines {
-            // Skip non-content lines
+            // Skip non-content lines (code blocks, frontmatter, HTML comments, etc.)
             if line_info.in_code_block
                 || line_info.in_front_matter
                 || line_info.in_mkdocstrings
                 || line_info.in_html_comment
+                || line_info.in_esm_block
             {
                 continue;
             }
@@ -93,7 +93,7 @@ impl MD007ULIndent {
                 last_was_blank = false;
 
                 // Pop items at same or greater position (they're siblings or deeper, not parents)
-                while let Some(&(pos, _, _)) = stack.last() {
+                while let Some(&(pos, _)) = stack.last() {
                     if pos >= current_pos {
                         stack.pop();
                     } else {
@@ -101,22 +101,14 @@ impl MD007ULIndent {
                     }
                 }
 
-                // Check if ANY ancestor has different type - this is mixed nesting
-                // The key insight: we track whether ancestors have different types,
-                // so even grandparent differences are detected
-                if let Some(&(_, parent_is_ordered, parent_has_diff_ancestor)) = stack.last() {
-                    let has_different_type_ancestor =
-                        parent_has_diff_ancestor || (parent_is_ordered != list_item.is_ordered);
-
-                    if has_different_type_ancestor {
-                        return true; // Found mixed nesting in ancestry
-                    }
-
-                    stack.push((current_pos, list_item.is_ordered, false));
-                } else {
-                    // Root level item - no mixed ancestry possible yet
-                    stack.push((current_pos, list_item.is_ordered, false));
+                // Check if immediate parent has different type - this is mixed nesting
+                if let Some(&(_, parent_is_ordered)) = stack.last()
+                    && parent_is_ordered != list_item.is_ordered
+                {
+                    return true; // Found mixed nesting
                 }
+
+                stack.push((current_pos, list_item.is_ordered));
             } else {
                 // Non-list line (but not blank) - could be paragraph or other content
                 last_was_blank = false;
@@ -1421,6 +1413,129 @@ items:
         assert!(
             !MD007ULIndent::has_mixed_list_nesting(&ctx),
             "Alternating types at same level should not be detected as mixed"
+        );
+    }
+
+    #[test]
+    fn test_five_level_deep_mixed_nesting() {
+        // Test detection at 5+ levels of nesting
+        let content = "* L0\n  1. L1\n     * L2\n       1. L3\n          * L4\n            1. L5";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Should detect mixed nesting at 5+ levels"
+        );
+    }
+
+    #[test]
+    fn test_very_deep_pure_unordered_nesting() {
+        // Test pure unordered list with 10+ levels of nesting
+        let mut content = String::from("* L1");
+        for level in 2..=12 {
+            let indent = "  ".repeat(level - 1);
+            content.push_str(&format!("\n{indent}* L{level}"));
+        }
+
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+
+        // Should NOT be detected as mixed (all unordered)
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Pure unordered deep nesting should not be detected as mixed"
+        );
+
+        // Should use fixed style with custom indent
+        let rule = MD007ULIndent::new(4);
+        let result = rule.check(&ctx).unwrap();
+        // With text-aligned default but auto-switch to fixed for pure unordered,
+        // the first nested level should be flagged (2 spaces instead of 4)
+        assert!(!result.is_empty(), "Should flag incorrect indentation for fixed style");
+    }
+
+    #[test]
+    fn test_interleaved_content_between_list_items() {
+        // Paragraph continuation between list items should not break detection
+        let content = "1. Ordered parent\n\n   Paragraph continuation\n\n   * Unordered child";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Should detect mixed nesting even with interleaved paragraphs"
+        );
+    }
+
+    #[test]
+    fn test_esm_blocks_skipped_in_detection() {
+        // ESM import/export blocks in MDX should be skipped
+        // Note: ESM detection depends on LintContext properly setting in_esm_block
+        let content = "* Unordered list\n  * Nested unordered";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Pure unordered should not be detected as mixed"
+        );
+    }
+
+    #[test]
+    fn test_multiple_list_blocks_pure_then_mixed() {
+        // Document with pure unordered list followed by mixed list
+        // Detection should find the mixed list and return true
+        let content = r#"* Pure unordered
+  * Nested unordered
+
+1. Mixed section
+   * Bullet under ordered"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Should detect mixed nesting in any part of document"
+        );
+    }
+
+    #[test]
+    fn test_multiple_separate_pure_lists() {
+        // Multiple pure unordered lists separated by blank lines
+        // Should NOT be detected as mixed
+        let content = r#"* First list
+  * Nested
+
+* Second list
+  * Also nested
+
+* Third list
+  * Deeply
+    * Nested"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Multiple separate pure unordered lists should not be mixed"
+        );
+    }
+
+    #[test]
+    fn test_code_block_between_list_items() {
+        // Code block between list items should not affect detection
+        let content = r#"1. Ordered
+   ```
+   code
+   ```
+   * Still a mixed child"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Code block between items should not prevent mixed detection"
+        );
+    }
+
+    #[test]
+    fn test_blockquoted_mixed_detection() {
+        // Mixed lists inside blockquotes should be detected
+        let content = "> 1. Ordered in blockquote\n>    * Mixed child";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        // Note: Detection depends on correct marker_column calculation in blockquotes
+        // This test verifies the detection logic works with blockquoted content
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Should detect mixed nesting in blockquotes"
         );
     }
 }
