@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.198] - 2025-12-20
+
+### Fixed
+
+- **MD057 (link-target-exists): Support mdBook and doc site .html links**
+  - Links to `.html` files now correctly resolve when corresponding `.md` source exists
+  - Handles mdBook, Jekyll, Hugo and similar doc generators that compile `.md` to `.html`
+  - Applied to both single-file `check()` and cross-file validation
+  - Reduces false positives in documentation projects like rustc-dev-guide
+
 ## [0.0.197] - 2025-12-19
 
 ### Fixed

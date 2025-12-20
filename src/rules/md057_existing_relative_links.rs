@@ -610,10 +610,26 @@ impl Rule for MD057ExistingRelativeLinks {
             // Normalize the path (handle .., ., etc.)
             let target_path = normalize_path(&target_path);
 
-            // Check if the target markdown file exists in the workspace index
-            if !workspace_index.contains_file(&target_path) {
-                // File not in index - check filesystem directly for case-insensitive filesystems
-                if !target_path.exists() {
+            // Check if the target file exists
+            let file_exists = workspace_index.contains_file(&target_path) || target_path.exists();
+
+            if !file_exists {
+                // For .html/.htm links, check if a corresponding markdown source exists
+                // This handles doc sites (mdBook, etc.) where .md is compiled to .html
+                let has_md_source = if let Some(ext) = target_path.extension().and_then(|e| e.to_str())
+                    && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+                    && let (Some(stem), Some(parent)) =
+                        (target_path.file_stem().and_then(|s| s.to_str()), target_path.parent())
+                {
+                    MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
+                        let source_path = parent.join(format!("{stem}{md_ext}"));
+                        workspace_index.contains_file(&source_path) || source_path.exists()
+                    })
+                } else {
+                    false
+                };
+
+                if !has_md_source {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: cross_link.line,
@@ -1445,6 +1461,68 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
 
         // Should have no warnings - file exists at normalized path
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_cross_file_check_html_link_with_md_source() {
+        // Test that .html links are accepted when corresponding .md source exists
+        // This supports mdBook and similar doc generators that compile .md to .html
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD057ExistingRelativeLinks::new();
+
+        // Create a workspace index with the .md source file
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(PathBuf::from("docs/guide.md"), FileIndex::new());
+
+        // Create file index with an .html link (from another rule like MD051)
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "guide.html".to_string(),
+            fragment: "section".to_string(),
+            line: 10,
+            column: 5,
+        });
+
+        // Run cross-file check from docs/index.md
+        let warnings = rule
+            .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
+            .unwrap();
+
+        // Should have no warnings - .md source exists for the .html link
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for .html link with .md source, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_cross_file_check_html_link_without_source() {
+        // Test that .html links without corresponding .md source ARE flagged
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD057ExistingRelativeLinks::new();
+
+        // Create an empty workspace index
+        let workspace_index = WorkspaceIndex::new();
+
+        // Create file index with an .html link to a non-existent file
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "missing.html".to_string(),
+            fragment: "".to_string(),
+            line: 10,
+            column: 5,
+        });
+
+        // Run cross-file check from docs/index.md
+        let warnings = rule
+            .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
+            .unwrap();
+
+        // Should have one warning - no .md source exists
+        assert_eq!(warnings.len(), 1, "Expected 1 warning for .html link without source");
+        assert!(warnings[0].message.contains("missing.html"));
     }
 
     #[test]
