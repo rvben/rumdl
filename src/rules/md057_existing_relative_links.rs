@@ -591,16 +591,20 @@ impl Rule for MD057ExistingRelativeLinks {
         let file_dir = file_path.parent();
 
         for cross_link in &file_index.cross_file_links {
-            // Resolve the relative path
-            let target_path = if cross_link.target_path.starts_with('/') {
+            // URL-decode the path for filesystem operations
+            // The stored path is URL-encoded (e.g., "%F0%9F%91%A4" for emoji 👤)
+            let decoded_target = Self::url_decode(&cross_link.target_path);
+
+            // Resolve the relative path using the decoded path
+            let target_path = if decoded_target.starts_with('/') {
                 // Absolute path from workspace root (e.g., "/CONTRIBUTING.md")
                 // Walk up from the current file's directory to find the workspace root
-                let stripped = cross_link.target_path.trim_start_matches('/');
+                let stripped = decoded_target.trim_start_matches('/');
                 resolve_absolute_link(file_path, stripped)
             } else if let Some(dir) = file_dir {
-                dir.join(&cross_link.target_path)
+                dir.join(&decoded_target)
             } else {
-                Path::new(&cross_link.target_path).to_path_buf()
+                Path::new(&decoded_target).to_path_buf()
             };
 
             // Normalize the path (handle .., ., etc.)
@@ -1015,6 +1019,47 @@ This is a [real missing link](missing.md) that should be flagged.
         assert!(
             result[0].message.contains("r%C3%A9sum%C3%A9.md"),
             "Warning should mention the URL-encoded filename"
+        );
+    }
+
+    #[test]
+    fn test_url_encoded_emoji_filenames() {
+        // Test for issue #214: URL-encoded emoji paths should be correctly resolved
+        // 👤 = U+1F464 = F0 9F 91 A4 in UTF-8
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create directory with emoji in name: 👤 Personal
+        let emoji_dir = base_path.join("👤 Personal");
+        std::fs::create_dir(&emoji_dir).unwrap();
+
+        // Create file in that directory: TV Shows.md
+        let file_path = emoji_dir.join("TV Shows.md");
+        File::create(&file_path)
+            .unwrap()
+            .write_all(b"# TV Shows\n\nContent here.")
+            .unwrap();
+
+        // Test content with URL-encoded emoji link
+        // %F0%9F%91%A4 = 👤, %20 = space
+        let content = r#"
+# Test Document
+
+[TV Shows](./%F0%9F%91%A4%20Personal/TV%20Shows.md)
+[Missing](./%F0%9F%91%A4%20Personal/Missing.md)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only warn about the missing file, not the valid emoji path
+        assert_eq!(result.len(), 1, "Should only warn about missing file. Got: {result:?}");
+        assert!(
+            result[0].message.contains("Missing.md"),
+            "Warning should be for Missing.md, got: {}",
+            result[0].message
         );
     }
 
