@@ -3383,7 +3383,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                         .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
                     sv.push_override(toml_val, source, file.clone(), None);
                 }
-            } else {
+            } else if registry.resolve_rule_name(key).is_none() {
                 // Key is not a global/special key and not a recognized rule name
                 // Track unknown keys under [tool.rumdl] for validation
                 fragment

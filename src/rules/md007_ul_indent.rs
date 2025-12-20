@@ -21,6 +21,7 @@ impl MD007ULIndent {
                 start_indented: false,
                 start_indent: crate::types::IndentSize::from_const(2),
                 style: md007_config::IndentStyle::TextAligned,
+                style_explicit: false, // Allow auto-detection for programmatic construction
             },
         }
     }
@@ -46,6 +47,108 @@ impl MD007ULIndent {
         }
         visual_col
     }
+
+    /// Detect if the document has mixed ordered/unordered list nesting.
+    /// This is used for smart style selection: fixed style causes oscillation
+    /// with mixed lists, so we only auto-switch to fixed for pure unordered lists.
+    fn has_mixed_list_nesting(ctx: &crate::lint_context::LintContext) -> bool {
+        // Track parent list items by their marker position and type
+        // Using marker_column instead of indent because it works correctly
+        // for blockquoted content where indent doesn't account for the prefix
+        // Stack stores: (marker_column, is_ordered, has_different_type_ancestor)
+        let mut stack: Vec<(usize, bool, bool)> = Vec::new();
+        let mut last_was_blank = false;
+
+        for line_info in &ctx.lines {
+            // Skip non-content lines
+            if line_info.in_code_block
+                || line_info.in_front_matter
+                || line_info.in_mkdocstrings
+                || line_info.in_html_comment
+            {
+                continue;
+            }
+
+            // Check for blank lines to detect list separation
+            let content = line_info.content(ctx.content);
+            let is_blank = content.trim().is_empty();
+
+            if is_blank {
+                last_was_blank = true;
+                continue;
+            }
+
+            if let Some(list_item) = &line_info.list_item {
+                // Normalize column 1 to column 0 (consistent with check function)
+                let current_pos = if list_item.marker_column == 1 {
+                    0
+                } else {
+                    list_item.marker_column
+                };
+
+                // If there was a blank line and this item is at root level, reset stack
+                if last_was_blank && current_pos == 0 {
+                    stack.clear();
+                }
+                last_was_blank = false;
+
+                // Pop items at same or greater position (they're siblings or deeper, not parents)
+                while let Some(&(pos, _, _)) = stack.last() {
+                    if pos >= current_pos {
+                        stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Check if ANY ancestor has different type - this is mixed nesting
+                // The key insight: we track whether ancestors have different types,
+                // so even grandparent differences are detected
+                if let Some(&(_, parent_is_ordered, parent_has_diff_ancestor)) = stack.last() {
+                    let has_different_type_ancestor =
+                        parent_has_diff_ancestor || (parent_is_ordered != list_item.is_ordered);
+
+                    if has_different_type_ancestor {
+                        return true; // Found mixed nesting in ancestry
+                    }
+
+                    stack.push((current_pos, list_item.is_ordered, false));
+                } else {
+                    // Root level item - no mixed ancestry possible yet
+                    stack.push((current_pos, list_item.is_ordered, false));
+                }
+            } else {
+                // Non-list line (but not blank) - could be paragraph or other content
+                last_was_blank = false;
+            }
+        }
+
+        false
+    }
+
+    /// Determine the effective style to use for this check.
+    /// When style is not explicitly set and indent != 2, we auto-select:
+    /// - Pure unordered lists → fixed style (markdownlint compatible)
+    /// - Mixed ordered/unordered → text-aligned (avoids oscillation)
+    fn effective_style(&self, ctx: &crate::lint_context::LintContext) -> md007_config::IndentStyle {
+        // If style was explicitly set, always use it
+        if self.config.style_explicit {
+            return self.config.style;
+        }
+
+        // If indent is the default (2), no need for auto-switch
+        // (text-aligned and fixed produce same results with indent=2)
+        if self.config.indent.get() == 2 {
+            return self.config.style;
+        }
+
+        // Auto-select: fixed for pure unordered lists, text-aligned for mixed
+        if Self::has_mixed_list_nesting(ctx) {
+            md007_config::IndentStyle::TextAligned
+        } else {
+            md007_config::IndentStyle::Fixed
+        }
+    }
 }
 
 impl Rule for MD007ULIndent {
@@ -60,6 +163,9 @@ impl Rule for MD007ULIndent {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
         let mut list_stack: Vec<(usize, usize, bool, usize)> = Vec::new(); // Stack of (marker_visual_col, line_num, is_ordered, content_visual_col) for tracking nesting
+
+        // Determine effective style: auto-select based on document content when appropriate
+        let effective_style = self.effective_style(ctx);
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             // Skip if this line is in a code block, front matter, or mkdocstrings
@@ -157,120 +263,118 @@ impl Rule for MD007ULIndent {
                     continue;
                 }
 
-                // Only check unordered list items
-                if !list_item.is_ordered {
-                    // Now stack contains only parent items
-                    let nesting_level = list_stack.len();
+                // At this point, we know this is an unordered list item
+                // Now stack contains only parent items
+                let nesting_level = list_stack.len();
 
-                    // Calculate expected indent first to determine expected content position
-                    let expected_indent = if self.config.start_indented {
-                        self.config.start_indent.get() as usize + (nesting_level * self.config.indent.get() as usize)
-                    } else {
-                        match self.config.style {
-                            md007_config::IndentStyle::Fixed => {
-                                // Fixed style: simple multiples of indent
-                                nesting_level * self.config.indent.get() as usize
-                            }
-                            md007_config::IndentStyle::TextAligned => {
-                                // Text-aligned style: child's marker aligns with parent's text content
-                                if nesting_level > 0 {
-                                    // Check if parent is an ordered list
-                                    if let Some(&(_, _parent_line_idx, _is_ordered, parent_content_visual_col)) =
-                                        list_stack.get(nesting_level - 1)
-                                    {
-                                        // Child marker is positioned where parent's text starts
-                                        parent_content_visual_col
-                                    } else {
-                                        // No parent at that level - for text-aligned, use standard alignment
-                                        // Each level aligns with previous level's text position
-                                        nesting_level * 2
-                                    }
+                // Calculate expected indent first to determine expected content position
+                let expected_indent = if self.config.start_indented {
+                    self.config.start_indent.get() as usize + (nesting_level * self.config.indent.get() as usize)
+                } else {
+                    match effective_style {
+                        md007_config::IndentStyle::Fixed => {
+                            // Fixed style: simple multiples of indent
+                            nesting_level * self.config.indent.get() as usize
+                        }
+                        md007_config::IndentStyle::TextAligned => {
+                            // Text-aligned style: child's marker aligns with parent's text content
+                            if nesting_level > 0 {
+                                // Check if parent is an ordered list
+                                if let Some(&(_, _parent_line_idx, _is_ordered, parent_content_visual_col)) =
+                                    list_stack.get(nesting_level - 1)
+                                {
+                                    // Child marker is positioned where parent's text starts
+                                    parent_content_visual_col
                                 } else {
-                                    0 // First level, no indentation needed
+                                    // No parent at that level - for text-aligned, use standard alignment
+                                    // Each level aligns with previous level's text position
+                                    nesting_level * 2
                                 }
+                            } else {
+                                0 // First level, no indentation needed
                             }
                         }
-                    };
-
-                    // Add current item to stack
-                    // Use actual marker position for cleanup logic
-                    // For text-aligned children, store the EXPECTED content position after fix
-                    // (not the actual position) to prevent error cascade
-                    let expected_content_visual_col = expected_indent + 2; // where content SHOULD be after fix
-                    list_stack.push((visual_marker_column, line_idx, false, expected_content_visual_col));
-
-                    // Skip first level check if start_indented is false
-                    // BUT always check items with 1 space indent (insufficient for nesting)
-                    if !self.config.start_indented && nesting_level == 0 && visual_marker_column != 1 {
-                        continue;
                     }
+                };
 
-                    if visual_marker_column != expected_indent {
-                        // Generate fix for this list item
-                        let fix = {
-                            let correct_indent = " ".repeat(expected_indent);
+                // Add current item to stack
+                // Use actual marker position for cleanup logic
+                // For text-aligned children, store the EXPECTED content position after fix
+                // (not the actual position) to prevent error cascade
+                let expected_content_visual_col = expected_indent + 2; // where content SHOULD be after fix
+                list_stack.push((visual_marker_column, line_idx, false, expected_content_visual_col));
 
-                            // Build the replacement string - need to preserve everything before the list marker
-                            // For blockquoted lines, this includes the blockquote prefix
-                            let replacement = if line_info.blockquote.is_some() {
-                                // Count the blockquote markers
-                                let mut blockquote_count = 0;
-                                for ch in line_info.content(ctx.content).chars() {
-                                    if ch == '>' {
-                                        blockquote_count += 1;
-                                    } else if ch != ' ' && ch != '\t' {
-                                        break;
-                                    }
-                                }
-                                // Build the blockquote prefix (one '>' per level, with spaces between for nested)
-                                let blockquote_prefix = if blockquote_count > 1 {
-                                    (0..blockquote_count)
-                                        .map(|_| "> ")
-                                        .collect::<String>()
-                                        .trim_end()
-                                        .to_string()
-                                } else {
-                                    ">".to_string()
-                                };
-                                // Add correct indentation after the blockquote prefix
-                                // Include one space after the blockquote marker(s) as part of the indent
-                                format!("{blockquote_prefix} {correct_indent}")
-                            } else {
-                                correct_indent
-                            };
+                // Skip first level check if start_indented is false
+                // BUT always check items with 1 space indent (insufficient for nesting)
+                if !self.config.start_indented && nesting_level == 0 && visual_marker_column != 1 {
+                    continue;
+                }
 
-                            // Calculate the byte positions
-                            // The range should cover from start of line to the marker position
-                            let start_byte = line_info.byte_offset;
-                            let mut end_byte = line_info.byte_offset;
+                if visual_marker_column != expected_indent {
+                    // Generate fix for this list item
+                    let fix = {
+                        let correct_indent = " ".repeat(expected_indent);
 
-                            // Calculate where the marker starts
-                            for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
-                                if i >= list_item.marker_column {
+                        // Build the replacement string - need to preserve everything before the list marker
+                        // For blockquoted lines, this includes the blockquote prefix
+                        let replacement = if line_info.blockquote.is_some() {
+                            // Count the blockquote markers
+                            let mut blockquote_count = 0;
+                            for ch in line_info.content(ctx.content).chars() {
+                                if ch == '>' {
+                                    blockquote_count += 1;
+                                } else if ch != ' ' && ch != '\t' {
                                     break;
                                 }
-                                end_byte += ch.len_utf8();
                             }
-
-                            Some(crate::rule::Fix {
-                                range: start_byte..end_byte,
-                                replacement,
-                            })
+                            // Build the blockquote prefix (one '>' per level, with spaces between for nested)
+                            let blockquote_prefix = if blockquote_count > 1 {
+                                (0..blockquote_count)
+                                    .map(|_| "> ")
+                                    .collect::<String>()
+                                    .trim_end()
+                                    .to_string()
+                            } else {
+                                ">".to_string()
+                            };
+                            // Add correct indentation after the blockquote prefix
+                            // Include one space after the blockquote marker(s) as part of the indent
+                            format!("{blockquote_prefix} {correct_indent}")
+                        } else {
+                            correct_indent
                         };
 
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: format!(
-                                "Expected {expected_indent} spaces for indent depth {nesting_level}, found {visual_marker_column}"
-                            ),
-                            line: line_idx + 1, // Convert to 1-indexed
-                            column: 1,          // Start of line
-                            end_line: line_idx + 1,
-                            end_column: visual_marker_column + 1, // End of visual indentation
-                            severity: Severity::Warning,
-                            fix,
-                        });
-                    }
+                        // Calculate the byte positions
+                        // The range should cover from start of line to the marker position
+                        let start_byte = line_info.byte_offset;
+                        let mut end_byte = line_info.byte_offset;
+
+                        // Calculate where the marker starts
+                        for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
+                            if i >= list_item.marker_column {
+                                break;
+                            }
+                            end_byte += ch.len_utf8();
+                        }
+
+                        Some(crate::rule::Fix {
+                            range: start_byte..end_byte,
+                            replacement,
+                        })
+                    };
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        message: format!(
+                            "Expected {expected_indent} spaces for indent depth {nesting_level}, found {visual_marker_column}"
+                        ),
+                        line: line_idx + 1, // Convert to 1-indexed
+                        column: 1,          // Start of line
+                        end_line: line_idx + 1,
+                        end_column: visual_marker_column + 1, // End of visual indentation
+                        severity: Severity::Warning,
+                        fix,
+                    });
                 }
             }
         }
@@ -346,7 +450,16 @@ impl Rule for MD007ULIndent {
     where
         Self: Sized,
     {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD007Config>(config);
+        let mut rule_config = crate::rule_config_serde::load_rule_config::<MD007Config>(config);
+
+        // Check if style was explicitly set in the config
+        // This is used for smart auto-detection: when style is not explicit and indent != 2,
+        // we select style based on document content to provide markdownlint compatibility
+        // for pure unordered lists while avoiding oscillation for mixed lists
+        if let Some(rule_cfg) = config.rules.get("MD007") {
+            rule_config.style_explicit = rule_cfg.values.contains_key("style");
+        }
+
         Box::new(Self::from_config_struct(rule_config))
     }
 }
@@ -559,40 +672,46 @@ repos:
 
     #[test]
     fn test_custom_indent_3_spaces() {
-        // Test dynamic alignment behavior (default start_indented=false)
+        // With smart auto-detection, pure unordered lists with indent=3 use fixed style
+        // This provides markdownlint compatibility for the common case
         let rule = MD007ULIndent::new(3);
 
-        let content = "* Item 1\n   * Item 2\n      * Item 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        // With dynamic alignment, Item 2 should align with Item 1's text (2 spaces)
-        // and Item 3 should align with Item 2's text (4 spaces), not fixed increments
-        assert!(!result.is_empty()); // Should have warnings due to alignment
-
-        // Test that dynamic alignment works correctly
-        // Item 3 should align with Item 2's text content (4 spaces)
-        let correct_content = "* Item 1\n  * Item 2\n    * Item 3";
+        // Fixed style with indent=3: level 0 = 0, level 1 = 3, level 2 = 6
+        let correct_content = "* Item 1\n   * Item 2\n      * Item 3";
         let ctx = LintContext::new(correct_content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty());
+        assert!(
+            result.is_empty(),
+            "Fixed style expects 0, 3, 6 spaces but got: {result:?}"
+        );
+
+        // Wrong indentation (text-aligned style spacing)
+        let wrong_content = "* Item 1\n  * Item 2\n    * Item 3";
+        let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(!result.is_empty(), "Should warn: expected 3 spaces, found 2");
     }
 
     #[test]
     fn test_custom_indent_4_spaces() {
-        // Test dynamic alignment behavior (default start_indented=false)
+        // With smart auto-detection, pure unordered lists with indent=4 use fixed style
+        // This provides markdownlint compatibility (fixes issue #210)
         let rule = MD007ULIndent::new(4);
-        let content = "* Item 1\n    * Item 2\n        * Item 3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        // With dynamic alignment, should expect 2 spaces and 6 spaces, not 4 and 8
-        assert!(!result.is_empty()); // Should have warnings due to alignment
 
-        // Test correct dynamic alignment
-        // Item 3 should align with Item 2's text content (4 spaces)
-        let correct_content = "* Item 1\n  * Item 2\n    * Item 3";
+        // Fixed style with indent=4: level 0 = 0, level 1 = 4, level 2 = 8
+        let correct_content = "* Item 1\n    * Item 2\n        * Item 3";
         let ctx = LintContext::new(correct_content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty());
+        assert!(
+            result.is_empty(),
+            "Fixed style expects 0, 4, 8 spaces but got: {result:?}"
+        );
+
+        // Wrong indentation (text-aligned style spacing)
+        let wrong_content = "* Item 1\n  * Item 2\n    * Item 3";
+        let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(!result.is_empty(), "Should warn: expected 4 spaces, found 2");
     }
 
     #[test]
@@ -740,6 +859,7 @@ tags:
             start_indent: crate::types::IndentSize::from_const(4),
             indent: crate::types::IndentSize::from_const(2),
             style: md007_config::IndentStyle::TextAligned,
+            style_explicit: true, // Explicit style for this test
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
@@ -857,25 +977,24 @@ tags:
 
     #[test]
     fn test_excessive_indentation_with_4_space_config() {
+        // With smart auto-detection, pure unordered lists use fixed style
+        // Fixed style with indent=4: level 0 = 0, level 1 = 4, level 2 = 8
         let rule = MD007ULIndent::new(4);
 
-        // Test excessive indentation (5 spaces instead of 4) - like Ruff's versioning.md
+        // Test excessive indentation (5 spaces instead of 4)
         let content = "- Formatter:\n     - The stable style changed";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-
-        // Due to text-aligned style, the expected indent should be 2 (aligning with "Formatter" text)
-        // But with 5 spaces, it's wrong
         assert!(
             !result.is_empty(),
-            "Should detect 5 spaces when expecting proper alignment"
+            "Should detect 5 spaces when expecting 4 (fixed style)"
         );
 
-        // Test with correct alignment
-        let correct_content = "- Formatter:\n  - The stable style changed";
+        // Test with correct fixed style alignment (4 spaces for level 1)
+        let correct_content = "- Formatter:\n    - The stable style changed";
         let ctx = LintContext::new(correct_content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Should accept correct text alignment");
+        assert!(result.is_empty(), "Should accept correct fixed style indent (4 spaces)");
     }
 
     #[test]
@@ -981,6 +1100,327 @@ tags:
         assert!(
             result.is_empty(),
             "Nested blockquotes with tabs should work correctly, got: {result:?}"
+        );
+    }
+
+    // Tests for smart style auto-detection (fixes issue #210 while preserving #209 fix)
+
+    #[test]
+    fn test_smart_style_pure_unordered_uses_fixed() {
+        // Issue #210: Pure unordered lists with custom indent should use fixed style
+        let rule = MD007ULIndent::new(4);
+
+        // With fixed style (auto-detected), this should be valid
+        let content = "* Level 0\n    * Level 1\n        * Level 2";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Pure unordered with indent=4 should use fixed style (0, 4, 8), got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_smart_style_mixed_lists_uses_text_aligned() {
+        // Issue #209: Mixed lists should use text-aligned to avoid oscillation
+        let rule = MD007ULIndent::new(4);
+
+        // With text-aligned style (auto-detected for mixed), bullets align with parent text
+        let content = "1. Ordered\n   * Bullet aligns with 'Ordered' text (3 spaces)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Mixed lists should use text-aligned style, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_smart_style_explicit_fixed_overrides() {
+        // When style is explicitly set to fixed, it should be respected even for mixed lists
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::Fixed,
+            style_explicit: true, // Explicit setting
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // With explicit fixed style, expect fixed calculations even for mixed lists
+        let content = "1. Ordered\n    * Should be at 4 spaces (fixed)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // The bullet is at 4 spaces which matches fixed style level 1
+        assert!(
+            result.is_empty(),
+            "Explicit fixed style should be respected, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_smart_style_explicit_text_aligned_overrides() {
+        // When style is explicitly set to text-aligned, it should be respected
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: true, // Explicit setting
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // With explicit text-aligned, pure unordered should use text-aligned (not auto-switch to fixed)
+        let content = "* Level 0\n  * Level 1 (aligned with 'Level 0' text)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Explicit text-aligned should be respected, got: {result:?}"
+        );
+
+        // This would be correct for fixed but wrong for text-aligned
+        let fixed_style_content = "* Level 0\n    * Level 1 (4 spaces - fixed style)";
+        let ctx = LintContext::new(fixed_style_content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "With explicit text-aligned, 4-space indent should be wrong (expected 2)"
+        );
+    }
+
+    #[test]
+    fn test_smart_style_default_indent_no_autoswitch() {
+        // When indent is default (2), no auto-switch happens (both styles produce same result)
+        let rule = MD007ULIndent::new(2);
+
+        let content = "* Level 0\n  * Level 1\n    * Level 2";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Default indent should work regardless of style, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_has_mixed_list_nesting_detection() {
+        // Test the mixed list detection function directly
+
+        // Pure unordered - no mixed nesting
+        let content = "* Item 1\n  * Item 2\n    * Item 3";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Pure unordered should not be detected as mixed"
+        );
+
+        // Pure ordered - no mixed nesting
+        let content = "1. Item 1\n   2. Item 2\n      3. Item 3";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Pure ordered should not be detected as mixed"
+        );
+
+        // Mixed: unordered under ordered
+        let content = "1. Ordered\n   * Unordered child";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Unordered under ordered should be detected as mixed"
+        );
+
+        // Mixed: ordered under unordered
+        let content = "* Unordered\n  1. Ordered child";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Ordered under unordered should be detected as mixed"
+        );
+
+        // Separate lists (not nested) - not mixed
+        let content = "* Unordered\n\n1. Ordered (separate list)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Separate lists should not be detected as mixed"
+        );
+
+        // Mixed lists inside blockquotes should be detected
+        let content = "> 1. Ordered in blockquote\n>    * Unordered child";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Mixed lists in blockquotes should be detected"
+        );
+    }
+
+    #[test]
+    fn test_issue_210_exact_reproduction() {
+        // Exact reproduction from issue #210
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned, // Default
+            style_explicit: false,                         // Not explicitly set - should auto-detect
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        let content = "# Title\n\n* some\n    * list\n    * items\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Issue #210: indent=4 on pure unordered should work (auto-fixed style), got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_209_still_fixed() {
+        // Verify issue #209 (oscillation) is still fixed
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(3),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned, // Default
+            style_explicit: false,                         // Not explicitly set
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // Mixed list from issue #209 - should use text-aligned, no oscillation
+        let content = r#"# Header 1
+
+- **Second item**:
+  - **This is a nested list**:
+    1. **First point**
+       - First subpoint
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Issue #209: Mixed lists should use text-aligned and have no issues, got: {result:?}"
+        );
+    }
+
+    // Edge case tests for review findings
+
+    #[test]
+    fn test_multi_level_mixed_detection_grandparent() {
+        // Test that multi-level mixed detection finds grandparent type differences
+        // ordered → unordered → unordered should be detected as mixed
+        // because the grandparent (ordered) is different from descendants (unordered)
+        let content = "1. Ordered grandparent\n   * Unordered child\n     * Unordered grandchild";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Should detect mixed nesting when grandparent differs in type"
+        );
+
+        // unordered → ordered → ordered should also be detected as mixed
+        let content = "* Unordered grandparent\n  1. Ordered child\n     2. Ordered grandchild";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Should detect mixed nesting for ordered descendants under unordered"
+        );
+    }
+
+    #[test]
+    fn test_html_comments_skipped_in_detection() {
+        // Lists inside HTML comments should not affect mixed detection
+        let content = r#"* Unordered list
+<!-- This is a comment
+  1. This ordered list is inside a comment
+     * This nested bullet is also inside
+-->
+  * Another unordered item"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Lists in HTML comments should be ignored in mixed detection"
+        );
+    }
+
+    #[test]
+    fn test_blank_lines_separate_lists() {
+        // Blank lines at root level should separate lists, treating them as independent
+        let content = "* First unordered list\n\n1. Second list is ordered (separate)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Blank line at root should separate lists"
+        );
+
+        // But nested lists after blank should still be detected if mixed
+        let content = "1. Ordered parent\n\n   * Still a child due to indentation";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Indented list after blank is still nested"
+        );
+    }
+
+    #[test]
+    fn test_column_1_normalization() {
+        // 1-space indent should be treated as column 0 (root level)
+        // This creates a sibling relationship, not nesting
+        let content = "* First item\n * Second item with 1 space (sibling)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD007ULIndent::default();
+        let result = rule.check(&ctx).unwrap();
+        // The second item should be flagged as wrong (1 space is not valid for nesting)
+        assert!(
+            result.iter().any(|w| w.line == 2),
+            "1-space indent should be flagged as incorrect"
+        );
+    }
+
+    #[test]
+    fn test_code_blocks_skipped_in_detection() {
+        // Lists inside code blocks should not affect mixed detection
+        let content = r#"* Unordered list
+```
+1. This ordered list is inside a code block
+   * This nested bullet is also inside
+```
+  * Another unordered item"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Lists in code blocks should be ignored in mixed detection"
+        );
+    }
+
+    #[test]
+    fn test_front_matter_skipped_in_detection() {
+        // Lists inside YAML front matter should not affect mixed detection
+        let content = r#"---
+items:
+  - yaml list item
+  - another item
+---
+* Unordered list after front matter"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Lists in front matter should be ignored in mixed detection"
+        );
+    }
+
+    #[test]
+    fn test_alternating_types_at_same_level() {
+        // Alternating between ordered and unordered at the same nesting level
+        // is NOT mixed nesting (they are siblings, not parent-child)
+        let content = "* First bullet\n1. First number\n* Second bullet\n2. Second number";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            "Alternating types at same level should not be detected as mixed"
         );
     }
 }

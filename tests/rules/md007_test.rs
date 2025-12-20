@@ -264,60 +264,48 @@ mod comprehensive_tests {
 
     #[test]
     fn test_custom_indent_3_spaces() {
-        // Test dynamic alignment behavior (default start_indented=false)
+        // With smart auto-detection, pure unordered lists use fixed style
+        // This provides markdownlint compatibility (fixes issue #210)
         let rule = MD007ULIndent::new(3);
 
-        let content = "* Item 1\n   * Item 2\n      * Item 3";
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        // With dynamic alignment, Item 2 should align with Item 1's text (2 spaces)
-        // and Item 3 should align with Item 2's text (4 spaces), not fixed increments
-        assert!(!result.is_empty()); // Should have warnings due to alignment
-
-        // Test that dynamic alignment works correctly
-        // Item 3 should align with Item 2's text content (4 spaces)
-        let correct_content = "* Item 1\n  * Item 2\n    * Item 3";
+        // Fixed style with indent=3: level 0 = 0, level 1 = 3, level 2 = 6
+        let correct_content = "* Item 1\n   * Item 2\n      * Item 3";
         let ctx = LintContext::new(correct_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty());
+        assert!(result.is_empty(), "Fixed style expects 0, 3, 6 spaces");
 
-        // Test that 2-space indentation fails with 3-space config
-        let wrong_content = "* Item 1\n  * Item 2";
+        // Wrong indentation (text-aligned spacing)
+        let wrong_content = "* Item 1\n  * Item 2\n    * Item 3";
         let ctx = LintContext::new(wrong_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // With dynamic alignment, this is actually correct (2 spaces aligns with text)
-        assert_eq!(result.len(), 0);
+        assert!(!result.is_empty(), "Should warn: expected 3 spaces, found 2");
 
-        // Test fix - no fix needed since it's correct
+        // Test fix corrects to fixed style
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "* Item 1\n  * Item 2");
+        assert_eq!(fixed, "* Item 1\n   * Item 2\n      * Item 3");
     }
 
     #[test]
     fn test_custom_indent_4_spaces() {
-        // Test dynamic alignment behavior (default start_indented=false)
+        // With smart auto-detection, pure unordered lists use fixed style
+        // This provides markdownlint compatibility (fixes issue #210)
         let rule = MD007ULIndent::new(4);
-        let content = "* Item 1\n    * Item 2\n        * Item 3";
-        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        // With dynamic alignment, should expect 2 spaces and 6 spaces, not 4 and 8
-        assert!(!result.is_empty()); // Should have warnings due to alignment
 
-        // Test correct dynamic alignment
-        // Item 3 should align with Item 2's text content (4 spaces)
-        let correct_content = "* Item 1\n  * Item 2\n    * Item 3";
+        // Fixed style with indent=4: level 0 = 0, level 1 = 4, level 2 = 8
+        let correct_content = "* Item 1\n    * Item 2\n        * Item 3";
         let ctx = LintContext::new(correct_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty());
+        assert!(result.is_empty(), "Fixed style expects 0, 4, 8 spaces");
 
-        // Test fix with wrong indentation - dynamic alignment means no fix needed
+        // Wrong indentation (text-aligned spacing)
         let wrong_content = "* Item 1\n  * Item 2\n    * Item 3";
         let ctx = LintContext::new(wrong_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Dynamic alignment makes this correct
-        assert!(result.is_empty());
+        assert!(!result.is_empty(), "Should warn: expected 4 spaces, found 2");
+
+        // Test fix corrects to fixed style
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
+        assert_eq!(fixed, "* Item 1\n    * Item 2\n        * Item 3");
     }
 
     // 7. Tab indentation
@@ -623,8 +611,10 @@ mod parity_with_markdownlint {
 
     #[test]
     fn parity_custom_indent_4() {
+        // With smart auto-detection, pure unordered lists use fixed style
+        // Input has text-aligned spacing (2, 4), output should be fixed (4, 8)
         let input = "* Item 1\n  * Nested 1\n    * Nested 2";
-        let expected = "* Item 1\n  * Nested 1\n    * Nested 2";
+        let expected = "* Item 1\n    * Nested 1\n        * Nested 2";
         let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let rule = MD007ULIndent::new(4);
         let fixed = rule.fix(&ctx).unwrap();
@@ -782,24 +772,26 @@ mod excessive_indentation_bug_fix {
     #[test]
     fn test_md007_with_4_space_config() {
         // Test with MD007 configured for 4-space indents
-        // Note: MD007ULIndent::new(4) uses TextAligned style with dynamic alignment
+        // With smart auto-detection, pure unordered lists use fixed style
+        // Fixed style: level 0 = 0, level 1 = 4, level 2 = 8
         let test = "- Item 1\n    - Item 2 with 4 spaces\n     - Item 3 with 5 spaces\n      - Item 4 with 6 spaces\n        - Item 5 with 8 spaces";
 
         let rule = MD007ULIndent::new(4);
         let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
 
-        // With TextAligned style (indent param not used for text-aligned):
-        // Line 2: 4 spaces - wrong, should align with Item 1's text (2 spaces)
-        // Line 3: 5 spaces - wrong, should align with Item 2's expected text (4 spaces)
-        // Lines 4-5: Correct for their respective nesting levels
-        // Note: markdownlint may handle excessive nesting differently
+        // With fixed style:
+        // Line 1: 0 spaces (level 0) - correct
+        // Line 2: 4 spaces (level 1) - correct
+        // Line 3: 5 spaces - wrong, should be 4 (level 1 sibling) or 8 (level 2)
+        // Line 4: 6 spaces - wrong, should be 4 (level 1 sibling) or 8 (level 2)
+        // Line 5: 8 spaces (level 2) - correct
 
-        assert!(warnings.len() >= 2, "Should detect indentation issues on lines 2 and 3");
+        assert!(warnings.len() >= 2, "Should detect indentation issues on lines 3 and 4");
 
-        // At least lines 2 and 3 should have warnings
-        assert!(warnings.iter().any(|w| w.line == 2), "Line 2 should have warning");
+        // Lines 3 and 4 should have warnings (wrong indentation)
         assert!(warnings.iter().any(|w| w.line == 3), "Line 3 should have warning");
+        assert!(warnings.iter().any(|w| w.line == 4), "Line 4 should have warning");
     }
 
     #[test]

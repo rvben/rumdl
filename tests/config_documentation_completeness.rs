@@ -20,6 +20,7 @@ fn extract_fields_from_config_file(file_path: &Path) -> HashSet<String> {
     let mut in_struct = false;
     let mut brace_depth = 0;
     let mut pending_rename: Option<String> = None;
+    let mut pending_skip = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -41,6 +42,13 @@ fn extract_fields_from_config_file(file_path: &Path) -> HashSet<String> {
             if brace_depth == 0 {
                 in_struct = false;
                 pending_rename = None;
+                pending_skip = false;
+                continue;
+            }
+
+            // Check for #[serde(skip)] - marks internal fields not for user config
+            if trimmed.contains("#[serde") && trimmed.contains("skip") {
+                pending_skip = true;
                 continue;
             }
 
@@ -62,6 +70,13 @@ fn extract_fields_from_config_file(file_path: &Path) -> HashSet<String> {
                 && let Some(field_part) = trimmed.strip_prefix("pub ")
                 && let Some(colon_pos) = field_part.find(':')
             {
+                // Skip internal fields marked with #[serde(skip)]
+                if pending_skip {
+                    pending_skip = false;
+                    pending_rename = None;
+                    continue;
+                }
+
                 // If we have a pending rename, use that instead of the field name
                 if let Some(renamed) = pending_rename.take() {
                     fields.insert(renamed);

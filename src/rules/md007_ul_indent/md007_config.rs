@@ -34,6 +34,13 @@ pub struct MD007Config {
     /// Indentation style: text-aligned (default) or fixed (markdownlint compatible)
     #[serde(default)]
     pub style: IndentStyle,
+
+    /// Whether style was explicitly set in config (used for smart auto-detection)
+    /// When false and indent != 2, we auto-select style based on document content:
+    /// - Pure unordered lists → fixed style (markdownlint compatible)
+    /// - Mixed ordered/unordered → text-aligned (avoids oscillation)
+    #[serde(skip)]
+    pub style_explicit: bool,
 }
 
 fn default_indent() -> IndentSize {
@@ -51,6 +58,7 @@ impl Default for MD007Config {
             start_indented: false,
             start_indent: default_start_indent(),
             style: IndentStyle::default(),
+            style_explicit: false,
         }
     }
 }
