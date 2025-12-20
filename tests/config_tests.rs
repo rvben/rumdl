@@ -339,7 +339,10 @@ fn test_config_validation_unknown_rule() {
     let rules = rumdl_lib::all_rules(&rumdl_lib::config::Config::default()); // Use all_rules instead of get_rules
     let registry = RuleRegistry::from_rules(&rules);
     let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry); // Use validate_config_sourced
-    assert_eq!(warnings.len(), 0);
+    // Unknown rules should generate a validation warning
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].message.contains("Unknown rule"));
+    assert!(warnings[0].message.contains("UNKNOWN_RULE"));
 }
 
 #[test]
@@ -1438,4 +1441,310 @@ line-length = 42
             ".rumdl.toml should take precedence over .config/rumdl.toml"
         );
     }
+}
+
+// ====================================
+// Rule Name Alias Support Tests
+// ====================================
+
+#[test]
+fn test_rumdl_toml_rule_section_with_aliases() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Test using rule name aliases in section headers
+    let config_content = r#"
+[ul-style]
+style = "dash"
+
+[ol-prefix]
+style = "ordered"
+
+[line-length]
+line-length = 100
+code-blocks = false
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config with aliases");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify that aliases were resolved to canonical names
+    let ul_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
+    assert_eq!(
+        ul_style,
+        Some("dash".to_string()),
+        "ul-style alias should resolve to MD004"
+    );
+
+    let ol_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD029", "style");
+    assert_eq!(
+        ol_style,
+        Some("ordered".to_string()),
+        "ol-prefix alias should resolve to MD029"
+    );
+
+    let line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line-length");
+    assert_eq!(line_length, Some(100), "line-length alias should resolve to MD013");
+
+    let code_blocks = rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", "code-blocks");
+    assert_eq!(code_blocks, Some(false), "code-blocks config should work with alias");
+}
+
+#[test]
+fn test_rumdl_toml_enable_disable_with_aliases() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Test using aliases in enable/disable arrays
+    let config_content = r#"
+[global]
+enable = ["ul-style", "ol-prefix", "line-length"]
+disable = ["no-bare-urls", "hr-style"]
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify that aliases were resolved in enable/disable arrays
+    assert!(
+        config.global.enable.contains(&"MD004".to_string()),
+        "ul-style should be resolved to MD004 in enable"
+    );
+    assert!(
+        config.global.enable.contains(&"MD029".to_string()),
+        "ol-prefix should be resolved to MD029 in enable"
+    );
+    assert!(
+        config.global.enable.contains(&"MD013".to_string()),
+        "line-length should be resolved to MD013 in enable"
+    );
+
+    assert!(
+        config.global.disable.contains(&"MD034".to_string()),
+        "no-bare-urls should be resolved to MD034 in disable"
+    );
+    assert!(
+        config.global.disable.contains(&"MD035".to_string()),
+        "hr-style should be resolved to MD035 in disable"
+    );
+}
+
+#[test]
+fn test_rumdl_toml_per_file_ignores_with_aliases() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    let config_content = r#"
+[per-file-ignores]
+"docs/*.md" = ["ul-style", "line-length"]
+"README.md" = ["no-bare-urls"]
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify that aliases were resolved in per-file-ignores
+    let docs_rules = config.per_file_ignores.get("docs/*.md");
+    assert!(docs_rules.is_some(), "docs/*.md pattern should exist");
+    assert!(
+        docs_rules.unwrap().contains(&"MD004".to_string()),
+        "ul-style should be resolved to MD004"
+    );
+    assert!(
+        docs_rules.unwrap().contains(&"MD013".to_string()),
+        "line-length should be resolved to MD013"
+    );
+
+    let readme_rules = config.per_file_ignores.get("README.md");
+    assert!(readme_rules.is_some(), "README.md pattern should exist");
+    assert!(
+        readme_rules.unwrap().contains(&"MD034".to_string()),
+        "no-bare-urls should be resolved to MD034"
+    );
+}
+
+#[test]
+fn test_pyproject_toml_rule_section_with_aliases() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("pyproject.toml");
+
+    // Test using dot notation for nested sections
+    let config_content = r#"
+[tool.rumdl.ul-style]
+style = "dash"
+
+[tool.rumdl.ol-prefix]
+style = "ordered"
+
+[tool.rumdl.line-length]
+line-length = 100
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load pyproject.toml with aliases");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify that aliases were resolved
+    let ul_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
+    assert_eq!(
+        ul_style,
+        Some("dash".to_string()),
+        "ul-style alias should resolve to MD004 in pyproject.toml"
+    );
+
+    let ol_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD029", "style");
+    assert_eq!(
+        ol_style,
+        Some("ordered".to_string()),
+        "ol-prefix alias should resolve to MD029 in pyproject.toml"
+    );
+
+    // Note: line-length config may work differently in pyproject.toml due to parsing
+    // Let's test with canonical name as well
+    let line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line-length");
+    // This test verifies section 3 handling of [tool.rumdl.alias] format
+    assert_eq!(
+        line_length,
+        Some(100),
+        "line-length alias should resolve to MD013 in pyproject.toml (section 3)"
+    );
+}
+
+#[test]
+fn test_pyproject_toml_enable_disable_with_aliases() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("pyproject.toml");
+
+    let config_content = r#"
+[tool.rumdl]
+enable = ["ul-style", "ol-prefix"]
+disable = ["no-bare-urls", "line-length"]
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify aliases were resolved
+    assert!(
+        config.global.enable.contains(&"MD004".to_string()),
+        "ul-style should be resolved to MD004"
+    );
+    assert!(
+        config.global.enable.contains(&"MD029".to_string()),
+        "ol-prefix should be resolved to MD029"
+    );
+    assert!(
+        config.global.disable.contains(&"MD034".to_string()),
+        "no-bare-urls should be resolved to MD034"
+    );
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        "line-length should be resolved to MD013"
+    );
+}
+
+#[test]
+fn test_mixed_canonical_and_alias_names() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Test mixing canonical names and aliases
+    let config_content = r#"
+[global]
+enable = ["MD001", "ul-style", "MD013", "ol-prefix"]
+
+[MD004]
+style = "asterisk"
+
+[line-length]
+line-length = 120
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify both canonical and alias names work
+    assert!(config.global.enable.contains(&"MD001".to_string()));
+    assert!(config.global.enable.contains(&"MD004".to_string()));
+    assert!(config.global.enable.contains(&"MD013".to_string()));
+    assert!(config.global.enable.contains(&"MD029".to_string()));
+
+    // Verify rule configs work with both
+    let ul_style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style");
+    assert_eq!(ul_style, Some("asterisk".to_string()));
+
+    let line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line-length");
+    assert_eq!(line_length, Some(120));
+}
+
+#[test]
+fn test_fuzzy_matching_suggests_aliases() {
+    // Test that fuzzy matching suggests aliases, not just canonical names
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Typo in alias name: "ul-sytle" instead of "ul-style"
+    let config_content = r#"
+[ul-sytle]
+style = "dash"
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let rules = rumdl_lib::all_rules(&rumdl_lib::config::Config::default());
+    let registry = RuleRegistry::from_rules(&rules);
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry);
+
+    // Debug: print warnings
+    for (i, warning) in warnings.iter().enumerate() {
+        println!("Warning {}: {}", i, warning.message);
+    }
+
+    // Should have 1 warning for unknown rule
+    assert_eq!(warnings.len(), 1, "Should have 1 validation warning");
+
+    // The warning should suggest the correct alias "ul-style" in lowercase
+    assert!(
+        warnings[0].message.contains("ul-sytle"),
+        "Warning should mention the typo: {}",
+        warnings[0].message
+    );
+    assert!(
+        warnings[0].message.contains("ul-style"),
+        "Warning should suggest the correct alias in lowercase: {}",
+        warnings[0].message
+    );
 }

@@ -8,7 +8,7 @@ use crate::types::LineLength;
 use log;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -2705,6 +2705,157 @@ impl RuleRegistry {
         }
         None
     }
+
+    /// Resolve any rule name (canonical or alias) to its canonical form
+    /// Returns None if the rule name is not recognized
+    ///
+    /// Resolution order:
+    /// 1. Direct canonical name match
+    /// 2. Static aliases (built-in markdownlint aliases)
+    pub fn resolve_rule_name(&self, name: &str) -> Option<String> {
+        // Try normalized canonical name first
+        let normalized = normalize_key(name);
+        if self.rule_schemas.contains_key(&normalized) {
+            return Some(normalized);
+        }
+
+        // Try static alias resolution (O(1) perfect hash lookup)
+        resolve_rule_name_alias(name).map(|s| s.to_string())
+    }
+}
+
+/// Compile-time perfect hash map for O(1) rule alias lookups
+/// Uses phf for zero-cost abstraction - compiles to direct jumps
+static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! {
+    // Canonical names (identity mapping for consistency)
+    "MD001" => "MD001",
+    "MD003" => "MD003",
+    "MD004" => "MD004",
+    "MD005" => "MD005",
+    "MD007" => "MD007",
+    "MD008" => "MD008",
+    "MD009" => "MD009",
+    "MD010" => "MD010",
+    "MD011" => "MD011",
+    "MD012" => "MD012",
+    "MD013" => "MD013",
+    "MD014" => "MD014",
+    "MD015" => "MD015",
+    "MD018" => "MD018",
+    "MD019" => "MD019",
+    "MD020" => "MD020",
+    "MD021" => "MD021",
+    "MD022" => "MD022",
+    "MD023" => "MD023",
+    "MD024" => "MD024",
+    "MD025" => "MD025",
+    "MD026" => "MD026",
+    "MD027" => "MD027",
+    "MD028" => "MD028",
+    "MD029" => "MD029",
+    "MD030" => "MD030",
+    "MD031" => "MD031",
+    "MD032" => "MD032",
+    "MD033" => "MD033",
+    "MD034" => "MD034",
+    "MD035" => "MD035",
+    "MD036" => "MD036",
+    "MD037" => "MD037",
+    "MD038" => "MD038",
+    "MD039" => "MD039",
+    "MD040" => "MD040",
+    "MD041" => "MD041",
+    "MD042" => "MD042",
+    "MD043" => "MD043",
+    "MD044" => "MD044",
+    "MD045" => "MD045",
+    "MD046" => "MD046",
+    "MD047" => "MD047",
+    "MD048" => "MD048",
+    "MD049" => "MD049",
+    "MD050" => "MD050",
+    "MD051" => "MD051",
+    "MD052" => "MD052",
+    "MD053" => "MD053",
+    "MD054" => "MD054",
+    "MD055" => "MD055",
+    "MD056" => "MD056",
+    "MD057" => "MD057",
+    "MD058" => "MD058",
+    "MD059" => "MD059",
+    "MD060" => "MD060",
+    "MD061" => "MD061",
+
+    // Aliases (hyphen format)
+    "HEADING-INCREMENT" => "MD001",
+    "HEADING-STYLE" => "MD003",
+    "UL-STYLE" => "MD004",
+    "LIST-INDENT" => "MD005",
+    "UL-INDENT" => "MD007",
+    "NO-TRAILING-SPACES" => "MD009",
+    "NO-HARD-TABS" => "MD010",
+    "NO-REVERSED-LINKS" => "MD011",
+    "NO-MULTIPLE-BLANKS" => "MD012",
+    "LINE-LENGTH" => "MD013",
+    "COMMANDS-SHOW-OUTPUT" => "MD014",
+    "NO-MISSING-SPACE-AFTER-LIST-MARKER" => "MD015",
+    "NO-MISSING-SPACE-ATX" => "MD018",
+    "NO-MULTIPLE-SPACE-ATX" => "MD019",
+    "NO-MISSING-SPACE-CLOSED-ATX" => "MD020",
+    "NO-MULTIPLE-SPACE-CLOSED-ATX" => "MD021",
+    "BLANKS-AROUND-HEADINGS" => "MD022",
+    "HEADING-START-LEFT" => "MD023",
+    "NO-DUPLICATE-HEADING" => "MD024",
+    "SINGLE-TITLE" => "MD025",
+    "SINGLE-H1" => "MD025",
+    "NO-TRAILING-PUNCTUATION" => "MD026",
+    "NO-MULTIPLE-SPACE-BLOCKQUOTE" => "MD027",
+    "NO-BLANKS-BLOCKQUOTE" => "MD028",
+    "OL-PREFIX" => "MD029",
+    "LIST-MARKER-SPACE" => "MD030",
+    "BLANKS-AROUND-FENCES" => "MD031",
+    "BLANKS-AROUND-LISTS" => "MD032",
+    "NO-INLINE-HTML" => "MD033",
+    "NO-BARE-URLS" => "MD034",
+    "HR-STYLE" => "MD035",
+    "NO-EMPHASIS-AS-HEADING" => "MD036",
+    "NO-SPACE-IN-EMPHASIS" => "MD037",
+    "NO-SPACE-IN-CODE" => "MD038",
+    "NO-SPACE-IN-LINKS" => "MD039",
+    "FENCED-CODE-LANGUAGE" => "MD040",
+    "FIRST-LINE-HEADING" => "MD041",
+    "FIRST-LINE-H1" => "MD041",
+    "NO-EMPTY-LINKS" => "MD042",
+    "REQUIRED-HEADINGS" => "MD043",
+    "PROPER-NAMES" => "MD044",
+    "NO-ALT-TEXT" => "MD045",
+    "CODE-BLOCK-STYLE" => "MD046",
+    "SINGLE-TRAILING-NEWLINE" => "MD047",
+    "CODE-FENCE-STYLE" => "MD048",
+    "EMPHASIS-STYLE" => "MD049",
+    "STRONG-STYLE" => "MD050",
+    "LINK-FRAGMENTS" => "MD051",
+    "REFERENCE-LINKS-IMAGES" => "MD052",
+    "LINK-IMAGE-REFERENCE-DEFINITIONS" => "MD053",
+    "LINK-IMAGE-STYLE" => "MD054",
+    "TABLE-PIPE-STYLE" => "MD055",
+    "TABLE-COLUMN-COUNT" => "MD056",
+    "EXISTING-RELATIVE-LINKS" => "MD057",
+    "BLANKS-AROUND-TABLES" => "MD058",
+    "TABLE-CELL-ALIGNMENT" => "MD059",
+    "TABLE-FORMAT" => "MD060",
+    "FORBIDDEN-TERMS" => "MD061",
+};
+
+/// Resolve a rule name alias to its canonical form with O(1) perfect hash lookup
+/// Converts rule aliases (like "ul-style", "line-length") to canonical IDs (like "MD004", "MD013")
+/// Returns None if the rule name is not recognized
+pub(crate) fn resolve_rule_name_alias(key: &str) -> Option<&'static str> {
+    // Normalize: uppercase and replace underscores with hyphens
+    let normalized_key = key.to_ascii_uppercase().replace('_', "-");
+
+    // O(1) perfect hash lookup
+    RULE_ALIAS_MAP.get(normalized_key.as_str()).copied()
 }
 
 /// Represents a config validation warning or error
@@ -2735,8 +2886,21 @@ fn validate_config_sourced_impl(
     // 1. Unknown rules
     for rule in rules.keys() {
         if !known_rules.contains(rule) {
+            // Include both canonical names AND aliases for fuzzy matching
+            let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+            let message = if let Some(suggestion) = suggest_similar_key(rule, &all_rule_names) {
+                // Convert alias suggestions to lowercase for better UX (MD001 stays uppercase, ul-style becomes lowercase)
+                let formatted_suggestion = if suggestion.starts_with("MD") {
+                    suggestion
+                } else {
+                    suggestion.to_lowercase()
+                };
+                format!("Unknown rule in config: {rule} (did you mean: {formatted_suggestion}?)")
+            } else {
+                format!("Unknown rule in config: {rule}")
+            };
             warnings.push(ConfigValidationWarning {
-                message: format!("Unknown rule in config: {rule}"),
+                message,
                 rule: Some(rule.clone()),
                 key: None,
             });
@@ -2817,20 +2981,27 @@ fn validate_config_sourced_impl(
             });
         } else if !key.is_empty() {
             // This is an unknown rule section (key is empty means it's a section header)
-            // No suggestions for rule names - just warn
             continue;
         } else {
-            // Unknown rule section
-            let message = if let Some(path) = file_path {
-                format!(
-                    "Unknown rule in {path}: {}",
-                    section.trim_matches(|c| c == '[' || c == ']')
-                )
+            // Unknown rule section - suggest similar rule names
+            let rule_name = section.trim_matches(|c| c == '[' || c == ']');
+            let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+            let message = if let Some(suggestion) = suggest_similar_key(rule_name, &all_rule_names) {
+                // Convert alias suggestions to lowercase for better UX (MD001 stays uppercase, ul-style becomes lowercase)
+                let formatted_suggestion = if suggestion.starts_with("MD") {
+                    suggestion
+                } else {
+                    suggestion.to_lowercase()
+                };
+                if let Some(path) = file_path {
+                    format!("Unknown rule in {path}: {rule_name} (did you mean: {formatted_suggestion}?)")
+                } else {
+                    format!("Unknown rule in config: {rule_name} (did you mean: {formatted_suggestion}?)")
+                }
+            } else if let Some(path) = file_path {
+                format!("Unknown rule in {path}: {rule_name}")
             } else {
-                format!(
-                    "Unknown rule in config: {}",
-                    section.trim_matches(|c| c == '[' || c == ']')
-                )
+                format!("Unknown rule in config: {rule_name}")
             };
             warnings.push(ConfigValidationWarning {
                 message,
@@ -2957,6 +3128,10 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
     let source = ConfigSource::PyprojectToml;
     let file = Some(path.to_string());
 
+    // Create rule registry for alias resolution
+    let all_rules = rules::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&all_rules);
+
     // 1. Handle [tool.rumdl] and [tool.rumdl.global] sections
     if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl"))
         && let Some(rumdl_table) = rumdl_config.as_table()
@@ -2967,8 +3142,11 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
             if let Some(enable) = table.get("enable")
                 && let Ok(values) = Vec::<String>::deserialize(enable.clone())
             {
-                // Normalize rule names in the list
-                let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+                // Resolve rule name aliases (e.g., "ul-style" -> "MD004")
+                let normalized_values = values
+                    .into_iter()
+                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                    .collect();
                 fragment
                     .global
                     .enable
@@ -2978,8 +3156,11 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
             if let Some(disable) = table.get("disable")
                 && let Ok(values) = Vec::<String>::deserialize(disable.clone())
             {
-                // Re-enable normalization
-                let normalized_values: Vec<String> = values.into_iter().map(|s| normalize_key(&s)).collect();
+                // Resolve rule name aliases
+                let normalized_values: Vec<String> = values
+                    .into_iter()
+                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                    .collect();
                 fragment
                     .global
                     .disable
@@ -3042,7 +3223,10 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
             if let Some(fixable) = table.get("fixable")
                 && let Ok(values) = Vec::<String>::deserialize(fixable.clone())
             {
-                let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+                let normalized_values = values
+                    .into_iter()
+                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                    .collect();
                 fragment
                     .global
                     .fixable
@@ -3052,7 +3236,10 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
             if let Some(unfixable) = table.get("unfixable")
                 && let Ok(values) = Vec::<String>::deserialize(unfixable.clone())
             {
-                let normalized_values = values.into_iter().map(|s| normalize_key(&s)).collect();
+                let normalized_values = values
+                    .into_iter()
+                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                    .collect();
                 fragment
                     .global
                     .unfixable
@@ -3127,7 +3314,10 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
             let mut per_file_map = HashMap::new();
             for (pattern, rules_value) in per_file_table {
                 if let Ok(rules) = Vec::<String>::deserialize(rules_value.clone()) {
-                    let normalized_rules = rules.into_iter().map(|s| normalize_key(&s)).collect();
+                    let normalized_rules = rules
+                        .into_iter()
+                        .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                        .collect();
                     per_file_map.insert(pattern.clone(), normalized_rules);
                 } else {
                     log::warn!(
@@ -3145,17 +3335,16 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
             let norm_rule_key = normalize_key(key);
 
             // Skip keys already handled as global or special cases
-            if [
+            // Note: Only skip these if they're NOT tables (rule sections are tables)
+            let is_global_key = [
                 "enable",
                 "disable",
                 "include",
                 "exclude",
                 "respect_gitignore",
-                "respect-gitignore", // Added kebab-case here too
+                "respect-gitignore",
                 "force_exclude",
                 "force-exclude",
-                "line_length",
-                "line-length",
                 "output_format",
                 "output-format",
                 "fixable",
@@ -3168,37 +3357,34 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 "cache-dir",
                 "cache",
             ]
-            .contains(&norm_rule_key.as_str())
-            {
+            .contains(&norm_rule_key.as_str());
+
+            // Special handling for line-length: could be global config OR rule section
+            let is_line_length_global =
+                (norm_rule_key == "line-length" || norm_rule_key == "line_length") && !value.is_table();
+
+            if is_global_key || is_line_length_global {
                 continue;
             }
 
-            // Explicitly check if the key looks like a rule name (e.g., starts with 'md')
-            // AND if the value is actually a TOML table before processing as rule config.
-            // This prevents misinterpreting other top-level keys under [tool.rumdl]
-            let norm_rule_key_upper = norm_rule_key.to_ascii_uppercase();
-            if norm_rule_key_upper.len() == 5
-                && norm_rule_key_upper.starts_with("MD")
-                && norm_rule_key_upper[2..].chars().all(|c| c.is_ascii_digit())
+            // Try to resolve as a rule name (handles both canonical names and aliases)
+            if let Some(resolved_rule_name) = registry.resolve_rule_name(key)
                 && value.is_table()
+                && let Some(rule_config_table) = value.as_table()
             {
-                if let Some(rule_config_table) = value.as_table() {
-                    // Get the entry for this rule (e.g., "md013")
-                    let rule_entry = fragment.rules.entry(norm_rule_key_upper).or_default();
-                    for (rk, rv) in rule_config_table {
-                        let norm_rk = normalize_key(rk); // Normalize the config key itself
+                let rule_entry = fragment.rules.entry(resolved_rule_name).or_default();
+                for (rk, rv) in rule_config_table {
+                    let norm_rk = normalize_key(rk);
+                    let toml_val = rv.clone();
 
-                        let toml_val = rv.clone();
-
-                        let sv = rule_entry
-                            .values
-                            .entry(norm_rk.clone())
-                            .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
-                        sv.push_override(toml_val, source, file.clone(), None);
-                    }
+                    let sv = rule_entry
+                        .values
+                        .entry(norm_rk.clone())
+                        .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
+                    sv.push_override(toml_val, source, file.clone(), None);
                 }
             } else {
-                // Key is not a global/special key, doesn't start with 'md', or isn't a table.
+                // Key is not a global/special key and not a recognized rule name
                 // Track unknown keys under [tool.rumdl] for validation
                 fragment
                     .unknown_keys
@@ -3211,24 +3397,24 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
     if let Some(tool_table) = doc.get("tool").and_then(|t| t.as_table()) {
         for (key, value) in tool_table.iter() {
             if let Some(rule_name) = key.strip_prefix("rumdl.") {
-                let norm_rule_name = normalize_key(rule_name);
-                if norm_rule_name.len() == 5
-                    && norm_rule_name.to_ascii_uppercase().starts_with("MD")
-                    && norm_rule_name[2..].chars().all(|c| c.is_ascii_digit())
-                    && let Some(rule_table) = value.as_table()
-                {
-                    let rule_entry = fragment.rules.entry(norm_rule_name.to_ascii_uppercase()).or_default();
-                    for (rk, rv) in rule_table {
-                        let norm_rk = normalize_key(rk);
-                        let toml_val = rv.clone();
-                        let sv = rule_entry
-                            .values
-                            .entry(norm_rk.clone())
-                            .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
-                        sv.push_override(toml_val, source, file.clone(), None);
+                // Try to resolve as a rule name (handles both canonical names and aliases)
+                if let Some(resolved_rule_name) = registry.resolve_rule_name(rule_name) {
+                    if let Some(rule_table) = value.as_table() {
+                        let rule_entry = fragment.rules.entry(resolved_rule_name).or_default();
+                        for (rk, rv) in rule_table {
+                            let norm_rk = normalize_key(rk);
+                            let toml_val = rv.clone();
+                            let sv = rule_entry
+                                .values
+                                .entry(norm_rk.clone())
+                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
+                            sv.push_override(toml_val, source, file.clone(), None);
+                        }
                     }
-                } else if rule_name.to_ascii_uppercase().starts_with("MD") {
-                    // Track unknown rule sections like [tool.rumdl.MD999]
+                } else if rule_name.to_ascii_uppercase().starts_with("MD")
+                    || rule_name.chars().any(|c| c.is_alphabetic())
+                {
+                    // Track unknown rule sections like [tool.rumdl.MD999] or [tool.rumdl.unknown-rule]
                     fragment.unknown_keys.push((
                         format!("[tool.rumdl.{rule_name}]"),
                         String::new(),
@@ -3239,28 +3425,28 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         }
     }
 
-    // 3. Handle [tool.rumdl.MDxxx] sections as top-level keys (e.g., [tool.rumdl.MD007])
+    // 3. Handle [tool.rumdl.MDxxx] sections as top-level keys (e.g., [tool.rumdl.MD007] or [tool.rumdl.line-length])
     if let Some(doc_table) = doc.as_table() {
         for (key, value) in doc_table.iter() {
             if let Some(rule_name) = key.strip_prefix("tool.rumdl.") {
-                let norm_rule_name = normalize_key(rule_name);
-                if norm_rule_name.len() == 5
-                    && norm_rule_name.to_ascii_uppercase().starts_with("MD")
-                    && norm_rule_name[2..].chars().all(|c| c.is_ascii_digit())
-                    && let Some(rule_table) = value.as_table()
-                {
-                    let rule_entry = fragment.rules.entry(norm_rule_name.to_ascii_uppercase()).or_default();
-                    for (rk, rv) in rule_table {
-                        let norm_rk = normalize_key(rk);
-                        let toml_val = rv.clone();
-                        let sv = rule_entry
-                            .values
-                            .entry(norm_rk.clone())
-                            .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
-                        sv.push_override(toml_val, source, file.clone(), None);
+                // Try to resolve as a rule name (handles both canonical names and aliases)
+                if let Some(resolved_rule_name) = registry.resolve_rule_name(rule_name) {
+                    if let Some(rule_table) = value.as_table() {
+                        let rule_entry = fragment.rules.entry(resolved_rule_name).or_default();
+                        for (rk, rv) in rule_table {
+                            let norm_rk = normalize_key(rk);
+                            let toml_val = rv.clone();
+                            let sv = rule_entry
+                                .values
+                                .entry(norm_rk.clone())
+                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
+                            sv.push_override(toml_val, source, file.clone(), None);
+                        }
                     }
-                } else if rule_name.to_ascii_uppercase().starts_with("MD") {
-                    // Track unknown rule sections like [tool.rumdl.MD999]
+                } else if rule_name.to_ascii_uppercase().starts_with("MD")
+                    || rule_name.chars().any(|c| c.is_alphabetic())
+                {
+                    // Track unknown rule sections like [tool.rumdl.MD999] or [tool.rumdl.unknown-rule]
                     fragment.unknown_keys.push((
                         format!("[tool.rumdl.{rule_name}]"),
                         String::new(),
@@ -3298,11 +3484,6 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
     // Define known rules before the loop
     let all_rules = rules::all_rules(&Config::default());
     let registry = RuleRegistry::from_rules(&all_rules);
-    let known_rule_names: BTreeSet<String> = registry
-        .rule_names()
-        .into_iter()
-        .map(|s| s.to_ascii_uppercase())
-        .collect();
 
     // Handle [global] section
     if let Some(global_item) = doc.get("global")
@@ -3320,10 +3501,12 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                                 .map(|s| s.to_string())
                                 .collect();
 
-                        // Normalize rule names for enable/disable
+                        // Resolve rule name aliases for enable/disable (e.g., "ul-style" -> "MD004")
                         let final_values = if norm_key == "enable" || norm_key == "disable" {
-                            // Corrected: Pass &str to normalize_key
-                            values.into_iter().map(|s| normalize_key(&s)).collect()
+                            values
+                                .into_iter()
+                                .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                                .collect()
                         } else {
                             values
                         };
@@ -3497,7 +3680,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         let values: Vec<String> = formatted_array
                             .iter()
                             .filter_map(|item| item.as_str())
-                            .map(normalize_key)
+                            .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
                             .collect();
                         fragment
                             .global
@@ -3550,7 +3733,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                 let rules: Vec<String> = formatted_array
                     .iter()
                     .filter_map(|item| item.as_str())
-                    .map(normalize_key)
+                    .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
                     .collect();
                 per_file_map.insert(pattern.to_string(), rules);
             } else {
@@ -3567,23 +3750,21 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
 
     // Rule-specific: all other top-level tables
     for (key, item) in doc.iter() {
-        let norm_rule_name = key.to_ascii_uppercase();
-
         // Skip known special sections
         if key == "global" || key == "per-file-ignores" {
             continue;
         }
 
-        // Track unknown rule sections (like [MD999])
-        if !known_rule_names.contains(&norm_rule_name) {
-            // Only track if it looks like a rule section (starts with MD or is uppercase)
-            if norm_rule_name.starts_with("MD") || key.chars().all(|c| c.is_uppercase() || c.is_numeric()) {
-                fragment
-                    .unknown_keys
-                    .push((format!("[{key}]"), String::new(), Some(path.to_string())));
-            }
+        // Resolve rule name (handles both canonical names like "MD004" and aliases like "ul-style")
+        let norm_rule_name = if let Some(resolved) = registry.resolve_rule_name(key) {
+            resolved
+        } else {
+            // Unknown rule - always track it for validation and suggestions
+            fragment
+                .unknown_keys
+                .push((format!("[{key}]"), String::new(), Some(path.to_string())));
             continue;
-        }
+        };
 
         if let Some(tbl) = item.as_table() {
             let rule_entry = fragment.rules.entry(norm_rule_name.clone()).or_default();
