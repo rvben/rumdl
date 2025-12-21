@@ -221,8 +221,7 @@ MD046: false
 MD060: false
 "#;
 
-    let config_map: HashMap<String, serde_yaml::Value> =
-        serde_yaml::from_str(config_str).expect("Failed to parse YAML");
+    let config_map: HashMap<String, serde_yml::Value> = serde_yml::from_str(config_str).expect("Failed to parse YAML");
     let ml_config = MarkdownlintConfig(config_map);
     let fragment = ml_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
 

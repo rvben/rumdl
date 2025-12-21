@@ -45,7 +45,7 @@ ignore = "0.4.25"
 itertools = "0.14"
 rayon = { version = "1.11.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9.34+deprecated"
+serde_yml = "0.0.12"
 serde_json = "1.0"
 toml = "0.9"
 thiserror = "2.0.17"

@@ -9,7 +9,7 @@ use std::fs;
 
 /// Represents a generic markdownlint config (rule keys to values)
 #[derive(Debug, Deserialize)]
-pub struct MarkdownlintConfig(pub HashMap<String, serde_yaml::Value>);
+pub struct MarkdownlintConfig(pub HashMap<String, serde_yml::Value>);
 
 /// Load a markdownlint config file (JSON or YAML) from the given path
 pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String> {
@@ -18,10 +18,10 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
     if path.ends_with(".json") || path.ends_with(".jsonc") {
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON: {e}"))
     } else if path.ends_with(".yaml") || path.ends_with(".yml") {
-        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {e}"))
+        serde_yml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {e}"))
     } else {
         serde_json::from_str(&content)
-            .or_else(|_| serde_yaml::from_str(&content))
+            .or_else(|_| serde_yml::from_str(&content))
             .map_err(|e| format!("Failed to parse config as JSON or YAML: {e}"))
     }
 }
@@ -125,7 +125,7 @@ impl MarkdownlintConfig {
             let mapped = markdownlint_to_rumdl_rule_key(key);
             if let Some(rumdl_key) = mapped {
                 let norm_rule_key = rumdl_key.to_ascii_uppercase();
-                let toml_value: Option<toml::Value> = serde_yaml::from_value::<toml::Value>(value.clone()).ok();
+                let toml_value: Option<toml::Value> = serde_yml::from_value::<toml::Value>(value.clone()).ok();
                 let toml_value = toml_value.map(normalize_toml_table_keys);
                 let rule_config = sourced_config.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
@@ -250,7 +250,7 @@ impl MarkdownlintConfig {
                     }
                     continue;
                 }
-                let toml_value: Option<toml::Value> = serde_yaml::from_value::<toml::Value>(value.clone()).ok();
+                let toml_value: Option<toml::Value> = serde_yml::from_value::<toml::Value>(value.clone()).ok();
                 let toml_value = toml_value.map(normalize_toml_table_keys);
                 let rule_config = fragment.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
@@ -510,17 +510,17 @@ ul-style:
         let mut config_map = HashMap::new();
         config_map.insert(
             "MD013".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
                 map.insert(
-                    serde_yaml::Value::String("line_length".to_string()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(100)),
+                    serde_yml::Value::String("line_length".to_string()),
+                    serde_yml::Value::Number(serde_yml::Number::from(100)),
                 );
                 map
             }),
         );
-        config_map.insert("MD025".to_string(), serde_yaml::Value::Bool(true));
-        config_map.insert("MD026".to_string(), serde_yaml::Value::Bool(false));
+        config_map.insert("MD025".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert("MD026".to_string(), serde_yml::Value::Bool(false));
 
         let mdl_config = MarkdownlintConfig(config_map);
         let sourced_config = mdl_config.map_to_sourced_rumdl_config(Some("test.json"));
@@ -544,23 +544,23 @@ ul-style:
         // Test line-length alias for MD013 with numeric value
         config_map.insert(
             "line-length".to_string(),
-            serde_yaml::Value::Number(serde_yaml::Number::from(120)),
+            serde_yml::Value::Number(serde_yml::Number::from(120)),
         );
 
         // Test rule disable (false)
-        config_map.insert("MD025".to_string(), serde_yaml::Value::Bool(false));
+        config_map.insert("MD025".to_string(), serde_yml::Value::Bool(false));
 
         // Test rule enable (true)
-        config_map.insert("MD026".to_string(), serde_yaml::Value::Bool(true));
+        config_map.insert("MD026".to_string(), serde_yml::Value::Bool(true));
 
         // Test another rule with configuration
         config_map.insert(
             "MD003".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
                 map.insert(
-                    serde_yaml::Value::String("style".to_string()),
-                    serde_yaml::Value::String("atx".to_string()),
+                    serde_yml::Value::String("style".to_string()),
+                    serde_yml::Value::String("atx".to_string()),
                 );
                 map
             }),
@@ -597,8 +597,8 @@ ul-style:
         assert!(sourced.rules.is_empty());
 
         // Test unknown rule (should be ignored)
-        config_map.insert("unknown-rule".to_string(), serde_yaml::Value::Bool(true));
-        config_map.insert("MD999".to_string(), serde_yaml::Value::Bool(true));
+        config_map.insert("unknown-rule".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert("MD999".to_string(), serde_yml::Value::Bool(true));
 
         let config = MarkdownlintConfig(config_map);
         let sourced = config.map_to_sourced_rumdl_config(None);
@@ -612,13 +612,13 @@ ul-style:
         // Test MD044 with array configuration
         config_map.insert(
             "MD044".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
                 map.insert(
-                    serde_yaml::Value::String("names".to_string()),
-                    serde_yaml::Value::Sequence(vec![
-                        serde_yaml::Value::String("JavaScript".to_string()),
-                        serde_yaml::Value::String("GitHub".to_string()),
+                    serde_yml::Value::String("names".to_string()),
+                    serde_yml::Value::Sequence(vec![
+                        serde_yml::Value::String("JavaScript".to_string()),
+                        serde_yml::Value::String("GitHub".to_string()),
                     ]),
                 );
                 map
@@ -628,11 +628,11 @@ ul-style:
         // Test nested configuration
         config_map.insert(
             "MD003".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
                 map.insert(
-                    serde_yaml::Value::String("style".to_string()),
-                    serde_yaml::Value::String("atx".to_string()),
+                    serde_yml::Value::String("style".to_string()),
+                    serde_yml::Value::String("atx".to_string()),
                 );
                 map
             }),
@@ -663,19 +663,19 @@ ul-style:
         // Test different value types
         config_map.insert(
             "MD007".to_string(),
-            serde_yaml::Value::Number(serde_yaml::Number::from(4)),
+            serde_yml::Value::Number(serde_yml::Number::from(4)),
         ); // Simple number
         config_map.insert(
             "MD009".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
                 map.insert(
-                    serde_yaml::Value::String("br_spaces".to_string()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(2)),
+                    serde_yml::Value::String("br_spaces".to_string()),
+                    serde_yml::Value::Number(serde_yml::Number::from(2)),
                 );
                 map.insert(
-                    serde_yaml::Value::String("strict".to_string()),
-                    serde_yaml::Value::Bool(true),
+                    serde_yml::Value::String("strict".to_string()),
+                    serde_yml::Value::Bool(true),
                 );
                 map
             }),
