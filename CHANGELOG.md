@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.199] - 2025-12-21
+
+### Fixed
+
+- **MD063 (heading-capitalization): Fix preserve-cased-words for iOS and ignore-words for first word** (fixes #215, #216)
+  - `preserve-cased-words` now correctly detects words starting with lowercase followed by uppercase (e.g., "iOS", "eBay")
+  - `ignore-words` in sentence case now properly preserves words at the start of headings (e.g., "nvim" stays "nvim")
+  - Previously, "iOS" was incorrectly converted to "ios" and "nvim config" became "Nvim config"
+
+### Changed
+
+- **Dependencies: Migrate from deprecated serde_yaml to serde_yml**
+  - Replace unmaintained serde_yaml 0.9.34 with maintained fork serde_yml 0.0.12
+  - Eliminates deprecation warnings during compilation
+  - Compatible API with no behavior changes
+
 ## [0.0.198] - 2025-12-20
 
 ### Fixed
