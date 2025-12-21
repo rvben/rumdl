@@ -71,19 +71,29 @@ impl MD063HeadingCapitalization {
         Self { config, lowercase_set }
     }
 
-    /// Check if a word has internal capitals (like "iPhone", "macOS", "GitHub")
+    /// Check if a word has internal capitals (like "iPhone", "macOS", "GitHub", "iOS")
     fn has_internal_capitals(&self, word: &str) -> bool {
         let chars: Vec<char> = word.chars().collect();
         if chars.len() < 2 {
             return false;
         }
 
-        // Check for mixed case (both upper AND lower after first char)
-        // This preserves "JavaScript", "iPhone", "macOS" but NOT "ALL", "API"
+        let first = chars[0];
         let rest = &chars[1..];
-        let has_upper = rest.iter().any(|c| c.is_uppercase());
-        let has_lower = rest.iter().any(|c| c.is_lowercase());
-        has_upper && has_lower
+        let has_upper_in_rest = rest.iter().any(|c| c.is_uppercase());
+        let has_lower_in_rest = rest.iter().any(|c| c.is_lowercase());
+
+        // Case 1: Mixed case after first character (like "iPhone", "macOS", "GitHub", "JavaScript")
+        if has_upper_in_rest && has_lower_in_rest {
+            return true;
+        }
+
+        // Case 2: Lowercase first + uppercase in rest (like "iOS", "eBay")
+        if first.is_lowercase() && has_upper_in_rest {
+            return true;
+        }
+
+        false
     }
 
     /// Check if a word is an all-caps acronym (2+ consecutive uppercase letters)
@@ -290,15 +300,17 @@ impl MD063HeadingCapitalization {
 
                 // Process the word
                 if is_first_word {
-                    // First word: capitalize first letter, lowercase rest
-                    let mut chars = word.chars();
-                    if let Some(first) = chars.next() {
-                        let first_upper: String = first.to_uppercase().collect();
-                        result.push_str(&first_upper);
-                        let rest: String = chars.collect();
-                        if self.should_preserve_word(word) {
-                            result.push_str(&rest);
-                        } else {
+                    // Check if word should be preserved BEFORE any capitalization
+                    if self.should_preserve_word(word) {
+                        // Preserve ignore-words exactly as-is, even at start
+                        result.push_str(word);
+                    } else {
+                        // First word: capitalize first letter, lowercase rest
+                        let mut chars = word.chars();
+                        if let Some(first) = chars.next() {
+                            let first_upper: String = first.to_uppercase().collect();
+                            result.push_str(&first_upper);
+                            let rest: String = chars.collect();
                             result.push_str(&rest.to_lowercase());
                         }
                     }
@@ -1109,5 +1121,122 @@ mod tests {
         assert!(!rule.is_all_caps_acronym("Api"));
         assert!(!rule.is_all_caps_acronym("npm"));
         assert!(!rule.is_all_caps_acronym("iPhone"));
+    }
+
+    // Issue #215: ignore-words should work for first word in sentence case
+    #[test]
+    fn test_sentence_case_ignore_words_first_word() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            ignore_words: vec!["nvim".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // "nvim" as first word should be preserved exactly
+        let content = "# nvim config\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "nvim in ignore-words should not be flagged. Got: {result:?}"
+        );
+
+        // Verify fix also preserves it
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# nvim config\n");
+    }
+
+    #[test]
+    fn test_sentence_case_ignore_words_not_first() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            ignore_words: vec!["nvim".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // "nvim" in middle should also be preserved
+        let content = "# Using nvim editor\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "nvim in ignore-words should be preserved. Got: {result:?}"
+        );
+    }
+
+    // Issue #216: preserve-cased-words should work for "iOS"
+    #[test]
+    fn test_preserve_cased_words_ios() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            preserve_cased_words: true,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // "iOS" should be preserved (has mixed case: lowercase 'i' + uppercase 'OS')
+        let content = "## This is iOS\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "iOS should be preserved with preserve-cased-words. Got: {result:?}"
+        );
+
+        // Verify fix also preserves it
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "## This is iOS\n");
+    }
+
+    #[test]
+    fn test_preserve_cased_words_ios_title_case() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            preserve_cased_words: true,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // "iOS" should be preserved in title case too
+        let content = "# developing for iOS\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# Developing for iOS\n");
+    }
+
+    #[test]
+    fn test_has_internal_capitals_ios() {
+        let rule = create_rule();
+
+        // iOS should be detected as having internal capitals
+        assert!(
+            rule.has_internal_capitals("iOS"),
+            "iOS has mixed case (lowercase i, uppercase OS)"
+        );
+
+        // Other mixed-case words
+        assert!(rule.has_internal_capitals("iPhone"));
+        assert!(rule.has_internal_capitals("macOS"));
+        assert!(rule.has_internal_capitals("GitHub"));
+        assert!(rule.has_internal_capitals("JavaScript"));
+        assert!(rule.has_internal_capitals("eBay"));
+
+        // All-caps should NOT be detected (handled by is_all_caps_acronym)
+        assert!(!rule.has_internal_capitals("API"));
+        assert!(!rule.has_internal_capitals("GPU"));
+
+        // All-lowercase should NOT be detected
+        assert!(!rule.has_internal_capitals("npm"));
+        assert!(!rule.has_internal_capitals("config"));
+
+        // Regular capitalized words should NOT be detected
+        assert!(!rule.has_internal_capitals("The"));
+        assert!(!rule.has_internal_capitals("Hello"));
     }
 }
