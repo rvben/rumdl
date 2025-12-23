@@ -150,6 +150,7 @@ impl MD057ExistingRelativeLinks {
     /// Returns `true` (skip validation) for:
     /// - URLs with protocols: `https://`, `http://`, `ftp://`, `mailto:`, etc.
     /// - Bare domains: `www.example.com`, `example.com`
+    /// - Email addresses: `user@example.com` (without `mailto:`)
     /// - Template variables: `{{URL}}`, `{{% include %}}`
     /// - Absolute web URL paths: `/api/docs`, `/blog/post.html`
     ///
@@ -170,6 +171,12 @@ impl MD057ExistingRelativeLinks {
         // Examples: {{URL}}, {{#URL}}, {{> partial}}, {{% include %}}, {{ variable }}
         if url.starts_with("{{") || url.starts_with("{%") {
             return true;
+        }
+
+        // Simple check: if URL contains @, it's almost certainly an email address
+        // File paths with @ are extremely rare, so this is a safe heuristic
+        if url.contains('@') {
+            return true; // It's an email address, skip it
         }
 
         // Bare domain check (e.g., "example.com")
@@ -281,7 +288,9 @@ impl MD057ExistingRelativeLinks {
             return;
         }
 
-        // Skip external URLs and fragment-only links (optimized order)
+        let url = url.trim();
+
+        // Skip external URLs, absolute paths, and fragment-only links
         if self.is_external_url(url) || self.is_fragment_only_link(url) {
             return;
         }
@@ -595,13 +604,13 @@ impl Rule for MD057ExistingRelativeLinks {
             // The stored path is URL-encoded (e.g., "%F0%9F%91%A4" for emoji 👤)
             let decoded_target = Self::url_decode(&cross_link.target_path);
 
-            // Resolve the relative path using the decoded path
-            let target_path = if decoded_target.starts_with('/') {
-                // Absolute path from workspace root (e.g., "/CONTRIBUTING.md")
-                // Walk up from the current file's directory to find the workspace root
-                let stripped = decoded_target.trim_start_matches('/');
-                resolve_absolute_link(file_path, stripped)
-            } else if let Some(dir) = file_dir {
+            // Skip absolute/protocol-relative paths (web paths, not filesystem paths)
+            if decoded_target.starts_with('/') {
+                continue;
+            }
+
+            // Resolve relative path
+            let target_path = if let Some(dir) = file_dir {
                 dir.join(&decoded_target)
             } else {
                 Path::new(&decoded_target).to_path_buf()
@@ -670,30 +679,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     }
 
     components.iter().collect()
-}
-
-/// Resolve an absolute link (e.g., "/CONTRIBUTING.md") relative to the workspace root.
-///
-/// Absolute paths in markdown (starting with "/") are relative to the workspace/repo root,
-/// not the filesystem root. This function walks up from the current file's directory
-/// to find where the target file exists.
-fn resolve_absolute_link(file_path: &Path, stripped_path: &str) -> PathBuf {
-    // Walk up from the file's directory, checking each ancestor for the target
-    let mut current = file_path.parent();
-    while let Some(dir) = current {
-        let candidate = dir.join(stripped_path);
-        if candidate.exists() {
-            return candidate;
-        }
-        current = dir.parent();
-    }
-
-    // If not found by walking up, return the path relative to the file's directory
-    // (this will likely fail the existence check later, which is correct behavior)
-    file_path
-        .parent()
-        .map(|d| d.join(stripped_path))
-        .unwrap_or_else(|| PathBuf::from(stripped_path))
 }
 
 #[cfg(test)]
@@ -889,7 +874,7 @@ mod tests {
         assert!(rule.is_external_url("www.example.com"));
         assert!(rule.is_external_url("example.com"));
 
-        // Special URI schemes (issue #192)
+        // Special URI schemes
         assert!(rule.is_external_url("file:///path/to/file"));
         assert!(rule.is_external_url("smb://server/share"));
         assert!(rule.is_external_url("macappstores://apps.apple.com/"));
@@ -899,6 +884,14 @@ mod tests {
         assert!(rule.is_external_url("javascript:void(0)"));
         assert!(rule.is_external_url("ssh://git@github.com/repo"));
         assert!(rule.is_external_url("git://github.com/repo.git"));
+
+        // Email addresses without mailto: protocol
+        // These are clearly not file links and should be skipped
+        assert!(rule.is_external_url("user@example.com"));
+        assert!(rule.is_external_url("steering@kubernetes.io"));
+        assert!(rule.is_external_url("john.doe+filter@company.co.uk"));
+        assert!(rule.is_external_url("user_name@sub.domain.com"));
+        assert!(rule.is_external_url("firstname.lastname+tag@really.long.domain.example.org"));
 
         // Template variables should be skipped (not checked as relative links)
         assert!(rule.is_external_url("{{URL}}")); // Handlebars/Mustache
@@ -1040,7 +1033,7 @@ This is a [real missing link](missing.md) that should be flagged.
 
     #[test]
     fn test_url_encoded_emoji_filenames() {
-        // Test for issue #214: URL-encoded emoji paths should be correctly resolved
+        // URL-encoded emoji paths should be correctly resolved
         // 👤 = U+1F464 = F0 9F 91 A4 in UTF-8
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
@@ -1550,33 +1543,6 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
     }
 
     #[test]
-    fn test_resolve_absolute_link() {
-        // Create a temporary directory structure for testing
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let root = temp_dir.path();
-
-        // Create root-level file
-        let contributing = root.join("CONTRIBUTING.md");
-        File::create(&contributing).expect("Failed to create CONTRIBUTING.md");
-
-        // Create nested directory with a markdown file
-        let docs = root.join("docs");
-        std::fs::create_dir(&docs).expect("Failed to create docs dir");
-        let readme = docs.join("README.md");
-        File::create(&readme).expect("Failed to create README.md");
-
-        // Test: absolute link from nested file to root file
-        // From docs/README.md, link to /CONTRIBUTING.md should resolve to root/CONTRIBUTING.md
-        let resolved = resolve_absolute_link(&readme, "CONTRIBUTING.md");
-        assert!(resolved.exists(), "Should find CONTRIBUTING.md at workspace root");
-        assert_eq!(resolved, contributing);
-
-        // Test: file that doesn't exist should not resolve (returns path relative to file's dir)
-        let nonexistent = resolve_absolute_link(&readme, "NONEXISTENT.md");
-        assert!(!nonexistent.exists(), "Should not find nonexistent file");
-    }
-
-    #[test]
     fn test_html_link_with_md_source() {
         // Links to .html files should pass if corresponding .md source exists
         let temp_dir = tempdir().unwrap();
@@ -1671,5 +1637,148 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "Should find markdown source in subdirectory");
+    }
+
+    #[test]
+    fn test_absolute_path_skipped_in_check() {
+        // Test that absolute paths are skipped in process_link_with_base()
+        // This fixes the bug where /pkg/runtime was being flagged
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"
+# Test Document
+
+[Go Runtime](/pkg/runtime)
+[Go Runtime with Fragment](/pkg/runtime#section)
+[API Docs](/api/v1/users)
+[Blog Post](/blog/2024/release.html)
+[React Hook](/react/hooks/use-state.html)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have NO warnings - all absolute paths should be skipped
+        assert!(
+            result.is_empty(),
+            "Absolute paths should be skipped. Got warnings: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_absolute_path_skipped_in_cross_file_check() {
+        // Test that absolute paths are skipped in cross_file_check()
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD057ExistingRelativeLinks::new();
+
+        // Create an empty workspace index (no files exist)
+        let workspace_index = WorkspaceIndex::new();
+
+        // Create file index with absolute path links (should be skipped)
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "/pkg/runtime.md".to_string(),
+            fragment: "".to_string(),
+            line: 5,
+            column: 1,
+        });
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "/api/v1/users.md".to_string(),
+            fragment: "section".to_string(),
+            line: 10,
+            column: 1,
+        });
+
+        // Run cross-file check
+        let warnings = rule
+            .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
+            .unwrap();
+
+        // Should have NO warnings - absolute paths should be skipped
+        assert!(
+            warnings.is_empty(),
+            "Absolute paths should be skipped in cross_file_check. Got warnings: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_protocol_relative_url_not_skipped() {
+        // Test that protocol-relative URLs (//example.com) are NOT skipped as absolute paths
+        // They should still be caught by is_external_url() though
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"
+# Test Document
+
+[External](//example.com/page)
+[Another](//cdn.example.com/asset.js)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have NO warnings - protocol-relative URLs are external and should be skipped
+        assert!(
+            result.is_empty(),
+            "Protocol-relative URLs should be skipped. Got warnings: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_email_addresses_skipped() {
+        // Test that email addresses without mailto: are skipped
+        // These are clearly not file links (the @ symbol is definitive)
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"
+# Test Document
+
+[Contact](user@example.com)
+[Steering](steering@kubernetes.io)
+[Support](john.doe+filter@company.co.uk)
+[User](user_name@sub.domain.com)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have NO warnings - email addresses are clearly not file links and should be skipped
+        assert!(
+            result.is_empty(),
+            "Email addresses should be skipped. Got warnings: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_email_addresses_vs_file_paths() {
+        // Test that email addresses (anything with @) are skipped
+        // Note: File paths with @ are extremely rare, so we treat anything with @ as an email
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"
+# Test Document
+
+[Email](user@example.com)  <!-- Should be skipped (email) -->
+[Email2](steering@kubernetes.io)  <!-- Should be skipped (email) -->
+[Email3](user@file.md)  <!-- Should be skipped (has @, treated as email) -->
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // All should be skipped - anything with @ is treated as an email
+        assert!(
+            result.is_empty(),
+            "All email addresses should be skipped. Got: {result:?}"
+        );
     }
 }
