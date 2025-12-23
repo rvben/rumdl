@@ -83,6 +83,8 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
     - [Excluding Files in Pre-commit](#excluding-files-in-pre-commit)
   - [CI/CD Integration](#cicd-integration)
     - [GitHub Actions](#github-actions)
+      - [Inputs](#inputs)
+      - [Examples](#examples)
   - [Rules](#rules)
   - [Command-line Interface](#command-line-interface)
     - [Commands](#commands)
@@ -111,6 +113,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
       - [Effective Configuration (`rumdl config`)](#effective-configuration-rumdl-config)
       - [Example output](#example-output)
     - [Defaults Only (`rumdl config --defaults`)](#defaults-only-rumdl-config---defaults)
+    - [Non-Defaults Only (`rumdl config --no-defaults`)](#non-defaults-only-rumdl-config---no-defaults)
   - [Output Style](#output-style)
     - [Output Format](#output-format)
       - [Text Output (Default)](#text-output-default)
@@ -330,7 +333,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.0.199
+    rev: v0.0.200
     hooks:
       - id: rumdl      # Lint only (fails on issues)
       - id: rumdl-fmt  # Auto-format (fixes what it can)
@@ -364,7 +367,7 @@ However, for pre-commit workflows where you want to exclude certain files even w
    ```yaml
    repos:
      - repo: https://github.com/rvben/rumdl-pre-commit
-       rev: v0.0.199
+       rev: v0.0.200
        hooks:
          - id: rumdl
            args: [--force-exclude]  # Respect exclude patterns from config
@@ -542,6 +545,7 @@ Show configuration or query a specific key
 **Options:**
 
 - `--defaults`: Show only the default configuration values
+- `--no-defaults`: Show only non-default configuration values (exclude defaults)
 - `--output <format>`: Output format (e.g. `toml`, `json`)
 
 **Subcommands:**
@@ -633,6 +637,9 @@ rumdl config file
 
 # Show configuration as JSON instead of the default format
 rumdl config --output json
+
+# Show only non-default configuration values
+rumdl config --no-defaults
 
 # Lint content from stdin
 echo "# My Heading" | rumdl check --stdin
@@ -886,6 +893,27 @@ the `[from ...]` annotation is globally aligned for easy scanning.
 - The `[from ...]` column is aligned across all sections.
 
 ### Defaults Only (`rumdl config --defaults`)
+
+The `rumdl config --defaults` command shows only the default configuration values, useful for understanding what the built-in defaults are.
+
+### Non-Defaults Only (`rumdl config --no-defaults`)
+
+The `rumdl config --no-defaults` command shows only configuration values that differ from defaults, making it easy to see what you've customized. This is particularly useful when you want to see only
+your project-specific or user-specific overrides without the noise of default values.
+
+**Example:**
+
+```bash
+$ rumdl config --no-defaults
+[global]
+disable = ["MD013"]                    [from project config]
+line_length = 100                      [from pyproject.toml]
+
+[MD004]
+style = "asterisk"                     [from project config]
+```
+
+This helps you quickly identify what customizations you've made to the default configuration.
 
 The `--defaults` flag prints only the default configuration as TOML, suitable for copy-paste or reference:
 

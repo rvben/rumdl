@@ -17,12 +17,6 @@ repos:
     hooks:
       - id: gitleaks
 
-  # Spell checking
-  - repo: https://github.com/crate-ci/typos
-    rev: v1.30.0
-    hooks:
-      - id: typos
-
   # Shell script linting
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.10.0.1

@@ -229,6 +229,25 @@ Result:
    "legacy/**/*.md" = ["MD003", "MD022", "MD032"]  # Old docs with different style
    ```
 
+5. **Documentation Generators with HTML Links**:
+
+   For documentation generators (mdBook, Jekyll, Hugo) that compile markdown to HTML and place sources in different locations:
+
+   ```toml
+   [per-file-ignores]
+   # mdBook projects - HTML links in book/ point to book/src/*.md sources
+   "book/**/*.md" = ["MD057"]
+
+   # Jekyll projects - HTML links in _posts/ point to generated files
+   "_posts/**/*.md" = ["MD057"]
+   "_docs/**/*.md" = ["MD057"]
+
+   # Hugo projects - HTML links in content/ point to generated files
+   "content/**/*.md" = ["MD057"]
+   ```
+
+   See [MD057 documentation](md057.md#handling-complex-generator-patterns) for more details.
+
 ### `exclude`
 
 **Type**: `string[]`
@@ -652,7 +671,7 @@ find . -name "*.md" -o -name "*.markdown" | head -10
 
 ```yaml
 - repo: https://github.com/rvben/rumdl-pre-commit
-  rev: v0.0.99
+  rev: v0.0.200
   hooks:
     - id: rumdl
       args: [--config=.rumdl.toml]

@@ -7,9 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.200] - 2025-12-22
+
+### Added
+
+- **CLI: Add `--no-defaults` flag to `rumdl config` command** (fixes #218)
+  - Show only non-default configuration values, excluding defaults
+  - Useful for seeing only customizations without the noise of default values
+  - Works with both smart output (with provenance annotations) and `--output toml/json` formats
+  - Mutually exclusive with `--defaults` flag
+  - Displays helpful message when all configurations are using defaults
+  - Supports filtering of global config, rule configs, and per-file-ignores
+
+### Fixed
+
+- **MD051 (link-fragments): Support extension-less cross-file links (GitHub-style)** (fixes extension-less link validation)
+  - Recognize extension-less paths with fragments as cross-file links (e.g., `[link](page#section)` → `page.md#section`)
+  - Resolve extension-less paths by trying markdown extensions (`.md`, `.markdown`, `.mdx`, etc.)
+  - Handles GitHub-style links that omit file extensions, matching GitHub's rendering behavior
+  - Applied to both link detection and cross-file validation
+  - Reduces false positives in repositories using extension-less links
+
+- **MD054 (link-image-style): Fix false positives for task lists and HTML tags** (fixes false positive detection)
+  - Skip validation for links/images inside task list items (e.g., `- [ ] [link](url)`)
+  - Skip validation for links/images inside HTML tags (e.g., `<a href="url">text</a>`)
+  - Reduces false positives when links are part of task lists or HTML structures
+
+- **MD057 (link-target-exists): Skip email addresses and fix absolute path bug** (fixes email and path handling)
+  - Skip validation for email addresses (e.g., `mailto:user@example.com`)
+  - Fix bug where absolute paths were incorrectly validated
+  - Improves accuracy by correctly identifying email links vs file links
+
+- **MD063 (heading-capitalization): Respect lowercase-words when inline code/link is last segment** (fixes #223)
+  - When the last word in a heading is inline code or a link, respect `lowercase-words` configuration
+  - Previously, inline code/link at the end was not checked against lowercase-words list
+  - Ensures consistent capitalization rules apply to all heading segments
+
+- **MD007 (ul-indent): Fix indent=1 edge case and integrate edge case tests** (fixes edge cases)
+  - Fix handling of `indent = 1` configuration edge cases
+  - Integrate comprehensive edge case tests for better coverage
+  - Improves reliability for non-standard indent configurations
+
+- **Rules: Fixes for issues 219 and 220** (fixes #219, #220)
+  - Fixes addressing edge cases and false positives
+  - Improves overall rule accuracy and reliability
+
+### Performance
+
+- **MD007 (ul-indent): Cache mixed list nesting detection and optimize blank line checks**
+  - Cache results of mixed list nesting detection to avoid redundant calculations
+  - Optimize blank line checks for better performance on large files
+  - Reduces processing time for files with complex list structures
+
+### Changed
+
+- **Tests: Reorganize issue-specific tests into appropriate test files**
+  - Moved Issue #210 tests to `tests/rules/md007_test.rs`
+  - Moved Issue #209 tests to `tests/rules/md007_test.rs`
+  - Moved Issue #197 tests to `tests/cli_integration_tests.rs`
+  - Removed `issueXXX`-named test files per project conventions
+
 ## [0.0.199] - 2025-12-21
 
 ### Fixed
+
+- **MD007 (ul-indent): Smart style auto-detection for custom indent values** (fixes #210)
+  - When `indent` is set to a non-default value (e.g., `indent = 4`) without explicit `style`, MD007 now auto-detects the appropriate style
+  - Pure unordered lists automatically use `fixed` style (markdownlint compatible)
+  - Mixed ordered/unordered lists use `text-aligned` style to avoid oscillation with MD005
+  - Previously, `indent = 4` was ignored when style wasn't explicitly set, causing incorrect validation
+  - The auto-detection handles edge cases including multi-level mixed nesting, HTML comments, code blocks, frontmatter, and blank line list separation
 
 - **MD063 (heading-capitalization): Fix preserve-cased-words for iOS and ignore-words for first word** (fixes #215, #216)
   - `preserve-cased-words` now correctly detects words starting with lowercase followed by uppercase (e.g., "iOS", "eBay")
@@ -978,11 +1045,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implements proper block continuation context tracking for footnotes
   - Prevents confusion between actual indented code blocks and footnote continuations
   - Example that now works correctly:
+
     ```markdown
     [^1]: First paragraph of footnote.
 
         Second paragraph (indented, but not a code block).
     ```
+
   - Added 11 specification-based tests ensuring robust footnote handling
 
 - **CLI: Differentiate `--quiet` and `--silent` flags (#141)**
@@ -1013,7 +1082,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MD043: Wildcard pattern support for heading structures**
   - New wildcard patterns for flexible heading structure validation
   - Allows `*` placeholders in heading text for dynamic content
-  - Expert-level edge case handling for complex heading hierarchies
+  - Edge case handling for complex heading hierarchies
 
 - **MD044: HTML elements configuration option**
   - New `html-elements` configuration to customize proper name handling
@@ -1182,10 +1251,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Previously defaulted to `true`, causing conflicts with table formatting rules
   - Now defaults to `false` for better user experience
   - **Migration**: If you rely on MD013 checking table line lengths, add to `.rumdl.toml`:
+
     ```toml
     [MD013]
     tables = true
     ```
+
   - This prevents false positives when using MD060 or other table formatting tools
 
 ## [0.0.170] - 2025-10-31
@@ -1228,7 +1299,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-**MASSIVE PERFORMANCE IMPROVEMENTS**: This release delivers 7-53x faster linting through systematic elimination of O(n²) bottlenecks and algorithmic optimizations. rumdl is now 16-29x faster than markdownlint-cli2 on real-world repositories.
+**MASSIVE PERFORMANCE IMPROVEMENTS**: This release delivers 7-53x faster linting through systematic elimination of O(n²) bottlenecks and algorithmic optimizations. rumdl is now 16-29x faster than
+markdownlint-cli2 on real-world repositories.
 
 - **Fix catastrophic O(n²) bottleneck in FilteredLinesIter** ⭐ THE GAME CHANGER
   - Eliminated `content.lines().collect()` from inside Iterator::next() method
@@ -1267,15 +1339,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Benchmarks
 
 **vs Previous Version (v0.0.168):**
+
 - Rust Book (478 files): 2,646ms → 269ms (9.8x faster)
 - Stress Test (10,514 lines): 9,987ms → 187ms (53.4x faster)
 - PyO3 (76 files): 2,004ms → 262ms (7.6x faster)
 
 **vs markdownlint-cli2 (industry standard):**
+
 - Rust Book: 10.3s vs 0.35s (29.4x faster)
 - PyO3: 4.4s vs 0.26s (16.9x faster)
 
 **Current Performance:**
+
 - 0.7ms per file (Rust Book)
 - 6.3x parallelization efficiency
 - Zero O(n²) algorithmic bottlenecks remaining
@@ -1440,7 +1515,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Intelligent "did you mean?" suggestions using Levenshtein distance algorithm
   - File path context in validation warnings for easy debugging
   - Catches typos in global options, rule names, and rule options
-  - Example: `line-lenght` → suggests `line-length`, `reflw` → suggests `reflow`
+  - Example: `line-length` → suggests `line-length`, `reflw` → suggests `reflow`
   - Zero-dependency implementation with configurable similarity threshold
   - Helps users catch configuration mistakes before they cause confusion
 
@@ -1518,6 +1593,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Still checks headings, tables, code blocks, blockquotes, and HTML when `paragraphs: false`
   - Useful for semantic line breaks where sentence length is determined by content, not arbitrary limits
   - Example configuration:
+
     ```yaml
     MD013:
       paragraphs: false  # Don't warn about long paragraphs
@@ -1834,7 +1910,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Removed legacy fix implementation** - Removed old single-pass fix implementation and `RUMDL_NO_FIX_COORDINATOR` environment variable. Fix Coordinator is now the only fix strategy, providing ~75% faster fixes with better coverage.
+- **Removed legacy fix implementation** - Removed old single-pass fix implementation and `RUMDL_NO_FIX_COORDINATOR` environment variable. Fix Coordinator is now the only fix strategy, providing ~75%
+  faster fixes with better coverage.
 
 ### Added
 
@@ -1849,7 +1926,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **MD042**: Smart URL detection in empty links (#104)
   - When link text looks like a URL (e.g., `[https://example.com]()`), use it as the destination
-  - Supports http://, https://, ftp://, ftps:// protocols
+  - Supports <http://>, <https://>, <ftp://>, ftps:// protocols
   - More intelligent fixes than placeholder URLs
 
 - **Always respect exclude patterns by default** (#99)
@@ -2196,7 +2273,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **MD028/MD009**: Complete fix for rule conflict where MD028 and MD009 were "fighting each other" (fixes #66)
-  - MD028 now only flags truly blank lines inside blockquotes, not `>` or `> ` lines
+  - MD028 now only flags truly blank lines inside blockquotes, not `>` or `>` lines
   - MD009 simplified to remove special cases for empty blockquote lines
   - Both rules now correctly follow CommonMark specifications
 
@@ -2767,7 +2844,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.163...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.200...HEAD
+[0.0.200]: https://github.com/rvben/rumdl/compare/v0.0.199...v0.0.200
 [0.0.163]: https://github.com/rvben/rumdl/compare/v0.0.162...v0.0.163
 [0.0.162]: https://github.com/rvben/rumdl/compare/v0.0.161...v0.0.162
 [0.0.161]: https://github.com/rvben/rumdl/compare/v0.0.160...v0.0.161
