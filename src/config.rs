@@ -3455,7 +3455,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                             // Special handling for severity
                             if norm_rk == "severity" {
                                 if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
-                                    if fragment.rule_severities.get(&resolved_rule_name).is_none() {
+                                    if !fragment.rule_severities.contains_key(&resolved_rule_name) {
                                         fragment
                                             .rule_severities
                                             .insert(resolved_rule_name.clone(), SourcedValue::new(severity, source));
@@ -3506,7 +3506,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                             // Special handling for severity
                             if norm_rk == "severity" {
                                 if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
-                                    if fragment.rule_severities.get(&resolved_rule_name).is_none() {
+                                    if !fragment.rule_severities.contains_key(&resolved_rule_name) {
                                         fragment
                                             .rule_severities
                                             .insert(resolved_rule_name.clone(), SourcedValue::new(severity, source));
@@ -3863,7 +3863,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         let severity_str = formatted_string.value();
                         match crate::rule::Severity::deserialize(toml::Value::String(severity_str.to_string())) {
                             Ok(severity) => {
-                                if fragment.rule_severities.get(&norm_rule_name).is_none() {
+                                if !fragment.rule_severities.contains_key(&norm_rule_name) {
                                     fragment
                                         .rule_severities
                                         .insert(norm_rule_name.clone(), SourcedValue::new(severity, source));

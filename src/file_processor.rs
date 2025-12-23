@@ -813,7 +813,16 @@ pub fn process_file_with_index(
 
     let start_time = Instant::now();
     if verbose && !quiet {
-        println!("Processing file: {file_path}");
+        // Display relative path for better UX, even if file_path is canonical (absolute)
+        let display_path = if let Ok(cwd) = std::env::current_dir() {
+            Path::new(file_path)
+                .strip_prefix(&cwd)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| file_path.to_string())
+        } else {
+            file_path.to_string()
+        };
+        println!("Processing file: {display_path}");
     }
 
     let empty_result = ProcessFileResult {
