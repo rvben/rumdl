@@ -342,3 +342,126 @@ fn test_mixed_styles_in_and_outside_comments() {
     assert!(result.iter().any(|w| w.message.contains("shortcut")));
     assert!(result.iter().any(|w| w.message.contains("autolink")));
 }
+
+#[test]
+fn test_task_list_checkboxes_not_flagged_as_shortcut() {
+    // Task list checkboxes should not be flagged as shortcut links (fixes issue #221)
+    let rule = MD054LinkImageStyle::new(true, true, true, true, false, true); // shortcut = false
+
+    let content = r#"
+# Todos
+
+- [ ] Task 1
+- [x] Task 2
+- [X] Task 3
+* [ ] Task 4
++ [x] Task 5
+
+[actual shortcut]: https://example.com
+    "#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Task list checkboxes should NOT be flagged
+    // Only the actual shortcut link should be flagged (if there was one in the content)
+    // But wait, there's no actual shortcut link usage in the content, only the definition
+    // So there should be no warnings
+    assert_eq!(
+        result.len(),
+        0,
+        "Task list checkboxes should not be flagged as shortcut links"
+    );
+}
+
+#[test]
+fn test_task_list_vs_shortcut_distinction() {
+    // Test that we can distinguish between task lists and actual shortcut links (fixes issue #221)
+    let rule = MD054LinkImageStyle::new(true, true, true, true, false, true); // shortcut = false
+
+    let content = r#"
+- [ ] This is a task list item
+- [actual link] This is a shortcut link that should be flagged
+
+[actual link]: https://example.com
+    "#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the shortcut link should be flagged, not the task list checkbox
+    assert_eq!(result.len(), 1, "Should flag shortcut link but not task list checkbox");
+    assert!(result[0].message.contains("shortcut"));
+    assert_eq!(result[0].line, 3, "Should flag the line with the shortcut link");
+}
+
+#[test]
+fn test_html_tags_not_flagged_as_autolink() {
+    // HTML tags should not be flagged as autolink links (fixes issue #222)
+    let rule = MD054LinkImageStyle::new(false, true, true, true, true, true); // autolink = false
+
+    let content = r#"
+# Example
+
+One line.<br>
+Second line.
+
+<https://example.com> This should be flagged
+    "#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // HTML tag <br> should NOT be flagged
+    // Only the actual autolink <https://example.com> should be flagged
+    assert_eq!(result.len(), 1, "Should flag autolink but not HTML tag");
+    assert!(result[0].message.contains("autolink"));
+    assert_eq!(result[0].line, 6, "Should flag the line with the autolink");
+}
+
+#[test]
+fn test_various_html_tags_not_flagged() {
+    // Test various HTML tags that should not be flagged (fixes issue #222)
+    let rule = MD054LinkImageStyle::new(false, true, true, true, true, true); // autolink = false
+
+    let content = r#"
+<div>Content</div>
+<span>Text</span>
+<br>
+<hr>
+<img src="image.png">
+<p>Paragraph</p>
+<strong>Bold</strong>
+<em>Italic</em>
+
+<https://example.com> This should be flagged
+    "#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the autolink should be flagged, not any HTML tags
+    assert_eq!(result.len(), 1, "Should flag autolink but not HTML tags");
+    assert!(result[0].message.contains("autolink"));
+}
+
+#[test]
+fn test_autolink_urls_still_detected() {
+    // Test that actual autolink URLs are still correctly detected (fixes issue #222)
+    let rule = MD054LinkImageStyle::new(false, true, true, true, true, true); // autolink = false
+
+    let content = r#"
+<br> HTML tag should not be flagged
+<https://example.com> Autolink should be flagged
+<http://example.com> HTTP autolink should be flagged
+<mailto:test@example.com> Mailto should be flagged
+<ftp://example.com> FTP should be flagged
+    "#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // All autolinks should be flagged, but not the HTML tag
+    assert_eq!(result.len(), 4, "Should flag all autolinks but not HTML tag");
+    assert!(result.iter().all(|w| w.message.contains("autolink")));
+}

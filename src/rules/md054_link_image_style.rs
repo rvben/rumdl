@@ -160,11 +160,23 @@ impl Rule for MD054LinkImageStyle {
             // Find all autolinks
             for cap in AUTOLINK_RE.captures_iter(line) {
                 let m = cap.get(0).unwrap();
-                all_matches.push(LinkMatch {
-                    style: "autolink",
-                    start: m.start(),
-                    end: m.end(),
-                });
+                let content = cap.get(1).unwrap().as_str();
+
+                // Filter out HTML tags: only match if content starts with a URL scheme
+                // HTML tags like <br> should not be flagged as autolinks
+                let is_url = content.starts_with("http://")
+                    || content.starts_with("https://")
+                    || content.starts_with("ftp://")
+                    || content.starts_with("ftps://")
+                    || content.starts_with("mailto:");
+
+                if is_url {
+                    all_matches.push(LinkMatch {
+                        style: "autolink",
+                        start: m.start(),
+                        end: m.end(),
+                    });
+                }
             }
 
             // Find all full references
@@ -221,6 +233,30 @@ impl Rule for MD054LinkImageStyle {
                 let m = cap.get(0).unwrap();
                 let start = m.start();
                 let end = m.end();
+                let link_text = cap.get(1).unwrap().as_str();
+
+                // Filter out task list checkboxes: [ ], [x], or [X]
+                // Task list checkboxes should not be flagged as shortcut links
+                // Task list pattern: list marker (*, -, +) followed by whitespace, then [ ], [x], or [X]
+                if link_text.trim() == "" || link_text == "x" || link_text == "X" {
+                    // Check if this is preceded by a list marker with whitespace
+                    if start > 0 {
+                        let before = &line[..start];
+                        // Trim leading whitespace to handle indentation
+                        let trimmed_before = before.trim_start();
+                        // Check if starts with list marker (*, -, +) followed by whitespace
+                        if let Some(marker_char) = trimmed_before.chars().next()
+                            && (marker_char == '*' || marker_char == '-' || marker_char == '+')
+                            && trimmed_before.len() > 1
+                        {
+                            let after_marker = &trimmed_before[1..];
+                            if after_marker.chars().next().is_some_and(|c| c.is_whitespace()) {
+                                // This is a task list checkbox: marker + whitespace + [ ]
+                                continue;
+                            }
+                        }
+                    }
+                }
 
                 // Check if any byte in this range is occupied (O(log n) per byte)
                 let overlaps = (start..end).any(|byte_pos| occupied_ranges.contains(&byte_pos));
@@ -461,7 +497,7 @@ mod tests {
     #[test]
     fn test_multiple_links_same_line() {
         let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
-        let content = "[ok](url) but <bad> and [also][bad]\n\n[bad]: url";
+        let content = "[ok](url) but <https://good.com> and [also][bad]\n\n[bad]: url";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
