@@ -171,6 +171,83 @@ pub fn read_file_efficiently(path: &Path) -> Result<String, Box<dyn Error>> {
 
 /// Utility function to load configuration with standard CLI error handling.
 /// This eliminates duplication between different CLI commands that load configuration.
+/// Filter a SourcedConfig to only include non-default values
+fn filter_sourced_config_to_non_defaults(
+    sourced: &rumdl_config::SourcedConfig<rumdl_config::ConfigLoaded>,
+) -> rumdl_config::SourcedConfig<rumdl_config::ConfigLoaded> {
+    let mut filtered = rumdl_config::SourcedConfig::default();
+
+    // Filter global config - only include fields with non-default sources
+    if sourced.global.enable.source != rumdl_config::ConfigSource::Default {
+        filtered.global.enable = sourced.global.enable.clone();
+    }
+    if sourced.global.disable.source != rumdl_config::ConfigSource::Default {
+        filtered.global.disable = sourced.global.disable.clone();
+    }
+    if sourced.global.exclude.source != rumdl_config::ConfigSource::Default {
+        filtered.global.exclude = sourced.global.exclude.clone();
+    }
+    if sourced.global.include.source != rumdl_config::ConfigSource::Default {
+        filtered.global.include = sourced.global.include.clone();
+    }
+    if sourced.global.respect_gitignore.source != rumdl_config::ConfigSource::Default {
+        filtered.global.respect_gitignore = sourced.global.respect_gitignore.clone();
+    }
+    if sourced.global.line_length.source != rumdl_config::ConfigSource::Default {
+        filtered.global.line_length = sourced.global.line_length.clone();
+    }
+    if sourced.global.flavor.source != rumdl_config::ConfigSource::Default {
+        filtered.global.flavor = sourced.global.flavor.clone();
+    }
+    if sourced.global.force_exclude.source != rumdl_config::ConfigSource::Default {
+        filtered.global.force_exclude = sourced.global.force_exclude.clone();
+    }
+    if sourced.global.cache.source != rumdl_config::ConfigSource::Default {
+        filtered.global.cache = sourced.global.cache.clone();
+    }
+    if sourced.global.fixable.source != rumdl_config::ConfigSource::Default {
+        filtered.global.fixable = sourced.global.fixable.clone();
+    }
+    if sourced.global.unfixable.source != rumdl_config::ConfigSource::Default {
+        filtered.global.unfixable = sourced.global.unfixable.clone();
+    }
+    if let Some(ref output_format) = sourced.global.output_format
+        && output_format.source != rumdl_config::ConfigSource::Default
+    {
+        filtered.global.output_format = Some(output_format.clone());
+    }
+    if let Some(ref cache_dir) = sourced.global.cache_dir
+        && cache_dir.source != rumdl_config::ConfigSource::Default
+    {
+        filtered.global.cache_dir = Some(cache_dir.clone());
+    }
+
+    // Filter per-file ignores
+    if sourced.per_file_ignores.source != rumdl_config::ConfigSource::Default {
+        filtered.per_file_ignores = sourced.per_file_ignores.clone();
+    }
+
+    // Filter rules - only include rules with at least one non-default value
+    for (rule_name, rule_cfg) in &sourced.rules {
+        let mut filtered_rule = rumdl_config::SourcedRuleConfig::default();
+        for (key, sv) in &rule_cfg.values {
+            if sv.source != rumdl_config::ConfigSource::Default {
+                filtered_rule.values.insert(key.clone(), sv.clone());
+            }
+        }
+        if !filtered_rule.values.is_empty() {
+            filtered.rules.insert(rule_name.clone(), filtered_rule);
+        }
+    }
+
+    // Preserve metadata
+    filtered.loaded_files = sourced.loaded_files.clone();
+    filtered.unknown_keys = sourced.unknown_keys.clone();
+    filtered.project_root = sourced.project_root.clone();
+
+    filtered
+}
+
 fn load_config_with_cli_error_handling(config_path: Option<&str>, isolated: bool) -> rumdl_config::SourcedConfig {
     load_config_with_cli_error_handling_with_dir(config_path, isolated, None)
 }
@@ -300,6 +377,9 @@ enum Commands {
         /// Show only the default configuration values
         #[arg(long, help = "Show only the default configuration values")]
         defaults: bool,
+        /// Show only non-default configuration values (exclude defaults)
+        #[arg(long, help = "Show only non-default configuration values (exclude defaults)")]
+        no_defaults: bool,
         #[arg(long, help = "Output format (e.g. toml, json)")]
         output: Option<String>,
     },
@@ -978,8 +1058,18 @@ build-backend = "setuptools.build_meta"
             Commands::Config {
                 subcmd,
                 defaults,
+                no_defaults,
                 output,
             } => {
+                // Validate mutual exclusivity of --defaults and --no-defaults
+                if defaults && no_defaults {
+                    eprintln!(
+                        "{}: Cannot use both --defaults and --no-defaults flags together",
+                        "Error".red().bold()
+                    );
+                    exit::tool_error();
+                }
+
                 // Handle config subcommands
                 if let Some(ConfigSubcommand::Get { key }) = subcmd {
                     if let Some((section_part, field_part)) = key.split_once('.') {
@@ -1200,46 +1290,116 @@ build-backend = "setuptools.build_meta"
                     }
                     // --- END CONFIG VALIDATION ---
 
-                    // Decide which config to print based on --defaults
+                    // Decide which config to print based on --defaults and --no-defaults
                     let final_sourced_to_print = sourced_reg;
 
-                    // If --output toml is set, print as valid TOML
-                    if output.as_deref() == Some("toml") {
-                        if defaults {
-                            // For defaults with TOML output, generate a complete default config
-                            let mut default_config = rumdl_config::Config::default();
+                    // Handle output format (toml, json, or smart output)
+                    match output.as_deref() {
+                        Some("toml") => {
+                            if defaults {
+                                // For defaults with TOML output, generate a complete default config
+                                let mut default_config = rumdl_config::Config::default();
 
-                            // Add all rule default configurations
-                            for rule in &all_rules_reg {
-                                if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section() {
-                                    let rule_config = rumdl_config::RuleConfig {
-                                        values: table.into_iter().collect(),
-                                    };
-                                    default_config.rules.insert(rule_name.to_uppercase(), rule_config);
+                                // Add all rule default configurations
+                                for rule in &all_rules_reg {
+                                    if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section()
+                                    {
+                                        let rule_config = rumdl_config::RuleConfig {
+                                            values: table.into_iter().collect(),
+                                        };
+                                        default_config.rules.insert(rule_name.to_uppercase(), rule_config);
+                                    }
                                 }
-                            }
 
-                            match toml::to_string_pretty(&default_config) {
-                                Ok(s) => println!("{s}"),
-                                Err(e) => {
-                                    eprintln!("Failed to serialize config to TOML: {e}");
-                                    exit::tool_error();
+                                match toml::to_string_pretty(&default_config) {
+                                    Ok(s) => println!("{s}"),
+                                    Err(e) => {
+                                        eprintln!("Failed to serialize config to TOML: {e}");
+                                        exit::tool_error();
+                                    }
                                 }
-                            }
-                        } else {
-                            let config_to_print: rumdl_config::Config =
-                                final_sourced_to_print.into_validated_unchecked().into();
-                            match toml::to_string_pretty(&config_to_print) {
-                                Ok(s) => println!("{s}"),
-                                Err(e) => {
-                                    eprintln!("Failed to serialize config to TOML: {e}");
-                                    exit::tool_error();
+                            } else if no_defaults {
+                                // For --no-defaults with TOML output, filter to non-defaults
+                                let filtered_sourced = filter_sourced_config_to_non_defaults(&final_sourced_to_print);
+                                let config_to_print: rumdl_config::Config =
+                                    filtered_sourced.into_validated_unchecked().into();
+                                match toml::to_string_pretty(&config_to_print) {
+                                    Ok(s) => println!("{s}"),
+                                    Err(e) => {
+                                        eprintln!("Failed to serialize config to TOML: {e}");
+                                        exit::tool_error();
+                                    }
+                                }
+                            } else {
+                                let config_to_print: rumdl_config::Config =
+                                    final_sourced_to_print.into_validated_unchecked().into();
+                                match toml::to_string_pretty(&config_to_print) {
+                                    Ok(s) => println!("{s}"),
+                                    Err(e) => {
+                                        eprintln!("Failed to serialize config to TOML: {e}");
+                                        exit::tool_error();
+                                    }
                                 }
                             }
                         }
-                    } else {
-                        // Otherwise, print the smart output with provenance annotations
-                        formatter::print_config_with_provenance(&final_sourced_to_print, &all_rules_reg);
+                        Some("json") => {
+                            if defaults {
+                                // For defaults with JSON output, generate a complete default config
+                                let mut default_config = rumdl_config::Config::default();
+
+                                // Add all rule default configurations
+                                for rule in &all_rules_reg {
+                                    if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section()
+                                    {
+                                        let rule_config = rumdl_config::RuleConfig {
+                                            values: table.into_iter().collect(),
+                                        };
+                                        default_config.rules.insert(rule_name.to_uppercase(), rule_config);
+                                    }
+                                }
+
+                                match serde_json::to_string_pretty(&default_config) {
+                                    Ok(s) => println!("{s}"),
+                                    Err(e) => {
+                                        eprintln!("Failed to serialize config to JSON: {e}");
+                                        exit::tool_error();
+                                    }
+                                }
+                            } else if no_defaults {
+                                // For --no-defaults with JSON output, filter to non-defaults
+                                let filtered_sourced = filter_sourced_config_to_non_defaults(&final_sourced_to_print);
+                                let config_to_print: rumdl_config::Config =
+                                    filtered_sourced.into_validated_unchecked().into();
+                                match serde_json::to_string_pretty(&config_to_print) {
+                                    Ok(s) => println!("{s}"),
+                                    Err(e) => {
+                                        eprintln!("Failed to serialize config to JSON: {e}");
+                                        exit::tool_error();
+                                    }
+                                }
+                            } else {
+                                let config_to_print: rumdl_config::Config =
+                                    final_sourced_to_print.into_validated_unchecked().into();
+                                match serde_json::to_string_pretty(&config_to_print) {
+                                    Ok(s) => println!("{s}"),
+                                    Err(e) => {
+                                        eprintln!("Failed to serialize config to JSON: {e}");
+                                        exit::tool_error();
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            // Otherwise, print the smart output with provenance annotations
+                            if no_defaults {
+                                formatter::print_config_with_provenance_no_defaults(
+                                    &final_sourced_to_print,
+                                    &all_rules_reg,
+                                );
+                            } else {
+                                formatter::print_config_with_provenance(&final_sourced_to_print, &all_rules_reg);
+                            }
+                        }
                     }
                 }
             }

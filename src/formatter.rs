@@ -107,6 +107,186 @@ pub fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
     }
 }
 
+/// Print configuration with provenance information, excluding default values
+pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedConfig, _all_rules: &[Box<dyn Rule>]) {
+    let g = &sourced.global;
+    let mut all_lines = Vec::new();
+    let mut has_global_section = false;
+
+    // Build global section, filtering out defaults
+    let mut global_lines = Vec::new();
+    if g.enable.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("enable = {:?}", g.enable.value),
+            format!("[from {}]", format_provenance(g.enable.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.disable.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("disable = {:?}", g.disable.value),
+            format!("[from {}]", format_provenance(g.disable.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.exclude.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("exclude = {:?}", g.exclude.value),
+            format!("[from {}]", format_provenance(g.exclude.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.include.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("include = {:?}", g.include.value),
+            format!("[from {}]", format_provenance(g.include.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.respect_gitignore.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("respect_gitignore = {}", g.respect_gitignore.value),
+            format!("[from {}]", format_provenance(g.respect_gitignore.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.flavor.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("flavor = {:?}", g.flavor.value),
+            format!("[from {}]", format_provenance(g.flavor.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.line_length.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("line_length = {}", g.line_length.value.get()),
+            format!("[from {}]", format_provenance(g.line_length.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.force_exclude.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("force_exclude = {}", g.force_exclude.value),
+            format!("[from {}]", format_provenance(g.force_exclude.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.cache.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("cache = {}", g.cache.value),
+            format!("[from {}]", format_provenance(g.cache.source)),
+        ));
+        has_global_section = true;
+    }
+    if let Some(ref output_format) = g.output_format
+        && output_format.source != rumdl_config::ConfigSource::Default
+    {
+        global_lines.push((
+            format!("output_format = {:?}", output_format.value),
+            format!("[from {}]", format_provenance(output_format.source)),
+        ));
+        has_global_section = true;
+    }
+    if let Some(ref cache_dir) = g.cache_dir
+        && cache_dir.source != rumdl_config::ConfigSource::Default
+    {
+        global_lines.push((
+            format!("cache_dir = {:?}", cache_dir.value),
+            format!("[from {}]", format_provenance(cache_dir.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.fixable.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("fixable = {:?}", g.fixable.value),
+            format!("[from {}]", format_provenance(g.fixable.source)),
+        ));
+        has_global_section = true;
+    }
+    if g.unfixable.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("unfixable = {:?}", g.unfixable.value),
+            format!("[from {}]", format_provenance(g.unfixable.source)),
+        ));
+        has_global_section = true;
+    }
+
+    if has_global_section {
+        all_lines.push(("[global]".to_string(), String::new()));
+        all_lines.extend(global_lines);
+        all_lines.push((String::new(), String::new()));
+    }
+
+    // Handle per-file ignores if non-default
+    if sourced.per_file_ignores.source != rumdl_config::ConfigSource::Default
+        && !sourced.per_file_ignores.value.is_empty()
+    {
+        all_lines.push(("[per-file-ignores]".to_string(), String::new()));
+        for (pattern, rules) in &sourced.per_file_ignores.value {
+            let rules_str = format!("{rules:?}");
+            all_lines.push((
+                format!("{pattern:?} = {rules_str}"),
+                format!("[from {}]", format_provenance(sourced.per_file_ignores.source)),
+            ));
+        }
+        all_lines.push((String::new(), String::new()));
+    }
+
+    // Handle rule configurations
+    let mut rule_names: Vec<_> = sourced.rules.keys().cloned().collect();
+    rule_names.sort();
+    for rule_name in rule_names {
+        let rule_cfg = &sourced.rules[&rule_name];
+        let mut lines = Vec::new();
+        let mut keys: Vec<_> = rule_cfg.values.keys().collect();
+        keys.sort();
+        for key in keys {
+            let sv = &rule_cfg.values[key];
+            // Only include non-default values
+            if sv.source != rumdl_config::ConfigSource::Default {
+                let value_str = match &sv.value {
+                    toml::Value::Array(arr) => {
+                        let vals: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+                        format!("[{}]", vals.join(", "))
+                    }
+                    toml::Value::String(s) => format!("\"{s}\""),
+                    toml::Value::Boolean(b) => b.to_string(),
+                    toml::Value::Integer(i) => i.to_string(),
+                    toml::Value::Float(f) => f.to_string(),
+                    _ => sv.value.to_string(),
+                };
+                lines.push((
+                    format!("{key} = {value_str}"),
+                    format!("[from {}]", format_provenance(sv.source)),
+                ));
+            }
+        }
+        if !lines.is_empty() {
+            all_lines.push((format!("[{rule_name}]"), String::new()));
+            all_lines.extend(lines);
+            all_lines.push((String::new(), String::new()));
+        }
+    }
+
+    // Print output
+    if all_lines.is_empty() {
+        // All configurations are using defaults
+        println!("All configurations are using default values.");
+        return;
+    }
+
+    let max_left = all_lines.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
+    for (left, right) in &all_lines {
+        if left.is_empty() && right.is_empty() {
+            println!();
+        } else if !right.is_empty() {
+            println!("{:<width$} {}", left, right.dimmed(), width = max_left);
+        } else {
+            println!("{left:<max_left$} {right}");
+        }
+    }
+}
+
 /// Print configuration with provenance information
 pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_rules: &[Box<dyn Rule>]) {
     let g = &sourced.global;
