@@ -274,7 +274,7 @@ impl Rule for MD025SingleTitle {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        severity: Severity::Warning,
+                        severity: Severity::Error,
                         fix: Some(Fix {
                             range: ctx.line_index.line_content_range(line_num + 1),
                             replacement: {

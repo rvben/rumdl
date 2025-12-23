@@ -282,7 +282,7 @@ impl Rule for MD042NoEmptyLinks {
                     column: link.start_col + 1, // Convert to 1-indexed
                     end_line: link.line,
                     end_column: link.end_col + 1, // Convert to 1-indexed
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     fix: replacement.map(|r| Fix {
                         range: link.byte_offset..link.byte_end,
                         replacement: r,

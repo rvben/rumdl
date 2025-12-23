@@ -453,7 +453,7 @@ impl Rule for MD051LinkFragments {
                     column: link.start_col + 1,
                     end_line: link.line,
                     end_column: link.end_col + 1,
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     fix: None,
                 });
             }
@@ -680,7 +680,7 @@ impl Rule for MD051LinkFragments {
                             "Link fragment '{}' not found in '{}'",
                             cross_link.fragment, cross_link.target_path
                         ),
-                        severity: Severity::Warning,
+                        severity: Severity::Error,
                         fix: None,
                     });
                 }

@@ -119,7 +119,7 @@ impl Rule for MD045NoAltText {
                     end_column: image.end_col + 1, // Convert to 1-indexed
                     message: "Image missing alt text (add description for accessibility: ![description](url))"
                         .to_string(),
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     fix: Some(Fix {
                         range: image.byte_offset..image.byte_offset + (image.end_col - image.start_col),
                         replacement: format!("![{placeholder}]{url_part}"),

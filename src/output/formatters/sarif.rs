@@ -606,7 +606,7 @@ mod tests {
     fn test_md032_integration_produces_error_level() {
         // Test with actual MD032 rule that produces Error severity warnings
         let content = "# Heading\n- List item without blank line before";
-        let rule = MD032BlanksAroundLists::default();
+        let rule = MD032BlanksAroundLists;
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, Some(PathBuf::from("test.md")));
         let warnings = rule.check(&ctx).expect("MD032 check should succeed");
 
@@ -891,8 +891,7 @@ mod tests {
             let level = result["level"].as_str().unwrap();
             assert!(
                 matches!(level, "warning" | "error" | "note" | "none" | "open"),
-                "Level must be valid SARIF level, got: {}",
-                level
+                "Level must be valid SARIF level, got: {level}"
             );
         }
     }
@@ -983,7 +982,7 @@ mod tests {
                 end_line: 1,
                 end_column: 5,
                 rule_name: Some("TEST".to_string()),
-                message: format!("Test {:?}", severity),
+                message: format!("Test {severity:?}"),
                 severity,
                 fix: None,
             }];
@@ -994,8 +993,7 @@ mod tests {
             let results = sarif["runs"][0]["results"].as_array().unwrap();
             assert_eq!(
                 results[0]["level"], expected_level,
-                "Severity::{:?} should map to SARIF level '{}'",
-                severity, expected_level
+                "Severity::{severity:?} should map to SARIF level '{expected_level}'"
             );
         }
     }

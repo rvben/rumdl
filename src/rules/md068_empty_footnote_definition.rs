@@ -137,7 +137,7 @@ impl Rule for MD068EmptyFootnoteDefinition {
                             end_line: line_idx + 1,
                             end_column: line.len() + 1,
                             message: format!("Footnote definition '[^{id}]' is empty"),
-                            severity: Severity::Warning,
+                            severity: Severity::Error,
                             fix: None,
                         });
                     }

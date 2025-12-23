@@ -129,7 +129,7 @@ impl Rule for MD024NoDuplicateHeading {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            severity: Severity::Warning,
+                            severity: Severity::Error,
                             fix: None,
                         });
                     } else {
@@ -149,7 +149,7 @@ impl Rule for MD024NoDuplicateHeading {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            severity: Severity::Warning,
+                            severity: Severity::Error,
                             fix: None,
                         });
                     } else {
@@ -165,7 +165,7 @@ impl Rule for MD024NoDuplicateHeading {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            severity: Severity::Warning,
+                            severity: Severity::Error,
                             fix: None,
                         });
                     } else {

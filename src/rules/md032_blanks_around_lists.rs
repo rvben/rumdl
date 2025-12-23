@@ -342,7 +342,7 @@ impl MD032BlanksAroundLists {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            severity: Severity::Error,
+                            severity: Severity::Warning,
                             rule_name: Some(self.name().to_string()),
                             message: "Ordered list starting with non-1 should be preceded by blank line".to_string(),
                             fix: Some(Fix {
@@ -382,7 +382,7 @@ impl MD032BlanksAroundLists {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        severity: Severity::Error,
+                        severity: Severity::Warning,
                         rule_name: Some(self.name().to_string()),
                         message: "List should be preceded by blank line".to_string(),
                         fix: Some(Fix {
@@ -420,7 +420,7 @@ impl MD032BlanksAroundLists {
                         column: start_col_last,
                         end_line: end_line_last,
                         end_column: end_col_last,
-                        severity: Severity::Error,
+                        severity: Severity::Warning,
                         rule_name: Some(self.name().to_string()),
                         message: "List should be followed by blank line".to_string(),
                         fix: Some(Fix {

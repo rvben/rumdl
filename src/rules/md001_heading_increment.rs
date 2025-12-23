@@ -108,7 +108,7 @@ impl Rule for MD001HeadingIncrement {
                     end_line,
                     end_column: end_col,
                     message: format!("Expected heading level {}, but found heading level {}", prev + 1, level),
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     fix: Some(Fix {
                         range: ctx.line_index.line_content_range(valid_heading.line_num),
                         replacement: format!("{}{}", " ".repeat(indentation), replacement),

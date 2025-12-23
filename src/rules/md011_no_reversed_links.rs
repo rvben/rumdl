@@ -268,7 +268,7 @@ impl Rule for MD011NoReversedLinks {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     fix: Some(Fix {
                         range: {
                             let match_start_byte = byte_pos + match_start;

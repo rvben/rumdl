@@ -206,7 +206,7 @@ impl Rule for MD066FootnoteValidation {
                             "Duplicate footnote definition '[^{def_id}]' (first defined on line {})",
                             occurrences[0].0
                         ),
-                        severity: Severity::Warning,
+                        severity: Severity::Error,
                         fix: None,
                     });
                 }
@@ -226,7 +226,7 @@ impl Rule for MD066FootnoteValidation {
                     end_line: line,
                     end_column: 1,
                     message: format!("Footnote reference '[^{ref_id}]' has no corresponding definition"),
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     fix: None,
                 });
             }
@@ -245,7 +245,7 @@ impl Rule for MD066FootnoteValidation {
                     end_line: line,
                     end_column: 1,
                     message: format!("Footnote definition '[^{def_id}]' is never referenced"),
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     fix: None,
                 });
             }

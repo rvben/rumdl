@@ -336,7 +336,7 @@ impl MD057ExistingRelativeLinks {
             end_line: line_num,
             end_column: column + url.len(),
             message: format!("Relative link '{url}' does not exist"),
-            severity: Severity::Warning,
+            severity: Severity::Error,
             fix: None,
         });
     }
@@ -646,7 +646,7 @@ impl Rule for MD057ExistingRelativeLinks {
                         end_line: cross_link.line,
                         end_column: cross_link.column + cross_link.target_path.len(),
                         message: format!("Relative link '{}' does not exist", cross_link.target_path),
-                        severity: Severity::Warning,
+                        severity: Severity::Error,
                         fix: None,
                     });
                 }
