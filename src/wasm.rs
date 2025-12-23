@@ -203,7 +203,7 @@ impl Linter {
         let all = all_rules(&self.config);
         let rules = filter_rules(&all, &self.config.global);
 
-        match crate::lint(content, &rules, false, self.flavor) {
+        match crate::lint(content, &rules, false, self.flavor, Some(&self.config)) {
             Ok(warnings) => {
                 // Convert byte offsets to character offsets for JavaScript
                 let js_warnings: Vec<JsWarning> = warnings.iter().map(|w| convert_warning_for_js(w, content)).collect();
@@ -220,7 +220,7 @@ impl Linter {
         let all = all_rules(&self.config);
         let rules = filter_rules(&all, &self.config.global);
 
-        let warnings = match crate::lint(content, &rules, false, self.flavor) {
+        let warnings = match crate::lint(content, &rules, false, self.flavor, Some(&self.config)) {
             Ok(w) => w,
             Err(_) => return content.to_string(),
         };
