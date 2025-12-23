@@ -273,73 +273,6 @@ impl MD057ExistingRelativeLinks {
     fn resolve_link_path_with_base(link: &str, base_path: &Path) -> PathBuf {
         base_path.join(link)
     }
-
-    /// Process a single link and check if it exists
-    fn process_link_with_base(
-        &self,
-        url: &str,
-        line_num: usize,
-        column: usize,
-        base_path: &Path,
-        warnings: &mut Vec<LintWarning>,
-    ) {
-        // Skip empty URLs
-        if url.is_empty() {
-            return;
-        }
-
-        let url = url.trim();
-
-        // Skip external URLs, absolute paths, and fragment-only links
-        if self.is_external_url(url) || self.is_fragment_only_link(url) {
-            return;
-        }
-
-        // Strip query parameters and fragments before checking file existence
-        // URLs like `path/to/image.png?raw=true` should check for `path/to/image.png`
-        let file_path = Self::strip_query_and_fragment(url);
-
-        // URL-decode the path to handle percent-encoded characters
-        // e.g., `penguin%20with%20space.jpg` -> `penguin with space.jpg`
-        let decoded_path = Self::url_decode(file_path);
-
-        // Resolve the relative link against the base path
-        let resolved_path = Self::resolve_link_path_with_base(&decoded_path, base_path);
-
-        // Check if the file exists, also trying markdown extensions for extensionless links
-        if file_exists_or_markdown_extension(&resolved_path) {
-            return; // File exists, no warning needed
-        }
-
-        // For .html/.htm links, check if a corresponding markdown source exists
-        // This handles doc sites where .md is compiled to .html at build time
-        if let Some(ext) = resolved_path.extension().and_then(|e| e.to_str())
-            && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
-            && let (Some(stem), Some(parent)) = (
-                resolved_path.file_stem().and_then(|s| s.to_str()),
-                resolved_path.parent(),
-            )
-        {
-            for md_ext in MARKDOWN_EXTENSIONS {
-                let source_path = parent.join(format!("{stem}{md_ext}"));
-                if file_exists_with_cache(&source_path) {
-                    return; // Markdown source exists, link is valid
-                }
-            }
-        }
-
-        // File doesn't exist and no source file found
-        warnings.push(LintWarning {
-            rule_name: Some(self.name().to_string()),
-            line: line_num,
-            column,
-            end_line: line_num,
-            end_column: column + url.len(),
-            message: format!("Relative link '{url}' does not exist"),
-            severity: Severity::Error,
-            fix: None,
-        });
-    }
 }
 
 impl Rule for MD057ExistingRelativeLinks {
@@ -458,11 +391,65 @@ impl Rule for MD057ExistingRelativeLinks {
                     if let Some((_caps, url_group)) = caps_and_url {
                         let url = url_group.as_str().trim();
 
-                        // Calculate column position
-                        let column = start_pos + 1;
+                        // Skip empty URLs
+                        if url.is_empty() {
+                            continue;
+                        }
 
-                        // Process and validate the link
-                        self.process_link_with_base(url, link.line, column, &base_path, &mut warnings);
+                        // Skip external URLs, absolute paths, and fragment-only links
+                        if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                            continue;
+                        }
+
+                        // Strip query parameters and fragments before checking file existence
+                        let file_path = Self::strip_query_and_fragment(url);
+
+                        // URL-decode the path to handle percent-encoded characters
+                        let decoded_path = Self::url_decode(file_path);
+
+                        // Resolve the relative link against the base path
+                        let resolved_path = Self::resolve_link_path_with_base(&decoded_path, &base_path);
+
+                        // Check if the file exists, also trying markdown extensions for extensionless links
+                        if file_exists_or_markdown_extension(&resolved_path) {
+                            continue; // File exists, no warning needed
+                        }
+
+                        // For .html/.htm links, check if a corresponding markdown source exists
+                        let has_md_source = if let Some(ext) = resolved_path.extension().and_then(|e| e.to_str())
+                            && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+                            && let (Some(stem), Some(parent)) = (
+                                resolved_path.file_stem().and_then(|s| s.to_str()),
+                                resolved_path.parent(),
+                            ) {
+                            MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
+                                let source_path = parent.join(format!("{stem}{md_ext}"));
+                                file_exists_with_cache(&source_path)
+                            })
+                        } else {
+                            false
+                        };
+
+                        if has_md_source {
+                            continue; // Markdown source exists, link is valid
+                        }
+
+                        // File doesn't exist and no source file found
+                        // Use actual URL position from regex capture group
+                        // Note: capture group positions are absolute within the line string
+                        let url_start = url_group.start();
+                        let url_end = url_group.end();
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: link.line,
+                            column: url_start + 1, // 1-indexed
+                            end_line: link.line,
+                            end_column: url_end + 1, // 1-indexed
+                            message: format!("Relative link '{url}' does not exist"),
+                            severity: Severity::Error,
+                            fix: None,
+                        });
                     }
                 }
             }
@@ -471,7 +458,62 @@ impl Rule for MD057ExistingRelativeLinks {
         // Also process images - they have URLs already parsed
         for image in &ctx.images {
             let url = image.url.as_ref();
-            self.process_link_with_base(url, image.line, image.start_col + 1, &base_path, &mut warnings);
+
+            // Skip empty URLs
+            if url.is_empty() {
+                continue;
+            }
+
+            // Skip external URLs, absolute paths, and fragment-only links
+            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                continue;
+            }
+
+            // Strip query parameters and fragments before checking file existence
+            let file_path = Self::strip_query_and_fragment(url);
+
+            // URL-decode the path to handle percent-encoded characters
+            let decoded_path = Self::url_decode(file_path);
+
+            // Resolve the relative link against the base path
+            let resolved_path = Self::resolve_link_path_with_base(&decoded_path, &base_path);
+
+            // Check if the file exists, also trying markdown extensions for extensionless links
+            if file_exists_or_markdown_extension(&resolved_path) {
+                continue; // File exists, no warning needed
+            }
+
+            // For .html/.htm links, check if a corresponding markdown source exists
+            let has_md_source = if let Some(ext) = resolved_path.extension().and_then(|e| e.to_str())
+                && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+                && let (Some(stem), Some(parent)) = (
+                    resolved_path.file_stem().and_then(|s| s.to_str()),
+                    resolved_path.parent(),
+                ) {
+                MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
+                    let source_path = parent.join(format!("{stem}{md_ext}"));
+                    file_exists_with_cache(&source_path)
+                })
+            } else {
+                false
+            };
+
+            if has_md_source {
+                continue; // Markdown source exists, link is valid
+            }
+
+            // File doesn't exist and no source file found
+            // Images already have correct position from parser
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: image.line,
+                column: image.start_col + 1,
+                end_line: image.line,
+                end_column: image.start_col + 1 + url.len(),
+                message: format!("Relative link '{url}' does not exist"),
+                severity: Severity::Error,
+                fix: None,
+            });
         }
 
         Ok(warnings)
@@ -1641,7 +1683,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
 
     #[test]
     fn test_absolute_path_skipped_in_check() {
-        // Test that absolute paths are skipped in process_link_with_base()
+        // Test that absolute paths are skipped during link validation
         // This fixes the bug where /pkg/runtime was being flagged
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
@@ -1780,5 +1822,113 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             result.is_empty(),
             "All email addresses should be skipped. Got: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_diagnostic_position_accuracy() {
+        // Test that diagnostics point to the URL, not the link text
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Position markers:     0         1         2         3
+        //                       0123456789012345678901234567890123456789
+        let content = "prefix [text](missing.md) suffix";
+        //             The URL "missing.md" starts at 0-indexed position 14
+        //             which is 1-indexed column 15, and ends at 0-indexed 24 (1-indexed column 25)
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should have exactly one warning");
+        assert_eq!(result[0].line, 1, "Should be on line 1");
+        assert_eq!(result[0].column, 15, "Should point to start of URL 'missing.md'");
+        assert_eq!(result[0].end_column, 25, "Should point past end of URL 'missing.md'");
+    }
+
+    #[test]
+    fn test_diagnostic_position_angle_brackets() {
+        // Test position accuracy with angle bracket links
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Position markers:     0         1         2
+        //                       012345678901234567890
+        let content = "[link](<missing.md>)";
+        //             The URL "missing.md" starts at 0-indexed position 8 (1-indexed column 9)
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should have exactly one warning");
+        assert_eq!(result[0].line, 1, "Should be on line 1");
+        assert_eq!(result[0].column, 9, "Should point to start of URL in angle brackets");
+    }
+
+    #[test]
+    fn test_diagnostic_position_multiline() {
+        // Test that line numbers are correct for links on different lines
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"# Title
+Some text on line 2
+[link on line 3](missing1.md)
+More text
+[link on line 5](missing2.md)"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 2, "Should have two warnings");
+
+        // First warning should be on line 3
+        assert_eq!(result[0].line, 3, "First warning should be on line 3");
+        assert!(result[0].message.contains("missing1.md"));
+
+        // Second warning should be on line 5
+        assert_eq!(result[1].line, 5, "Second warning should be on line 5");
+        assert!(result[1].message.contains("missing2.md"));
+    }
+
+    #[test]
+    fn test_diagnostic_position_with_spaces() {
+        // Test position with URLs that have spaces in parentheses
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = "[link]( missing.md )";
+        //             0123456789012345678901
+        //             0-indexed position 8 is 'm' in 'missing.md' (after space and paren)
+        //             which is 1-indexed column 9
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should have exactly one warning");
+        // The regex captures the URL without leading/trailing spaces
+        assert_eq!(result[0].column, 9, "Should point to URL after stripping spaces");
+    }
+
+    #[test]
+    fn test_diagnostic_position_image() {
+        // Test that image diagnostics also have correct positions
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = "![alt text](missing.jpg)";
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should have exactly one warning for image");
+        assert_eq!(result[0].line, 1);
+        // Images use start_col from the parser, which should point to the URL
+        assert!(result[0].column > 0, "Should have valid column position");
+        assert!(result[0].message.contains("missing.jpg"));
     }
 }
