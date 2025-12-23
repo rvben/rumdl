@@ -26,9 +26,13 @@ impl OutputFormatter for SarifFormatter {
             .iter()
             .map(|warning| {
                 let rule_id = warning.rule_name.as_deref().unwrap_or("unknown");
+                let level = match warning.severity {
+                    crate::rule::Severity::Error => "error",
+                    crate::rule::Severity::Warning => "warning",
+                };
                 json!({
                     "ruleId": rule_id,
-                    "level": "warning",
+                    "level": level,
                     "message": {
                         "text": warning.message
                     },
@@ -86,16 +90,17 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
                     },
                     "fullDescription": {
                         "text": format!("Markdown linting rule {}", rule_id)
-                    },
-                    "defaultConfiguration": {
-                        "level": "warning"
                     }
                 })
             });
 
+            let level = match warning.severity {
+                crate::rule::Severity::Error => "error",
+                crate::rule::Severity::Warning => "warning",
+            };
             let result = json!({
                 "ruleId": rule_id,
-                "level": "warning",
+                "level": level,
                 "message": {
                     "text": warning.message
                 },
@@ -139,8 +144,12 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rule::{Fix, Severity};
+    use crate::config::MarkdownFlavor;
+    use crate::lint_context::LintContext;
+    use crate::rule::{Fix, Rule, Severity};
+    use crate::rules::MD032BlanksAroundLists;
     use serde_json::Value;
+    use std::path::PathBuf;
 
     #[test]
     fn test_sarif_formatter_default() {
@@ -262,8 +271,10 @@ mod tests {
         let results = sarif["runs"][0]["results"].as_array().unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0]["ruleId"], "MD001");
+        assert_eq!(results[0]["level"], "warning");
         assert_eq!(results[0]["locations"][0]["physicalLocation"]["region"]["startLine"], 5);
         assert_eq!(results[1]["ruleId"], "MD013");
+        assert_eq!(results[1]["level"], "error");
         assert_eq!(
             results[1]["locations"][0]["physicalLocation"]["region"]["startLine"],
             10
@@ -396,6 +407,11 @@ mod tests {
         let results = sarif["runs"][0]["results"].as_array().unwrap();
         assert_eq!(results.len(), 3);
 
+        // Check severity mapping
+        assert_eq!(results[0]["level"], "warning"); // MD001 - Warning
+        assert_eq!(results[1]["level"], "warning"); // MD013 - Warning
+        assert_eq!(results[2]["level"], "error"); // MD022 - Error
+
         // Check that all rules are defined
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 3);
@@ -447,10 +463,9 @@ mod tests {
     }
 
     #[test]
-    fn test_severity_always_warning() {
+    fn test_severity_mapping() {
         let formatter = SarifFormatter::new();
 
-        // Test that all severities are output as "warning" in SARIF format
         let warnings = vec![
             LintWarning {
                 line: 1,
@@ -467,7 +482,7 @@ mod tests {
                 column: 1,
                 end_line: 2,
                 end_column: 5,
-                rule_name: Some("MD002".to_string()),
+                rule_name: Some("MD032".to_string()),
                 message: "Error severity".to_string(),
                 severity: Severity::Error,
                 fix: None,
@@ -478,9 +493,48 @@ mod tests {
         let sarif: Value = serde_json::from_str(&output).unwrap();
 
         let results = sarif["runs"][0]["results"].as_array().unwrap();
-        // Both should use level "warning" regardless of severity
+        assert_eq!(results[0]["level"], "warning"); // Warning → "warning"
+        assert_eq!(results[1]["level"], "error"); // Error → "error"
+    }
+
+    #[test]
+    fn test_sarif_report_severity_mapping() {
+        let warnings = vec![
+            (
+                "file1.md".to_string(),
+                vec![LintWarning {
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 5,
+                    rule_name: Some("MD001".to_string()),
+                    message: "Warning".to_string(),
+                    severity: Severity::Warning,
+                    fix: None,
+                }],
+            ),
+            (
+                "file2.md".to_string(),
+                vec![LintWarning {
+                    line: 5,
+                    column: 1,
+                    end_line: 5,
+                    end_column: 10,
+                    rule_name: Some("MD032".to_string()),
+                    message: "Error".to_string(),
+                    severity: Severity::Error,
+                    fix: None,
+                }],
+            ),
+        ];
+
+        let output = format_sarif_report(&warnings);
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
         assert_eq!(results[0]["level"], "warning");
-        assert_eq!(results[1]["level"], "warning");
+        assert_eq!(results[1]["level"], "error");
     }
 
     #[test]
@@ -544,5 +598,405 @@ mod tests {
             "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
         );
         assert_eq!(sarif["version"], "2.1.0");
+    }
+
+    // ===== Expert-level tests for comprehensive coverage =====
+
+    #[test]
+    fn test_md032_integration_produces_error_level() {
+        // Test with actual MD032 rule that produces Error severity warnings
+        let content = "# Heading\n- List item without blank line before";
+        let rule = MD032BlanksAroundLists::default();
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, Some(PathBuf::from("test.md")));
+        let warnings = rule.check(&ctx).expect("MD032 check should succeed");
+
+        // MD032 should produce at least one error-level warning
+        assert!(!warnings.is_empty(), "MD032 should flag list without blank line");
+
+        let formatter = SarifFormatter::new();
+        let output = formatter.format_warnings(&warnings, "test.md");
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        // Verify at least one result has error level (MD032 uses Severity::Error)
+        assert!(
+            results.iter().any(|r| r["level"] == "error"),
+            "MD032 violations should produce 'error' level in SARIF output"
+        );
+        // Verify rule ID is MD032
+        assert!(
+            results.iter().any(|r| r["ruleId"] == "MD032"),
+            "Results should include MD032 rule"
+        );
+    }
+
+    #[test]
+    fn test_all_warnings_no_errors() {
+        // Edge case: File with only Warning severity (no Error severity)
+        let formatter = SarifFormatter::new();
+        let warnings = vec![
+            LintWarning {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                rule_name: Some("MD001".to_string()),
+                message: "First warning".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            },
+            LintWarning {
+                line: 2,
+                column: 1,
+                end_line: 2,
+                end_column: 5,
+                rule_name: Some("MD013".to_string()),
+                message: "Second warning".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            },
+            LintWarning {
+                line: 3,
+                column: 1,
+                end_line: 3,
+                end_column: 5,
+                rule_name: Some("MD041".to_string()),
+                message: "Third warning".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            },
+        ];
+
+        let output = formatter.format_warnings(&warnings, "test.md");
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 3);
+        // All should be "warning" level
+        assert!(results.iter().all(|r| r["level"] == "warning"));
+        // None should be "error" level
+        assert!(!results.iter().any(|r| r["level"] == "error"));
+    }
+
+    #[test]
+    fn test_all_errors_no_warnings() {
+        // Edge case: File with only Error severity (no Warning severity)
+        let formatter = SarifFormatter::new();
+        let warnings = vec![
+            LintWarning {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                rule_name: Some("MD032".to_string()),
+                message: "First error".to_string(),
+                severity: Severity::Error,
+                fix: None,
+            },
+            LintWarning {
+                line: 2,
+                column: 1,
+                end_line: 2,
+                end_column: 5,
+                rule_name: Some("MD032".to_string()),
+                message: "Second error".to_string(),
+                severity: Severity::Error,
+                fix: None,
+            },
+        ];
+
+        let output = formatter.format_warnings(&warnings, "test.md");
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        // All should be "error" level
+        assert!(results.iter().all(|r| r["level"] == "error"));
+        // None should be "warning" level
+        assert!(!results.iter().any(|r| r["level"] == "warning"));
+    }
+
+    #[test]
+    fn test_mixed_severities_same_file() {
+        // Edge case: Same file with both Warning and Error severities interleaved
+        let formatter = SarifFormatter::new();
+        let warnings = vec![
+            LintWarning {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                rule_name: Some("MD001".to_string()),
+                message: "Warning".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            },
+            LintWarning {
+                line: 2,
+                column: 1,
+                end_line: 2,
+                end_column: 5,
+                rule_name: Some("MD032".to_string()),
+                message: "Error".to_string(),
+                severity: Severity::Error,
+                fix: None,
+            },
+            LintWarning {
+                line: 3,
+                column: 1,
+                end_line: 3,
+                end_column: 5,
+                rule_name: Some("MD013".to_string()),
+                message: "Warning".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            },
+            LintWarning {
+                line: 4,
+                column: 1,
+                end_line: 4,
+                end_column: 5,
+                rule_name: Some("MD032".to_string()),
+                message: "Error".to_string(),
+                severity: Severity::Error,
+                fix: None,
+            },
+        ];
+
+        let output = formatter.format_warnings(&warnings, "test.md");
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 4);
+
+        // Verify exact mapping for each result
+        assert_eq!(results[0]["level"], "warning"); // Line 1
+        assert_eq!(results[1]["level"], "error"); // Line 2
+        assert_eq!(results[2]["level"], "warning"); // Line 3
+        assert_eq!(results[3]["level"], "error"); // Line 4
+
+        // Count severities
+        let warning_count = results.iter().filter(|r| r["level"] == "warning").count();
+        let error_count = results.iter().filter(|r| r["level"] == "error").count();
+        assert_eq!(warning_count, 2);
+        assert_eq!(error_count, 2);
+    }
+
+    #[test]
+    fn test_rule_deduplication_preserves_severity() {
+        // Test that rule deduplication doesn't lose severity information
+        // Same rule (MD032) appears multiple times in same file with Error severity
+        let warnings = vec![(
+            "test.md".to_string(),
+            vec![
+                LintWarning {
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 5,
+                    rule_name: Some("MD032".to_string()),
+                    message: "First MD032 error".to_string(),
+                    severity: Severity::Error,
+                    fix: None,
+                },
+                LintWarning {
+                    line: 5,
+                    column: 1,
+                    end_line: 5,
+                    end_column: 5,
+                    rule_name: Some("MD032".to_string()),
+                    message: "Second MD032 error".to_string(),
+                    severity: Severity::Error,
+                    fix: None,
+                },
+                LintWarning {
+                    line: 10,
+                    column: 1,
+                    end_line: 10,
+                    end_column: 5,
+                    rule_name: Some("MD032".to_string()),
+                    message: "Third MD032 error".to_string(),
+                    severity: Severity::Error,
+                    fix: None,
+                },
+            ],
+        )];
+
+        let output = format_sarif_report(&warnings);
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        // Should have 3 results, all with error level
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().all(|r| r["level"] == "error"));
+        assert!(results.iter().all(|r| r["ruleId"] == "MD032"));
+
+        // Should have only 1 rule definition (deduplicated)
+        let rules = sarif["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["id"], "MD032");
+        // Verify defaultConfiguration was removed (should not be present)
+        assert!(rules[0].get("defaultConfiguration").is_none());
+    }
+
+    #[test]
+    fn test_sarif_output_valid_json_schema() {
+        // Verify SARIF output is valid JSON and has required top-level fields
+        let formatter = SarifFormatter::new();
+        let warnings = vec![LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            rule_name: Some("MD001".to_string()),
+            message: "Test".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        }];
+
+        let output = formatter.format_warnings(&warnings, "test.md");
+
+        // Must be valid JSON
+        let sarif: Value = serde_json::from_str(&output).expect("SARIF output must be valid JSON");
+
+        // SARIF 2.1.0 required fields at root level
+        assert!(sarif.get("version").is_some(), "Must have version field");
+        assert!(sarif.get("$schema").is_some(), "Must have $schema field");
+        assert!(sarif.get("runs").is_some(), "Must have runs field");
+
+        // Runs must be an array with at least one run
+        let runs = sarif["runs"].as_array().expect("runs must be an array");
+        assert!(!runs.is_empty(), "Must have at least one run");
+
+        // Each run must have tool and results
+        let run = &runs[0];
+        assert!(run.get("tool").is_some(), "Run must have tool field");
+        assert!(run.get("results").is_some(), "Run must have results field");
+
+        // Tool must have driver
+        assert!(run["tool"].get("driver").is_some(), "Tool must have driver field");
+
+        // Results must be an array
+        assert!(run["results"].is_array(), "Results must be an array");
+
+        // Each result must have required fields
+        let results = run["results"].as_array().unwrap();
+        for result in results {
+            assert!(result.get("ruleId").is_some(), "Result must have ruleId");
+            assert!(result.get("level").is_some(), "Result must have level");
+            assert!(result.get("message").is_some(), "Result must have message");
+            assert!(result.get("locations").is_some(), "Result must have locations");
+
+            // Level must be a valid SARIF level
+            let level = result["level"].as_str().unwrap();
+            assert!(
+                matches!(level, "warning" | "error" | "note" | "none" | "open"),
+                "Level must be valid SARIF level, got: {}",
+                level
+            );
+        }
+    }
+
+    #[test]
+    fn test_default_configuration_removed() {
+        // Verify that defaultConfiguration is no longer present in rule metadata
+        // (it was semantically incorrect since severity is instance-specific)
+        let warnings = vec![(
+            "test.md".to_string(),
+            vec![
+                LintWarning {
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 5,
+                    rule_name: Some("MD001".to_string()),
+                    message: "Warning".to_string(),
+                    severity: Severity::Warning,
+                    fix: None,
+                },
+                LintWarning {
+                    line: 2,
+                    column: 1,
+                    end_line: 2,
+                    end_column: 5,
+                    rule_name: Some("MD032".to_string()),
+                    message: "Error".to_string(),
+                    severity: Severity::Error,
+                    fix: None,
+                },
+            ],
+        )];
+
+        let output = format_sarif_report(&warnings);
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let rules = sarif["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 2);
+
+        // Verify defaultConfiguration is not present in any rule
+        for rule in rules {
+            assert!(
+                rule.get("defaultConfiguration").is_none(),
+                "Rule {} should not have defaultConfiguration (it's instance-specific, not rule-specific)",
+                rule["id"]
+            );
+        }
+    }
+
+    #[test]
+    fn test_unknown_rule_with_error_severity() {
+        // Edge case: Unknown rule (None) with Error severity
+        let formatter = SarifFormatter::new();
+        let warnings = vec![LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            rule_name: None,
+            message: "Unknown error".to_string(),
+            severity: Severity::Error,
+            fix: None,
+        }];
+
+        let output = formatter.format_warnings(&warnings, "test.md");
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["ruleId"], "unknown");
+        assert_eq!(results[0]["level"], "error"); // Should still map Error → "error"
+    }
+
+    #[test]
+    fn test_exhaustive_severity_mapping() {
+        // Document all Severity enum variants and their SARIF mappings
+        // This test will break if new Severity variants are added without updating SARIF mapper
+        let formatter = SarifFormatter::new();
+
+        // Test all current Severity variants
+        let all_severities = vec![(Severity::Warning, "warning"), (Severity::Error, "error")];
+
+        for (severity, expected_level) in all_severities {
+            let warnings = vec![LintWarning {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                rule_name: Some("TEST".to_string()),
+                message: format!("Test {:?}", severity),
+                severity,
+                fix: None,
+            }];
+
+            let output = formatter.format_warnings(&warnings, "test.md");
+            let sarif: Value = serde_json::from_str(&output).unwrap();
+
+            let results = sarif["runs"][0]["results"].as_array().unwrap();
+            assert_eq!(
+                results[0]["level"], expected_level,
+                "Severity::{:?} should map to SARIF level '{}'",
+                severity, expected_level
+            );
+        }
     }
 }
