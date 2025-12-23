@@ -18,33 +18,33 @@ echo -e "Last release: ${YELLOW}$LAST_TAG${NC}"
 
 # Show commits since last tag
 echo -e "\n${BLUE}Commits since $LAST_TAG:${NC}"
-git log $LAST_TAG..HEAD --oneline
+git log "$LAST_TAG"..HEAD --oneline
 
 # Categorize commits
 echo -e "\n${BLUE}Categorized changes:${NC}"
 
 echo -e "\n${GREEN}Features/Added:${NC}"
-git log $LAST_TAG..HEAD --oneline | grep -iE "^[a-f0-9]+ (feat|add|new)" || echo "  (none)"
+git log "$LAST_TAG"..HEAD --oneline | grep -iE "^[a-f0-9]+ (feat|add|new)" || echo "  (none)"
 
 echo -e "\n${GREEN}Changes/Refactoring:${NC}"
-git log $LAST_TAG..HEAD --oneline | grep -iE "^[a-f0-9]+ (refactor|change|update|optimize|improve)" || echo "  (none)"
+git log "$LAST_TAG"..HEAD --oneline | grep -iE "^[a-f0-9]+ (refactor|change|update|optimize|improve)" || echo "  (none)"
 
 echo -e "\n${GREEN}Fixes:${NC}"
-git log $LAST_TAG..HEAD --oneline | grep -iE "^[a-f0-9]+ (fix|bugfix|hotfix)" || echo "  (none)"
+git log "$LAST_TAG"..HEAD --oneline | grep -iE "^[a-f0-9]+ (fix|bugfix|hotfix)" || echo "  (none)"
 
 echo -e "\n${GREEN}Performance:${NC}"
-git log $LAST_TAG..HEAD --oneline | grep -iE "^[a-f0-9]+ (perf|optimize|speed)" || echo "  (none)"
+git log "$LAST_TAG"..HEAD --oneline | grep -iE "^[a-f0-9]+ (perf|optimize|speed)" || echo "  (none)"
 
 echo -e "\n${GREEN}Documentation:${NC}"
-git log $LAST_TAG..HEAD --oneline | grep -iE "^[a-f0-9]+ (docs|doc)" || echo "  (none)"
+git log "$LAST_TAG"..HEAD --oneline | grep -iE "^[a-f0-9]+ (docs|doc)" || echo "  (none)"
 
 # Check for breaking changes
 echo -e "\n${YELLOW}Potential breaking changes:${NC}"
-git log $LAST_TAG..HEAD --oneline | grep -iE "breaking|!\s*:" || echo "  (none detected)"
+git log "$LAST_TAG"..HEAD --oneline | grep -iE "breaking|!\s*:" || echo "  (none detected)"
 
 # Show file statistics
 echo -e "\n${BLUE}File changes summary:${NC}"
-git diff --stat $LAST_TAG..HEAD | tail -1
+git diff --stat "$LAST_TAG"..HEAD | tail -1
 
 # Remind about manual steps
 echo -e "\n${YELLOW}Release checklist:${NC}"
