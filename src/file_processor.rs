@@ -191,6 +191,19 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
 
     final_rules
 }
+
+/// Canonicalize a file path to resolve symlinks and prevent duplicate linting.
+///
+/// Returns the canonical path if successful, or the original path if canonicalization
+/// fails (e.g., file doesn't exist yet, permission denied, network path).
+#[inline]
+fn canonicalize_path_safe(path_str: &str) -> String {
+    Path::new(path_str)
+        .canonicalize()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path_str.to_string())
+}
+
 pub fn find_markdown_files(
     paths: &[String],
     args: &crate::CheckArgs,
@@ -440,11 +453,10 @@ pub fn find_markdown_files(
                             "warning: {cleaned_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
                         );
                     } else {
-                        file_paths.push(cleaned_path);
+                        file_paths.push(canonicalize_path_safe(&cleaned_path));
                     }
                 } else {
-                    // No exclude patterns, add the file
-                    file_paths.push(cleaned_path);
+                    file_paths.push(canonicalize_path_safe(&cleaned_path));
                 }
             }
         }
@@ -474,7 +486,7 @@ pub fn find_markdown_files(
                     } else {
                         file_path
                     };
-                    file_paths.push(cleaned_path);
+                    file_paths.push(canonicalize_path_safe(&cleaned_path));
                 }
             }
             Err(err) => {
