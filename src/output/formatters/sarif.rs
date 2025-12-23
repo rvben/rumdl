@@ -603,14 +603,14 @@ mod tests {
     // ===== Expert-level tests for comprehensive coverage =====
 
     #[test]
-    fn test_md032_integration_produces_error_level() {
-        // Test with actual MD032 rule that produces Error severity warnings
+    fn test_md032_integration_produces_warning_level() {
+        // Test with actual MD032 rule that produces Warning severity warnings
         let content = "# Heading\n- List item without blank line before";
         let rule = MD032BlanksAroundLists;
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, Some(PathBuf::from("test.md")));
         let warnings = rule.check(&ctx).expect("MD032 check should succeed");
 
-        // MD032 should produce at least one error-level warning
+        // MD032 should produce at least one warning-level warning
         assert!(!warnings.is_empty(), "MD032 should flag list without blank line");
 
         let formatter = SarifFormatter::new();
@@ -618,10 +618,10 @@ mod tests {
         let sarif: Value = serde_json::from_str(&output).unwrap();
 
         let results = sarif["runs"][0]["results"].as_array().unwrap();
-        // Verify at least one result has error level (MD032 uses Severity::Error)
+        // Verify at least one result has warning level (MD032 uses Severity::Warning)
         assert!(
-            results.iter().any(|r| r["level"] == "error"),
-            "MD032 violations should produce 'error' level in SARIF output"
+            results.iter().any(|r| r["level"] == "warning"),
+            "MD032 violations should produce 'warning' level in SARIF output"
         );
         // Verify rule ID is MD032
         assert!(
