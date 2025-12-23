@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.200] - 2025-12-22
+## [0.0.200] - 2025-12-23
 
 ### Added
 
@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Mutually exclusive with `--defaults` flag
   - Displays helpful message when all configurations are using defaults
   - Supports filtering of global config, rule configs, and per-file-ignores
+
+- **SARIF: Map severity field to SARIF result levels**
+  - Error severity maps to SARIF "error" level
+  - Warning severity maps to SARIF "warning" level
+  - Improves integration with tools that consume SARIF output
+
+- **Testing: Add O(n²) complexity regression testing infrastructure**
+  - Detect potential quadratic time complexity issues in rules
+  - Prevent performance regressions in line analysis algorithms
 
 ### Fixed
 
@@ -48,6 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Integrate comprehensive edge case tests for better coverage
   - Improves reliability for non-standard indent configurations
 
+- **MD057 (link-target-exists): Point diagnostics to URL instead of link text** (fixes #226)
+  - LSP diagnostics now point to the actual non-existent URL rather than the link text
+  - Fixes incorrect positioning in editors where diagnostics appeared at wrong location
+  - Makes diagnostics semantically correct by highlighting the actual problem
+  - Improves both CLI and LSP diagnostic accuracy
+
+- **File processor: Canonicalize file paths to prevent duplicate warnings**
+  - Normalize file paths to resolve symbolic links and relative paths
+  - Prevents duplicate warnings when the same file is referenced via different paths
+  - Improves accuracy when processing files via symlinks or relative paths
+
 - **Rules: Fixes for issues 219 and 220** (fixes #219, #220)
   - Fixes addressing edge cases and false positives
   - Improves overall rule accuracy and reliability
@@ -60,6 +80,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reduces processing time for files with complex list structures
 
 ### Changed
+
+- **Rules: Categorize severities by document impact**
+  - Reorganized rule severities into meaningful categories
+  - Structure-critical rules (MD001, MD002, MD003, etc.) remain Error
+  - Style-preference rules (MD004, MD007, MD029, etc.) now Warning
+  - Better alignment between severity and actual impact on document quality
+
+- **Documentation: Add severity categorization section to RULES.md**
+  - Documents the reasoning behind severity assignments
+  - Explains the distinction between structural errors and style warnings
+  - Helps users understand why rules have their assigned severity levels
 
 - **Tests: Reorganize issue-specific tests into appropriate test files**
   - Moved Issue #210 tests to `tests/rules/md007_test.rs`
