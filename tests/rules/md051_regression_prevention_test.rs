@@ -317,7 +317,7 @@ fn regression_test_mode_switching() {
     // Test cases where modes should differ
     let mode_test_cases = vec![
         ("test_method", "test_method", "testmethod"), // Underscores
-        ("Café Menu", "café-menu", "caf-menu"),       // Accents - updated to match actual kramdown behavior
+        ("Café Menu", "café-menu", "calf-menu"),      // Accents - updated to match actual kramdown behavior
     ];
 
     for (heading, github_expected, kramdown_expected) in mode_test_cases {

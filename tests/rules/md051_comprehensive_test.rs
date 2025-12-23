@@ -175,7 +175,7 @@ fn test_kramdown_vs_github_differences() {
     // Based on verified behavior from official tools
     let test_cases = vec![
         ("test_method", "test_method", "test_method", "testmethod"), // GitHub/GFM preserve _, pure kramdown removes _
-        ("Café Menu", "café-menu", "café-menu", "caf-menu"),         // Pure kramdown removes accents, others preserve
+        ("Café Menu", "café-menu", "café-menu", "calf-menu"),        // Pure kramdown removes accents, others preserve
         ("über_cool", "über_cool", "über_cool", "bercool"), // Pure kramdown removes accents & _, others preserve _
         ("naïve_approach", "naïve_approach", "naïve_approach", "naveapproach"), // Pure kramdown removes accents & _
     ];

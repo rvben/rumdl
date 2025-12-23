@@ -1,5 +1,6 @@
 use crate::rule::{CrossFileScope, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::anchor_styles::AnchorStyle;
+use crate::utils::regex_cache::get_cached_regex;
 use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
 use pulldown_cmark::LinkType;
 use regex::Regex;
@@ -138,9 +139,9 @@ impl MD051LinkFragments {
                     markdown_headings.insert(custom_id.to_lowercase());
                 }
 
-                // Generate anchor from heading text
-                // The anchor generation algorithm handles markdown formatting and HTML tags correctly
-                let fragment = self.anchor_style.generate_fragment(&heading.text);
+                // Strip HTML tags before generating anchor (handles inline IDs like <span id="...">)
+                let heading_text_no_html = Self::strip_html_tags(&heading.text).trim().to_string();
+                let fragment = self.anchor_style.generate_fragment(&heading_text_no_html);
 
                 if !fragment.is_empty() {
                     // Handle duplicate headings by appending -1, -2, etc.
@@ -170,6 +171,106 @@ impl MD051LinkFragments {
             || url.starts_with("mailto:")
             || url.starts_with("tel:")
             || url.starts_with("//")
+    }
+
+    /// Resolve a path by trying markdown extensions if it has no extension
+    ///
+    /// For extension-less paths (e.g., `page`), returns a list of paths to try:
+    /// 1. The original path (in case it's already in the index)
+    /// 2. The path with each markdown extension (e.g., `page.md`, `page.markdown`, etc.)
+    ///
+    /// For paths with extensions, returns just the original path.
+    #[inline]
+    fn resolve_path_with_extensions(path: &Path, extensions: &[&str]) -> Vec<PathBuf> {
+        if path.extension().is_none() {
+            // Extension-less path - try with markdown extensions
+            let mut paths = Vec::with_capacity(extensions.len() + 1);
+            // First try the exact path (in case it's already in the index)
+            paths.push(path.to_path_buf());
+            // Then try with each markdown extension
+            for ext in extensions {
+                let path_with_ext = path.with_extension(&ext[1..]); // Remove leading dot
+                paths.push(path_with_ext);
+            }
+            paths
+        } else {
+            // Path has extension - use as-is
+            vec![path.to_path_buf()]
+        }
+    }
+
+    /// Check if a path part (without fragment) is an extension-less path
+    ///
+    /// Extension-less paths are potential cross-file links that need resolution
+    /// with markdown extensions (e.g., `page#section` -> `page.md#section`).
+    ///
+    /// We recognize them as extension-less if:
+    /// 1. Path has no extension (no dot)
+    /// 2. Path is not empty
+    /// 3. Path doesn't look like a query parameter or special syntax
+    /// 4. Path contains at least one alphanumeric character (valid filename)
+    /// 5. Path contains only valid path characters (alphanumeric, slashes, hyphens, underscores)
+    ///
+    /// Optimized: single pass through characters to check both conditions.
+    #[inline]
+    fn is_extensionless_path(path_part: &str) -> bool {
+        // Quick rejections for common non-extension-less cases
+        if path_part.is_empty()
+            || path_part.contains('.')
+            || path_part.contains('?')
+            || path_part.contains('&')
+            || path_part.contains('=')
+        {
+            return false;
+        }
+
+        // Single pass: check for alphanumeric and validate all characters
+        let mut has_alphanumeric = false;
+        for c in path_part.chars() {
+            if c.is_alphanumeric() {
+                has_alphanumeric = true;
+            } else if !matches!(c, '/' | '\\' | '-' | '_') {
+                // Invalid character found - early exit
+                return false;
+            }
+        }
+
+        // Must have at least one alphanumeric character to be a valid filename
+        has_alphanumeric
+    }
+
+    /// Strip HTML tags from text, preserving text content.
+    ///
+    /// Removes HTML comments, self-closing tags, and element tags while keeping
+    /// the text content between tags. Normalizes whitespace in the result.
+    #[inline]
+    fn strip_html_tags(text: &str) -> String {
+        if !text.contains('<') {
+            return text.to_string();
+        }
+
+        // Matches HTML comments and all tag variants
+        const HTML_TAG_REGEX: &str = r"<!--[\s\S]*?-->|<[^>]*>";
+
+        let stripped = get_cached_regex(HTML_TAG_REGEX)
+            .map(|re| re.replace_all(text, " "))
+            .unwrap_or_else(|_| std::borrow::Cow::Borrowed(text));
+
+        // Normalize whitespace in single pass
+        let mut result = String::with_capacity(stripped.len());
+        let mut prev_space = true;
+        for c in stripped.trim().chars() {
+            if c.is_whitespace() {
+                if !prev_space {
+                    result.push(' ');
+                    prev_space = true;
+                }
+            } else {
+                result.push(c);
+                prev_space = false;
+            }
+        }
+        result
     }
 
     /// Check if URL is a cross-file link (contains a file path before #)
@@ -209,7 +310,8 @@ impl MD051LinkFragments {
             // - Contains a file extension (dot followed by letters)
             // - Contains path separators
             // - Contains relative path indicators
-            path_part.contains('.')
+            // - OR is an extension-less path with a fragment (GitHub-style: page#section)
+            let has_extension = path_part.contains('.')
                 && (
                     // Has file extension pattern (handle query parameters by splitting on them first)
                     {
@@ -239,7 +341,13 @@ impl MD051LinkFragments {
                 path_part.contains('/') || path_part.contains('\\') ||
                 // Or starts with relative path indicators
                 path_part.starts_with("./") || path_part.starts_with("../")
-                )
+                );
+
+            // Extension-less paths with fragments are potential cross-file links
+            // This supports GitHub-style links like [link](page#section) that resolve to page.md#section
+            let is_extensionless = Self::is_extensionless_path(path_part);
+
+            has_extension || is_extensionless
         } else {
             false
         }
@@ -448,7 +556,8 @@ impl Rule for MD051LinkFragments {
 
             // Extract heading anchors
             if let Some(heading) = &line_info.heading {
-                let fragment = self.anchor_style.generate_fragment(&heading.text);
+                let heading_text_no_html = Self::strip_html_tags(&heading.text).trim().to_string();
+                let fragment = self.anchor_style.generate_fragment(&heading_text_no_html);
 
                 if !fragment.is_empty() {
                     // Handle duplicate headings
@@ -514,6 +623,19 @@ impl Rule for MD051LinkFragments {
     ) -> LintResult {
         let mut warnings = Vec::new();
 
+        // Supported markdown file extensions (with leading dot, matching MD057)
+        const MARKDOWN_EXTENSIONS: &[&str] = &[
+            ".md",
+            ".markdown",
+            ".mdx",
+            ".mkd",
+            ".mkdn",
+            ".mdown",
+            ".mdwn",
+            ".qmd",
+            ".rmd",
+        ];
+
         // Check each cross-file link in this file
         for cross_link in &file_index.cross_file_links {
             // Skip cross-file links without fragments - nothing to validate
@@ -522,17 +644,30 @@ impl Rule for MD051LinkFragments {
             }
 
             // Resolve the target file path relative to the current file
-            let target_path = if let Some(parent) = file_path.parent() {
+            let base_target_path = if let Some(parent) = file_path.parent() {
                 parent.join(&cross_link.target_path)
             } else {
                 Path::new(&cross_link.target_path).to_path_buf()
             };
 
             // Normalize the path (remove . and ..)
-            let target_path = normalize_path(&target_path);
+            let base_target_path = normalize_path(&base_target_path);
 
-            // Look up the target file in the workspace index
-            if let Some(target_file_index) = workspace_index.get_file(&target_path) {
+            // For extension-less paths, try resolving with markdown extensions
+            // This handles GitHub-style links like [link](page#section) -> page.md#section
+            let target_paths_to_try = Self::resolve_path_with_extensions(&base_target_path, MARKDOWN_EXTENSIONS);
+
+            // Try to find the target file in the workspace index
+            let mut target_file_index = None;
+
+            for target_path in &target_paths_to_try {
+                if let Some(index) = workspace_index.get_file(target_path) {
+                    target_file_index = Some(index);
+                    break;
+                }
+            }
+
+            if let Some(target_file_index) = target_file_index {
                 // Check if the fragment matches any heading in the target file (O(1) lookup)
                 if !target_file_index.has_anchor(&cross_link.fragment) {
                     warnings.push(LintWarning {
@@ -787,5 +922,185 @@ See [link](#nonexistent) for details."#;
 
         // Should not warn about files not in workspace
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_html_tags_stripped_before_anchor_generation() {
+        let rule = MD051LinkFragments::new();
+
+        // Headings with inline HTML (like <span id="...">) should generate anchors from text only
+        let content = r#"## Style Guide <span id="black-compatibility"></span>
+
+See [link](#style-guide) for details."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Heading with HTML tags should generate anchor '#style-guide'. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_html_tags_stripping() {
+        // Test the strip_html_tags helper function - basic cases
+        assert_eq!(MD051LinkFragments::strip_html_tags("Simple Heading"), "Simple Heading");
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Heading <span>with</span> HTML"),
+            "Heading with HTML"
+        );
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Heading <span id=\"test\"></span>"),
+            "Heading"
+        );
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("## Style Guide <span id=\"black-compatibility\"></span>"),
+            "## Style Guide"
+        );
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text <a href=\"url\">link</a> more text"),
+            "Text link more text"
+        );
+    }
+
+    #[test]
+    fn test_html_tags_stripping_edge_cases() {
+        // HTML comments
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Heading <!-- comment --> text"),
+            "Heading text"
+        );
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("<!-- comment -->Heading"),
+            "Heading"
+        );
+
+        // Edge case 2: Self-closing tags
+        assert_eq!(MD051LinkFragments::strip_html_tags("Text <br/> more"), "Text more");
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text <img src=\"test.jpg\" /> more"),
+            "Text more"
+        );
+
+        // Edge case 3: Nested tags
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text <span><strong>bold</strong></span> more"),
+            "Text bold more"
+        );
+
+        // Edge case 4: Multiple tags
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("A <span>B</span> C <em>D</em> E"),
+            "A B C D E"
+        );
+
+        // Edge case 5: Tags with special characters in attributes
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text <a href=\"url?param=value&other=test\">link</a>"),
+            "Text link"
+        );
+
+        // Edge case 6: Empty tags
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text <span></span> more"),
+            "Text more"
+        );
+
+        // Edge case 7: Tags with newlines (malformed but should handle)
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text <span\nid=\"test\">content</span>"),
+            "Text content"
+        );
+
+        // Edge case 8: HTML entities should be preserved (they're text content)
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text &amp; entities &lt;test&gt;"),
+            "Text &amp; entities &lt;test&gt;"
+        );
+
+        // Edge case 9: Only tags, no text
+        assert_eq!(MD051LinkFragments::strip_html_tags("<span>content</span>"), "content");
+
+        // Edge case 10: Leading/trailing tags
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("<span>Start</span> middle <em>end</em>"),
+            "Start middle end"
+        );
+
+        // Edge case 11: Multiple spaces from tag removal should be normalized
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text  <span></span>  more"),
+            "Text more"
+        );
+
+        // Edge case 12: Unicode in tag attributes
+        assert_eq!(
+            MD051LinkFragments::strip_html_tags("Text <span title=\"Café\">content</span>"),
+            "Text content"
+        );
+    }
+
+    #[test]
+    fn test_html_tags_in_headings_comprehensive() {
+        let rule = MD051LinkFragments::new();
+
+        // Test case 1: Basic HTML tag in heading
+        let content1 = r#"## Heading <span>with</span> HTML
+
+See [link](#heading-with-html) for details."#;
+        let ctx1 = LintContext::new(content1, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx1).unwrap().is_empty(), "Basic HTML tag should work");
+
+        // Test case 2: Multiple HTML tags
+        let content2 = r#"## Guide <span id="test"></span> <em>emphasis</em>
+
+See [link](#guide-emphasis) for details."#;
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx2).unwrap().is_empty(), "Multiple HTML tags should work");
+
+        // Test case 3: HTML comment in heading
+        let content3 = r#"## Heading <!-- comment --> text
+
+See [link](#heading-text) for details."#;
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx3).unwrap().is_empty(), "HTML comment should be stripped");
+
+        // Test case 4: Self-closing tag
+        let content4 = r#"## Heading <br/> more
+
+See [link](#heading-more) for details."#;
+        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx4).unwrap().is_empty(), "Self-closing tag should work");
+
+        // Test case 5: Nested tags
+        let content5 = r#"## Guide <span><strong>bold</strong></span> text
+
+See [link](#guide-bold-text) for details."#;
+        let ctx5 = LintContext::new(content5, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx5).unwrap().is_empty(), "Nested tags should work");
+
+        // Test case 6: HTML entities should be preserved in anchor generation
+        let content6 = r#"## Test &amp; Entities
+
+See [link](#test-amp-entities) for details."#;
+        let ctx6 = LintContext::new(content6, crate::config::MarkdownFlavor::Standard, None);
+        // HTML entities are preserved, so anchor should include them
+        // The anchor generation will convert &amp; to something, let's just verify no error
+        // (exact anchor format depends on anchor style)
+        let _result6 = rule.check(&ctx6).unwrap();
+    }
+
+    #[test]
+    fn test_html_tags_performance_optimization() {
+        // Test that early return optimization works (no HTML tags)
+        let text_without_html = "Simple heading text without any HTML";
+        let result = MD051LinkFragments::strip_html_tags(text_without_html);
+        assert_eq!(result, text_without_html);
+
+        // Test with HTML tags (should process)
+        let text_with_html = "Heading <span>with</span> HTML";
+        let result = MD051LinkFragments::strip_html_tags(text_with_html);
+        assert_eq!(result, "Heading with HTML");
     }
 }

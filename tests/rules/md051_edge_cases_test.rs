@@ -840,7 +840,7 @@ Edge cases:
                 [
                     (AnchorStyle::GitHub, "café-menu"),
                     (AnchorStyle::KramdownGfm, "café-menu"),
-                    (AnchorStyle::Kramdown, "caf-menu"), // Kramdown removes accents
+                    (AnchorStyle::Kramdown, "calf-menu"), // Kramdown removes accents
                 ],
             ),
             // Complex punctuation: different arrow handling

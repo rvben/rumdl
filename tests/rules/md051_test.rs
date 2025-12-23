@@ -1822,7 +1822,7 @@ fn test_html_anchors_parity_with_markdownlint() {
 
 ## Acknowledgements<a id="acknowledgements"></a>
 
-## Who's Using Ruff?<a id="whos-using-ruff"></a>
+## Who's Using Ruff?<a id="whose-using-ruff"></a>
 
 ## License<a id="license"></a>
 
@@ -1833,7 +1833,7 @@ Table of contents:
 1. [Contributing](#contributing)
 1. [Support](#support)
 1. [Acknowledgements](#acknowledgements)
-1. [Who's Using Ruff?](#whos-using-ruff)
+1. [Who's Using Ruff?](#whose-using-ruff)
 1. [License](#license)
 "#;
 
@@ -1878,4 +1878,402 @@ Content with arrows.
         0,
         "Arrow patterns in headers should generate correct anchors (issue #82)"
     );
+}
+
+// Extension-less cross-file link tests
+// These tests verify that MD051 correctly recognizes and validates
+// extension-less markdown links like `[link](page#section)` that resolve to `page.md#section`.
+// Note: Due to file size, comprehensive edge case tests are in separate modules below.
+mod extensionless_links {
+    use rumdl_lib::config::{Config, MarkdownFlavor};
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD051LinkFragments;
+    use rumdl_lib::workspace_index::WorkspaceIndex;
+    use std::fs;
+    use tempfile::tempdir;
+
+    /// Test the exact scenario from REMAINING-ISSUES.md
+    ///
+    /// Pattern: `[b#header1](b#header1)` where `b.md` exists
+    /// Expected: Should recognize as cross-file link and validate fragment exists in b.md
+    #[test]
+    fn test_extensionless_link_exact_reproduction() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create target file with heading
+        let target_file = base_path.join("b.md");
+        fs::write(&target_file, "# header1\n\nContent here.\n").unwrap();
+
+        // Create source file with extension-less link
+        let source_file = base_path.join("a.md");
+        let source_content = r#"# Source Document
+
+This links to [header1 in b](b#header1).
+"#;
+        fs::write(&source_file, source_content).unwrap();
+
+        // Get all rules
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+        // Lint and index both files
+        let source_content_str = fs::read_to_string(&source_file).unwrap();
+        let target_content_str = fs::read_to_string(&target_file).unwrap();
+
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content_str, &rules, false, MarkdownFlavor::default(), None);
+
+        // Build workspace index
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+        workspace_index.insert_file(target_file.clone(), target_index.clone());
+
+        // Verify target file has the heading indexed
+        let target_file_index = workspace_index.get_file(&target_file).unwrap();
+        assert!(
+            target_file_index.has_anchor("header1"),
+            "Target file should have 'header1' anchor indexed"
+        );
+
+        // Verify extension-less link is recognized as cross-file
+        let has_cross_file_link = source_index
+            .cross_file_links
+            .iter()
+            .any(|link| link.target_path == "b" && link.fragment == "header1");
+
+        assert!(
+            has_cross_file_link,
+            "Extension-less link 'b#header1' should be recognized as cross-file link.\n\
+             Cross-file links found: {:?}",
+            source_index.cross_file_links
+        );
+
+        // Run cross-file validation
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        // Should have NO warnings because the fragment exists
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Extension-less link to existing fragment should have no warnings.\n\
+             Current warnings: {warnings:?}",
+        );
+    }
+
+    /// Test extension-less link to non-existent fragment
+    #[test]
+    fn test_extensionless_link_missing_fragment() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create target file WITHOUT the heading
+        let target_file = base_path.join("page.md");
+        fs::write(&target_file, "# Other Heading\n\nContent.\n").unwrap();
+
+        // Create source file with extension-less link to missing fragment
+        let source_file = base_path.join("index.md");
+        let source_content = r#"# Index
+
+Link to [missing section](page#missing-section).
+"#;
+        fs::write(&source_file, source_content).unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+        let source_content_str = fs::read_to_string(&source_file).unwrap();
+        let target_content_str = fs::read_to_string(&target_file).unwrap();
+
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content_str, &rules, false, MarkdownFlavor::default(), None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+        workspace_index.insert_file(target_file.clone(), target_index.clone());
+
+        // Verify link is recognized as cross-file
+        let has_cross_file_link = source_index
+            .cross_file_links
+            .iter()
+            .any(|link| link.target_path == "page" && link.fragment == "missing-section");
+
+        assert!(
+            has_cross_file_link,
+            "Extension-less link 'page#missing-section' should be recognized as cross-file"
+        );
+
+        // Run validation - should warn about missing fragment
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn about missing fragment in extension-less link"
+        );
+        assert!(
+            warnings[0].message.contains("missing-section"),
+            "Warning should mention the missing fragment"
+        );
+        assert!(
+            warnings[0].message.contains("page"),
+            "Warning should mention the target file"
+        );
+    }
+
+    /// Test extension-less links in subdirectories
+    #[test]
+    fn test_extensionless_link_subdirectory() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create subdirectory structure
+        let docs_dir = base_path.join("docs");
+        fs::create_dir_all(&docs_dir).unwrap();
+
+        let target_file = docs_dir.join("guide.md");
+        fs::write(&target_file, "# Getting Started\n\n## Installation\n\n## Usage\n").unwrap();
+
+        let source_file = base_path.join("README.md");
+        let source_content = r#"# Main README
+
+See the [installation guide](docs/guide#installation).
+"#;
+        fs::write(&source_file, source_content).unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+        let source_content_str = fs::read_to_string(&source_file).unwrap();
+        let target_content_str = fs::read_to_string(&target_file).unwrap();
+
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content_str, &rules, false, MarkdownFlavor::default(), None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+        workspace_index.insert_file(target_file.clone(), target_index.clone());
+
+        // Verify link is recognized
+        let has_cross_file_link = source_index
+            .cross_file_links
+            .iter()
+            .any(|link| link.target_path == "docs/guide" && link.fragment == "installation");
+
+        assert!(
+            has_cross_file_link,
+            "Extension-less link in subdirectory should be recognized"
+        );
+
+        // Should validate successfully
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Extension-less link to existing fragment in subdirectory should be valid"
+        );
+    }
+
+    /// Test that extension-less links are distinguished from fragment-only links
+    #[test]
+    fn test_extensionless_vs_fragment_only() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let target_file = base_path.join("other.md");
+        fs::write(&target_file, "# Target Heading\n").unwrap();
+
+        let source_file = base_path.join("main.md");
+        let source_content = r#"# Main Document
+
+## Local Section
+
+- [Fragment only](#local-section) - should validate against THIS file
+- [Extension-less cross-file](other#target-heading) - should validate against other.md
+- [Extension-less missing](other#missing) - should warn about missing fragment
+"#;
+        fs::write(&source_file, source_content).unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+        let source_content_str = fs::read_to_string(&source_file).unwrap();
+        let target_content_str = fs::read_to_string(&target_file).unwrap();
+
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content_str, &rules, false, MarkdownFlavor::default(), None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+        workspace_index.insert_file(target_file.clone(), target_index.clone());
+
+        // Fragment-only link should NOT be in cross_file_links
+        let has_fragment_only = source_index
+            .cross_file_links
+            .iter()
+            .any(|link| link.target_path.is_empty() || link.target_path == "#");
+
+        assert!(
+            !has_fragment_only,
+            "Fragment-only link should NOT be in cross_file_links"
+        );
+
+        // Extension-less link SHOULD be in cross_file_links
+        let has_extensionless = source_index
+            .cross_file_links
+            .iter()
+            .any(|link| link.target_path == "other");
+
+        assert!(
+            has_extensionless,
+            "Extension-less link 'other#target-heading' should be in cross_file_links"
+        );
+
+        // Run validation
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        // Should only warn about the missing fragment in other.md
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should only warn about missing fragment in extension-less link"
+        );
+        assert!(
+            warnings[0].message.contains("missing"),
+            "Warning should be about missing fragment"
+        );
+    }
+
+    /// Test edge case: extension-less link where file doesn't exist
+    #[test]
+    fn test_extensionless_link_file_not_exists() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Don't create the target file - it doesn't exist
+        let source_file = base_path.join("index.md");
+        let source_content = r#"# Index
+
+Link to [non-existent](nonexistent#section).
+"#;
+        fs::write(&source_file, source_content).unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+        let source_content_str = fs::read_to_string(&source_file).unwrap();
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        // Link should still be recognized as cross-file (even if file doesn't exist)
+        let has_cross_file_link = source_index
+            .cross_file_links
+            .iter()
+            .any(|link| link.target_path == "nonexistent");
+
+        assert!(
+            has_cross_file_link,
+            "Extension-less link should be recognized even if file doesn't exist yet"
+        );
+
+        // Validation should skip (file not in workspace index)
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        // No warnings because file isn't in workspace index
+        assert_eq!(
+            warnings.len(),
+            0,
+            "No warnings for files not in workspace (expected behavior)"
+        );
+    }
+
+    /// Test that extension-less links work with various markdown extensions
+    #[test]
+    fn test_extensionless_link_markdown_variants() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Test .markdown extension
+        let target1 = base_path.join("page.markdown");
+        fs::write(&target1, "# Page Markdown\n").unwrap();
+
+        // Test .md extension
+        let target2 = base_path.join("doc.md");
+        fs::write(&target2, "# Doc MD\n").unwrap();
+
+        let source_file = base_path.join("index.md");
+        let source_content = r#"# Index
+
+- [Page](page#page-markdown)
+- [Doc](doc#doc-md)
+"#;
+        fs::write(&source_file, source_content).unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+
+        let source_content_str = fs::read_to_string(&source_file).unwrap();
+        let target1_content = fs::read_to_string(&target1).unwrap();
+        let target2_content = fs::read_to_string(&target2).unwrap();
+
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, target1_index) =
+            rumdl_lib::lint_and_index(&target1_content, &rules, false, MarkdownFlavor::default(), None);
+        let (_, target2_index) =
+            rumdl_lib::lint_and_index(&target2_content, &rules, false, MarkdownFlavor::default(), None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+        workspace_index.insert_file(target1.clone(), target1_index.clone());
+        workspace_index.insert_file(target2.clone(), target2_index.clone());
+
+        // Both links should be recognized
+        let has_page_link = source_index
+            .cross_file_links
+            .iter()
+            .any(|link| link.target_path == "page");
+        let has_doc_link = source_index
+            .cross_file_links
+            .iter()
+            .any(|link| link.target_path == "doc");
+
+        assert!(
+            has_page_link && has_doc_link,
+            "Both extension-less links should be recognized"
+        );
+
+        // Both should validate successfully
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Extension-less links to .md and .markdown files should both work"
+        );
+    }
 }
