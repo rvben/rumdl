@@ -452,6 +452,15 @@ pub enum FixMode {
     Format,
 }
 
+/// Fail-on mode determines which severity triggers exit code 1
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FailOn {
+    #[default]
+    Any, // Exit 1 on any violation (current behavior)
+    Error, // Exit 1 only on error-severity violations
+    Never, // Always exit 0
+}
+
 #[derive(Args, Debug)]
 pub struct CheckArgs {
     /// Files or directories to lint (use '-' for stdin)
@@ -573,8 +582,16 @@ pub struct CheckArgs {
     )]
     cache_dir: Option<String>,
 
+    /// Control when to exit with code 1: any (default), error (only on errors), never (always 0)
+    #[arg(long, value_parser = ["any", "error", "never"], default_value = "any",
+          help = "Exit code behavior: 'any' (default) exits 1 on any violation, 'error' only on error-severity, 'never' always exits 0")]
+    fail_on: String,
+
     #[arg(skip)]
     pub fix_mode: FixMode,
+
+    #[arg(skip)]
+    pub fail_on_mode: FailOn,
 }
 
 /// Offer to install the VS Code extension during init
@@ -946,6 +963,11 @@ build-backend = "setuptools.build_meta"
             }
             Commands::Check(mut args) => {
                 args.fix_mode = if args.fix { FixMode::CheckFix } else { FixMode::Check };
+                args.fail_on_mode = match args.fail_on.as_str() {
+                    "error" => FailOn::Error,
+                    "never" => FailOn::Never,
+                    _ => FailOn::Any,
+                };
 
                 if cli.no_config || cli.isolated {
                     run_check(&args, None, cli.no_config || cli.isolated);
@@ -955,6 +977,11 @@ build-backend = "setuptools.build_meta"
             }
             Commands::Fmt(mut args) => {
                 args.fix_mode = FixMode::Format;
+                args.fail_on_mode = match args.fail_on.as_str() {
+                    "error" => FailOn::Error,
+                    "never" => FailOn::Never,
+                    _ => FailOn::Any,
+                };
 
                 if cli.no_config || cli.isolated {
                     run_check(&args, None, cli.no_config || cli.isolated);
@@ -1841,7 +1868,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     // Use the same cache directory for workspace index cache (when cache is enabled)
     let workspace_cache_dir = if cache_enabled { Some(cache_dir.as_path()) } else { None };
 
-    let has_issues = watch::perform_check_run(
+    let (has_issues, has_errors) = watch::perform_check_run(
         args,
         &config,
         quiet,
@@ -1849,7 +1876,15 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         workspace_cache_dir,
         project_root.as_deref(),
     );
-    if has_issues && args.fix_mode != FixMode::Format {
+
+    // Determine if we should fail based on --fail-on setting
+    let should_fail = match args.fail_on_mode {
+        FailOn::Never => false,
+        FailOn::Error => has_errors,
+        FailOn::Any => has_issues,
+    };
+
+    if should_fail && args.fix_mode != FixMode::Format {
         exit::violations_found();
     }
 }

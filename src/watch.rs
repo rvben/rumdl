@@ -77,6 +77,7 @@ pub fn clear_screen() {
 }
 
 /// Perform a single check run (extracted from run_check for reuse in watch mode)
+/// Returns (has_issues, has_errors) - has_issues if any violations, has_errors if any Error-severity
 pub fn perform_check_run(
     args: &crate::CheckArgs,
     config: &rumdl_config::Config,
@@ -84,8 +85,9 @@ pub fn perform_check_run(
     cache: Option<Arc<std::sync::Mutex<crate::cache::LintCache>>>,
     workspace_cache_dir: Option<&Path>,
     project_root: Option<&Path>,
-) -> bool {
+) -> (bool, bool) {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
+    use rumdl_lib::rule::Severity;
 
     // Create output writer for linting results
     let output_writer = OutputWriter::new(args.stderr, quiet, args.silent);
@@ -105,7 +107,7 @@ pub fn perform_check_run(
         Ok(fmt) => fmt,
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            return true; // Has errors
+            return (true, true);
         }
     };
 
@@ -115,7 +117,7 @@ pub fn perform_check_run(
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
         crate::stdin_processor::process_stdin(&enabled_rules, args, config);
-        return false; // stdin processing handles its own exit codes
+        return (false, false);
     }
 
     // Find all markdown files to check
@@ -125,14 +127,14 @@ pub fn perform_check_run(
             if !args.silent {
                 eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
             }
-            return true; // Has errors
+            return (true, true);
         }
     };
     if file_paths.is_empty() {
         if !quiet {
             println!("No markdown files found to check.");
         }
-        return false;
+        return (false, false);
     }
 
     // Check if any enabled rule needs cross-file analysis
@@ -150,6 +152,7 @@ pub fn perform_check_run(
         let start_time = Instant::now();
         let mut all_file_warnings = Vec::new();
         let mut has_issues = false;
+        let mut has_errors = false;
         let mut _files_with_issues = 0;
         let mut _total_issues = 0;
 
@@ -171,6 +174,9 @@ pub fn perform_check_run(
                 has_issues = true;
                 _files_with_issues += 1;
                 _total_issues += result.warnings.len();
+                if result.warnings.iter().any(|w| w.severity == Severity::Error) {
+                    has_errors = true;
+                }
                 all_file_warnings.push((file_path.clone(), result.warnings));
             }
 
@@ -240,6 +246,9 @@ pub fn perform_check_run(
                 ) && !cross_file_warnings.is_empty()
                 {
                     let file_path_str = file_path.to_string_lossy().to_string();
+                    if cross_file_warnings.iter().any(|w| w.severity == Severity::Error) {
+                        has_errors = true;
+                    }
                     // Find existing entry or create new one
                     if let Some((_, warnings)) = all_file_warnings.iter_mut().find(|(p, _)| p == &file_path_str) {
                         warnings.extend(cross_file_warnings);
@@ -282,7 +291,7 @@ pub fn perform_check_run(
             eprintln!("Error writing output: {e}");
         });
 
-        return has_issues;
+        return (has_issues, has_errors);
     }
 
     let start_time = Instant::now();
@@ -301,6 +310,7 @@ pub fn perform_check_run(
 
     let (
         mut has_issues,
+        mut has_errors,
         mut files_with_issues,
         mut total_issues,
         total_issues_fixed,
@@ -336,6 +346,7 @@ pub fn perform_check_run(
 
         // Aggregate results and extract FileIndex for cross-file analysis
         let mut has_issues = false;
+        let mut has_errors = false;
         let mut files_with_issues = 0;
         let mut total_issues = 0;
         let mut total_issues_fixed = 0;
@@ -355,6 +366,10 @@ pub fn perform_check_run(
                 files_with_issues += 1;
             }
 
+            if warnings.iter().any(|w| w.severity == Severity::Error) {
+                has_errors = true;
+            }
+
             if args.statistics {
                 all_warnings_for_stats.extend(warnings);
             }
@@ -369,6 +384,7 @@ pub fn perform_check_run(
 
         (
             has_issues,
+            has_errors,
             files_with_issues,
             total_issues,
             total_issues_fixed,
@@ -378,6 +394,7 @@ pub fn perform_check_run(
     } else {
         // Sequential processing for single files or when fixing
         let mut has_issues = false;
+        let mut has_errors = false;
         let mut files_with_issues = 0;
         let mut total_issues = 0;
         let mut total_issues_fixed = 0;
@@ -420,6 +437,10 @@ pub fn perform_check_run(
                 files_with_issues += 1;
             }
 
+            if warnings.iter().any(|w| w.severity == Severity::Error) {
+                has_errors = true;
+            }
+
             if args.statistics {
                 all_warnings_for_stats.extend(warnings);
             }
@@ -427,6 +448,7 @@ pub fn perform_check_run(
 
         (
             has_issues,
+            has_errors,
             files_with_issues,
             total_issues,
             total_issues_fixed,
@@ -493,6 +515,11 @@ pub fn perform_check_run(
                 files_with_issues += 1;
                 total_issues += cross_file_warnings.len();
 
+                // Check for error-severity warnings
+                if cross_file_warnings.iter().any(|w| w.severity == Severity::Error) {
+                    has_errors = true;
+                }
+
                 // Output cross-file warnings
                 if !args.silent {
                     let formatted = formatter.format_warnings(&cross_file_warnings, &file_path.to_string_lossy());
@@ -556,7 +583,7 @@ pub fn perform_check_run(
         }
     }
 
-    has_issues
+    (has_issues, has_errors)
 }
 
 /// Run the linter in watch mode, re-running on file changes

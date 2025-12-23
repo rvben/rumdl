@@ -5,7 +5,7 @@ use colored::*;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
 use rumdl_lib::lint_context::LintContext;
-use rumdl_lib::rule::Rule;
+use rumdl_lib::rule::{Rule, Severity};
 use std::io::{self, Read};
 use std::str::FromStr;
 
@@ -94,6 +94,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     });
 
     let has_issues = !all_warnings.is_empty();
+    let has_errors = all_warnings.iter().any(|w| w.severity == Severity::Error);
 
     // Apply fixes if requested
     if args.fix_mode != crate::FixMode::Check {
@@ -135,8 +136,16 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                 );
             }
 
-            if !remaining_warnings.is_empty() && args.fix_mode != crate::FixMode::Format {
-                exit::violations_found();
+            if args.fix_mode != crate::FixMode::Format {
+                let remaining_has_errors = remaining_warnings.iter().any(|w| w.severity == Severity::Error);
+                let should_fail = match args.fail_on_mode {
+                    crate::FailOn::Never => false,
+                    crate::FailOn::Error => remaining_has_errors,
+                    crate::FailOn::Any => !remaining_warnings.is_empty(),
+                };
+                if should_fail {
+                    exit::violations_found();
+                }
             }
         } else {
             print!("{content}");
@@ -192,8 +201,13 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
         }
     }
 
-    // Exit with error code if issues found
-    if has_issues {
+    // Exit with error code based on --fail-on setting
+    let should_fail = match args.fail_on_mode {
+        crate::FailOn::Never => false,
+        crate::FailOn::Error => has_errors,
+        crate::FailOn::Any => has_issues,
+    };
+    if should_fail {
         exit::violations_found();
     }
 }
