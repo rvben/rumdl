@@ -205,9 +205,8 @@ For more information on configuring rumdl, see the [Configuration](#configuratio
 
 Each rule has a default severity level:
 
-- **error**: Rule violations will cause the linter to exit with a non-zero code
-- **warning**: Rule violations will be reported but won't affect the exit code
-- **info**: Rule violations are reported for informational purposes only
+- **error**: Rule violations cause the linter to exit with code 1
+- **warning**: Rule violations are reported but don't affect the exit code
 
 You can customize rule severities in your configuration file:
 
