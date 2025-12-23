@@ -1,6 +1,5 @@
 use crate::rule::{CrossFileScope, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::anchor_styles::AnchorStyle;
-use crate::utils::regex_cache::get_cached_regex;
 use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
 use pulldown_cmark::LinkType;
 use regex::Regex;
@@ -139,9 +138,10 @@ impl MD051LinkFragments {
                     markdown_headings.insert(custom_id.to_lowercase());
                 }
 
-                // Strip HTML tags before generating anchor (handles inline IDs like <span id="...">)
-                let heading_text_no_html = Self::strip_html_tags(&heading.text).trim().to_string();
-                let fragment = self.anchor_style.generate_fragment(&heading_text_no_html);
+                // Generate fragment directly from heading text
+                // Note: HTML stripping was removed because it interfered with arrow patterns
+                // like <-> and placeholders like <FILE>. The anchor styles handle these correctly.
+                let fragment = self.anchor_style.generate_fragment(&heading.text);
 
                 if !fragment.is_empty() {
                     // Handle duplicate headings by appending -1, -2, etc.
@@ -237,41 +237,6 @@ impl MD051LinkFragments {
 
         // Must have at least one alphanumeric character to be a valid filename
         has_alphanumeric
-    }
-
-    /// Strip HTML tags from text, preserving text content.
-    ///
-    /// Removes HTML comments, self-closing tags, and element tags while keeping
-    /// the text content between tags. Normalizes whitespace in the result.
-    #[inline]
-    fn strip_html_tags(text: &str) -> String {
-        if !text.contains('<') {
-            return text.to_string();
-        }
-
-        // Matches HTML comments and actual HTML tags (lowercase tag names only)
-        // This preserves arrow patterns like <->, <--, and placeholders like <FILE>, <Type>
-        const HTML_TAG_REGEX: &str = r"<!--[\s\S]*?-->|</?[a-z][^>]*>";
-
-        let stripped = get_cached_regex(HTML_TAG_REGEX)
-            .map(|re| re.replace_all(text, " "))
-            .unwrap_or_else(|_| std::borrow::Cow::Borrowed(text));
-
-        // Normalize whitespace in single pass
-        let mut result = String::with_capacity(stripped.len());
-        let mut prev_space = true;
-        for c in stripped.trim().chars() {
-            if c.is_whitespace() {
-                if !prev_space {
-                    result.push(' ');
-                    prev_space = true;
-                }
-            } else {
-                result.push(c);
-                prev_space = false;
-            }
-        }
-        result
     }
 
     /// Check if URL is a cross-file link (contains a file path before #)
@@ -557,8 +522,7 @@ impl Rule for MD051LinkFragments {
 
             // Extract heading anchors
             if let Some(heading) = &line_info.heading {
-                let heading_text_no_html = Self::strip_html_tags(&heading.text).trim().to_string();
-                let fragment = self.anchor_style.generate_fragment(&heading_text_no_html);
+                let fragment = self.anchor_style.generate_fragment(&heading.text);
 
                 if !fragment.is_empty() {
                     // Handle duplicate headings
@@ -923,185 +887,5 @@ See [link](#nonexistent) for details."#;
 
         // Should not warn about files not in workspace
         assert!(warnings.is_empty());
-    }
-
-    #[test]
-    fn test_html_tags_stripped_before_anchor_generation() {
-        let rule = MD051LinkFragments::new();
-
-        // Headings with inline HTML (like <span id="...">) should generate anchors from text only
-        let content = r#"## Style Guide <span id="black-compatibility"></span>
-
-See [link](#style-guide) for details."#;
-
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-
-        assert!(
-            result.is_empty(),
-            "Heading with HTML tags should generate anchor '#style-guide'. Got: {result:?}"
-        );
-    }
-
-    #[test]
-    fn test_html_tags_stripping() {
-        // Test the strip_html_tags helper function - basic cases
-        assert_eq!(MD051LinkFragments::strip_html_tags("Simple Heading"), "Simple Heading");
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Heading <span>with</span> HTML"),
-            "Heading with HTML"
-        );
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Heading <span id=\"test\"></span>"),
-            "Heading"
-        );
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("## Style Guide <span id=\"black-compatibility\"></span>"),
-            "## Style Guide"
-        );
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text <a href=\"url\">link</a> more text"),
-            "Text link more text"
-        );
-    }
-
-    #[test]
-    fn test_html_tags_stripping_edge_cases() {
-        // HTML comments
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Heading <!-- comment --> text"),
-            "Heading text"
-        );
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("<!-- comment -->Heading"),
-            "Heading"
-        );
-
-        // Edge case 2: Self-closing tags
-        assert_eq!(MD051LinkFragments::strip_html_tags("Text <br/> more"), "Text more");
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text <img src=\"test.jpg\" /> more"),
-            "Text more"
-        );
-
-        // Edge case 3: Nested tags
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text <span><strong>bold</strong></span> more"),
-            "Text bold more"
-        );
-
-        // Edge case 4: Multiple tags
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("A <span>B</span> C <em>D</em> E"),
-            "A B C D E"
-        );
-
-        // Edge case 5: Tags with special characters in attributes
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text <a href=\"url?param=value&other=test\">link</a>"),
-            "Text link"
-        );
-
-        // Edge case 6: Empty tags
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text <span></span> more"),
-            "Text more"
-        );
-
-        // Edge case 7: Tags with newlines (malformed but should handle)
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text <span\nid=\"test\">content</span>"),
-            "Text content"
-        );
-
-        // Edge case 8: HTML entities should be preserved (they're text content)
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text &amp; entities &lt;test&gt;"),
-            "Text &amp; entities &lt;test&gt;"
-        );
-
-        // Edge case 9: Only tags, no text
-        assert_eq!(MD051LinkFragments::strip_html_tags("<span>content</span>"), "content");
-
-        // Edge case 10: Leading/trailing tags
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("<span>Start</span> middle <em>end</em>"),
-            "Start middle end"
-        );
-
-        // Edge case 11: Multiple spaces from tag removal should be normalized
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text  <span></span>  more"),
-            "Text more"
-        );
-
-        // Edge case 12: Unicode in tag attributes
-        assert_eq!(
-            MD051LinkFragments::strip_html_tags("Text <span title=\"Café\">content</span>"),
-            "Text content"
-        );
-    }
-
-    #[test]
-    fn test_html_tags_in_headings_comprehensive() {
-        let rule = MD051LinkFragments::new();
-
-        // Test case 1: Basic HTML tag in heading
-        let content1 = r#"## Heading <span>with</span> HTML
-
-See [link](#heading-with-html) for details."#;
-        let ctx1 = LintContext::new(content1, crate::config::MarkdownFlavor::Standard, None);
-        assert!(rule.check(&ctx1).unwrap().is_empty(), "Basic HTML tag should work");
-
-        // Test case 2: Multiple HTML tags
-        let content2 = r#"## Guide <span id="test"></span> <em>emphasis</em>
-
-See [link](#guide-emphasis) for details."#;
-        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
-        assert!(rule.check(&ctx2).unwrap().is_empty(), "Multiple HTML tags should work");
-
-        // Test case 3: HTML comment in heading
-        let content3 = r#"## Heading <!-- comment --> text
-
-See [link](#heading-text) for details."#;
-        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard, None);
-        assert!(rule.check(&ctx3).unwrap().is_empty(), "HTML comment should be stripped");
-
-        // Test case 4: Self-closing tag
-        let content4 = r#"## Heading <br/> more
-
-See [link](#heading-more) for details."#;
-        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::Standard, None);
-        assert!(rule.check(&ctx4).unwrap().is_empty(), "Self-closing tag should work");
-
-        // Test case 5: Nested tags
-        let content5 = r#"## Guide <span><strong>bold</strong></span> text
-
-See [link](#guide-bold-text) for details."#;
-        let ctx5 = LintContext::new(content5, crate::config::MarkdownFlavor::Standard, None);
-        assert!(rule.check(&ctx5).unwrap().is_empty(), "Nested tags should work");
-
-        // Test case 6: HTML entities should be preserved in anchor generation
-        let content6 = r#"## Test &amp; Entities
-
-See [link](#test-amp-entities) for details."#;
-        let ctx6 = LintContext::new(content6, crate::config::MarkdownFlavor::Standard, None);
-        // HTML entities are preserved, so anchor should include them
-        // The anchor generation will convert &amp; to something, let's just verify no error
-        // (exact anchor format depends on anchor style)
-        let _result6 = rule.check(&ctx6).unwrap();
-    }
-
-    #[test]
-    fn test_html_tags_performance_optimization() {
-        // Test that early return optimization works (no HTML tags)
-        let text_without_html = "Simple heading text without any HTML";
-        let result = MD051LinkFragments::strip_html_tags(text_without_html);
-        assert_eq!(result, text_without_html);
-
-        // Test with HTML tags (should process)
-        let text_with_html = "Heading <span>with</span> HTML";
-        let result = MD051LinkFragments::strip_html_tags(text_with_html);
-        assert_eq!(result, "Heading with HTML");
     }
 }
