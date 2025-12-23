@@ -416,7 +416,7 @@ Second line.
     // Only the actual autolink <https://example.com> should be flagged
     assert_eq!(result.len(), 1, "Should flag autolink but not HTML tag");
     assert!(result[0].message.contains("autolink"));
-    assert_eq!(result[0].line, 6, "Should flag the line with the autolink");
+    assert_eq!(result[0].line, 7, "Should flag the line with the autolink");
 }
 
 #[test]

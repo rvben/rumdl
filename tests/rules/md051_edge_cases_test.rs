@@ -452,17 +452,14 @@ Edge cases:
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // Should only flag the invalid internal link and ambiguous "somefile#section"
-        assert_eq!(result.len(), 2, "Should flag invalid internal + ambiguous path");
+        // Should only flag the invalid internal link
+        // Note: "somefile#section" is treated as a cross-file link (GitHub-style extension-less)
+        assert_eq!(result.len(), 1, "Should flag only invalid internal link");
 
         let messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
         assert!(
             messages.iter().any(|m| m.contains("missing-section")),
             "Should warn about missing-section"
-        );
-        assert!(
-            messages.iter().any(|m| m.contains("section")),
-            "Should warn about ambiguous section"
         );
     }
 
@@ -840,7 +837,7 @@ Edge cases:
                 [
                     (AnchorStyle::GitHub, "café-menu"),
                     (AnchorStyle::KramdownGfm, "café-menu"),
-                    (AnchorStyle::Kramdown, "calf-menu"), // Kramdown removes accents
+                    (AnchorStyle::Kramdown, "caf-menu"), // Kramdown removes accented chars entirely
                 ],
             ),
             // Complex punctuation: different arrow handling
