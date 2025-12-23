@@ -37,6 +37,12 @@ debug = true         # Keep debug symbols for profiling
 strip = false        # Don't strip symbols
 opt-level = 3        # Maximum optimization for realistic performance
 
+[profile.perf-test]
+inherits = "release"
+lto = false          # Disable LTO for faster compilation
+codegen-units = 16   # More parallel compilation
+opt-level = 3        # Optimize for speed (not size)
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 colored = { version = "3.0.0", optional = true }

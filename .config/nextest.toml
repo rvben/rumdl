@@ -25,7 +25,7 @@ status-level = "pass"
 # Skip performance and memory tests in CI (they're flaky due to resource variability)
 # Exclude specific integration test binaries and performance-related test functions
 # Including perf_regression_issue_148 which contains timing-based complexity tests
-default-filter = 'not (package(rumdl) and binary(deeply_nested_lists_performance_test)) and not (package(rumdl) and binary(performance_validation_tests)) and not (package(rumdl) and binary(perf_check)) and not binary(perf_regression_issue_148) and not test(/performance|benchmark|memory/)'
+default-filter = 'not (package(rumdl) and binary(deeply_nested_lists_performance_test)) and not (package(rumdl) and binary(performance_validation_tests)) and not (package(rumdl) and binary(perf_check)) and not binary(perf_regression_issue_148) and not binary(rule_complexity_regression_test) and not test(/performance|benchmark|memory|linear_complexity/)'
 
 # More conservative in CI
 test-threads = "num-cpus"
@@ -59,7 +59,7 @@ status-level = "fail"
 # Skip the slowest tests but include integration tests
 # Complexity regression tests (perf_regression_issue_148) are excluded because timing-based
 # assertions are inherently flaky under parallel execution - they run in the performance profile
-default-filter = 'not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/) and not test(/performance/) and not test(/perf_check/) and not binary(perf_regression_issue_148)'
+default-filter = 'not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/) and not test(/performance/) and not test(/perf_check/) and not test(/linear_complexity/) and not binary(perf_regression_issue_148) and not binary(rule_complexity_regression_test)'
 
 # Good parallelization for dev machines
 test-threads = "num-cpus"

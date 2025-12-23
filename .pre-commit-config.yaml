@@ -138,3 +138,12 @@ repos:
         pass_filenames: false
         stages: [pre-push]
         verbose: true
+
+      - id: complexity-check
+        name: check for O(n²) regressions
+        entry: mise exec -- make test-complexity
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+        verbose: true
