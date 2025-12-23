@@ -68,10 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents duplicate warnings when the same file is referenced via different paths
   - Improves accuracy when processing files via symlinks or relative paths
 
-- **Rules: Fixes for issues 219 and 220** (fixes #219, #220)
-  - Fixes addressing edge cases and false positives
-  - Improves overall rule accuracy and reliability
-
 ### Performance
 
 - **MD007 (ul-indent): Cache mixed list nesting detection and optimize blank line checks**
