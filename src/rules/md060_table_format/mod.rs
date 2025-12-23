@@ -61,12 +61,16 @@ struct TableFormatResult {
 ///
 /// Controls when tables automatically switch from aligned to compact formatting:
 ///
-/// - **`max-width = 0`** (default): Inherits from MD013's `line-length` setting (default 80)
+/// - **`max-width = 0`** (default): Smart inheritance from MD013
 /// - **`max-width = N`**: Explicit threshold, independent of MD013
 ///
-/// When a table's aligned width would exceed this limit, MD060 automatically
-/// uses compact formatting instead to prevent excessively long lines. This matches
-/// the behavior of Prettier's table formatting.
+/// When `max-width = 0`:
+/// - If MD013 is disabled → unlimited (no auto-compact)
+/// - If MD013.tables = false → unlimited (no auto-compact)
+/// - If MD013.line_length = 0 → unlimited (no auto-compact)
+/// - Otherwise → inherits MD013's line-length
+///
+/// This matches the behavior of Prettier's table formatting.
 ///
 /// #### Examples
 ///
@@ -139,19 +143,11 @@ struct TableFormatResult {
 /// - Respects alignment indicators in delimiter rows (`:---`, `:---:`, `---:`)
 /// - Automatically switches to compact mode for tables exceeding max_width
 /// - Skips tables with ZWJ emoji to prevent corruption
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MD060TableFormat {
     config: MD060Config,
-    md013_line_length: usize,
-}
-
-impl Default for MD060TableFormat {
-    fn default() -> Self {
-        Self {
-            config: MD060Config::default(),
-            md013_line_length: 80,
-        }
-    }
+    md013_config: MD013Config,
+    md013_disabled: bool,
 }
 
 impl MD060TableFormat {
@@ -163,27 +159,44 @@ impl MD060TableFormat {
                 style,
                 max_width: LineLength::from_const(0),
             },
-            md013_line_length: 80, // Default MD013 line_length
+            md013_config: MD013Config::default(),
+            md013_disabled: false,
         }
     }
 
-    pub fn from_config_struct(config: MD060Config, md013_line_length: usize) -> Self {
+    pub fn from_config_struct(config: MD060Config, md013_config: MD013Config, md013_disabled: bool) -> Self {
         Self {
             config,
-            md013_line_length,
+            md013_config,
+            md013_disabled,
         }
     }
 
     /// Get the effective max width for table formatting.
     ///
-    /// - If `max_width` is 0, inherits from MD013's `line_length`
-    /// - Otherwise, uses the explicitly configured `max_width`
+    /// Priority order:
+    /// 1. Explicit `max_width > 0` always takes precedence
+    /// 2. When `max_width = 0` (inherit mode), check MD013 configuration:
+    ///    - If MD013 is globally disabled → unlimited
+    ///    - If `MD013.tables = false` → unlimited
+    ///    - If `MD013.line_length = 0` → unlimited
+    ///    - Otherwise → inherit MD013's line_length
     fn effective_max_width(&self) -> usize {
-        if self.config.max_width.is_unlimited() {
-            self.md013_line_length
-        } else {
-            self.config.max_width.get()
+        // Explicit max_width always takes precedence
+        if !self.config.max_width.is_unlimited() {
+            return self.config.max_width.get();
         }
+
+        // max_width = 0 means "inherit" - but inherit UNLIMITED if:
+        // 1. MD013 is globally disabled
+        // 2. MD013.tables = false (user doesn't care about table line length)
+        // 3. MD013.line_length = 0 (no line length limit at all)
+        if self.md013_disabled || !self.md013_config.tables || self.md013_config.line_length.is_unlimited() {
+            return usize::MAX; // Unlimited
+        }
+
+        // Otherwise inherit MD013's line-length
+        self.md013_config.line_length.get()
     }
 
     /// Check if text contains characters that break Unicode width calculations
@@ -781,7 +794,11 @@ impl Rule for MD060TableFormat {
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD060Config>(config);
         let md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
-        Box::new(Self::from_config_struct(rule_config, md013_config.line_length.get()))
+
+        // Check if MD013 is globally disabled
+        let md013_disabled = config.global.disable.iter().any(|r| r == "MD013");
+
+        Box::new(Self::from_config_struct(rule_config, md013_config, md013_disabled))
     }
 }
 
@@ -790,6 +807,15 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::types::LineLength;
+
+    /// Helper to create an MD013Config with a specific line length for testing
+    fn md013_with_line_length(line_length: usize) -> MD013Config {
+        MD013Config {
+            line_length: LineLength::from_const(line_length),
+            tables: true, // Default: tables are checked
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_md060_disabled_by_default() {
@@ -984,7 +1010,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
         };
-        let rule = MD060TableFormat::from_config_struct(config, 80);
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
         // Table that would be 85 chars when aligned (exceeds 80)
         // Formula: 1 + (3 * 3) + (20 + 20 + 30) = 1 + 9 + 70 = 80 chars
@@ -1013,7 +1039,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(50),
         };
-        let rule = MD060TableFormat::from_config_struct(config, 80); // MD013 setting doesn't matter
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false); // MD013 setting doesn't matter
 
         // Table that would exceed 50 chars when aligned
         // Column widths: 25 + 25 + 25 = 75 chars
@@ -1043,7 +1069,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(100),
         };
-        let rule = MD060TableFormat::from_config_struct(config, 80);
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
         // Small table that fits well under 100 chars
         let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
@@ -1068,7 +1094,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
         };
-        let rule = MD060TableFormat::from_config_struct(config, 30);
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(30), false);
 
         // Create a table where we know exact column widths: 5 + 5 + 5 = 15
         // Expected aligned width: 1 + (3 * 3) + 15 = 1 + 9 + 15 = 25 chars
@@ -1090,7 +1116,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(24),
         };
-        let rule_tight = MD060TableFormat::from_config_struct(config_tight, 80);
+        let rule_tight = MD060TableFormat::from_config_struct(config_tight, md013_with_line_length(80), false);
 
         let fixed_compact = rule_tight.fix(&ctx).unwrap();
 
@@ -1106,7 +1132,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
         };
-        let rule = MD060TableFormat::from_config_struct(config, 80);
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
         // Very wide table with many columns
         // 8 columns with widths of 12 chars each = 96 chars
@@ -1131,8 +1157,8 @@ mod tests {
         };
 
         // Test with different MD013 line_length values
-        let rule_80 = MD060TableFormat::from_config_struct(config.clone(), 80);
-        let rule_120 = MD060TableFormat::from_config_struct(config.clone(), 120);
+        let rule_80 = MD060TableFormat::from_config_struct(config.clone(), md013_with_line_length(80), false);
+        let rule_120 = MD060TableFormat::from_config_struct(config.clone(), md013_with_line_length(120), false);
 
         // Medium-sized table
         let content = "| Column Header A | Column Header B | Column Header C |\n|---|---|---|\n| Some Data | More Data | Even More |";
@@ -1160,7 +1186,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(17),
         };
-        let rule = MD060TableFormat::from_config_struct(config, 80);
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
         let content = "| AAAAA | BBBBB |\n|---|---|\n| AAAAA | BBBBB |";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -1179,7 +1205,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(16),
         };
-        let rule_under = MD060TableFormat::from_config_struct(config_under, 80);
+        let rule_under = MD060TableFormat::from_config_struct(config_under, md013_with_line_length(80), false);
 
         let fixed_compact = rule_under.fix(&ctx).unwrap();
 
@@ -1196,7 +1222,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(50),
         };
-        let rule = MD060TableFormat::from_config_struct(config, 80);
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
         // Table that will be auto-compacted (exceeds 50 chars when aligned)
         let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| Data | Data | Data |";
@@ -1263,7 +1289,7 @@ mod tests {
             style: "aligned".to_string(),
             max_width: LineLength::from_const(100), // Large enough to not trigger auto-compact
         };
-        let rule = MD060TableFormat::from_config_struct(config, 80);
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
         // Small misaligned table
         let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
@@ -1278,5 +1304,145 @@ mod tests {
         assert!(warnings[0].message.contains("Table columns should be aligned"));
         assert!(!warnings[0].message.contains("too wide"));
         assert!(!warnings[0].message.contains("max-width"));
+    }
+
+    // === Issue #219: Unlimited table width tests ===
+
+    #[test]
+    fn test_md060_unlimited_when_md013_disabled() {
+        // When MD013 is globally disabled, max_width should be unlimited
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0), // Inherit
+        };
+        let md013_config = MD013Config::default();
+        let rule = MD060TableFormat::from_config_struct(config, md013_config, true /* disabled */);
+
+        // Very wide table that would normally exceed 80 chars
+        let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| data | data | data |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be aligned (not compacted) since MD013 is disabled
+        let lines: Vec<&str> = fixed.lines().collect();
+        // In aligned mode, all lines have the same length
+        assert_eq!(
+            lines[0].len(),
+            lines[1].len(),
+            "Table should be aligned when MD013 is disabled"
+        );
+    }
+
+    #[test]
+    fn test_md060_unlimited_when_md013_tables_false() {
+        // When MD013.tables = false, max_width should be unlimited
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+        };
+        let md013_config = MD013Config {
+            tables: false, // User doesn't care about table line length
+            line_length: LineLength::from_const(80),
+            ..Default::default()
+        };
+        let rule = MD060TableFormat::from_config_struct(config, md013_config, false);
+
+        // Wide table that would exceed 80 chars
+        let content = "| Very Long Header A | Very Long Header B | Very Long Header C |\n|---|---|---|\n| x | y | z |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be aligned (no auto-compact since tables=false)
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(
+            lines[0].len(),
+            lines[1].len(),
+            "Table should be aligned when MD013.tables=false"
+        );
+    }
+
+    #[test]
+    fn test_md060_unlimited_when_md013_line_length_zero() {
+        // When MD013.line_length = 0, max_width should be unlimited
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+        };
+        let md013_config = MD013Config {
+            tables: true,
+            line_length: LineLength::from_const(0), // No limit
+            ..Default::default()
+        };
+        let rule = MD060TableFormat::from_config_struct(config, md013_config, false);
+
+        // Wide table
+        let content = "| Very Long Header | Another Long Header | Third Long Header |\n|---|---|---|\n| x | y | z |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be aligned
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(
+            lines[0].len(),
+            lines[1].len(),
+            "Table should be aligned when MD013.line_length=0"
+        );
+    }
+
+    #[test]
+    fn test_md060_explicit_max_width_overrides_md013_settings() {
+        // Explicit max_width should always take precedence
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(50), // Explicit limit
+        };
+        let md013_config = MD013Config {
+            tables: false,                          // This would make it unlimited...
+            line_length: LineLength::from_const(0), // ...and this too
+            ..Default::default()
+        };
+        let rule = MD060TableFormat::from_config_struct(config, md013_config, false);
+
+        // Wide table that exceeds explicit 50-char limit
+        let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| x | y | z |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be compact (explicit max_width = 50 overrides MD013 settings)
+        assert!(
+            fixed.contains("| --- |"),
+            "Should be compact format due to explicit max_width"
+        );
+    }
+
+    #[test]
+    fn test_md060_inherits_md013_line_length_when_tables_enabled() {
+        // When MD013.tables = true and MD013.line_length is set, inherit that limit
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0), // Inherit
+        };
+        let md013_config = MD013Config {
+            tables: true,
+            line_length: LineLength::from_const(50), // 50 char limit
+            ..Default::default()
+        };
+        let rule = MD060TableFormat::from_config_struct(config, md013_config, false);
+
+        // Wide table that exceeds 50 chars
+        let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| x | y | z |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be compact (inherited 50-char limit from MD013)
+        assert!(
+            fixed.contains("| --- |"),
+            "Should be compact format when inheriting MD013 limit"
+        );
     }
 }
