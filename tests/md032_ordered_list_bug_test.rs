@@ -17,7 +17,7 @@ This allows you to set personal preferences."#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Should have NO warnings - this is a properly formatted ordered list
     assert_eq!(
@@ -41,7 +41,7 @@ fn test_md032_actual_non_1_start() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Should have a warning - list starts with 2
     assert_eq!(
@@ -72,7 +72,7 @@ fn test_md032_backslash_continuation() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Should have NO warnings - backslash continuation is valid
     assert_eq!(

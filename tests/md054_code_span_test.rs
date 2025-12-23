@@ -31,7 +31,7 @@ Complex: `Array<[T]>` and `Map<[K, V]>` should be ignored
         // MD054 is normally disabled by default, so it shouldn't produce warnings
         // unless explicitly configured. Let's just ensure it doesn't crash
         // with the fixed indexing
-        let warnings = rumdl_lib::lint(content, &md054_rules, false, MarkdownFlavor::Standard).unwrap();
+        let warnings = rumdl_lib::lint(content, &md054_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
         // The test passes if it doesn't panic due to indexing errors
         // The actual warning count depends on the default configuration
@@ -61,7 +61,7 @@ Complex: `Array<[T]>` and `Map<[K, V]>` should be ignored
 
         for (i, content) in test_cases.iter().enumerate() {
             // The test passes if it doesn't panic due to indexing errors
-            let result = rumdl_lib::lint(content, &md054_rules, false, MarkdownFlavor::Standard);
+            let result = rumdl_lib::lint(content, &md054_rules, false, MarkdownFlavor::Standard, None);
             assert!(
                 result.is_ok(),
                 "Test case {} failed with content '{}': {:?}",
@@ -92,7 +92,7 @@ Complex: `Array<[T]>` and `Map<[K, V]>` should be ignored
         let md054_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD054").collect();
 
         // The test passes if it doesn't panic
-        let result = rumdl_lib::lint(content, &md054_rules, false, MarkdownFlavor::Standard);
+        let result = rumdl_lib::lint(content, &md054_rules, false, MarkdownFlavor::Standard, None);
         assert!(result.is_ok(), "MD054 regression test failed: {result:?}");
 
         if let Ok(warnings) = result {

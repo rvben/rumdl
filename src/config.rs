@@ -182,6 +182,11 @@ pub struct Config {
     #[serde(flatten)]
     pub rules: BTreeMap<String, RuleConfig>,
 
+    /// Per-rule severity overrides
+    /// Maps rule name (e.g., "MD001") to severity level (Error or Warning)
+    #[serde(skip)]
+    pub rule_severities: BTreeMap<String, crate::rule::Severity>,
+
     /// Project root directory, used for resolving relative paths in per-file-ignores
     #[serde(skip)]
     pub project_root: Option<std::path::PathBuf>,
@@ -1798,6 +1803,7 @@ pub struct SourcedConfigFragment {
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
+    pub rule_severities: BTreeMap<String, SourcedValue<crate::rule::Severity>>,
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
                                                              // Note: loaded_files is tracked globally in SourcedConfig.
 }
@@ -1808,6 +1814,7 @@ impl Default for SourcedConfigFragment {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
             rules: BTreeMap::new(),
+            rule_severities: BTreeMap::new(),
             unknown_keys: Vec::new(),
         }
     }
@@ -1835,6 +1842,7 @@ pub struct SourcedConfig<State = ConfigLoaded> {
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
+    pub rule_severities: BTreeMap<String, SourcedValue<crate::rule::Severity>>,
     pub loaded_files: Vec<String>,
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
     /// Project root directory (parent of config file), used for resolving relative paths
@@ -1851,6 +1859,7 @@ impl Default for SourcedConfig<ConfigLoaded> {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
             rules: BTreeMap::new(),
+            rule_severities: BTreeMap::new(),
             loaded_files: Vec::new(),
             unknown_keys: Vec::new(),
             project_root: None,
@@ -2018,6 +2027,20 @@ impl SourcedConfig<ConfigLoaded> {
                     file_from_fragment,            // Pass the file path from the fragment override
                     line_from_fragment,            // Pass the line number from the fragment override
                 );
+            }
+        }
+
+        // Merge rule_severities
+        for (rule_name, severity) in fragment.rule_severities {
+            if let Some(ref mut existing) = self.rule_severities.get_mut(&rule_name) {
+                existing.merge_override(
+                    severity.value,
+                    severity.source,
+                    severity.overrides.first().and_then(|o| o.file.clone()),
+                    severity.overrides.first().and_then(|o| o.line),
+                );
+            } else {
+                self.rule_severities.insert(rule_name, severity);
             }
         }
 
@@ -2512,6 +2535,7 @@ impl SourcedConfig<ConfigLoaded> {
             global: self.global,
             per_file_ignores: self.per_file_ignores,
             rules: self.rules,
+            rule_severities: self.rule_severities,
             loaded_files: self.loaded_files,
             unknown_keys: self.unknown_keys,
             project_root: self.project_root,
@@ -2545,6 +2569,7 @@ impl SourcedConfig<ConfigLoaded> {
             global: self.global,
             per_file_ignores: self.per_file_ignores,
             rules: self.rules,
+            rule_severities: self.rule_severities,
             loaded_files: self.loaded_files,
             unknown_keys: self.unknown_keys,
             project_root: self.project_root,
@@ -2590,6 +2615,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             global,
             per_file_ignores: sourced.per_file_ignores.value,
             rules,
+            rule_severities: sourced.rule_severities.into_iter().map(|(k, v)| (k, v.value)).collect(),
             project_root: sourced.project_root,
         }
     }
@@ -2641,6 +2667,9 @@ impl RuleRegistry {
     pub fn config_keys_for(&self, rule: &str) -> Option<std::collections::BTreeSet<String>> {
         self.rule_schemas.get(rule).map(|schema| {
             let mut all_keys = std::collections::BTreeSet::new();
+
+            // Always allow 'severity' for any rule
+            all_keys.insert("severity".to_string());
 
             // Add original keys from schema
             for key in schema.keys() {
@@ -3372,9 +3401,28 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 && value.is_table()
                 && let Some(rule_config_table) = value.as_table()
             {
-                let rule_entry = fragment.rules.entry(resolved_rule_name).or_default();
+                let rule_entry = fragment.rules.entry(resolved_rule_name.clone()).or_default();
                 for (rk, rv) in rule_config_table {
                     let norm_rk = normalize_key(rk);
+
+                    // Special handling for severity
+                    if norm_rk == "severity" {
+                        if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
+                            if !fragment.rule_severities.contains_key(&resolved_rule_name) {
+                                fragment
+                                    .rule_severities
+                                    .insert(resolved_rule_name.clone(), SourcedValue::new(severity, source));
+                            } else {
+                                fragment
+                                    .rule_severities
+                                    .get_mut(&resolved_rule_name)
+                                    .unwrap()
+                                    .push_override(severity, source, file.clone(), None);
+                            }
+                        }
+                        continue; // Skip regular value processing for severity
+                    }
+
                     let toml_val = rv.clone();
 
                     let sv = rule_entry
@@ -3400,9 +3448,28 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 // Try to resolve as a rule name (handles both canonical names and aliases)
                 if let Some(resolved_rule_name) = registry.resolve_rule_name(rule_name) {
                     if let Some(rule_table) = value.as_table() {
-                        let rule_entry = fragment.rules.entry(resolved_rule_name).or_default();
+                        let rule_entry = fragment.rules.entry(resolved_rule_name.clone()).or_default();
                         for (rk, rv) in rule_table {
                             let norm_rk = normalize_key(rk);
+
+                            // Special handling for severity
+                            if norm_rk == "severity" {
+                                if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
+                                    if fragment.rule_severities.get(&resolved_rule_name).is_none() {
+                                        fragment
+                                            .rule_severities
+                                            .insert(resolved_rule_name.clone(), SourcedValue::new(severity, source));
+                                    } else {
+                                        fragment
+                                            .rule_severities
+                                            .get_mut(&resolved_rule_name)
+                                            .unwrap()
+                                            .push_override(severity, source, file.clone(), None);
+                                    }
+                                }
+                                continue; // Skip regular value processing for severity
+                            }
+
                             let toml_val = rv.clone();
                             let sv = rule_entry
                                 .values
@@ -3432,9 +3499,28 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 // Try to resolve as a rule name (handles both canonical names and aliases)
                 if let Some(resolved_rule_name) = registry.resolve_rule_name(rule_name) {
                     if let Some(rule_table) = value.as_table() {
-                        let rule_entry = fragment.rules.entry(resolved_rule_name).or_default();
+                        let rule_entry = fragment.rules.entry(resolved_rule_name.clone()).or_default();
                         for (rk, rv) in rule_table {
                             let norm_rk = normalize_key(rk);
+
+                            // Special handling for severity
+                            if norm_rk == "severity" {
+                                if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
+                                    if fragment.rule_severities.get(&resolved_rule_name).is_none() {
+                                        fragment
+                                            .rule_severities
+                                            .insert(resolved_rule_name.clone(), SourcedValue::new(severity, source));
+                                    } else {
+                                        fragment
+                                            .rule_severities
+                                            .get_mut(&resolved_rule_name)
+                                            .unwrap()
+                                            .push_override(severity, source, file.clone(), None);
+                                    }
+                                }
+                                continue; // Skip regular value processing for severity
+                            }
+
                             let toml_val = rv.clone();
                             let sv = rule_entry
                                 .values
@@ -3770,6 +3856,35 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
             let rule_entry = fragment.rules.entry(norm_rule_name.clone()).or_default();
             for (rk, rv_item) in tbl.iter() {
                 let norm_rk = normalize_key(rk);
+
+                // Special handling for severity
+                if norm_rk == "severity" {
+                    if let Some(toml_edit::Value::String(formatted_string)) = rv_item.as_value() {
+                        let severity_str = formatted_string.value();
+                        match crate::rule::Severity::deserialize(toml::Value::String(severity_str.to_string())) {
+                            Ok(severity) => {
+                                if fragment.rule_severities.get(&norm_rule_name).is_none() {
+                                    fragment
+                                        .rule_severities
+                                        .insert(norm_rule_name.clone(), SourcedValue::new(severity, source));
+                                } else {
+                                    fragment
+                                        .rule_severities
+                                        .get_mut(&norm_rule_name)
+                                        .unwrap()
+                                        .push_override(severity, source, file.clone(), None);
+                                }
+                            }
+                            Err(_) => {
+                                log::warn!(
+                                    "[WARN] Invalid severity '{severity_str}' for rule {norm_rule_name} in {path}. Valid values: error, warning"
+                                );
+                            }
+                        }
+                    }
+                    continue; // Skip regular value processing for severity
+                }
+
                 let maybe_toml_val: Option<toml::Value> = match rv_item.as_value() {
                     Some(toml_edit::Value::String(formatted)) => Some(toml::Value::String(formatted.value().clone())),
                     Some(toml_edit::Value::Integer(formatted)) => Some(toml::Value::Integer(*formatted.value())),

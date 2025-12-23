@@ -120,7 +120,7 @@ fn bench_md053_many_references(c: &mut Criterion) {
 
     c.bench_function("MD053 Many References", |b| {
         b.iter(|| {
-            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let _ = rule.check(&ctx);
         });
     });
@@ -132,7 +132,7 @@ fn bench_md053_fix_many_references(c: &mut Criterion) {
 
     c.bench_function("MD053 Fix Many References", |b| {
         b.iter(|| {
-            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard);
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
             let _ = rule.fix(&ctx);
         });
     });

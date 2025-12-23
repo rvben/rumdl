@@ -13,7 +13,7 @@ fn test_md051_readme_headings() {
     let all_rules = rules::all_rules(&config);
     let md051_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD051").collect();
 
-    let warnings = rumdl_lib::lint(&content, &md051_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(&content, &md051_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Check that we no longer have false positives for these anchors
     // This bug was fixed in v0.0.144

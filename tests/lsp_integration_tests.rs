@@ -37,7 +37,14 @@ Here's some `inline code` and a [link](https://example.com).
 
     // Test that we can process this content with rumdl
     let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
-    let warnings = rumdl_lib::lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(
+        content,
+        &rules,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    )
+    .unwrap();
 
     // Should find some issues in this content
     assert!(!warnings.is_empty(), "Expected to find linting issues in test content");
@@ -63,7 +70,14 @@ async fn test_multiple_file_scenarios() {
     let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
 
     for (filename, content) in files {
-        let warnings = rumdl_lib::lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+        let warnings = rumdl_lib::lint(
+            content,
+            &rules,
+            false,
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            None,
+        )
+        .unwrap();
 
         // Each file should be processable
         for warning in &warnings {
@@ -118,6 +132,7 @@ async fn test_error_recovery() {
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     );
 
     // Should not panic or fail catastrophically
@@ -150,6 +165,7 @@ async fn test_performance_with_large_document() {
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     )
     .unwrap();
 
@@ -178,7 +194,14 @@ async fn test_rapid_editing_simulation() {
     for i in 1..=50 {
         let content = format!("# Document Version {}\n\n{}", i, "Content here. ".repeat(i));
 
-        let warnings = rumdl_lib::lint(&content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+        let warnings = rumdl_lib::lint(
+            &content,
+            &rules,
+            false,
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            None,
+        )
+        .unwrap();
 
         // Convert to diagnostics (simulating LSP diagnostic updates)
         for warning in &warnings {
@@ -225,7 +248,14 @@ async fn test_workspace_scenarios() {
     let file_count = workspace_files.len();
 
     for (filepath, content) in &workspace_files {
-        let warnings = rumdl_lib::lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+        let warnings = rumdl_lib::lint(
+            content,
+            &rules,
+            false,
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            None,
+        )
+        .unwrap();
         total_warnings += warnings.len();
 
         // Verify each file processes correctly
@@ -246,7 +276,14 @@ async fn test_workspace_scenarios() {
 async fn test_diagnostic_conversion_completeness() {
     let content = "#  Heading with extra space\n\nContent here.";
     let rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
-    let warnings = rumdl_lib::lint(content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(
+        content,
+        &rules,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    )
+    .unwrap();
 
     for warning in warnings {
         let diagnostic = warning_to_diagnostic(&warning);

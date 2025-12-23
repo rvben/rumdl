@@ -30,7 +30,7 @@ Testing content here.
     let all_rules = rules::all_rules(&config);
     let md051_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD051").collect();
 
-    let warnings = rumdl_lib::lint(content, &md051_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md051_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // There should be NO warnings - all the linked headings exist
     assert_eq!(
@@ -78,7 +78,7 @@ Installation instructions.
     let all_rules = rules::all_rules(&config);
     let md051_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD051").collect();
 
-    let warnings = rumdl_lib::lint(content, &md051_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md051_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),

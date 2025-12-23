@@ -922,7 +922,7 @@ pub fn process_file_with_index(
     // Use lint_and_index for single-file linting + index contribution
     let source_file = Some(std::path::PathBuf::from(file_path));
     let (warnings_result, file_index) =
-        rumdl_lib::lint_and_index(&content, &filtered_rules, verbose, flavor, source_file);
+        rumdl_lib::lint_and_index(&content, &filtered_rules, verbose, flavor, source_file, Some(config));
 
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();

@@ -55,7 +55,34 @@ Rules with Error severity flag issues that break document functionality:
 
 All other rules use Warning severity. These flag style, formatting, and convention issues that don't break document functionality but affect readability, consistency, or best practices.
 
-**Note**: While issue #217 documents per-rule severity configuration, this feature is not yet implemented. Current severities are defaults that apply to all files.
+### Configuring Severity
+
+You can override default severities for any rule in your configuration file:
+
+**.rumdl.toml:**
+```toml
+[MD013]
+severity = "warning"  # Downgrade from error to warning
+
+[MD004]
+severity = "error"    # Upgrade from warning to error
+```
+
+**pyproject.toml:**
+```toml
+[tool.rumdl.MD013]
+severity = "warning"
+
+[tool.rumdl.MD004]
+severity = "error"
+```
+
+Valid severity values: `"error"`, `"warning"` (case-insensitive)
+
+Severity affects:
+- Exit codes: rumdl exits with code 1 when errors are found (warnings alone don't cause non-zero exit)
+- Output formatting: errors are visually distinct from warnings in console output
+- CI/CD: severity controls whether linting failures block builds
 
 ## Heading Rules
 

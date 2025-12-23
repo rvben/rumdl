@@ -42,8 +42,10 @@ Here are the features.
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
     // Lint and index both files
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
 
     // Build workspace index
     let mut workspace_index = WorkspaceIndex::new();
@@ -106,7 +108,7 @@ fn test_heading_anchor_generation_in_index() {
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None, None);
 
     // Should have 3 headings indexed
     let unique_anchors: std::collections::HashSet<_> =
@@ -144,7 +146,7 @@ fn test_cross_file_links_extraction() {
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None, None);
 
     // Should have 1 cross-file link with fragment (./guide.md#install)
     // Local anchors (#local) and links without fragments are not included
@@ -177,7 +179,7 @@ fn test_inline_config_stored_in_file_index() {
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None, None);
 
     // Verify that inline config data was stored in FileIndex
     // Line 4 should have MD051 disabled (line numbers are 1-indexed)
@@ -203,7 +205,7 @@ fn test_file_wide_disable_in_file_index() {
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None, None);
 
     // All lines should have MD051 disabled with file-wide disable
     assert!(
@@ -228,7 +230,7 @@ fn test_disable_next_line_in_file_index() {
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, file_index) = rumdl_lib::lint_and_index(content, &rules, false, MarkdownFlavor::default(), None, None);
 
     // Line 4 (the link after the disable-next-line comment) should have MD051 disabled
     assert!(
@@ -270,8 +272,10 @@ Here are the features.
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
     // Lint and index both files
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
 
     // Build workspace index
     let mut workspace_index = WorkspaceIndex::new();
@@ -338,8 +342,10 @@ Content here.
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
 
     let mut workspace_index = WorkspaceIndex::new();
     workspace_index.insert_file(source_path.clone(), source_index.clone());
@@ -388,8 +394,10 @@ Some text with <span id="inline-anchor">inline</span> anchor.
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
 
     let mut workspace_index = WorkspaceIndex::new();
     workspace_index.insert_file(source_path.clone(), source_index.clone());
@@ -440,8 +448,10 @@ See the [locale setting](./config.md#mkdocs-locale) for configuration.
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
 
     let mut workspace_index = WorkspaceIndex::new();
     workspace_index.insert_file(source_path.clone(), source_index.clone());
@@ -498,8 +508,10 @@ API
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
 
     let mut workspace_index = WorkspaceIndex::new();
     workspace_index.insert_file(source_path.clone(), source_index.clone());
@@ -549,7 +561,7 @@ Link to [locale](#mkdocs-locale) again.
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default()).unwrap();
+    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default(), None).unwrap();
 
     // Filter to MD051 only
     let md051_warnings: Vec<_> = warnings
@@ -577,7 +589,7 @@ Content here.
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default()).unwrap();
+    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default(), None).unwrap();
 
     let md051_warnings: Vec<_> = warnings
         .iter()
@@ -610,8 +622,10 @@ Text{ #anchor-id } here.
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
 
     let mut workspace_index = WorkspaceIndex::new();
     workspace_index.insert_file(source_path.clone(), source_index.clone());
@@ -658,8 +672,10 @@ Regular text.
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
-    let (_, source_index) = rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None);
-    let (_, target_index) = rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None);
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
 
     let mut workspace_index = WorkspaceIndex::new();
     workspace_index.insert_file(source_path.clone(), source_index.clone());

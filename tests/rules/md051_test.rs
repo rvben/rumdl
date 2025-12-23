@@ -1920,10 +1920,22 @@ This links to [header1 in b](b#header1).
         let source_content_str = fs::read_to_string(&source_file).unwrap();
         let target_content_str = fs::read_to_string(&target_file).unwrap();
 
-        let (_, source_index) =
-            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
-        let (_, target_index) =
-            rumdl_lib::lint_and_index(&target_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, source_index) = rumdl_lib::lint_and_index(
+            &source_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
+        let (_, target_index) = rumdl_lib::lint_and_index(
+            &target_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
 
         // Build workspace index
         let mut workspace_index = WorkspaceIndex::new();
@@ -1988,10 +2000,22 @@ Link to [missing section](page#missing-section).
         let source_content_str = fs::read_to_string(&source_file).unwrap();
         let target_content_str = fs::read_to_string(&target_file).unwrap();
 
-        let (_, source_index) =
-            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
-        let (_, target_index) =
-            rumdl_lib::lint_and_index(&target_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, source_index) = rumdl_lib::lint_and_index(
+            &source_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
+        let (_, target_index) = rumdl_lib::lint_and_index(
+            &target_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
 
         let mut workspace_index = WorkspaceIndex::new();
         workspace_index.insert_file(source_file.clone(), source_index.clone());
@@ -2054,10 +2078,22 @@ See the [installation guide](docs/guide#installation).
         let source_content_str = fs::read_to_string(&source_file).unwrap();
         let target_content_str = fs::read_to_string(&target_file).unwrap();
 
-        let (_, source_index) =
-            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
-        let (_, target_index) =
-            rumdl_lib::lint_and_index(&target_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, source_index) = rumdl_lib::lint_and_index(
+            &source_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
+        let (_, target_index) = rumdl_lib::lint_and_index(
+            &target_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
 
         let mut workspace_index = WorkspaceIndex::new();
         workspace_index.insert_file(source_file.clone(), source_index.clone());
@@ -2112,10 +2148,22 @@ See the [installation guide](docs/guide#installation).
         let source_content_str = fs::read_to_string(&source_file).unwrap();
         let target_content_str = fs::read_to_string(&target_file).unwrap();
 
-        let (_, source_index) =
-            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
-        let (_, target_index) =
-            rumdl_lib::lint_and_index(&target_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, source_index) = rumdl_lib::lint_and_index(
+            &source_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
+        let (_, target_index) = rumdl_lib::lint_and_index(
+            &target_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
 
         let mut workspace_index = WorkspaceIndex::new();
         workspace_index.insert_file(source_file.clone(), source_index.clone());
@@ -2178,8 +2226,14 @@ Link to [non-existent](nonexistent#section).
         let rules = rumdl_lib::rules::all_rules(&Config::default());
 
         let source_content_str = fs::read_to_string(&source_file).unwrap();
-        let (_, source_index) =
-            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, source_index) = rumdl_lib::lint_and_index(
+            &source_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
 
         let mut workspace_index = WorkspaceIndex::new();
         workspace_index.insert_file(source_file.clone(), source_index.clone());
@@ -2237,12 +2291,18 @@ Link to [non-existent](nonexistent#section).
         let target1_content = fs::read_to_string(&target1).unwrap();
         let target2_content = fs::read_to_string(&target2).unwrap();
 
-        let (_, source_index) =
-            rumdl_lib::lint_and_index(&source_content_str, &rules, false, MarkdownFlavor::default(), None);
+        let (_, source_index) = rumdl_lib::lint_and_index(
+            &source_content_str,
+            &rules,
+            false,
+            MarkdownFlavor::default(),
+            None,
+            None,
+        );
         let (_, target1_index) =
-            rumdl_lib::lint_and_index(&target1_content, &rules, false, MarkdownFlavor::default(), None);
+            rumdl_lib::lint_and_index(&target1_content, &rules, false, MarkdownFlavor::default(), None, None);
         let (_, target2_index) =
-            rumdl_lib::lint_and_index(&target2_content, &rules, false, MarkdownFlavor::default(), None);
+            rumdl_lib::lint_and_index(&target2_content, &rules, false, MarkdownFlavor::default(), None, None);
 
         let mut workspace_index = WorkspaceIndex::new();
         workspace_index.insert_file(source_file.clone(), source_index.clone());

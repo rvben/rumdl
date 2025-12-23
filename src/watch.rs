@@ -231,9 +231,13 @@ pub fn perform_check_run(
 
             // Run cross-file checks for each file using the FileIndex (no re-parsing needed)
             for (file_path, file_index) in workspace_index.files() {
-                if let Ok(cross_file_warnings) =
-                    rumdl_lib::run_cross_file_checks(file_path, file_index, &enabled_rules, &workspace_index)
-                    && !cross_file_warnings.is_empty()
+                if let Ok(cross_file_warnings) = rumdl_lib::run_cross_file_checks(
+                    file_path,
+                    file_index,
+                    &enabled_rules,
+                    &workspace_index,
+                    Some(config),
+                ) && !cross_file_warnings.is_empty()
                 {
                     let file_path_str = file_path.to_string_lossy().to_string();
                     // Find existing entry or create new one
@@ -482,7 +486,7 @@ pub fn perform_check_run(
         let formatter = output_format.create_formatter();
         for (file_path, file_index) in workspace_index.files() {
             if let Ok(cross_file_warnings) =
-                rumdl_lib::run_cross_file_checks(file_path, file_index, &enabled_rules, &workspace_index)
+                rumdl_lib::run_cross_file_checks(file_path, file_index, &enabled_rules, &workspace_index, Some(config))
                 && !cross_file_warnings.is_empty()
             {
                 has_issues = true;

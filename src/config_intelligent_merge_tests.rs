@@ -179,6 +179,7 @@ mod tests {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
+            rule_severities: Default::default(),
             unknown_keys: vec![],
         };
         project_fragment.global.disable = make_sourced_vec(vec!["MD047"], ConfigSource::PyprojectToml);
@@ -208,6 +209,7 @@ mod tests {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
+            rule_severities: Default::default(),
             unknown_keys: vec![],
         };
         project_fragment.global.enable = make_sourced_vec(vec!["MD013"], ConfigSource::PyprojectToml);
@@ -272,6 +274,7 @@ mod tests {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
+            rule_severities: Default::default(),
             unknown_keys: vec![],
         };
 

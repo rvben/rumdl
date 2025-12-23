@@ -518,7 +518,7 @@ impl RumdlLanguageServer {
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
         // Run rumdl linting with the configured flavor
-        let mut all_warnings = match crate::lint(text, &filtered_rules, false, flavor) {
+        let mut all_warnings = match crate::lint(text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
             Ok(warnings) => warnings,
             Err(e) => {
                 log::error!("Failed to lint document {uri}: {e}");
@@ -532,7 +532,13 @@ impl RumdlLanguageServer {
             if matches!(index_state, IndexState::Ready) {
                 let workspace_index = self.workspace_index.read().await;
                 if let Some(file_index) = workspace_index.get_file(path) {
-                    match crate::run_cross_file_checks(path, file_index, &filtered_rules, &workspace_index) {
+                    match crate::run_cross_file_checks(
+                        path,
+                        file_index,
+                        &filtered_rules,
+                        &workspace_index,
+                        Some(&rumdl_config),
+                    ) {
                         Ok(cross_file_warnings) => {
                             all_warnings.extend(cross_file_warnings);
                         }
@@ -612,7 +618,7 @@ impl RumdlLanguageServer {
         let mut rules_with_warnings = std::collections::HashSet::new();
         let mut fixed_text = text.to_string();
 
-        match lint(&fixed_text, &filtered_rules, false, flavor) {
+        match lint(&fixed_text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
             Ok(warnings) => {
                 for warning in warnings {
                     if let Some(rule_name) = &warning.rule_name {
@@ -704,7 +710,7 @@ impl RumdlLanguageServer {
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
-        match crate::lint(text, &filtered_rules, false, flavor) {
+        match crate::lint(text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
             Ok(warnings) => {
                 let mut actions = Vec::new();
                 let mut fixable_count = 0;
@@ -1669,7 +1675,7 @@ impl LanguageServer for RumdlLanguageServer {
             filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
             // Use warning fixes for all rules
-            match crate::lint(&text, &filtered_rules, false, flavor) {
+            match crate::lint(&text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
                 Ok(warnings) => {
                     log::debug!(
                         "Found {} warnings, {} with fixes",

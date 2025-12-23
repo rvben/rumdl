@@ -20,7 +20,7 @@ fn test_md038_no_false_positive_for_commands() {
     let md038_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD038").collect();
 
     for content in test_cases {
-        let warnings = rumdl_lib::lint(content, &md038_rules, false, MarkdownFlavor::Standard).unwrap();
+        let warnings = rumdl_lib::lint(content, &md038_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
         // These should NOT produce warnings - the code spans have no leading/trailing spaces
         assert_eq!(
@@ -48,7 +48,7 @@ fn test_md038_correctly_flags_actual_spaces() {
     let md038_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD038").collect();
 
     for (content, expected_warnings) in test_cases {
-        let warnings = rumdl_lib::lint(content, &md038_rules, false, MarkdownFlavor::Standard).unwrap();
+        let warnings = rumdl_lib::lint(content, &md038_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
         assert_eq!(
             warnings.len(),

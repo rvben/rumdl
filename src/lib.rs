@@ -157,9 +157,10 @@ pub fn lint(
     rules: &[Box<dyn Rule>],
     verbose: bool,
     flavor: crate::config::MarkdownFlavor,
+    config: Option<&crate::config::Config>,
 ) -> LintResult {
     // Use lint_and_index but discard the FileIndex for backward compatibility
-    let (result, _file_index) = lint_and_index(content, rules, verbose, flavor, None);
+    let (result, _file_index) = lint_and_index(content, rules, verbose, flavor, None, config);
     result
 }
 
@@ -210,6 +211,7 @@ pub fn lint_and_index(
     _verbose: bool,
     flavor: crate::config::MarkdownFlavor,
     source_file: Option<std::path::PathBuf>,
+    config: Option<&crate::config::Config>,
 ) -> (LintResult, crate::workspace_index::FileIndex) {
     let mut warnings = Vec::new();
     // Compute content hash for change detection
@@ -281,6 +283,16 @@ pub fn lint_and_index(
                             warning.line, // Already 1-indexed
                         )
                     })
+                    .map(|mut warning| {
+                        // Apply severity override from config if present
+                        if let Some(cfg) = config {
+                            let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
+                            if let Some(&override_severity) = cfg.rule_severities.get(rule_name_to_check) {
+                                warning.severity = override_severity;
+                            }
+                        }
+                        warning
+                    })
                     .collect();
                 warnings.extend(filtered_warnings);
             }
@@ -344,6 +356,7 @@ pub fn run_cross_file_checks(
     file_index: &crate::workspace_index::FileIndex,
     rules: &[Box<dyn Rule>],
     workspace_index: &crate::workspace_index::WorkspaceIndex,
+    config: Option<&crate::config::Config>,
 ) -> LintResult {
     use crate::rule::CrossFileScope;
 
@@ -361,6 +374,15 @@ pub fn run_cross_file_checks(
                 let filtered: Vec<_> = rule_warnings
                     .into_iter()
                     .filter(|w| !file_index.is_rule_disabled_at_line(rule.name(), w.line))
+                    .map(|mut warning| {
+                        // Apply severity override from config if present
+                        if let Some(cfg) = config
+                            && let Some(&override_severity) = cfg.rule_severities.get(rule.name())
+                        {
+                            warning.severity = override_severity;
+                        }
+                        warning
+                    })
                     .collect();
                 warnings.extend(filtered);
             }
@@ -507,7 +529,7 @@ mod tests {
     fn test_lint_empty_content() {
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
 
-        let result = lint("", &rules, false, crate::config::MarkdownFlavor::Standard);
+        let result = lint("", &rules, false, crate::config::MarkdownFlavor::Standard, None);
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
     }
@@ -517,7 +539,7 @@ mod tests {
         let content = "## Level 2\n#### Level 4"; // Skips level 3
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
 
-        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard);
+        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard, None);
         assert!(result.is_ok());
         let warnings = result.unwrap();
         assert!(!warnings.is_empty());
@@ -530,7 +552,7 @@ mod tests {
         let content = "<!-- rumdl-disable MD001 -->\n## Level 2\n#### Level 4";
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
 
-        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard);
+        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard, None);
         assert!(result.is_ok());
         let warnings = result.unwrap();
         assert!(warnings.is_empty()); // Should be disabled by inline comment
@@ -545,7 +567,7 @@ mod tests {
             // A list-related rule would be skipped
         ];
 
-        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard);
+        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard, None);
         assert!(result.is_ok());
     }
 

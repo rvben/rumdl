@@ -20,6 +20,7 @@ fn bench_md013(c: &mut Criterion) {
             rule.check(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -29,6 +30,7 @@ fn bench_md013(c: &mut Criterion) {
             rule.fix(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -51,6 +53,7 @@ fn bench_md033(c: &mut Criterion) {
             rule.check(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -80,6 +83,7 @@ fn bench_md037(c: &mut Criterion) {
             rule.check(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -89,6 +93,7 @@ fn bench_md037(c: &mut Criterion) {
             rule.fix(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -129,6 +134,7 @@ fn bench_md044(c: &mut Criterion) {
             rule.check(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -138,6 +144,7 @@ fn bench_md044(c: &mut Criterion) {
             rule.fix(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -171,6 +178,7 @@ fn bench_md051(c: &mut Criterion) {
             rule.check(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -208,6 +216,7 @@ fn bench_md053(c: &mut Criterion) {
                 r.check(&rumdl_lib::lint_context::LintContext::new(
                     &content,
                     rumdl_lib::config::MarkdownFlavor::Standard,
+                    None,
                 ))
             },
         )
@@ -220,6 +229,7 @@ fn bench_md053(c: &mut Criterion) {
         let _ = primed_rule.check(&rumdl_lib::lint_context::LintContext::new(
             &content,
             rumdl_lib::config::MarkdownFlavor::Standard,
+            None,
         ));
 
         // Then benchmark with warm cache
@@ -227,6 +237,7 @@ fn bench_md053(c: &mut Criterion) {
             primed_rule.check(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });
@@ -236,6 +247,7 @@ fn bench_md053(c: &mut Criterion) {
             rule.fix(&rumdl_lib::lint_context::LintContext::new(
                 &content,
                 rumdl_lib::config::MarkdownFlavor::Standard,
+                None,
             ))
         })
     });

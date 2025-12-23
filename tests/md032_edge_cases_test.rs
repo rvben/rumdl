@@ -19,7 +19,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -51,7 +51,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -82,7 +82,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -114,7 +114,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -141,7 +141,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Mixed lists should be treated as separate lists
     assert_eq!(
@@ -170,7 +170,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -199,7 +199,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -221,7 +221,7 @@ fn test_md032_list_without_blank_before() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -243,7 +243,7 @@ Text directly after"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -273,7 +273,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -304,7 +304,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -331,7 +331,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Empty list items can cause issues with line-by-line parsing
     // The parser may see the second item as a new list
@@ -363,7 +363,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // HTML blocks with proper spacing don't cause MD032 warnings
     // The blank lines around the HTML block satisfy MD032 requirements

@@ -54,10 +54,26 @@ pub struct Fix {
     pub replacement: String,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize)]
 pub enum Severity {
     Error,
     Warning,
+}
+
+impl<'de> serde::Deserialize<'de> for Severity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.to_lowercase().as_str() {
+            "error" => Ok(Severity::Error),
+            "warning" => Ok(Severity::Warning),
+            _ => Err(serde::de::Error::custom(format!(
+                "Invalid severity: '{s}'. Valid values: error, warning"
+            ))),
+        }
+    }
 }
 
 /// Type of rule for selective processing

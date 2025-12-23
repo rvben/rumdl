@@ -11,7 +11,7 @@ fn test_md052_literal_brackets_not_reference() {
     let all_rules = rules::all_rules(&config);
     let md052_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD052").collect();
 
-    let warnings = rumdl_lib::lint(content, &md052_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md052_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Should have NO warnings - [from ...] in backticks is literal text, not a reference
     assert_eq!(
@@ -41,7 +41,7 @@ But this [link text][actual-reference] should be flagged."#;
     let all_rules = rules::all_rules(&config);
     let md052_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD052").collect();
 
-    let warnings = rumdl_lib::lint(content, &md052_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md052_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Should only flag [link text][actual-reference], not the JavaScript literals
     assert_eq!(
@@ -66,7 +66,7 @@ Some other text."#;
     let all_rules = rules::all_rules(&config);
     let md052_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD052").collect();
 
-    let warnings = rumdl_lib::lint(content, &md052_rules, false, MarkdownFlavor::Standard).unwrap();
+    let warnings = rumdl_lib::lint(content, &md052_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
     // Should have a warning - this is an actual broken reference
     assert_eq!(warnings.len(), 1, "MD052 should report actual broken references");

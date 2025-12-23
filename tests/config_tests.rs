@@ -176,8 +176,14 @@ style = "asterisk"
     let test_content = "# Test\n\nThis is a line that exceeds 80 characters but not 150 characters. It's specifically designed for our test case.";
 
     // Run the linter with our configured rules
-    let warnings = rumdl_lib::lint(test_content, &rules, false, rumdl_lib::config::MarkdownFlavor::Standard)
-        .expect("Linting should succeed");
+    let warnings = rumdl_lib::lint(
+        test_content,
+        &rules,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    )
+    .expect("Linting should succeed");
 
     // Verify no MD013 warnings because line_length is set to 150
     let md013_warnings = warnings
@@ -302,6 +308,7 @@ style = "dash"
         &rules_md013,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     )
     .unwrap();
     let warnings_long = rumdl_lib::lint(
@@ -309,6 +316,7 @@ style = "dash"
         &rules_md013,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
     )
     .unwrap();
 
@@ -1808,5 +1816,198 @@ indent = 4
     assert!(
         style.is_none(),
         "style should not be set when only indent is configured"
+    );
+}
+
+#[test]
+fn test_severity_config_toml() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    let config_content = r#"
+[MD001]
+severity = "warning"
+
+[MD013]
+severity = "error"
+line_length = 120
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify severity overrides are stored correctly
+    assert_eq!(
+        config.rule_severities.get("MD001"),
+        Some(&rumdl_lib::rule::Severity::Warning),
+        "MD001 should have Warning severity"
+    );
+    assert_eq!(
+        config.rule_severities.get("MD013"),
+        Some(&rumdl_lib::rule::Severity::Error),
+        "MD013 should have Error severity"
+    );
+
+    // Verify other config still works
+    let line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
+    assert_eq!(line_length, Some(120));
+}
+
+#[test]
+fn test_severity_case_insensitive() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    let config_content = r#"
+[MD001]
+severity = "ERROR"
+
+[MD003]
+severity = "Warning"
+
+[MD004]
+severity = "error"
+
+[MD005]
+severity = "warning"
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify all case variations work
+    assert_eq!(
+        config.rule_severities.get("MD001"),
+        Some(&rumdl_lib::rule::Severity::Error)
+    );
+    assert_eq!(
+        config.rule_severities.get("MD003"),
+        Some(&rumdl_lib::rule::Severity::Warning)
+    );
+    assert_eq!(
+        config.rule_severities.get("MD004"),
+        Some(&rumdl_lib::rule::Severity::Error)
+    );
+    assert_eq!(
+        config.rule_severities.get("MD005"),
+        Some(&rumdl_lib::rule::Severity::Warning)
+    );
+}
+
+#[test]
+fn test_severity_pyproject_toml() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("pyproject.toml");
+
+    let config_content = r#"
+[tool.rumdl]
+MD001 = { severity = "warning" }
+MD013 = { severity = "error", line_length = 100 }
+
+[tool.rumdl.MD003]
+severity = "error"
+style = "atx"
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify severity overrides work in both formats
+    assert_eq!(
+        config.rule_severities.get("MD001"),
+        Some(&rumdl_lib::rule::Severity::Warning)
+    );
+    assert_eq!(
+        config.rule_severities.get("MD013"),
+        Some(&rumdl_lib::rule::Severity::Error)
+    );
+    assert_eq!(
+        config.rule_severities.get("MD003"),
+        Some(&rumdl_lib::rule::Severity::Error)
+    );
+
+    // Verify other config still works
+    let line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line_length");
+    assert_eq!(line_length, Some(100));
+
+    let style = rumdl_lib::config::get_rule_config_value::<String>(&config, "MD003", "style");
+    assert_eq!(style.as_deref(), Some("atx"));
+}
+
+#[test]
+fn test_severity_unknown_rule_validation() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    let config_content = r#"
+[MD999]
+severity = "error"
+
+[MD001]
+severity = "warning"
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let all_rules = rumdl_lib::rules::all_rules(&rumdl_lib::config::Config::default());
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let validated = sourced.validate(&registry).expect("Validation should succeed");
+
+    // Should have a warning about unknown rule MD999
+    assert!(
+        validated
+            .validation_warnings
+            .iter()
+            .any(|w| w.message.contains("MD999") && w.message.contains("nknown")),
+        "Should warn about unknown rule MD999"
+    );
+
+    let config: Config = validated.into();
+
+    // MD001 should still work
+    assert_eq!(
+        config.rule_severities.get("MD001"),
+        Some(&rumdl_lib::rule::Severity::Warning)
+    );
+}
+
+#[test]
+fn test_severity_with_rule_aliases() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Use an alias (heading-increment is alias for MD001)
+    let config_content = r#"
+[heading-increment]
+severity = "error"
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Severity should be stored under canonical name MD001
+    assert_eq!(
+        config.rule_severities.get("MD001"),
+        Some(&rumdl_lib::rule::Severity::Error),
+        "Severity set via alias should be stored under canonical name"
     );
 }
