@@ -11,6 +11,7 @@ For information on global configuration settings (file selection, rule enablemen
 
 ## Rule Categories
 
+- [Severity Levels](#severity-levels) - Understanding Error vs Warning severities
 - [Heading Rules](#heading-rules) - Rules related to heading structure and formatting
 - [List Rules](#list-rules) - Rules for list formatting and structure
 - [Whitespace Rules](#whitespace-rules) - Rules for spacing, indentation, and line length
@@ -30,6 +31,31 @@ Some rule numbers are not implemented in rumdl:
 - **MD015, MD016, MD017** - These rule numbers were never assigned in either the Ruby or Node.js versions of markdownlint
 
 These gaps in numbering are maintained for compatibility with markdownlint rule numbering.
+
+## Severity Levels
+
+Rules are categorized into two severity levels based on their impact on document functionality:
+
+### Error Severity
+
+Rules with Error severity flag issues that break document functionality:
+
+- **MD001** - Broken heading hierarchy prevents screen reader navigation
+- **MD011** - Reversed link syntax makes links non-functional
+- **MD024** - Duplicate headings create ID collisions, anchors point to wrong sections
+- **MD025** - Multiple H1 elements break document outline structure
+- **MD042** - Empty links have no destination and don't work
+- **MD045** - Missing alt text violates WCAG accessibility requirements
+- **MD051** - Invalid link fragments point to non-existent sections
+- **MD057** - Links to non-existent files are broken
+- **MD066** - Undefined footnote references are broken
+- **MD068** - Empty footnote definitions have no content
+
+### Warning Severity
+
+All other rules use Warning severity. These flag style, formatting, and convention issues that don't break document functionality but affect readability, consistency, or best practices.
+
+**Note**: While issue #217 documents per-rule severity configuration, this feature is not yet implemented. Current severities are defaults that apply to all files.
 
 ## Heading Rules
 
