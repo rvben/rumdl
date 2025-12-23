@@ -16,13 +16,13 @@ tags:
 ## Backuparten
 
 - **Voll-Backup**
-    Ein Voll-Backup ist eine vollständige Sicherung aller Daten. Es ist die Grundlage für andere Backuparten und ermöglicht eine schnelle Wiederherstellung.
+    In Voll-Backup ist eine vollständige Sicherung aller Daten. Es ist die Grundlage für andere Backuparten und ermöglicht eine schnelle Wiederherstellung.
 
 - **Inkrementelles Backup**
     Sichert nur die Änderungen seit dem letzten Backup. Dies spart Speicherplatz und Zeit.
 
 - **Differenzielles Backup**
-    Sichert alle Änderungen seit dem letzten Voll-Backup. Größere Datenmenge als inkrementell.
+    Sichert alle Änderungen seit dem letzten Voll-Backup. Größere Datenmenge also inkrementell.
 
 ## Überprüfung
 

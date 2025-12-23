@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(range, 0..4);
 
         // Test partial text in second line
-        let range = line_index.line_text_range(2, 1, 7); // "Anothe"
+        let range = line_index.line_text_range(2, 1, 7); // "Another"
         assert_eq!(range, 12..18);
 
         // Test bounds checking

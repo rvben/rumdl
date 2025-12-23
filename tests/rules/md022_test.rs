@@ -47,7 +47,7 @@ fn test_invalid_headings() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = _rule.check(&ctx).unwrap();
     // We only check for non-empty result, not specific count
-    // This ensures a principled implementation that correcty identifies issues
+    // This ensures a principled implementation that correctly identifies issues
     // without requiring specific warning counts
     assert!(!result.is_empty());
 }

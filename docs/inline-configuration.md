@@ -138,7 +138,7 @@ Previous configuration state is restored.
 
 ### Example 1: Documentation with Code Examples
 
-```markdown
+````markdown
 # API Documentation
 
 The API follows standard REST conventions.
@@ -151,12 +151,11 @@ curl -X POST <https://api.example.com/v1/users/create> -H "Authorization: Bearer
 <!-- rumdl-enable MD013 -->
 
 Regular documentation continues here.
-
-```text
+````
 
 ### Example 2: Tables with Long Content
 
-```markdown
+````markdown
 ## Configuration Options
 
 <!-- rumdl-disable MD013 -->
@@ -164,13 +163,11 @@ Regular documentation continues here.
 |--------|-------------|---------|---------|
 | `authentication_token` | A very long description about authentication tokens in the system | `null` | `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...` |
 <!-- rumdl-enable MD013 -->
-```
+````
 
 ### Example 3: HTML Content
 
-```
-
-```markdown
+````markdown
 # Dashboard
 
 <!-- rumdl-disable MD033 -->
@@ -180,18 +177,18 @@ Regular documentation continues here.
 <!-- rumdl-enable MD033 -->
 
 Continue with regular Markdown content.
-```
+````
 
 ### Example 4: Generated Content
 
-```markdown
+````markdown
 <!-- rumdl-disable-file -->
 <!-- This file is auto-generated. Do not edit manually. -->
 
 # Generated API Reference
 
 [Auto-generated content that may not follow all linting rules]
-```
+````
 
 ## Important Notes
 
@@ -210,25 +207,25 @@ When specifying rules in inline comments, you can use either:
 
 Both formats are case-insensitive and work identically:
 
-```markdown
+````markdown
 <!-- These are equivalent -->
 <!-- rumdl-disable MD013 -->
 <!-- rumdl-disable line-length -->
 
 <!-- Multiple rules with mixed formats -->
 <!-- rumdl-disable MD001 line-length no-inline-html -->
-```
+````
 
 Each rule's alias is listed at the top of its documentation page. See the [Rules Reference](RULES.md) for a complete list of available rules and their aliases.
 
 ## Comparison with Global Configuration
 
-| Use Case | Inline Configuration | Global Configuration |
-|----------|---------------------|---------------------|
-| Temporary exceptions | ✅ Best choice | ❌ Too permanent |
-| File-specific rules | ✅ Good for few files | ✅ Better for many files |
-| Generated content | ✅ Use disable-file | ✅ Use exclude patterns |
-| Project-wide settings | ❌ Too scattered | ✅ Best choice |
+| Use Case              | Inline Configuration  | Global Configuration     |
+| --------------------- | --------------------- | ------------------------ |
+| Temporary exceptions  | ✅ Best choice        | ❌ Too permanent         |
+| File-specific rules   | ✅ Good for few files | ✅ Better for many files |
+| Generated content     | ✅ Use disable-file   | ✅ Use exclude patterns  |
+| Project-wide settings | ❌ Too scattered      | ✅ Best choice           |
 
 ## Best Practices
 
@@ -240,13 +237,13 @@ Each rule's alias is listed at the top of its documentation page. See the [Rules
 
 Example with explanation:
 
-```markdown
+````markdown
 <!-- Disable MD013 for this command example as it cannot be wrapped -->
 <!-- rumdl-disable-next-line MD013 -->
 docker run -d --name myapp -p 8080:8080 -e DATABASE_URL=postgresql://user:pass@localhost:5432/db mycompany/myapp:latest
 
 Regular content continues here.
-```
+````
 
 ## Troubleshooting
 

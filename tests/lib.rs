@@ -4,7 +4,6 @@ mod cli_duplication_test;
 mod cli_integration_tests;
 mod comprehensive_integration_tests;
 mod init_command_test;
-mod issue197_exit_code_fix_test;
 mod output_format_tests;
 mod pyproject_config_tests;
 mod rules;

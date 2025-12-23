@@ -1712,9 +1712,9 @@ fn test_fuzzy_matching_suggests_aliases() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let config_path = temp_dir.path().join("test.toml");
 
-    // Typo in alias name: "ul-sytle" instead of "ul-style"
+    // Typo in alias name: "ul-style" instead of "ul-style"
     let config_content = r#"
-[ul-sytle]
+[ul-style]
 style = "dash"
 "#;
 
@@ -1738,7 +1738,7 @@ style = "dash"
 
     // The warning should suggest the correct alias "ul-style" in lowercase
     assert!(
-        warnings[0].message.contains("ul-sytle"),
+        warnings[0].message.contains("ul-style"),
         "Warning should mention the typo: {}",
         warnings[0].message
     );
