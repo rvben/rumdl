@@ -500,6 +500,7 @@ pub struct LintContext<'a> {
     emphasis_spans_cache: OnceLock<Arc<Vec<EmphasisSpan>>>, // Lazy-loaded emphasis spans
     table_rows_cache: OnceLock<Arc<Vec<TableRow>>>, // Lazy-loaded table rows
     bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>, // Lazy-loaded bare URLs
+    has_mixed_list_nesting_cache: OnceLock<bool>, // Cached result for mixed ordered/unordered list nesting detection
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
     pub line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed line index for byte position calculations
@@ -702,6 +703,7 @@ impl<'a> LintContext<'a> {
             emphasis_spans_cache: OnceLock::new(),
             table_rows_cache: OnceLock::new(),
             bare_urls_cache: OnceLock::new(),
+            has_mixed_list_nesting_cache: OnceLock::new(),
             html_comment_ranges,
             table_blocks,
             line_index,
@@ -758,6 +760,81 @@ impl<'a> LintContext<'a> {
             self.bare_urls_cache
                 .get_or_init(|| Arc::new(Self::parse_bare_urls(self.content, &self.lines, &self.code_blocks))),
         )
+    }
+
+    /// Check if document has mixed ordered/unordered list nesting.
+    /// Result is cached after first computation (document-level invariant).
+    /// This is used by MD007 for smart style auto-detection.
+    pub fn has_mixed_list_nesting(&self) -> bool {
+        *self
+            .has_mixed_list_nesting_cache
+            .get_or_init(|| self.compute_mixed_list_nesting())
+    }
+
+    /// Internal computation for mixed list nesting (only called once per LintContext).
+    fn compute_mixed_list_nesting(&self) -> bool {
+        // Track parent list items by their marker position and type
+        // Using marker_column instead of indent because it works correctly
+        // for blockquoted content where indent doesn't account for the prefix
+        // Stack stores: (marker_column, is_ordered)
+        let mut stack: Vec<(usize, bool)> = Vec::new();
+        let mut last_was_blank = false;
+
+        for line_info in &self.lines {
+            // Skip non-content lines (code blocks, frontmatter, HTML comments, etc.)
+            if line_info.in_code_block
+                || line_info.in_front_matter
+                || line_info.in_mkdocstrings
+                || line_info.in_html_comment
+                || line_info.in_esm_block
+            {
+                continue;
+            }
+
+            // OPTIMIZATION: Use pre-computed is_blank instead of content().trim()
+            if line_info.is_blank {
+                last_was_blank = true;
+                continue;
+            }
+
+            if let Some(list_item) = &line_info.list_item {
+                // Normalize column 1 to column 0 (consistent with MD007 check function)
+                let current_pos = if list_item.marker_column == 1 {
+                    0
+                } else {
+                    list_item.marker_column
+                };
+
+                // If there was a blank line and this item is at root level, reset stack
+                if last_was_blank && current_pos == 0 {
+                    stack.clear();
+                }
+                last_was_blank = false;
+
+                // Pop items at same or greater position (they're siblings or deeper, not parents)
+                while let Some(&(pos, _)) = stack.last() {
+                    if pos >= current_pos {
+                        stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Check if immediate parent has different type - this is mixed nesting
+                if let Some(&(_, parent_is_ordered)) = stack.last()
+                    && parent_is_ordered != list_item.is_ordered
+                {
+                    return true; // Found mixed nesting - early exit
+                }
+
+                stack.push((current_pos, list_item.is_ordered));
+            } else {
+                // Non-list line (but not blank) - could be paragraph or other content
+                last_was_blank = false;
+            }
+        }
+
+        false
     }
 
     /// Map a byte offset to (line, column)

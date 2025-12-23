@@ -47,77 +47,6 @@ impl MD007ULIndent {
         visual_col
     }
 
-    /// Detect if the document has mixed ordered/unordered list nesting.
-    /// This is used for smart style selection: fixed style causes oscillation
-    /// with mixed lists, so we only auto-switch to fixed for pure unordered lists.
-    fn has_mixed_list_nesting(ctx: &crate::lint_context::LintContext) -> bool {
-        // Track parent list items by their marker position and type
-        // Using marker_column instead of indent because it works correctly
-        // for blockquoted content where indent doesn't account for the prefix
-        // Stack stores: (marker_column, is_ordered)
-        let mut stack: Vec<(usize, bool)> = Vec::new();
-        let mut last_was_blank = false;
-
-        for line_info in &ctx.lines {
-            // Skip non-content lines (code blocks, frontmatter, HTML comments, etc.)
-            if line_info.in_code_block
-                || line_info.in_front_matter
-                || line_info.in_mkdocstrings
-                || line_info.in_html_comment
-                || line_info.in_esm_block
-            {
-                continue;
-            }
-
-            // Check for blank lines to detect list separation
-            let content = line_info.content(ctx.content);
-            let is_blank = content.trim().is_empty();
-
-            if is_blank {
-                last_was_blank = true;
-                continue;
-            }
-
-            if let Some(list_item) = &line_info.list_item {
-                // Normalize column 1 to column 0 (consistent with check function)
-                let current_pos = if list_item.marker_column == 1 {
-                    0
-                } else {
-                    list_item.marker_column
-                };
-
-                // If there was a blank line and this item is at root level, reset stack
-                if last_was_blank && current_pos == 0 {
-                    stack.clear();
-                }
-                last_was_blank = false;
-
-                // Pop items at same or greater position (they're siblings or deeper, not parents)
-                while let Some(&(pos, _)) = stack.last() {
-                    if pos >= current_pos {
-                        stack.pop();
-                    } else {
-                        break;
-                    }
-                }
-
-                // Check if immediate parent has different type - this is mixed nesting
-                if let Some(&(_, parent_is_ordered)) = stack.last()
-                    && parent_is_ordered != list_item.is_ordered
-                {
-                    return true; // Found mixed nesting
-                }
-
-                stack.push((current_pos, list_item.is_ordered));
-            } else {
-                // Non-list line (but not blank) - could be paragraph or other content
-                last_was_blank = false;
-            }
-        }
-
-        false
-    }
-
     /// Determine the effective style to use for this check.
     /// When style is not explicitly set and indent != 2, we auto-select:
     /// - Pure unordered lists → fixed style (markdownlint compatible)
@@ -135,7 +64,8 @@ impl MD007ULIndent {
         }
 
         // Auto-select: fixed for pure unordered lists, text-aligned for mixed
-        if Self::has_mixed_list_nesting(ctx) {
+        // Use cached method from LintContext for optimal performance
+        if ctx.has_mixed_list_nesting() {
             md007_config::IndentStyle::TextAligned
         } else {
             md007_config::IndentStyle::Fixed
@@ -232,7 +162,8 @@ impl Rule for MD007ULIndent {
 
                 // For nesting detection, treat 1-space indent as if it's at column 0
                 // because 1 space is insufficient to establish a nesting relationship
-                let visual_marker_for_nesting = if visual_marker_column == 1 {
+                // UNLESS the user has explicitly configured indent=1, in which case 1 space IS valid nesting
+                let visual_marker_for_nesting = if visual_marker_column == 1 && self.config.indent.get() != 1 {
                     0
                 } else {
                     visual_marker_column
@@ -1203,7 +1134,7 @@ tags:
         let content = "* Item 1\n  * Item 2\n    * Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Pure unordered should not be detected as mixed"
         );
 
@@ -1211,7 +1142,7 @@ tags:
         let content = "1. Item 1\n   2. Item 2\n      3. Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Pure ordered should not be detected as mixed"
         );
 
@@ -1219,7 +1150,7 @@ tags:
         let content = "1. Ordered\n   * Unordered child";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Unordered under ordered should be detected as mixed"
         );
 
@@ -1227,7 +1158,7 @@ tags:
         let content = "* Unordered\n  1. Ordered child";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Ordered under unordered should be detected as mixed"
         );
 
@@ -1235,7 +1166,7 @@ tags:
         let content = "* Unordered\n\n1. Ordered (separate list)";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Separate lists should not be detected as mixed"
         );
 
@@ -1243,7 +1174,7 @@ tags:
         let content = "> 1. Ordered in blockquote\n>    * Unordered child";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Mixed lists in blockquotes should be detected"
         );
     }
@@ -1309,7 +1240,7 @@ tags:
         let content = "1. Ordered grandparent\n   * Unordered child\n     * Unordered grandchild";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Should detect mixed nesting when grandparent differs in type"
         );
 
@@ -1317,7 +1248,7 @@ tags:
         let content = "* Unordered grandparent\n  1. Ordered child\n     2. Ordered grandchild";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Should detect mixed nesting for ordered descendants under unordered"
         );
     }
@@ -1333,7 +1264,7 @@ tags:
   * Another unordered item"#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Lists in HTML comments should be ignored in mixed detection"
         );
     }
@@ -1344,7 +1275,7 @@ tags:
         let content = "* First unordered list\n\n1. Second list is ordered (separate)";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Blank line at root should separate lists"
         );
 
@@ -1352,7 +1283,7 @@ tags:
         let content = "1. Ordered parent\n\n   * Still a child due to indentation";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Indented list after blank is still nested"
         );
     }
@@ -1383,7 +1314,7 @@ tags:
   * Another unordered item"#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Lists in code blocks should be ignored in mixed detection"
         );
     }
@@ -1399,7 +1330,7 @@ items:
 * Unordered list after front matter"#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Lists in front matter should be ignored in mixed detection"
         );
     }
@@ -1411,7 +1342,7 @@ items:
         let content = "* First bullet\n1. First number\n* Second bullet\n2. Second number";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Alternating types at same level should not be detected as mixed"
         );
     }
@@ -1421,10 +1352,7 @@ items:
         // Test detection at 5+ levels of nesting
         let content = "* L0\n  1. L1\n     * L2\n       1. L3\n          * L4\n            1. L5";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
-            "Should detect mixed nesting at 5+ levels"
-        );
+        assert!(ctx.has_mixed_list_nesting(), "Should detect mixed nesting at 5+ levels");
     }
 
     #[test]
@@ -1440,7 +1368,7 @@ items:
 
         // Should NOT be detected as mixed (all unordered)
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Pure unordered deep nesting should not be detected as mixed"
         );
 
@@ -1458,7 +1386,7 @@ items:
         let content = "1. Ordered parent\n\n   Paragraph continuation\n\n   * Unordered child";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Should detect mixed nesting even with interleaved paragraphs"
         );
     }
@@ -1470,7 +1398,7 @@ items:
         let content = "* Unordered list\n  * Nested unordered";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Pure unordered should not be detected as mixed"
         );
     }
@@ -1486,7 +1414,7 @@ items:
    * Bullet under ordered"#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Should detect mixed nesting in any part of document"
         );
     }
@@ -1506,7 +1434,7 @@ items:
     * Nested"#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            !MD007ULIndent::has_mixed_list_nesting(&ctx),
+            !ctx.has_mixed_list_nesting(),
             "Multiple separate pure unordered lists should not be mixed"
         );
     }
@@ -1521,7 +1449,7 @@ items:
    * Still a mixed child"#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Code block between items should not prevent mixed detection"
         );
     }
@@ -1534,7 +1462,7 @@ items:
         // Note: Detection depends on correct marker_column calculation in blockquotes
         // This test verifies the detection logic works with blockquoted content
         assert!(
-            MD007ULIndent::has_mixed_list_nesting(&ctx),
+            ctx.has_mixed_list_nesting(),
             "Should detect mixed nesting in blockquotes"
         );
     }

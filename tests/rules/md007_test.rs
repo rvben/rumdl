@@ -832,4 +832,793 @@ mod excessive_indentation_bug_fix {
         // Should have no MD007 warnings - code blocks are not list items
         assert!(warnings.is_empty(), "Code blocks should not trigger MD007");
     }
+
+    // Tests for Issue #210: MD007 indent config
+    // These tests verify that custom indent values are respected when configured
+    mod issue210_indent_config {
+        use std::fs;
+        use std::process::Command;
+        use tempfile::tempdir;
+
+        /// Test the exact scenario from issue #210
+        /// Pure unordered list with indent=4 should use fixed style (0, 4, 8 spaces)
+        #[test]
+        fn test_indent_4_pure_unordered() {
+            let temp_dir = tempdir().unwrap();
+            let test_file = temp_dir.path().join("repro.md");
+            let config_file = temp_dir.path().join(".rumdl.toml");
+
+            // Exact content from issue #210
+            let content = r#"# Title
+
+* some
+    * list
+    * items
+"#;
+
+            // Exact config from issue #210
+            let config = r#"[global]
+line-length = 120
+
+[MD007]
+indent = 4
+start-indented = false
+"#;
+
+            fs::write(&test_file, content).unwrap();
+            fs::write(&config_file, config).unwrap();
+
+            // Run check - should find NO issues because:
+            // - Level 0: 0 spaces (correct for "* some")
+            // - Level 1: 4 spaces (correct for "* list" and "* items" with indent=4 fixed style)
+            let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("check")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            // Should have no issues - the 4-space indent is correct for level 1 with indent=4
+            assert!(
+                stdout.contains("No issues found") && exit_code == 0,
+                "Issue #210: With indent=4, pure unordered lists should use fixed style (0, 4, 8 spaces).\n\
+                 The 4-space indent for level 1 items should be correct.\n\
+                 stdout: {stdout}\n\
+                 stderr: {stderr}\n\
+                 exit code: {exit_code}\n\
+                 If this fails, the indent=4 config is being ignored."
+            );
+        }
+
+        /// Test that indent=4 works with deeper nesting
+        #[test]
+        fn test_indent_4_deep_nesting() {
+            let temp_dir = tempdir().unwrap();
+            let test_file = temp_dir.path().join("test.md");
+            let config_file = temp_dir.path().join(".rumdl.toml");
+
+            // Content with 3 levels - should use 0, 4, 8 spaces with indent=4 fixed style
+            let content = r#"# Title
+
+* Level 0
+    * Level 1 (4 spaces)
+        * Level 2 (8 spaces)
+"#;
+
+            let config = r#"[MD007]
+indent = 4
+"#;
+
+            fs::write(&test_file, content).unwrap();
+            fs::write(&config_file, config).unwrap();
+
+            let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("check")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            assert!(
+                stdout.contains("No issues found") && exit_code == 0,
+                "With indent=4 fixed style, 0/4/8 spaces should be correct.\n\
+                 stdout: {stdout}\n\
+                 exit code: {exit_code}"
+            );
+        }
+
+        /// Test that wrong indentation is detected with indent=4
+        #[test]
+        fn test_indent_4_detects_wrong_indent() {
+            let temp_dir = tempdir().unwrap();
+            let test_file = temp_dir.path().join("test.md");
+            let config_file = temp_dir.path().join(".rumdl.toml");
+
+            // Content with wrong indentation - 2 spaces instead of 4
+            let content = r#"# Title
+
+* Level 0
+  * Level 1 (2 spaces - WRONG, should be 4)
+"#;
+
+            let config = r#"[MD007]
+indent = 4
+"#;
+
+            fs::write(&test_file, content).unwrap();
+            fs::write(&config_file, config).unwrap();
+
+            let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("check")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            // Should detect the wrong indentation
+            assert!(
+                stdout.contains("MD007") && stdout.contains("Expected 4 spaces"),
+                "Should detect wrong indentation (2 spaces instead of 4).\n\
+                 stdout: {stdout}\n\
+                 exit code: {exit_code}"
+            );
+        }
+
+        /// Test that explicit style=fixed works with indent=4
+        #[test]
+        fn test_explicit_fixed_style() {
+            let temp_dir = tempdir().unwrap();
+            let test_file = temp_dir.path().join("test.md");
+            let config_file = temp_dir.path().join(".rumdl.toml");
+
+            // Content with correct fixed style indentation
+            let content = r#"# Title
+
+* Level 0
+    * Level 1 (4 spaces)
+        * Level 2 (8 spaces)
+"#;
+
+            // Explicit style=fixed should work the same as auto-detection
+            let config = r#"[MD007]
+indent = 4
+style = "fixed"
+"#;
+
+            fs::write(&test_file, content).unwrap();
+            fs::write(&config_file, config).unwrap();
+
+            let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("check")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            assert!(
+                stdout.contains("No issues found") && exit_code == 0,
+                "With explicit style=fixed and indent=4, should work correctly.\n\
+                 stdout: {stdout}\n\
+                 exit code: {exit_code}"
+            );
+        }
+    }
+
+    // Tests for Issue #209: Fix convergence for mixed ordered/unordered lists
+    // These tests verify that MD007 and MD005 don't oscillate when fixing mixed lists
+    mod issue209_fix_convergence {
+        use std::fs;
+        use std::process::Command;
+        use tempfile::tempdir;
+
+        /// Test the exact scenario from issue #209
+        /// Mixed ordered/unordered list with indent=3 should converge in one pass
+        #[test]
+        fn test_mixed_list_single_pass_convergence() {
+            let temp_dir = tempdir().unwrap();
+            let test_file = temp_dir.path().join("test.md");
+            let config_file = temp_dir.path().join(".rumdl.toml");
+
+            // Exact content from issue #209
+            let content = r#"# Header 1
+
+- **First item**:
+  - First subitem
+  - Second subitem
+  - Third subitem
+- **Second item**:
+  - **This is a nested list**:
+    1. **First point**
+       - First subpoint
+       - Second subpoint
+       - Third subpoint
+    2. **Second point**
+       - First subpoint
+       - Second subpoint
+       - Third subpoint
+"#;
+
+            // Config from issue #209
+            let config = r#"[global]
+enable = ["MD005", "MD007"]
+
+[MD007]
+indent = 3
+"#;
+
+            fs::write(&test_file, content).unwrap();
+            fs::write(&config_file, config).unwrap();
+
+            // Run fmt once
+            let output1 = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("fmt")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout1 = String::from_utf8_lossy(&output1.stdout);
+
+            // Run fmt a second time - should find no issues (convergence)
+            let output2 = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("fmt")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout2 = String::from_utf8_lossy(&output2.stdout);
+
+            // The second run should show "No issues found" - single pass convergence
+            assert!(
+                stdout2.contains("No issues found"),
+                "Fix should converge in single pass.\n\
+                 First run output:\n{stdout1}\n\
+                 Second run output:\n{stdout2}"
+            );
+        }
+
+        /// Test that check --fix also converges in one pass
+        #[test]
+        fn test_check_fix_single_pass() {
+            let temp_dir = tempdir().unwrap();
+            let test_file = temp_dir.path().join("test.md");
+            let config_file = temp_dir.path().join(".rumdl.toml");
+
+            let content = r#"# Header 1
+
+- **Second item**:
+  - **This is a nested list**:
+    1. **First point**
+       - First subpoint
+    2. **Second point**
+       - First subpoint
+"#;
+
+            let config = r#"[global]
+enable = ["MD005", "MD007"]
+
+[MD007]
+indent = 3
+"#;
+
+            fs::write(&test_file, content).unwrap();
+            fs::write(&config_file, config).unwrap();
+
+            // Run check --fix
+            let output1 = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("check")
+                .arg("--fix")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            // Run check (no fix) - should find no issues
+            let output2 = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("check")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout2 = String::from_utf8_lossy(&output2.stdout);
+            let exit_code = output2.status.code().unwrap_or(-1);
+
+            assert!(
+                stdout2.contains("No issues found") && exit_code == 0,
+                "After check --fix, no issues should remain.\n\
+                 First run: {:?}\n\
+                 Second run stdout: {stdout2}\n\
+                 Exit code: {exit_code}",
+                String::from_utf8_lossy(&output1.stdout)
+            );
+        }
+
+        /// Test that explicit style=text-aligned works correctly
+        #[test]
+        fn test_explicit_text_aligned_no_issues() {
+            let temp_dir = tempdir().unwrap();
+            let test_file = temp_dir.path().join("test.md");
+            let config_file = temp_dir.path().join(".rumdl.toml");
+
+            // This content should have NO issues with text-aligned style
+            let content = r#"# Header 1
+
+- **Second item**:
+  - **This is a nested list**:
+    1. **First point**
+       - First subpoint
+"#;
+
+            let config = r#"[global]
+enable = ["MD005", "MD007"]
+
+[MD007]
+indent = 3
+style = "text-aligned"
+"#;
+
+            fs::write(&test_file, content).unwrap();
+            fs::write(&config_file, config).unwrap();
+
+            let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("check")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            assert!(
+                stdout.contains("No issues found") && exit_code == 0,
+                "With explicit text-aligned style, mixed lists should have no issues.\n\
+                 stdout: {stdout}\n\
+                 exit code: {exit_code}"
+            );
+        }
+
+        /// Test that without explicit style, text-aligned is used (default)
+        /// This is the key behavioral change - we no longer auto-switch to fixed
+        #[test]
+        fn test_default_style_is_text_aligned() {
+            let temp_dir = tempdir().unwrap();
+            let test_file = temp_dir.path().join("test.md");
+            let config_file = temp_dir.path().join(".rumdl.toml");
+
+            // Content matching the exact issue 209 scenario - this should have no issues
+            // with text-aligned style (default) but would oscillate with fixed style
+            let content = r#"# Header 1
+
+- **Second item**:
+  - **This is a nested list**:
+    1. **First point**
+       - First subpoint
+"#;
+
+            // indent=3 but NO explicit style - should default to text-aligned
+            // Previously this would auto-switch to fixed style and cause oscillation
+            let config = r#"[global]
+enable = ["MD005", "MD007"]
+
+[MD007]
+indent = 3
+"#;
+
+            fs::write(&test_file, content).unwrap();
+            fs::write(&config_file, config).unwrap();
+
+            let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .arg("check")
+                .arg("--no-cache")
+                .current_dir(temp_dir.path())
+                .output()
+                .expect("Failed to execute rumdl");
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            // With text-aligned (default), this structure should be valid
+            // With the old auto-switch to fixed, MD007 would flag the sub-bullets
+            // expecting 9 spaces instead of 7
+            assert!(
+                stdout.contains("No issues found") && exit_code == 0,
+                "Default style should be text-aligned, not auto-switching to fixed.\n\
+                 stdout: {stdout}\n\
+                 exit code: {exit_code}\n\
+                 (If this fails, the auto-switch to fixed style may still be active)"
+            );
+        }
+    }
+}
+
+// Edge case tests for MD007 indent config (Issue #210)
+// These tests verify edge cases and potential issues with the smart
+// auto-detection for custom indent values.
+mod indent_config_edge_cases {
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    /// Test edge case: indent=3 with pure unordered lists
+    #[test]
+    fn test_indent_3_pure_unordered() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        let content = r#"# Title
+
+* Level 0
+   * Level 1 (3 spaces)
+      * Level 2 (6 spaces)
+"#;
+
+        let config = r#"[MD007]
+indent = 3
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "With indent=3, pure unordered lists should use fixed style (0, 3, 6 spaces).\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test edge case: indent=5 with pure unordered lists
+    #[test]
+    fn test_indent_5_pure_unordered() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        let content = r#"# Title
+
+* Level 0
+     * Level 1 (5 spaces)
+          * Level 2 (10 spaces)
+"#;
+
+        let config = r#"[MD007]
+indent = 5
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "With indent=5, pure unordered lists should use fixed style (0, 5, 10 spaces).\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test edge case: indent=4 with mixed lists (should use text-aligned)
+    #[test]
+    fn test_indent_4_mixed_lists_text_aligned() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        // Mixed list - should use text-aligned style, not fixed
+        // Use consistent markers to avoid MD004 issues
+        let content = r#"# Title
+
+* Unordered item
+  * Nested unordered (2 spaces - text-aligned)
+    1. Ordered child (3 spaces - text-aligned)
+"#;
+
+        let config = r#"[global]
+disable = ["MD004"]
+
+[MD007]
+indent = 4
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        // With mixed lists, text-aligned style should be used, so this should be valid
+        // (text-aligned doesn't require strict multiples of indent)
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "With indent=4 and mixed lists, text-aligned style should be used.\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test edge case: config loaded from pyproject.toml
+    #[test]
+    fn test_indent_4_from_pyproject() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join("pyproject.toml");
+
+        let content = r#"# Title
+
+* some
+    * list
+    * items
+"#;
+
+        let config = r#"[tool.rumdl.MD007]
+indent = 4
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "Config from pyproject.toml should work correctly.\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test edge case: config with explicit style=fixed should override auto-detection
+    #[test]
+    fn test_indent_4_explicit_fixed_overrides_auto() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        // Even with mixed lists, explicit style=fixed should be used
+        let content = r#"# Title
+
+* Unordered
+    * Nested (4 spaces - fixed style)
+"#;
+
+        let config = r#"[MD007]
+indent = 4
+style = "fixed"
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        // With explicit fixed style, it should expect 4 spaces for level 1
+        // The content has 4 spaces, so this should be valid
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "Explicit style=fixed with correct 4-space indent should be valid.\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test edge case: config with explicit style=text-aligned
+    #[test]
+    fn test_indent_4_explicit_text_aligned() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        let content = r#"# Title
+
+* Unordered
+  * Nested (2 spaces - text-aligned)
+"#;
+
+        let config = r#"[MD007]
+indent = 4
+style = "text-aligned"
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "Explicit style=text-aligned should work correctly.\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test edge case: indent=1 (minimum value)
+    #[test]
+    fn test_indent_1_pure_unordered() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        let content = r#"# Title
+
+* Level 0
+ * Level 1 (1 space - correct for indent=1 fixed style)
+  * Level 2 (2 spaces - correct for indent=1 fixed style)
+"#;
+
+        let config = r#"[global]
+disable = ["MD005"]
+
+[MD007]
+indent = 1
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "With indent=1, pure unordered lists should use fixed style (0, 1, 2 spaces).\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test edge case: indent=8 (maximum value)
+    #[test]
+    fn test_indent_8_pure_unordered() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        let content = r#"# Title
+
+* Level 0
+        * Level 1 (8 spaces)
+                * Level 2 (16 spaces)
+"#;
+
+        let config = r#"[MD007]
+indent = 8
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "With indent=8, pure unordered lists should use fixed style (0, 8, 16 spaces).\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test edge case: config in parent directory
+    #[test]
+    fn test_indent_4_config_in_parent() {
+        let temp_dir = tempdir().unwrap();
+        let sub_dir = temp_dir.path().join("sub");
+        fs::create_dir_all(&sub_dir).unwrap();
+
+        let test_file = sub_dir.join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        let content = r#"# Title
+
+* some
+    * list
+    * items
+"#;
+
+        let config = r#"[MD007]
+indent = 4
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(&sub_dir)
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "Config from parent directory should be discovered and used.\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
 }
