@@ -249,8 +249,9 @@ impl MD051LinkFragments {
             return text.to_string();
         }
 
-        // Matches HTML comments and all tag variants
-        const HTML_TAG_REGEX: &str = r"<!--[\s\S]*?-->|<[^>]*>";
+        // Matches HTML comments and actual HTML tags (lowercase tag names only)
+        // This preserves arrow patterns like <->, <--, and placeholders like <FILE>, <Type>
+        const HTML_TAG_REGEX: &str = r"<!--[\s\S]*?-->|</?[a-z][^>]*>";
 
         let stripped = get_cached_regex(HTML_TAG_REGEX)
             .map(|re| re.replace_all(text, " "))
