@@ -463,6 +463,14 @@ impl MD063HeadingCapitalization {
             .filter_map(|(i, s)| matches!(s, HeadingSegment::Text(_)).then_some(i))
             .collect();
 
+        // Determine if the last segment overall is a text segment
+        // If the last segment is Code or Link, then the last text segment should NOT
+        // treat its last word as the heading's last word (for lowercase-words respect)
+        let last_segment_is_text = segments
+            .last()
+            .map(|s| matches!(s, HeadingSegment::Text(_)))
+            .unwrap_or(false);
+
         // Apply capitalization to each segment
         let mut result_parts: Vec<String> = Vec::new();
 
@@ -470,7 +478,10 @@ impl MD063HeadingCapitalization {
             match segment {
                 HeadingSegment::Text(t) => {
                     let is_first_text = text_segments.first() == Some(&i);
-                    let is_last_text = text_segments.last() == Some(&i);
+                    // A text segment is "last" only if it's the last text segment AND
+                    // the last segment overall is also text. If there's Code/Link after,
+                    // the last word should respect lowercase-words.
+                    let is_last_text = text_segments.last() == Some(&i) && last_segment_is_text;
 
                     let capitalized = match self.config.style {
                         HeadingCapStyle::TitleCase => self.apply_title_case_segment(t, is_first_text, is_last_text),
@@ -1123,7 +1134,6 @@ mod tests {
         assert!(!rule.is_all_caps_acronym("iPhone"));
     }
 
-    // Issue #215: ignore-words should work for first word in sentence case
     #[test]
     fn test_sentence_case_ignore_words_first_word() {
         let config = MD063Config {
@@ -1168,7 +1178,6 @@ mod tests {
         );
     }
 
-    // Issue #216: preserve-cased-words should work for "iOS"
     #[test]
     fn test_preserve_cased_words_ios() {
         let config = MD063Config {
@@ -1238,5 +1247,372 @@ mod tests {
         // Regular capitalized words should NOT be detected
         assert!(!rule.has_internal_capitals("The"));
         assert!(!rule.has_internal_capitals("Hello"));
+    }
+
+    #[test]
+    fn test_lowercase_words_before_trailing_code() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec![
+                "a".to_string(),
+                "an".to_string(),
+                "and".to_string(),
+                "at".to_string(),
+                "but".to_string(),
+                "by".to_string(),
+                "for".to_string(),
+                "from".to_string(),
+                "into".to_string(),
+                "nor".to_string(),
+                "on".to_string(),
+                "onto".to_string(),
+                "or".to_string(),
+                "the".to_string(),
+                "to".to_string(),
+                "upon".to_string(),
+                "via".to_string(),
+                "vs".to_string(),
+                "with".to_string(),
+                "without".to_string(),
+            ],
+            preserve_cased_words: true,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Test: "subtitle with a `app`" (all lowercase input)
+        // Expected fix: "Subtitle With a `app`" - capitalize "Subtitle" and "With",
+        // but keep "a" lowercase (it's in lowercase-words and not the last word)
+        // Incorrect: "Subtitle with A `app`" (would incorrectly capitalize "a")
+        let content = "## subtitle with a `app`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag it
+        assert!(!result.is_empty(), "Should flag incorrect capitalization");
+        let fixed = rule.fix(&ctx).unwrap();
+        // "a" should remain lowercase (not "A") because inline code at end doesn't change lowercase-words behavior
+        assert!(
+            fixed.contains("with a `app`"),
+            "Expected 'with a `app`' but got: {fixed:?}"
+        );
+        assert!(
+            !fixed.contains("with A `app`"),
+            "Should not capitalize 'a' to 'A'. Got: {fixed:?}"
+        );
+        // "Subtitle" should be capitalized, "with" and "a" should remain lowercase (they're in lowercase-words)
+        assert!(
+            fixed.contains("Subtitle with a `app`"),
+            "Expected 'Subtitle with a `app`' but got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_lowercase_words_preserved_before_trailing_code_variant() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "with".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Another variant: "Title with the `code`"
+        let content = "## Title with the `code`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "the" should remain lowercase
+        assert!(
+            fixed.contains("with the `code`"),
+            "Expected 'with the `code`' but got: {fixed:?}"
+        );
+        assert!(
+            !fixed.contains("with The `code`"),
+            "Should not capitalize 'the' to 'The'. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_last_word_capitalized_when_no_trailing_code() {
+        // Verify that when there's NO trailing code, the last word IS capitalized
+        // (even if it's in lowercase-words) - this is the normal title case behavior
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // "title with a word" - "word" is last, should be capitalized
+        // "a" is in lowercase-words and not last, so should be lowercase
+        let content = "## title with a word\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "a" should be lowercase, "word" should be capitalized (it's last)
+        assert!(
+            fixed.contains("With a Word"),
+            "Expected 'With a Word' but got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_lowercase_words_before_code() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec![
+                "a".to_string(),
+                "the".to_string(),
+                "with".to_string(),
+                "for".to_string(),
+            ],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Multiple lowercase words before code - all should remain lowercase
+        let content = "## Guide for the `user`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("for the `user`"),
+            "Expected 'for the `user`' but got: {fixed:?}"
+        );
+        assert!(
+            !fixed.contains("For The `user`"),
+            "Should not capitalize lowercase words before code. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_code_in_middle_normal_rules_apply() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "for".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Code in the middle - normal title case rules apply (last word capitalized)
+        let content = "## Using `const` for the code\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "for" and "the" should be lowercase (middle), "code" should be capitalized (last)
+        assert!(
+            fixed.contains("for the Code"),
+            "Expected 'for the Code' but got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_link_at_end_same_as_code() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "for".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Link at the end - same behavior as code (lowercase words before should remain lowercase)
+        let content = "## Guide for the [link](./page.md)\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "for" and "the" should remain lowercase (not last word because link follows)
+        assert!(
+            fixed.contains("for the [Link]"),
+            "Expected 'for the [Link]' but got: {fixed:?}"
+        );
+        assert!(
+            !fixed.contains("for The [Link]"),
+            "Should not capitalize 'the' before link. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_code_segments() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "with".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Multiple code segments - last segment is code, so lowercase words before should remain lowercase
+        let content = "## Using `const` with a `variable`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "a" should remain lowercase (not last word because code follows)
+        assert!(
+            fixed.contains("with a `variable`"),
+            "Expected 'with a `variable`' but got: {fixed:?}"
+        );
+        assert!(
+            !fixed.contains("with A `variable`"),
+            "Should not capitalize 'a' before trailing code. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_code_and_link_combination() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "for".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Code then link - last segment is link, so lowercase words before code should remain lowercase
+        let content = "## Guide for the `code` [link](./page.md)\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "for" and "the" should remain lowercase (not last word because link follows)
+        assert!(
+            fixed.contains("for the `code`"),
+            "Expected 'for the `code`' but got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_text_after_code_capitalizes_last() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "for".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Code in middle, text after - last word should be capitalized
+        let content = "## Using `const` for the code\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "for" and "the" should be lowercase, "code" is last word, should be capitalized
+        assert!(
+            fixed.contains("for the Code"),
+            "Expected 'for the Code' but got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_preserve_cased_words_with_trailing_code() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "for".to_string()],
+            preserve_cased_words: true,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Preserve-cased words should still work with trailing code
+        let content = "## Guide for iOS `app`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "iOS" should be preserved, "for" should be lowercase
+        assert!(
+            fixed.contains("for iOS `app`"),
+            "Expected 'for iOS `app`' but got: {fixed:?}"
+        );
+        assert!(
+            !fixed.contains("For iOS `app`"),
+            "Should not capitalize 'for' before trailing code. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_ignore_words_with_trailing_code() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "with".to_string()],
+            ignore_words: vec!["npm".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Ignore-words should still work with trailing code
+        let content = "## Using npm with a `script`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "npm" should be preserved, "with" and "a" should be lowercase
+        assert!(
+            fixed.contains("npm with a `script`"),
+            "Expected 'npm with a `script`' but got: {fixed:?}"
+        );
+        assert!(
+            !fixed.contains("with A `script`"),
+            "Should not capitalize 'a' before trailing code. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_empty_text_segment_edge_case() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "with".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Edge case: code at start, then text with lowercase word, then code at end
+        let content = "## `start` with a `end`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "with" is first word in text segment, so capitalized (correct)
+        // "a" should remain lowercase (not last word because code follows) - this is the key test
+        assert!(fixed.contains("a `end`"), "Expected 'a `end`' but got: {fixed:?}");
+        assert!(
+            !fixed.contains("A `end`"),
+            "Should not capitalize 'a' before trailing code. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_with_trailing_code() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Sentence case should also respect lowercase words before code
+        let content = "## guide for the `user`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // First word capitalized, rest lowercase including "the" before code
+        assert!(
+            fixed.contains("Guide for the `user`"),
+            "Expected 'Guide for the `user`' but got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_hyphenated_word_before_code() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            lowercase_words: vec!["a".to_string(), "the".to_string(), "with".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Hyphenated word before code - last part should respect lowercase-words
+        let content = "## Self-contained with a `feature`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "with" and "a" should remain lowercase (not last word because code follows)
+        assert!(
+            fixed.contains("with a `feature`"),
+            "Expected 'with a `feature`' but got: {fixed:?}"
+        );
     }
 }
