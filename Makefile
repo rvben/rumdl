@@ -109,7 +109,7 @@ test-performance:
 test-complexity:
 	@echo "Running O(n²) complexity regression tests..."
 	@echo "These tests verify all rules maintain linear O(n) complexity."
-	cargo nextest run --profile performance --cargo-profile perf-test -E 'test(linear_complexity)'
+	cargo nextest run --profile performance -E 'test(linear_complexity)'
 
 clean:
 	cargo clean

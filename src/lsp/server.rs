@@ -2919,7 +2919,7 @@ disable = ["MD022"]
         // Test ASCII boundary conditions
         assert!(!RumdlLanguageServer::is_valid_rule_name("MD/01")); // '/' is before '0'
         assert!(!RumdlLanguageServer::is_valid_rule_name("MD:01")); // ':' is after '9'
-        assert!(!RumdlLanguageServer::is_valid_rule_name("AND001")); // 'N' instead of 'M'
+        assert!(!RumdlLanguageServer::is_valid_rule_name("ND001")); // 'N' instead of 'M'
         assert!(!RumdlLanguageServer::is_valid_rule_name("ME001")); // 'E' instead of 'D'
 
         // Test non-ASCII characters (should fail gracefully)
