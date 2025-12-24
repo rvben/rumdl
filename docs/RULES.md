@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements 57 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements 58 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -154,15 +154,16 @@ Severity affects:
 
 ## List Rules
 
-| Rule ID           | Rule Name           | Description                                               |
-| ----------------- | ------------------- | --------------------------------------------------------- |
-| [MD004](md004.md) | UL style            | Unordered list style                                      |
-| [MD005](md005.md) | List indent         | Inconsistent indentation for list items at the same level |
-| [MD007](md007.md) | UL indent           | Unordered list indentation                                |
-| [MD029](md029.md) | OL prefix           | Ordered list item prefix                                  |
-| [MD030](md030.md) | List marker space   | Spaces after list markers                                 |
-| [MD032](md032.md) | Blanks around lists | Lists should be surrounded by blank lines                 |
-| [MD051](md051.md) | Link fragments      | Link fragments should be valid heading IDs                |
+| Rule ID           | Rule Name                 | Description                                               |
+| ----------------- | ------------------------- | --------------------------------------------------------- |
+| [MD004](md004.md) | UL style                  | Unordered list style                                      |
+| [MD005](md005.md) | List indent               | Inconsistent indentation for list items at the same level |
+| [MD007](md007.md) | UL indent                 | Unordered list indentation                                |
+| [MD029](md029.md) | OL prefix                 | Ordered list item prefix                                  |
+| [MD030](md030.md) | List marker space         | Spaces after list markers                                 |
+| [MD032](md032.md) | Blanks around lists       | Lists should be surrounded by blank lines                 |
+| [MD051](md051.md) | Link fragments            | Link fragments should be valid heading IDs                |
+| [MD069](md069.md) | No duplicate list markers | Duplicate markers like `- - text` from copy-paste         |
 
 ## Whitespace Rules
 

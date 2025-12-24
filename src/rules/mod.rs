@@ -62,6 +62,7 @@ mod md065_blanks_around_horizontal_rules;
 mod md066_footnote_validation;
 mod md067_footnote_definition_order;
 mod md068_empty_footnote_definition;
+mod md069_no_duplicate_list_markers;
 
 pub use md001_heading_increment::MD001HeadingIncrement;
 pub use md003_heading_style::MD003HeadingStyle;
@@ -118,6 +119,7 @@ pub use md065_blanks_around_horizontal_rules::MD065BlanksAroundHorizontalRules;
 pub use md066_footnote_validation::MD066FootnoteValidation;
 pub use md067_footnote_definition_order::MD067FootnoteDefinitionOrder;
 pub use md068_empty_footnote_definition::MD068EmptyFootnoteDefinition;
+pub use md069_no_duplicate_list_markers::MD069NoDuplicateListMarkers;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -211,6 +213,7 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD066", MD066FootnoteValidation::from_config),
         ("MD067", MD067FootnoteDefinitionOrder::from_config),
         ("MD068", MD068EmptyFootnoteDefinition::from_config),
+        ("MD069", MD069NoDuplicateListMarkers::from_config),
     ];
     RULES.iter().map(|(_, ctor)| ctor(config)).collect()
 }
