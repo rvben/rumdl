@@ -2981,4 +2981,212 @@ disable = ["MD022"]
         // Test wrapping_sub edge cases
         assert!(!RumdlLanguageServer::is_valid_rule_name("MD\x00\x00\x00")); // null bytes
     }
+
+    /// Generic parity test: LSP config must produce identical results to TOML config.
+    ///
+    /// This test ensures that ANY config field works identically whether applied via:
+    /// 1. LSP settings (JSON → apply_rule_config)
+    /// 2. TOML file parsing (direct RuleConfig construction)
+    ///
+    /// When adding new config fields to RuleConfig, add them to TEST_CONFIGS below.
+    /// The test will fail if LSP handling diverges from TOML handling.
+    #[tokio::test]
+    async fn test_lsp_toml_config_parity_generic() {
+        use crate::config::RuleConfig;
+        use crate::rule::Severity;
+
+        let server = create_test_server();
+
+        // Define test configurations covering all field types and combinations.
+        // Each entry: (description, LSP JSON, expected TOML RuleConfig)
+        // When adding new RuleConfig fields, add test cases here.
+        let test_configs: Vec<(&str, serde_json::Value, RuleConfig)> = vec![
+            // Severity alone (the bug from issue #229)
+            (
+                "severity only - error",
+                serde_json::json!({"severity": "error"}),
+                RuleConfig {
+                    severity: Some(Severity::Error),
+                    values: std::collections::BTreeMap::new(),
+                },
+            ),
+            (
+                "severity only - warning",
+                serde_json::json!({"severity": "warning"}),
+                RuleConfig {
+                    severity: Some(Severity::Warning),
+                    values: std::collections::BTreeMap::new(),
+                },
+            ),
+            (
+                "severity only - info",
+                serde_json::json!({"severity": "info"}),
+                RuleConfig {
+                    severity: Some(Severity::Info),
+                    values: std::collections::BTreeMap::new(),
+                },
+            ),
+            // Value types: integer
+            (
+                "integer value",
+                serde_json::json!({"lineLength": 120}),
+                RuleConfig {
+                    severity: None,
+                    values: [("line_length".to_string(), toml::Value::Integer(120))]
+                        .into_iter()
+                        .collect(),
+                },
+            ),
+            // Value types: boolean
+            (
+                "boolean value",
+                serde_json::json!({"enabled": true}),
+                RuleConfig {
+                    severity: None,
+                    values: [("enabled".to_string(), toml::Value::Boolean(true))]
+                        .into_iter()
+                        .collect(),
+                },
+            ),
+            // Value types: string
+            (
+                "string value",
+                serde_json::json!({"style": "consistent"}),
+                RuleConfig {
+                    severity: None,
+                    values: [("style".to_string(), toml::Value::String("consistent".to_string()))]
+                        .into_iter()
+                        .collect(),
+                },
+            ),
+            // Value types: array
+            (
+                "array value",
+                serde_json::json!({"allowedElements": ["div", "span"]}),
+                RuleConfig {
+                    severity: None,
+                    values: [(
+                        "allowed_elements".to_string(),
+                        toml::Value::Array(vec![
+                            toml::Value::String("div".to_string()),
+                            toml::Value::String("span".to_string()),
+                        ]),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            // Mixed: severity + values (critical combination)
+            (
+                "severity + integer",
+                serde_json::json!({"severity": "info", "lineLength": 80}),
+                RuleConfig {
+                    severity: Some(Severity::Info),
+                    values: [("line_length".to_string(), toml::Value::Integer(80))]
+                        .into_iter()
+                        .collect(),
+                },
+            ),
+            (
+                "severity + multiple values",
+                serde_json::json!({
+                    "severity": "warning",
+                    "lineLength": 100,
+                    "strict": false,
+                    "style": "atx"
+                }),
+                RuleConfig {
+                    severity: Some(Severity::Warning),
+                    values: [
+                        ("line_length".to_string(), toml::Value::Integer(100)),
+                        ("strict".to_string(), toml::Value::Boolean(false)),
+                        ("style".to_string(), toml::Value::String("atx".to_string())),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            // camelCase to snake_case conversion
+            (
+                "camelCase conversion",
+                serde_json::json!({"codeBlocks": true, "headingStyle": "setext"}),
+                RuleConfig {
+                    severity: None,
+                    values: [
+                        ("code_blocks".to_string(), toml::Value::Boolean(true)),
+                        ("heading_style".to_string(), toml::Value::String("setext".to_string())),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+        ];
+
+        for (description, lsp_json, expected_toml_config) in test_configs {
+            let mut lsp_config = crate::config::Config::default();
+            server.apply_rule_config(&mut lsp_config, "TEST", &lsp_json);
+
+            let lsp_rule = lsp_config.rules.get("TEST").expect("Rule should exist");
+
+            // Compare severity
+            assert_eq!(
+                lsp_rule.severity, expected_toml_config.severity,
+                "Parity failure [{description}]: severity mismatch. \
+                 LSP={:?}, TOML={:?}",
+                lsp_rule.severity, expected_toml_config.severity
+            );
+
+            // Compare values
+            assert_eq!(
+                lsp_rule.values, expected_toml_config.values,
+                "Parity failure [{description}]: values mismatch. \
+                 LSP={:?}, TOML={:?}",
+                lsp_rule.values, expected_toml_config.values
+            );
+        }
+    }
+
+    /// Test apply_rule_config_if_absent preserves all existing config
+    #[tokio::test]
+    async fn test_lsp_config_if_absent_preserves_existing() {
+        use crate::config::RuleConfig;
+        use crate::rule::Severity;
+
+        let server = create_test_server();
+
+        // Pre-existing file config with severity AND values
+        let mut config = crate::config::Config::default();
+        config.rules.insert(
+            "MD013".to_string(),
+            RuleConfig {
+                severity: Some(Severity::Error),
+                values: [("line_length".to_string(), toml::Value::Integer(80))]
+                    .into_iter()
+                    .collect(),
+            },
+        );
+
+        // LSP tries to override with different values
+        let lsp_json = serde_json::json!({
+            "severity": "info",
+            "lineLength": 120
+        });
+        server.apply_rule_config_if_absent(&mut config, "MD013", &lsp_json);
+
+        let rule = config.rules.get("MD013").expect("Rule should exist");
+
+        // Original severity preserved
+        assert_eq!(
+            rule.severity,
+            Some(Severity::Error),
+            "Existing severity should not be overwritten"
+        );
+
+        // Original values preserved
+        assert_eq!(
+            rule.values.get("line_length"),
+            Some(&toml::Value::Integer(80)),
+            "Existing values should not be overwritten"
+        );
+    }
 }
