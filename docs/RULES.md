@@ -19,6 +19,7 @@ For information on global configuration settings (file selection, rule enablemen
 - [Code Block Rules](#code-block-rules) - Rules specific to code blocks and fences
 - [Link and Image Rules](#link-and-image-rules) - Rules for links, references, and images
 - [Table Rules](#table-rules) - Rules for table formatting and structure
+- [Footnote Rules](#footnote-rules) - Rules for footnote validation and formatting
 - [Other Rules](#other-rules) - Miscellaneous rules that don't fit the other categories
 - [Opt-in Rules](#opt-in-rules) - Rules disabled by default
 
@@ -220,14 +221,22 @@ Severity affects:
 | [MD056](md056.md) | Table column count | Table column count should be consistent    |
 | [MD058](md058.md) | Table spacing      | Tables should be surrounded by blank lines |
 
+## Footnote Rules
+
+| Rule ID           | Rule Name                  | Description                                                |
+| ----------------- | -------------------------- | ---------------------------------------------------------- |
+| [MD066](md066.md) | Footnote validation        | Footnote references should have definitions and vice versa |
+| [MD067](md067.md) | Footnote definition order  | Footnote definitions should appear in order of reference   |
+| [MD068](md068.md) | Empty footnote definitions | Footnote definitions should not be empty                   |
+
 ## Other Rules
 
-| Rule ID           | Rule Name               | Description                                                     |
-| ----------------- | ----------------------- | --------------------------------------------------------------- |
-| [MD057](md057.md) | Relative links          | Relative links should exist                                     |
-| [MD060](md060.md) | Table format            | Table formatting should be consistent                           |
-| [MD061](md061.md) | Forbidden terms         | Certain terms should not be used                                |
-| [MD062](md062.md) | Link destination space  | No whitespace in link destinations                              |
+| Rule ID           | Rule Name              | Description                           |
+| ----------------- | ---------------------- | ------------------------------------- |
+| [MD057](md057.md) | Relative links         | Relative links should exist           |
+| [MD060](md060.md) | Table format           | Table formatting should be consistent |
+| [MD061](md061.md) | Forbidden terms        | Certain terms should not be used      |
+| [MD062](md062.md) | Link destination space | No whitespace in link destinations    |
 
 ## Using Rules
 

@@ -9,16 +9,18 @@ Global settings are configured in the `[global]` section of your configuration f
 
 ## Quick Reference
 
-| Setting                                   | Type       | Default      | Description                               |
-| ----------------------------------------- | ---------- | ------------ | ----------------------------------------- |
-| [`enable`](#enable)                       | `string[]` | `[]`         | Enable only specific rules                |
-| [`disable`](#disable)                     | `string[]` | `[]`         | Disable specific rules                    |
-| [`per-file-ignores`](#per-file-ignores)   | `table`    | `{}`         | Disable specific rules for specific files |
-| [`exclude`](#exclude)                     | `string[]` | `[]`         | Files/directories to exclude              |
-| [`include`](#include)                     | `string[]` | `[]`         | Files/directories to include              |
-| [`respect_gitignore`](#respect_gitignore) | `boolean`  | `true`       | Respect .gitignore files                  |
-| [`line_length`](#line_length)             | `integer`  | `80`         | Default line length for rules             |
-| [`flavor`](#flavor)                       | `string`   | `"standard"` | Markdown flavor to use                    |
+| Setting                                   | Type       | Default        | Description                               |
+| ----------------------------------------- | ---------- | -------------- | ----------------------------------------- |
+| [`enable`](#enable)                       | `string[]` | `[]`           | Enable only specific rules                |
+| [`disable`](#disable)                     | `string[]` | `[]`           | Disable specific rules                    |
+| [`per-file-ignores`](#per-file-ignores)   | `table`    | `{}`           | Disable specific rules for specific files |
+| [`exclude`](#exclude)                     | `string[]` | `[]`           | Files/directories to exclude              |
+| [`include`](#include)                     | `string[]` | `[]`           | Files/directories to include              |
+| [`respect_gitignore`](#respect_gitignore) | `boolean`  | `true`         | Respect .gitignore files                  |
+| [`line_length`](#line_length)             | `integer`  | `80`           | Default line length for rules             |
+| [`flavor`](#flavor)                       | `string`   | `"standard"`   | Markdown flavor to use                    |
+| [`cache`](#cache)                         | `boolean`  | `true`         | Enable result caching                     |
+| [`cache_dir`](#cache_dir)                 | `string`   | `.rumdl_cache` | Directory for cache files                 |
 
 ## Configuration Examples
 
@@ -430,6 +432,86 @@ flavor = "mkdocs"  # Use MkDocs flavor
 ```bash
 # Use MkDocs flavor for linting
 rumdl check --flavor mkdocs docs/
+```
+
+### `cache`
+
+**Type**: `boolean`
+**Default**: `true`
+**CLI Equivalent**: `--no-cache` (to disable)
+
+Controls whether rumdl caches linting results to speed up subsequent runs.
+
+```toml
+[global]
+cache = true   # Enable caching (default)
+# or
+cache = false  # Disable caching
+```
+
+**Behavior**:
+
+- `true` (default): Results are cached based on file content hashes
+- `false`: Every run processes all files from scratch
+
+**Usage Notes**:
+
+- Caching significantly speeds up repeated linting of unchanged files
+- Cache is automatically invalidated when file content changes
+- Disable caching during development when debugging rule changes
+- Use `--no-cache` CLI flag for one-time cache bypass without changing config
+
+**Example CLI usage**:
+
+```bash
+# Disable cache for this run only
+rumdl check --no-cache .
+```
+
+### `cache_dir`
+
+**Type**: `string`
+**Default**: `.rumdl_cache`
+**CLI Equivalent**: `--cache-dir`
+**Environment Variable**: `RUMDL_CACHE_DIR`
+
+Specifies the directory where rumdl stores cache files.
+
+```toml
+[global]
+cache_dir = ".rumdl_cache"      # Default location
+# or
+cache_dir = "/tmp/rumdl-cache"  # Custom location
+```
+
+**Behavior**:
+
+- Cache files are stored in this directory
+- Directory is created automatically if it doesn't exist
+- Each file's cache entry is based on its content hash
+
+**Usage Notes**:
+
+- Default `.rumdl_cache` is relative to the current working directory
+- Use absolute paths for consistent behavior across different working directories
+- Consider adding the cache directory to `.gitignore`
+- Environment variable `RUMDL_CACHE_DIR` can override config file settings
+
+**Example CLI usage**:
+
+```bash
+# Use custom cache directory
+rumdl check --cache-dir /tmp/rumdl-cache .
+
+# Or via environment variable
+RUMDL_CACHE_DIR=/tmp/rumdl-cache rumdl check .
+```
+
+**Adding to .gitignore**:
+
+```gitignore
+# rumdl cache
+.rumdl_cache/
 ```
 
 ## Configuration Precedence

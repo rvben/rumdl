@@ -110,7 +110,6 @@ repos:
         types: [rust]
         pass_filenames: false
         stages: [pre-push]
-        verbose: true
 
       - id: cargo-lint-full
         name: cargo clippy (all targets)
@@ -119,7 +118,6 @@ repos:
         types: [rust]
         pass_filenames: false
         stages: [pre-push]
-        verbose: true
 
       - id: cargo-doc-check
         name: cargo doc (check)
@@ -128,7 +126,6 @@ repos:
         types: [rust]
         pass_filenames: false
         stages: [pre-push]
-        verbose: true
 
       - id: cargo-lock-check-push
         name: verify Cargo.lock is committed and up-to-date
@@ -137,7 +134,6 @@ repos:
         files: ^(Cargo\.(toml|lock)|.*\.rs)$
         pass_filenames: false
         stages: [pre-push]
-        verbose: true
 
       - id: complexity-check
         name: check for O(n²) regressions
@@ -146,4 +142,3 @@ repos:
         types: [rust]
         pass_filenames: false
         stages: [pre-push]
-        verbose: true
