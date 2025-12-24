@@ -29,6 +29,7 @@ impl OutputFormatter for SarifFormatter {
                 let level = match warning.severity {
                     crate::rule::Severity::Error => "error",
                     crate::rule::Severity::Warning => "warning",
+                    crate::rule::Severity::Info => "note",
                 };
                 json!({
                     "ruleId": rule_id,
@@ -97,6 +98,7 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
             let level = match warning.severity {
                 crate::rule::Severity::Error => "error",
                 crate::rule::Severity::Warning => "warning",
+                crate::rule::Severity::Info => "note",
             };
             let result = json!({
                 "ruleId": rule_id,

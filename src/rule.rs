@@ -58,6 +58,7 @@ pub struct Fix {
 pub enum Severity {
     Error,
     Warning,
+    Info,
 }
 
 impl<'de> serde::Deserialize<'de> for Severity {
@@ -69,8 +70,9 @@ impl<'de> serde::Deserialize<'de> for Severity {
         match s.to_lowercase().as_str() {
             "error" => Ok(Severity::Error),
             "warning" => Ok(Severity::Warning),
+            "info" => Ok(Severity::Info),
             _ => Err(serde::de::Error::custom(format!(
-                "Invalid severity: '{s}'. Valid values: error, warning"
+                "Invalid severity: '{s}'. Valid values: error, warning, info"
             ))),
         }
     }

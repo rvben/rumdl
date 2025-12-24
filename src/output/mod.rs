@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_severity_variations() {
-        let severities = [Severity::Error, Severity::Warning];
+        let severities = [Severity::Error, Severity::Warning, Severity::Info];
 
         for severity in &severities {
             let warning = LintWarning {
@@ -369,6 +369,7 @@ mod tests {
                     match severity {
                         Severity::Error => "error",
                         Severity::Warning => "warning",
+                        Severity::Info => "info",
                     }
                 ),
                 severity: *severity,

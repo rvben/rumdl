@@ -134,6 +134,7 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
     let severity = match warning.severity {
         crate::rule::Severity::Error => DiagnosticSeverity::ERROR,
         crate::rule::Severity::Warning => DiagnosticSeverity::WARNING,
+        crate::rule::Severity::Info => DiagnosticSeverity::INFORMATION,
     };
 
     // Create clickable link to rule documentation

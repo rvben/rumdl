@@ -51,6 +51,7 @@ impl OutputFormatter for GitHubFormatter {
             let level = match warning.severity {
                 Severity::Error => "error",
                 Severity::Warning => "warning",
+                Severity::Info => "notice",
             };
 
             // Escape special characters in all properties
