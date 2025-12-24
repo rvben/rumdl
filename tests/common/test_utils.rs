@@ -40,7 +40,7 @@ impl InMemoryTestRunner {
         // Add a few common rules for basic validation
         use rumdl_lib::rule::Rule;
         use rumdl_lib::rules::{
-            MD001HeadingIncrement,
+            MD001HeadingIncrement::default(),
             MD013LineLength,
             MD022BlanksAroundHeadings,
             MD032BlanksAroundLists,

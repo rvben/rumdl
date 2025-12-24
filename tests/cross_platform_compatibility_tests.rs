@@ -29,7 +29,7 @@ fn test_line_ending_compatibility() {
         let rules: Vec<Box<dyn Rule>> = vec![
             Box::new(MD022BlanksAroundHeadings::default()),
             Box::new(MD025SingleTitle::default()),
-            Box::new(MD001HeadingIncrement),
+            Box::new(MD001HeadingIncrement::default()),
         ];
 
         let mut total_warnings = 0;
@@ -155,7 +155,7 @@ fn test_unicode_content_handling() {
 
         // Test various rules with Unicode content
         let rules: Vec<Box<dyn Rule>> = vec![
-            Box::new(MD001HeadingIncrement),
+            Box::new(MD001HeadingIncrement::default()),
             Box::new(MD025SingleTitle::default()),
             Box::new(MD022BlanksAroundHeadings::default()),
             Box::new(MD026NoTrailingPunctuation::default()),

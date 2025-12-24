@@ -14,7 +14,7 @@ fn test_large_repository_simulation() {
     ];
 
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement),
+        Box::new(MD001HeadingIncrement::default()),
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::default()),

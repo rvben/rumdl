@@ -4,7 +4,7 @@ use rumdl_lib::rules::MD001HeadingIncrement;
 
 #[test]
 pub fn test_md001_unicode_valid() {
-    let rule = MD001HeadingIncrement;
+    let rule = MD001HeadingIncrement::default();
     let content = "# Heading with café\n## Heading with 汉字\n### Heading with emoji 🔥\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -16,7 +16,7 @@ pub fn test_md001_unicode_valid() {
 
 #[test]
 pub fn test_md001_unicode_invalid() {
-    let rule = MD001HeadingIncrement;
+    let rule = MD001HeadingIncrement::default();
     let content = "# Heading with café\n### Heading with 汉字\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -31,7 +31,7 @@ pub fn test_md001_unicode_invalid() {
 
 #[test]
 pub fn test_md001_unicode_fix() {
-    let rule = MD001HeadingIncrement;
+    let rule = MD001HeadingIncrement::default();
     let content = "# Café heading\n### 汉字 heading\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
@@ -43,7 +43,7 @@ pub fn test_md001_unicode_fix() {
 
 #[test]
 pub fn test_md001_unicode_multiple_violations() {
-    let rule = MD001HeadingIncrement;
+    let rule = MD001HeadingIncrement::default();
     let content = "# café\n### 汉字\n##### 🔥\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -54,7 +54,7 @@ pub fn test_md001_unicode_multiple_violations() {
 
 #[test]
 pub fn test_md001_unicode_atx_and_setext() {
-    let rule = MD001HeadingIncrement;
+    let rule = MD001HeadingIncrement::default();
     let content = "# Heading café\nHeading 汉字\n---------\n### Heading 🔥\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -66,7 +66,7 @@ pub fn test_md001_unicode_atx_and_setext() {
 
 #[test]
 pub fn test_md001_unicode_complex() {
-    let rule = MD001HeadingIncrement;
+    let rule = MD001HeadingIncrement::default();
     let content = "# 汉字 café 🔥\n## مرحبا こんにちは\n### Mixed Unicode: ñáéíóú привет שלום\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();

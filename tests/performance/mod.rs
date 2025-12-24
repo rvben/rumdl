@@ -33,7 +33,7 @@ fn test_real_world_performance() {
 
         // Test a representative sample of rules
         test_rule(&ctx, "MD001", || {
-            use rumdl_lib::MD001HeadingIncrement;
+            use rumdl_lib::MD001HeadingIncrement::default();
             MD001HeadingIncrement.check(&ctx)
         });
 

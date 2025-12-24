@@ -39,7 +39,7 @@ fn validate_core_functionality() {
     test_content.push_str("\n\n### Skipping Level 2 (MD001 issue)\n\n##Missing Space Heading\n- List item 1\n- List item 2\n\n```\ncode without language\n```\nAnother paragraph.\n");
 
     let critical_rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement),
+        Box::new(MD001HeadingIncrement::default()),
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD018NoMissingSpaceAtx),
         Box::new(MD022BlanksAroundHeadings::default()),
@@ -245,7 +245,7 @@ fn validate_integration_scenarios() {
     ];
 
     let comprehensive_rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD001HeadingIncrement),
+        Box::new(MD001HeadingIncrement::default()),
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::default()),

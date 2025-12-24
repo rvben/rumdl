@@ -450,7 +450,7 @@ fn test_md032_linear_complexity() {
 fn test_md001_linear_complexity() {
     let sizes = [500, 1000, 2000];
     let iterations = 5;
-    let rule = MD001HeadingIncrement;
+    let rule = MD001HeadingIncrement::default();
 
     let durations: Vec<_> = sizes
         .iter()

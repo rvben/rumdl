@@ -511,7 +511,7 @@ mod tests {
         };
 
         // Create test rules for different categories
-        let heading_rule = MD001HeadingIncrement;
+        let heading_rule = MD001HeadingIncrement::default();
         assert!(!chars.should_skip_rule(&heading_rule));
 
         let trailing_spaces_rule = MD009TrailingSpaces::new(2, false);
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn test_lint_empty_content() {
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement::default())];
 
         let result = lint("", &rules, false, crate::config::MarkdownFlavor::Standard, None);
         assert!(result.is_ok());
@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn test_lint_with_violations() {
         let content = "## Level 2\n#### Level 4"; // Skips level 3
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement::default())];
 
         let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard, None);
         assert!(result.is_ok());
@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn test_lint_with_inline_disable() {
         let content = "<!-- rumdl-disable MD001 -->\n## Level 2\n#### Level 4";
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement)];
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement::default())];
 
         let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard, None);
         assert!(result.is_ok());
@@ -563,7 +563,7 @@ mod tests {
         // Content with no lists
         let content = "# Heading\nJust text";
         let rules: Vec<Box<dyn Rule>> = vec![
-            Box::new(MD001HeadingIncrement),
+            Box::new(MD001HeadingIncrement::default()),
             // A list-related rule would be skipped
         ];
 

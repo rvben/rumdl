@@ -18,7 +18,7 @@ use rumdl_lib::rules::{
 
 #[test]
 fn test_md001_edge_cases() {
-    let rule = MD001HeadingIncrement;
+    let rule = MD001HeadingIncrement::default();
 
     // Test 1: Empty headings
     let content = "\
@@ -580,7 +580,7 @@ fn test_heading_rules_with_code_blocks() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // MD001 - Heading increment
-    let md001 = MD001HeadingIncrement;
+    let md001 = MD001HeadingIncrement::default();
     let result = md001.check(&ctx).unwrap();
     assert!(result.is_empty(), "MD001 should ignore headings in code blocks");
 
@@ -626,7 +626,7 @@ fn test_heading_rules_performance() {
     // Test performance of each rule
     let start = std::time::Instant::now();
 
-    let md001 = MD001HeadingIncrement;
+    let md001 = MD001HeadingIncrement::default();
     let _ = md001.check(&ctx).unwrap();
     let md001_time = start.elapsed();
 
@@ -672,7 +672,7 @@ fn test_heading_rules_fix_generation() {
     // MD001 - Test fix for heading increment
     let content = "# Level 1\n### Level 3";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let md001 = MD001HeadingIncrement;
+    let md001 = MD001HeadingIncrement::default();
     let fixed = md001.fix(&ctx).unwrap();
     assert_eq!(fixed, "# Level 1\n## Level 3", "MD001 should fix heading level");
 
@@ -770,7 +770,7 @@ Code example:
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
-    let md001 = MD001HeadingIncrement;
+    let md001 = MD001HeadingIncrement::default();
     let result = md001.check(&ctx).unwrap();
     assert!(result.is_empty(), "Proper increment should pass");
 
@@ -800,7 +800,7 @@ fn test_heading_rules_unicode_edge_cases() {
     assert_eq!(result.len(), 1, "Should detect duplicate Unicode headings");
 
     // MD001 should handle Unicode correctly
-    let md001 = MD001HeadingIncrement;
+    let md001 = MD001HeadingIncrement::default();
     let result = md001.check(&ctx).unwrap();
     assert!(result.is_empty(), "Unicode shouldn't affect heading increment");
 
@@ -824,7 +824,7 @@ fn test_heading_rules_boundary_conditions() {
     let content = "";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
-    let md001 = MD001HeadingIncrement;
+    let md001 = MD001HeadingIncrement::default();
     assert!(md001.check(&ctx).unwrap().is_empty());
 
     let md003 = MD003HeadingStyle::new(HeadingStyle::Atx);

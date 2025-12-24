@@ -71,7 +71,10 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
 /// Helper function to create test cases for each rule
 fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn Rule>)> {
     match rule_name {
-        "MD001" => Some(("# H1\n### H3 (should be H2)", Box::new(MD001HeadingIncrement))),
+        "MD001" => Some((
+            "# H1\n### H3 (should be H2)",
+            Box::new(MD001HeadingIncrement::default()),
+        )),
         "MD003" => Some(("# ATX\nSetext\n======", Box::new(MD003HeadingStyle::default()))),
         "MD004" => Some((
             "* Item 1\n- Item 2",
