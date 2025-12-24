@@ -94,6 +94,9 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     });
 
     let has_issues = !all_warnings.is_empty();
+    let has_warnings = all_warnings
+        .iter()
+        .any(|w| matches!(w.severity, Severity::Warning | Severity::Error));
     let has_errors = all_warnings.iter().any(|w| w.severity == Severity::Error);
 
     // Apply fixes if requested
@@ -137,10 +140,14 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             }
 
             if args.fix_mode != crate::FixMode::Format {
+                let remaining_has_warnings = remaining_warnings
+                    .iter()
+                    .any(|w| matches!(w.severity, Severity::Warning | Severity::Error));
                 let remaining_has_errors = remaining_warnings.iter().any(|w| w.severity == Severity::Error);
                 let should_fail = match args.fail_on_mode {
                     crate::FailOn::Never => false,
                     crate::FailOn::Error => remaining_has_errors,
+                    crate::FailOn::Warning => remaining_has_warnings,
                     crate::FailOn::Any => !remaining_warnings.is_empty(),
                 };
                 if should_fail {
@@ -205,6 +212,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     let should_fail = match args.fail_on_mode {
         crate::FailOn::Never => false,
         crate::FailOn::Error => has_errors,
+        crate::FailOn::Warning => has_warnings,
         crate::FailOn::Any => has_issues,
     };
     if should_fail {

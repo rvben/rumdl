@@ -34,7 +34,7 @@ These gaps in numbering are maintained for compatibility with markdownlint rule 
 
 ## Severity Levels
 
-Rules are categorized into two severity levels based on their impact on document functionality:
+Rules are categorized into three severity levels based on their impact on document functionality:
 
 ### Error Severity
 
@@ -53,35 +53,47 @@ Rules with Error severity flag issues that break document functionality:
 
 ### Warning Severity
 
-All other rules use Warning severity. These flag style, formatting, and convention issues that don't break document functionality but affect readability, consistency, or best practices.
+Most rules use Warning severity by default. These flag style, formatting, and convention issues that don't break document functionality but affect readability, consistency, or best practices.
+
+### Info Severity
+
+Info severity is available for rules you want to track but not treat as warnings. Useful for:
+
+- Style issues that automatic formatting will fix
+- Low-priority suggestions
+- Rules you're gradually adopting
 
 ### Configuring Severity
 
 You can override default severities for any rule in your configuration file:
 
 **.rumdl.toml:**
+
 ```toml
 [MD013]
-severity = "warning"  # Downgrade from error to warning
+severity = "info"     # Downgrade to info (formatting will fix this)
 
 [MD004]
 severity = "error"    # Upgrade from warning to error
 ```
 
 **pyproject.toml:**
+
 ```toml
 [tool.rumdl.MD013]
-severity = "warning"
+severity = "info"
 
 [tool.rumdl.MD004]
 severity = "error"
 ```
 
-Valid severity values: `"error"`, `"warning"` (case-insensitive)
+Valid severity values: `"error"`, `"warning"`, `"info"` (case-insensitive)
 
 Severity affects:
-- Exit codes: rumdl exits with code 1 when errors are found (warnings alone don't cause non-zero exit)
-- Output formatting: errors are visually distinct from warnings in console output
+
+- Exit codes: Use `--fail-on` to control which severities cause exit code 1
+- Output formatting: Different severities are visually distinct in console output
+- LSP: Error → Error, Warning → Warning, Info → Information in your editor
 - CI/CD: severity controls whether linting failures block builds
 
 ## Heading Rules
@@ -205,15 +217,23 @@ For more information on configuring rumdl, see the [Configuration](#configuratio
 
 Each rule has a default severity level:
 
-- **error**: Rule violations cause the linter to exit with code 1
-- **warning**: Rule violations are reported but don't affect the exit code
+- **error**: Critical issues (broken links, accessibility violations)
+- **warning**: Style and convention issues (default for most rules)
+- **info**: Low-priority suggestions or issues that formatting will fix
 
 You can customize rule severities in your configuration file:
 
 ```toml
 [MD013]
-severity = "warning"  # Downgrade from error to warning
+severity = "info"  # Downgrade to info (formatting will fix this)
 ```
+
+Use `--fail-on` to control which severities cause exit code 1:
+
+- `--fail-on any` (default): Exit 1 on any violation
+- `--fail-on warning`: Exit 1 on warning or error only
+- `--fail-on error`: Exit 1 only on errors
+- `--fail-on never`: Always exit 0
 
 ## Configuration
 

@@ -456,9 +456,10 @@ pub enum FixMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FailOn {
     #[default]
-    Any, // Exit 1 on any violation (current behavior)
-    Error, // Exit 1 only on error-severity violations
-    Never, // Always exit 0
+    Any, // Exit 1 on any violation (info, warning, or error)
+    Warning, // Exit 1 on warning or error severity violations
+    Error,   // Exit 1 only on error-severity violations
+    Never,   // Always exit 0
 }
 
 #[derive(Args, Debug)]
@@ -582,9 +583,9 @@ pub struct CheckArgs {
     )]
     cache_dir: Option<String>,
 
-    /// Control when to exit with code 1: any (default), error (only on errors), never (always 0)
-    #[arg(long, value_parser = ["any", "error", "never"], default_value = "any",
-          help = "Exit code behavior: 'any' (default) exits 1 on any violation, 'error' only on error-severity, 'never' always exits 0")]
+    /// Control when to exit with code 1: any (default), warning, error, or never
+    #[arg(long, value_parser = ["any", "warning", "error", "never"], default_value = "any",
+          help = "Exit code behavior: 'any' (default) exits 1 on any violation, 'warning' on warning+error, 'error' only on errors, 'never' always exits 0")]
     fail_on: String,
 
     #[arg(skip)]
@@ -965,6 +966,7 @@ build-backend = "setuptools.build_meta"
                 args.fix_mode = if args.fix { FixMode::CheckFix } else { FixMode::Check };
                 args.fail_on_mode = match args.fail_on.as_str() {
                     "error" => FailOn::Error,
+                    "warning" => FailOn::Warning,
                     "never" => FailOn::Never,
                     _ => FailOn::Any,
                 };
@@ -979,6 +981,7 @@ build-backend = "setuptools.build_meta"
                 args.fix_mode = FixMode::Format;
                 args.fail_on_mode = match args.fail_on.as_str() {
                     "error" => FailOn::Error,
+                    "warning" => FailOn::Warning,
                     "never" => FailOn::Never,
                     _ => FailOn::Any,
                 };
@@ -1868,7 +1871,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     // Use the same cache directory for workspace index cache (when cache is enabled)
     let workspace_cache_dir = if cache_enabled { Some(cache_dir.as_path()) } else { None };
 
-    let (has_issues, has_errors) = watch::perform_check_run(
+    let (has_issues, has_warnings, has_errors) = watch::perform_check_run(
         args,
         &config,
         quiet,
@@ -1881,6 +1884,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     let should_fail = match args.fail_on_mode {
         FailOn::Never => false,
         FailOn::Error => has_errors,
+        FailOn::Warning => has_warnings,
         FailOn::Any => has_issues,
     };
 
