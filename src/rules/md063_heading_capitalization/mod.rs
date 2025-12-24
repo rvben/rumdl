@@ -28,6 +28,17 @@ static INLINE_CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+[^`]
 static LINK_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\([^)]*\)|\[([^\]]*)\]\[[^\]]*\]").unwrap());
 
+// Regex to match inline HTML tags commonly used in headings
+// Matches paired tags: <tag>content</tag>, <tag attr="val">content</tag>
+// Matches self-closing: <tag/>, <tag />
+// Uses explicit list of common inline tags to avoid backreference (not supported in Rust regex)
+static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    // Common inline HTML tags used in documentation headings
+    let tags = "kbd|abbr|code|span|sub|sup|mark|cite|dfn|var|samp|small|strong|em|b|i|u|s|q|br|wbr";
+    let pattern = format!(r"<({tags})(?:\s[^>]*)?>.*?</({tags})>|<({tags})(?:\s[^>]*)?\s*/?>");
+    Regex::new(&pattern).unwrap()
+});
+
 // Regex to match custom header IDs {#id}
 static CUSTOM_ID_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\{#[^}]+\}\s*$").unwrap());
 
@@ -44,6 +55,8 @@ enum HeadingSegment {
         text_start: usize,
         text_end: usize,
     },
+    /// Inline HTML tag that should be preserved as-is
+    Html(String),
 }
 
 /// Rule MD063: Heading capitalization
@@ -403,6 +416,11 @@ impl MD063HeadingCapitalization {
             }
         }
 
+        // Find inline HTML tags
+        for mat in HTML_TAG_REGEX.find_iter(text) {
+            special_regions.push((mat.start(), mat.end(), HeadingSegment::Html(mat.as_str().to_string())));
+        }
+
         // Sort by start position
         special_regions.sort_by_key(|(start, _, _)| *start);
 
@@ -531,6 +549,10 @@ impl MD063HeadingCapitalization {
                     new_link.push_str(&capitalized_text);
                     new_link.push_str(&full[*text_end..]);
                     result_parts.push(new_link);
+                }
+                HeadingSegment::Html(h) => {
+                    // Preserve HTML tags as-is (like code)
+                    result_parts.push(h.clone());
                 }
             }
         }
@@ -1890,6 +1912,164 @@ mod tests {
             result[0].message.contains("Quick Start Guide") || result[0].message.contains("quick Start Guide"),
             "Title case should capitalize major words after code. Got: {:?}",
             result[0].message
+        );
+    }
+
+    // ======== HTML TAG TESTS ========
+
+    #[test]
+    fn test_sentence_case_html_tag_at_start() {
+        // HTML tag at start: text after should NOT capitalize first word
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# <kbd>Ctrl</kbd> is a Modifier Key\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // "is", "a", "Modifier", "Key" should all be lowercase (except preserved words)
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# <kbd>Ctrl</kbd> is a modifier key\n",
+            "Text after HTML at start should be lowercase"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_html_tag_preserves_content() {
+        // Content inside HTML tags should be preserved as-is
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# The <abbr>API</abbr> documentation guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // "The" is first, "API" inside tag preserved, rest lowercase
+        assert!(
+            result.is_empty(),
+            "HTML tag content should be preserved. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_html_tag_at_start_with_acronym() {
+        // HTML tag at start with acronym content
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# <abbr>API</abbr> Documentation Guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# <abbr>API</abbr> documentation guide\n",
+            "Text after HTML at start should be lowercase, HTML content preserved"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_html_tag_in_middle() {
+        // HTML tag in middle: first word still capitalized
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# using the <code>config</code> File\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# Using the <code>config</code> file\n",
+            "First word capitalized, HTML preserved, rest lowercase"
+        );
+    }
+
+    #[test]
+    fn test_html_tag_strong_emphasis() {
+        // <strong> tag handling
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# The <strong>Bold</strong> Way\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# The <strong>Bold</strong> way\n",
+            "<strong> tag content should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_html_tag_with_attributes() {
+        // HTML tags with attributes should still be detected
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# <span class=\"highlight\">Important</span> Notice Here\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# <span class=\"highlight\">Important</span> notice here\n",
+            "HTML tag with attributes should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_multiple_html_tags() {
+        // Multiple HTML tags in heading
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# <kbd>Ctrl</kbd>+<kbd>C</kbd> to Copy Text\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy text\n",
+            "Multiple HTML tags should all be preserved"
+        );
+    }
+
+    #[test]
+    fn test_html_and_code_mixed() {
+        // Mix of HTML tags and inline code
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# <kbd>Ctrl</kbd>+`v` Paste command\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# <kbd>Ctrl</kbd>+`v` paste command\n",
+            "HTML and code should both be preserved"
+        );
+    }
+
+    #[test]
+    fn test_self_closing_html_tag() {
+        // Self-closing tags like <br/>
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# Line one<br/>Line Two Here\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# Line one<br/>line two here\n",
+            "Self-closing HTML tags should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_title_case_with_html_tags() {
+        // Title case with HTML tags
+        let rule = create_rule_with_style(HeadingCapStyle::TitleCase);
+        let content = "# the <kbd>ctrl</kbd> key is a modifier\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        // "the" as first word should be "The", content inside <kbd> preserved
+        assert!(
+            fixed.contains("<kbd>ctrl</kbd>"),
+            "HTML tag content should be preserved in title case. Got: {fixed}"
+        );
+        assert!(
+            fixed.starts_with("# The ") || fixed.starts_with("# the "),
+            "Title case should work with HTML. Got: {fixed}"
         );
     }
 }
