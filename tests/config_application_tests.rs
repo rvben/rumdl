@@ -12,20 +12,25 @@ fn create_test_config() -> Config {
     md013_values.insert(normalize_key("line_length"), toml::Value::Integer(120));
     md013_values.insert(normalize_key("code_blocks"), toml::Value::Boolean(false));
     md013_values.insert(normalize_key("headings"), toml::Value::Boolean(true));
-    let md013_config = RuleConfig { values: md013_values };
+    let md013_config = RuleConfig {
+        severity: None,
+        values: md013_values,
+    };
     rules.insert(normalize_key("MD013"), md013_config);
 
     // Add MD004 config
     let mut md004_values = BTreeMap::new();
     md004_values.insert(normalize_key("style"), toml::Value::String("asterisk".to_string()));
-    let md004_config = RuleConfig { values: md004_values };
+    let md004_config = RuleConfig {
+        severity: None,
+        values: md004_values,
+    };
     rules.insert(normalize_key("MD004"), md004_config);
 
     Config {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
         rules,
-        rule_severities: Default::default(),
         project_root: None,
     }
 }
@@ -186,7 +191,10 @@ fn test_config_priority() {
     // Now change config to 50 chars
     let mut md013_values = BTreeMap::new();
     md013_values.insert(normalize_key("line_length"), toml::Value::Integer(50));
-    let md013_config = RuleConfig { values: md013_values };
+    let md013_config = RuleConfig {
+        severity: None,
+        values: md013_values,
+    };
     // Need to use normalized key for insertion
     config.rules.insert(normalize_key("MD013"), md013_config);
 
@@ -221,7 +229,10 @@ fn test_partial_rule_config() {
     let mut md013_values = BTreeMap::new();
     md013_values.insert(normalize_key("line_length"), toml::Value::Integer(100));
     // Note: code_blocks not specified, should keep default value
-    let md013_config = RuleConfig { values: md013_values };
+    let md013_config = RuleConfig {
+        severity: None,
+        values: md013_values,
+    };
     // Use normalized key
     rules_map.insert(normalize_key("MD013"), md013_config);
 
@@ -229,7 +240,6 @@ fn test_partial_rule_config() {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
         rules: rules_map,
-        rule_severities: Default::default(),
         project_root: None,
     };
 
@@ -261,7 +271,10 @@ fn test_partial_rule_config() {
     let mut rules_map = BTreeMap::new();
     let mut md013_values = BTreeMap::new();
     md013_values.insert(normalize_key("line_length"), toml::Value::Integer(60));
-    let md013_config = RuleConfig { values: md013_values };
+    let md013_config = RuleConfig {
+        severity: None,
+        values: md013_values,
+    };
     // Use normalized key
     rules_map.insert(normalize_key("MD013"), md013_config);
 
@@ -269,7 +282,6 @@ fn test_partial_rule_config() {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
         rules: rules_map,
-        rule_severities: Default::default(),
         project_root: None,
     };
 

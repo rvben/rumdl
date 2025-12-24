@@ -260,9 +260,13 @@ mod tests {
             ]),
         );
 
-        config
-            .rules
-            .insert("TEST001".to_string(), crate::config::RuleConfig { values: rule_values });
+        config.rules.insert(
+            "TEST001".to_string(),
+            crate::config::RuleConfig {
+                severity: None,
+                values: rule_values,
+            },
+        );
 
         // Load config
         let rule_config: TestRuleConfig = load_rule_config(&config);
@@ -280,9 +284,13 @@ mod tests {
         rule_values.insert("enabled".to_string(), toml::Value::Boolean(true));
         rule_values.insert("style".to_string(), toml::Value::String("custom".to_string()));
 
-        config
-            .rules
-            .insert("TEST001".to_string(), crate::config::RuleConfig { values: rule_values });
+        config.rules.insert(
+            "TEST001".to_string(),
+            crate::config::RuleConfig {
+                severity: None,
+                values: rule_values,
+            },
+        );
 
         // Load config - missing fields should use defaults from TestRuleConfig::default()
         let rule_config: TestRuleConfig = load_rule_config(&config);
@@ -376,9 +384,13 @@ mod tests {
         // Use a table value for items, which expects an array
         rule_values.insert("items".to_string(), toml::Value::Table(toml::map::Map::new()));
 
-        config
-            .rules
-            .insert("TEST001".to_string(), crate::config::RuleConfig { values: rule_values });
+        config.rules.insert(
+            "TEST001".to_string(),
+            crate::config::RuleConfig {
+                severity: None,
+                values: rule_values,
+            },
+        );
 
         // Load config - should return default and print warning
         let rule_config: TestRuleConfig = load_rule_config(&config);
@@ -394,9 +406,13 @@ mod tests {
         // indent should be i64, but we're providing a string
         rule_values.insert("indent".to_string(), toml::Value::String("not_a_number".to_string()));
 
-        config
-            .rules
-            .insert("TEST001".to_string(), crate::config::RuleConfig { values: rule_values });
+        config.rules.insert(
+            "TEST001".to_string(),
+            crate::config::RuleConfig {
+                severity: None,
+                values: rule_values,
+            },
+        );
 
         // Load config - should return default and print warning
         let rule_config: TestRuleConfig = load_rule_config(&config);

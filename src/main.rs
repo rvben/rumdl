@@ -1335,6 +1335,7 @@ build-backend = "setuptools.build_meta"
                                     if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section()
                                     {
                                         let rule_config = rumdl_config::RuleConfig {
+                                            severity: None,
                                             values: table.into_iter().collect(),
                                         };
                                         default_config.rules.insert(rule_name.to_uppercase(), rule_config);
@@ -1382,6 +1383,7 @@ build-backend = "setuptools.build_meta"
                                     if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section()
                                     {
                                         let rule_config = rumdl_config::RuleConfig {
+                                            severity: None,
                                             values: table.into_iter().collect(),
                                         };
                                         default_config.rules.insert(rule_name.to_uppercase(), rule_config);

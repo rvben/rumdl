@@ -414,7 +414,6 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
-            rule_severities: Default::default(),
             project_root: None,
         };
 
@@ -492,7 +491,6 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
-            rule_severities: Default::default(),
             project_root: None,
         };
 
@@ -541,7 +539,6 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
-            rule_severities: Default::default(),
             project_root: None,
         };
         config.global.unfixable = vec!["MD001".to_string()];
@@ -610,7 +607,6 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
-            rule_severities: Default::default(),
             project_root: None,
         };
 
@@ -633,7 +629,6 @@ mod tests {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
             rules: Default::default(),
-            rule_severities: Default::default(),
             project_root: None,
         };
 

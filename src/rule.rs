@@ -54,7 +54,7 @@ pub struct Fix {
     pub replacement: String,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Serialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, schemars::JsonSchema)]
 pub enum Severity {
     Error,
     Warning,

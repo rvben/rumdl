@@ -1842,13 +1842,13 @@ line_length = 120
 
     // Verify severity overrides are stored correctly
     assert_eq!(
-        config.rule_severities.get("MD001"),
-        Some(&rumdl_lib::rule::Severity::Warning),
+        config.get_rule_severity("MD001"),
+        Some(rumdl_lib::rule::Severity::Warning),
         "MD001 should have Warning severity"
     );
     assert_eq!(
-        config.rule_severities.get("MD013"),
-        Some(&rumdl_lib::rule::Severity::Error),
+        config.get_rule_severity("MD013"),
+        Some(rumdl_lib::rule::Severity::Error),
         "MD013 should have Error severity"
     );
 
@@ -1885,20 +1885,20 @@ severity = "warning"
 
     // Verify all case variations work
     assert_eq!(
-        config.rule_severities.get("MD001"),
-        Some(&rumdl_lib::rule::Severity::Error)
+        config.get_rule_severity("MD001"),
+        Some(rumdl_lib::rule::Severity::Error)
     );
     assert_eq!(
-        config.rule_severities.get("MD003"),
-        Some(&rumdl_lib::rule::Severity::Warning)
+        config.get_rule_severity("MD003"),
+        Some(rumdl_lib::rule::Severity::Warning)
     );
     assert_eq!(
-        config.rule_severities.get("MD004"),
-        Some(&rumdl_lib::rule::Severity::Error)
+        config.get_rule_severity("MD004"),
+        Some(rumdl_lib::rule::Severity::Error)
     );
     assert_eq!(
-        config.rule_severities.get("MD005"),
-        Some(&rumdl_lib::rule::Severity::Warning)
+        config.get_rule_severity("MD005"),
+        Some(rumdl_lib::rule::Severity::Warning)
     );
 }
 
@@ -1926,16 +1926,16 @@ style = "atx"
 
     // Verify severity overrides work in both formats
     assert_eq!(
-        config.rule_severities.get("MD001"),
-        Some(&rumdl_lib::rule::Severity::Warning)
+        config.get_rule_severity("MD001"),
+        Some(rumdl_lib::rule::Severity::Warning)
     );
     assert_eq!(
-        config.rule_severities.get("MD013"),
-        Some(&rumdl_lib::rule::Severity::Error)
+        config.get_rule_severity("MD013"),
+        Some(rumdl_lib::rule::Severity::Error)
     );
     assert_eq!(
-        config.rule_severities.get("MD003"),
-        Some(&rumdl_lib::rule::Severity::Error)
+        config.get_rule_severity("MD003"),
+        Some(rumdl_lib::rule::Severity::Error)
     );
 
     // Verify other config still works
@@ -1981,8 +1981,8 @@ severity = "warning"
 
     // MD001 should still work
     assert_eq!(
-        config.rule_severities.get("MD001"),
-        Some(&rumdl_lib::rule::Severity::Warning)
+        config.get_rule_severity("MD001"),
+        Some(rumdl_lib::rule::Severity::Warning)
     );
 }
 
@@ -2006,8 +2006,8 @@ severity = "error"
 
     // Severity should be stored under canonical name MD001
     assert_eq!(
-        config.rule_severities.get("MD001"),
-        Some(&rumdl_lib::rule::Severity::Error),
+        config.get_rule_severity("MD001"),
+        Some(rumdl_lib::rule::Severity::Error),
         "Severity set via alias should be stored under canonical name"
     );
 }

@@ -287,7 +287,7 @@ pub fn lint_and_index(
                         // Apply severity override from config if present
                         if let Some(cfg) = config {
                             let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
-                            if let Some(&override_severity) = cfg.rule_severities.get(rule_name_to_check) {
+                            if let Some(override_severity) = cfg.get_rule_severity(rule_name_to_check) {
                                 warning.severity = override_severity;
                             }
                         }
@@ -377,7 +377,7 @@ pub fn run_cross_file_checks(
                     .map(|mut warning| {
                         // Apply severity override from config if present
                         if let Some(cfg) = config
-                            && let Some(&override_severity) = cfg.rule_severities.get(rule.name())
+                            && let Some(override_severity) = cfg.get_rule_severity(rule.name())
                         {
                             warning.severity = override_severity;
                         }

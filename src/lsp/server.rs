@@ -356,6 +356,26 @@ impl RumdlLanguageServer {
                 // Convert camelCase to snake_case for config compatibility
                 let config_key = Self::camel_to_snake(key);
 
+                // Handle severity specially - it's a first-class field on RuleConfig
+                if config_key == "severity" {
+                    if let Some(severity_str) = value.as_str() {
+                        match serde_json::from_value::<crate::rule::Severity>(serde_json::Value::String(
+                            severity_str.to_string(),
+                        )) {
+                            Ok(severity) => {
+                                rule_entry.severity = Some(severity);
+                            }
+                            Err(_) => {
+                                log::warn!(
+                                    "Invalid severity '{severity_str}' for rule {rule_key}. \
+                                     Valid values: error, warning, info"
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 // Convert JSON value to TOML value
                 if let Some(toml_value) = Self::json_to_toml(value) {
                     rule_entry.values.insert(config_key, toml_value);
@@ -365,21 +385,53 @@ impl RumdlLanguageServer {
     }
 
     /// Apply per-rule configuration only if not already set in file config
+    ///
+    /// For FilesystemFirst mode: file config takes precedence for each setting.
+    /// This means:
+    /// - If file has severity set, don't override it with LSP severity
+    /// - If file has values set, don't override them with LSP values
+    /// - Handle severity and values independently
     fn apply_rule_config_if_absent(&self, config: &mut Config, rule_name: &str, rule_config: &serde_json::Value) {
         let rule_key = rule_name.to_uppercase();
 
-        // Check if rule already has configuration in file
+        // Check existing config state
         let existing_rule = config.rules.get(&rule_key);
-        let has_existing = existing_rule.map(|r| !r.values.is_empty()).unwrap_or(false);
+        let has_existing_values = existing_rule.map(|r| !r.values.is_empty()).unwrap_or(false);
+        let has_existing_severity = existing_rule.and_then(|r| r.severity).is_some();
 
-        if has_existing {
-            // Rule already configured in file, skip LSP settings for this rule
-            log::debug!("Rule {rule_key} already configured in file, skipping LSP settings");
-            return;
+        // Apply LSP settings, respecting file config
+        if let Some(obj) = rule_config.as_object() {
+            let rule_entry = config.rules.entry(rule_key.clone()).or_default();
+
+            for (key, value) in obj {
+                let config_key = Self::camel_to_snake(key);
+
+                // Handle severity independently
+                if config_key == "severity" {
+                    if !has_existing_severity && let Some(severity_str) = value.as_str() {
+                        match serde_json::from_value::<crate::rule::Severity>(serde_json::Value::String(
+                            severity_str.to_string(),
+                        )) {
+                            Ok(severity) => {
+                                rule_entry.severity = Some(severity);
+                            }
+                            Err(_) => {
+                                log::warn!(
+                                    "Invalid severity '{severity_str}' for rule {rule_key}. \
+                                     Valid values: error, warning, info"
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // Handle other values only if file config doesn't have any values for this rule
+                if !has_existing_values && let Some(toml_value) = Self::json_to_toml(value) {
+                    rule_entry.values.insert(config_key, toml_value);
+                }
+            }
         }
-
-        // No existing config, apply LSP settings
-        self.apply_rule_config(config, rule_name, rule_config);
     }
 
     /// Convert camelCase to snake_case
