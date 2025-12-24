@@ -20,6 +20,42 @@ For information on global configuration settings (file selection, rule enablemen
 - [Link and Image Rules](#link-and-image-rules) - Rules for links, references, and images
 - [Table Rules](#table-rules) - Rules for table formatting and structure
 - [Other Rules](#other-rules) - Miscellaneous rules that don't fit the other categories
+- [Opt-in Rules](#opt-in-rules) - Rules disabled by default
+
+## Opt-in Rules
+
+The following rules are **disabled by default** because they enforce opinionated style choices that may not suit all projects. Enable them explicitly if your project requires these checks.
+
+| Rule              | Description            | Why opt-in                                              |
+| ----------------- | ---------------------- | ------------------------------------------------------- |
+| [MD060](md060.md) | Table formatting       | Makes significant formatting changes to existing tables |
+| [MD063](md063.md) | Heading capitalization | Style varies by guide (AP, Chicago, APA)                |
+
+### Enabling Opt-in Rules
+
+**.rumdl.toml:**
+
+```toml
+[MD060]
+enabled = true
+
+[MD063]
+enabled = true
+style = "title_case"  # Optional: configure the style
+```
+
+**pyproject.toml:**
+
+```toml
+[tool.rumdl.MD060]
+enabled = true
+
+[tool.rumdl.MD063]
+enabled = true
+style = "title_case"
+```
+
+See each rule's documentation for available configuration options.
 
 ## Note on Missing Rule Numbers
 
