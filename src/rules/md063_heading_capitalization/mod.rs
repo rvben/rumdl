@@ -463,6 +463,14 @@ impl MD063HeadingCapitalization {
             .filter_map(|(i, s)| matches!(s, HeadingSegment::Text(_)).then_some(i))
             .collect();
 
+        // Determine if the first segment overall is a text segment
+        // For sentence case: if heading starts with code/link, the first text segment
+        // should NOT capitalize its first word (the heading already has a "first element")
+        let first_segment_is_text = segments
+            .first()
+            .map(|s| matches!(s, HeadingSegment::Text(_)))
+            .unwrap_or(false);
+
         // Determine if the last segment overall is a text segment
         // If the last segment is Code or Link, then the last text segment should NOT
         // treat its last word as the heading's last word (for lowercase-words respect)
@@ -486,10 +494,13 @@ impl MD063HeadingCapitalization {
                     let capitalized = match self.config.style {
                         HeadingCapStyle::TitleCase => self.apply_title_case_segment(t, is_first_text, is_last_text),
                         HeadingCapStyle::SentenceCase => {
-                            if is_first_text {
+                            // For sentence case, only capitalize first word if:
+                            // 1. This is the first text segment, AND
+                            // 2. The heading actually starts with text (not code/link)
+                            if is_first_text && first_segment_is_text {
                                 self.apply_sentence_case(t)
                             } else {
-                                // For non-first segments in sentence case, lowercase
+                                // Non-first segments OR heading starts with code/link
                                 self.apply_sentence_case_non_first(t)
                             }
                         }
@@ -1613,6 +1624,197 @@ mod tests {
         assert!(
             fixed.contains("with a `feature`"),
             "Expected 'with a `feature`' but got: {fixed:?}"
+        );
+    }
+
+    // Issue #228: Sentence case with inline code at heading start
+    // When a heading starts with inline code, the first word after the code
+    // should NOT be capitalized because the heading already has a "first element"
+
+    #[test]
+    fn test_sentence_case_code_at_start_basic() {
+        // The exact case from issue #228
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# `rumdl` is a linter\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should be correct as-is: code is first, "is" stays lowercase
+        assert!(
+            result.is_empty(),
+            "Heading with code at start should not flag 'is' for capitalization. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_code_at_start_incorrect_capitalization() {
+        // Verify we detect incorrect capitalization after code at start
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# `rumdl` Is a Linter\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should flag: "Is" and "Linter" should be lowercase
+        assert_eq!(result.len(), 1, "Should detect incorrect capitalization");
+        assert!(
+            result[0].message.contains("`rumdl` is a linter"),
+            "Should suggest lowercase after code. Got: {:?}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_code_at_start_fix() {
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# `rumdl` Is A Linter\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("# `rumdl` is a linter"),
+            "Should fix to lowercase after code. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_text_at_start_still_capitalizes() {
+        // Ensure normal headings still capitalize first word
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# the quick brown fox\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("The quick brown fox"),
+            "Text-first heading should capitalize first word. Got: {:?}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_link_at_start() {
+        // Links at start: link text is lowercased, following text also lowercase
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        // Use lowercase link text to avoid link text case flagging
+        let content = "# [api](api.md) reference guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // "reference" should be lowercase (link is first)
+        assert!(
+            result.is_empty(),
+            "Heading with link at start should not capitalize 'reference'. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_link_at_start_uppercase_flagged() {
+        // Links at start with uppercase link text should be flagged
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# [API](api.md) Reference Guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        // Link text and following text should be lowercased
+        assert!(
+            result[0].message.contains("[api](api.md) reference guide"),
+            "Should lowercase link text and following text. Got: {:?}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_multiple_code_spans() {
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# `foo` and `bar` are methods\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // All text after first code should be lowercase
+        assert!(
+            result.is_empty(),
+            "Should not capitalize words between/after code spans. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_code_only_heading() {
+        // Heading with only code, no text
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# `rumdl`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Code-only heading should be fine. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_code_at_end() {
+        // Heading ending with code, text before should still capitalize first word
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# install the `rumdl` tool\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // "install" should be capitalized (first word), rest lowercase
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("Install the `rumdl` tool"),
+            "First word should still be capitalized when text comes first. Got: {:?}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_code_in_middle() {
+        // Code in middle, text at start should capitalize first word
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# using the `rumdl` linter for markdown\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // "using" should be capitalized, rest lowercase
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("Using the `rumdl` linter for markdown"),
+            "First word should be capitalized. Got: {:?}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_preserved_word_after_code() {
+        // Preserved words (like iPhone) should stay preserved even after code
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            preserve_cased_words: true,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+        let content = "# `swift` iPhone development\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // "iPhone" should be preserved, "development" lowercase
+        assert!(
+            result.is_empty(),
+            "Preserved words after code should stay. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_title_case_code_at_start_still_capitalizes() {
+        // Title case should still capitalize words even after code at start
+        let rule = create_rule_with_style(HeadingCapStyle::TitleCase);
+        let content = "# `api` quick start guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Title case: all major words capitalized
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("Quick Start Guide") || result[0].message.contains("quick Start Guide"),
+            "Title case should capitalize major words after code. Got: {:?}",
+            result[0].message
         );
     }
 }
