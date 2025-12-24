@@ -339,15 +339,22 @@ respect_gitignore = false  # Ignore .gitignore files
 
 **Behavior**:
 
-- `true` (default): Files and directories listed in `.gitignore` are automatically excluded
-- `false`: `.gitignore` files are ignored, all Markdown files are considered
+- `true` (default): Files and directories listed in ignore files are automatically excluded
+- `false`: Ignore files are not considered, all Markdown files are scanned
+
+**Supported ignore files**:
+
+- `.gitignore` - Standard Git ignore patterns
+- `.ignore` - Additional ignore patterns (used by ripgrep, fd, and other tools)
+
+Both file types use the same gitignore pattern syntax and are respected at any level in the directory tree.
 
 **Usage Notes**:
 
 - This setting only affects directory scanning, not explicitly provided file paths
 - Useful for linting files that are normally ignored (e.g., generated docs)
 - When disabled, you may need more specific `exclude` patterns
-- Respects `.gitignore` files at any level in the directory tree
+- Use `.ignore` for rumdl-specific exclusions without affecting Git
 
 **Example CLI usage**:
 
