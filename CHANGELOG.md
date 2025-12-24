@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.202] - 2025-12-24
+
+### Added
+
+- **MD069 (no-duplicate-list-markers): Detect accidental duplicate list markers** (fixes #227)
+  - Detects patterns like `- - text` that occur from copy-paste with editor auto-list-continuation
+  - Supports all unordered markers: `-`, `*`, `+` and mixed combinations
+  - Auto-fix removes the first marker: `- - text` → `- text`
+  - Correctly ignores CLI flags (`- --verbose`), emphasis (`* *italic*`), and nested lists
+  - Skips code blocks, frontmatter, and HTML comments
+
+- **MD032 (blanks-around-lists): Add `allow-lazy-continuation` config option**
+  - When enabled, allows list items to continue without blank lines in specific contexts
+  - Useful for documentation styles that prefer compact list formatting
+
+### Fixed
+
+- **LSP: Make severity a first-class field on RuleConfig**
+  - Severity configuration now properly propagates through LSP diagnostics
+  - Fixes issue where custom severity settings were not reflected in editor diagnostics
+
+### Changed
+
+- **Documentation improvements**
+  - Added `.ignore` file support documentation
+  - Added LSP server documentation
+  - Added footnote rules documentation and cache configuration
+  - Added opt-in rules section to RULES.md
+
 ## [0.0.201] - 2025-12-24
 
 ### Added
