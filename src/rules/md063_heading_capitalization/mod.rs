@@ -520,7 +520,9 @@ impl MD063HeadingCapitalization {
                     let link_text = &full[*text_start..*text_end];
                     let capitalized_text = match self.config.style {
                         HeadingCapStyle::TitleCase => self.apply_title_case(link_text),
-                        HeadingCapStyle::SentenceCase => link_text.to_lowercase(),
+                        // For sentence case, apply same preservation logic as non-first text
+                        // This preserves acronyms (API), brand names (iPhone), etc.
+                        HeadingCapStyle::SentenceCase => self.apply_sentence_case_non_first(link_text),
                         HeadingCapStyle::AllCaps => self.apply_all_caps(link_text),
                     };
 
@@ -1706,17 +1708,90 @@ mod tests {
     }
 
     #[test]
-    fn test_sentence_case_link_at_start_uppercase_flagged() {
-        // Links at start with uppercase link text should be flagged
+    fn test_sentence_case_link_preserves_acronyms() {
+        // Acronyms in link text should be preserved (API, HTTP, etc.)
         let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
         let content = "# [API](api.md) Reference Guide\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        // Link text and following text should be lowercased
+        // "API" should be preserved (acronym), "Reference Guide" should be lowercased
         assert!(
-            result[0].message.contains("[api](api.md) reference guide"),
-            "Should lowercase link text and following text. Got: {:?}",
+            result[0].message.contains("[API](api.md) reference guide"),
+            "Should preserve acronym 'API' but lowercase following text. Got: {:?}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_link_preserves_brand_names() {
+        // Brand names with internal capitals should be preserved
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            preserve_cased_words: true,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+        let content = "# [iPhone](iphone.md) Features Guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        // "iPhone" should be preserved, "Features Guide" should be lowercased
+        assert!(
+            result[0].message.contains("[iPhone](iphone.md) features guide"),
+            "Should preserve 'iPhone' but lowercase following text. Got: {:?}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_link_lowercases_regular_words() {
+        // Regular words in link text should be lowercased
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# [Documentation](docs.md) Reference\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        // "Documentation" should be lowercased (regular word)
+        assert!(
+            result[0].message.contains("[documentation](docs.md) reference"),
+            "Should lowercase regular link text. Got: {:?}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_link_at_start_correct_already() {
+        // Link with correct casing should not be flagged
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# [API](api.md) reference guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Correctly cased heading with link should not be flagged. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_link_github_preserved() {
+        // GitHub should be preserved (internal capitals)
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            preserve_cased_words: true,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+        let content = "# [GitHub](gh.md) Repository Setup\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("[GitHub](gh.md) repository setup"),
+            "Should preserve 'GitHub'. Got: {:?}",
             result[0].message
         );
     }
