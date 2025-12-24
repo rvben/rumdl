@@ -155,6 +155,25 @@ impl MD063HeadingCapitalization {
             return true;
         }
 
+        // Preserve caret notation for control characters (^A, ^Z, ^@, etc.)
+        if self.is_caret_notation(word) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if a word is caret notation for control characters (e.g., ^A, ^C, ^Z)
+    fn is_caret_notation(&self, word: &str) -> bool {
+        let chars: Vec<char> = word.chars().collect();
+        // Pattern: ^ followed by uppercase letter or @[\]^_
+        if chars.len() >= 2 && chars[0] == '^' {
+            let second = chars[1];
+            // Control characters: ^@ (NUL) through ^_ (US), which includes ^A-^Z
+            if second.is_ascii_uppercase() || "@[\\]^_".contains(second) {
+                return true;
+            }
+        }
         false
     }
 
@@ -2071,5 +2090,79 @@ mod tests {
             fixed.starts_with("# The ") || fixed.starts_with("# the "),
             "Title case should work with HTML. Got: {fixed}"
         );
+    }
+
+    // ======== CARET NOTATION TESTS ========
+
+    #[test]
+    fn test_sentence_case_preserves_caret_notation() {
+        // Caret notation for control characters should be preserved
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "## Ctrl+A, Ctrl+R output ^A, ^R on zsh\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should not flag - ^A and ^R are preserved
+        assert!(
+            result.is_empty(),
+            "Caret notation should be preserved. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_caret_notation_various() {
+        // Various caret notation patterns
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+
+        // ^C for interrupt
+        let content = "## Press ^C to cancel\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "^C should be preserved. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+
+        // ^Z for suspend
+        let content = "## Use ^Z for background\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "^Z should be preserved. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+
+        // ^[ for escape
+        let content = "## Press ^[ for escape\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "^[ should be preserved. Got: {:?}",
+            result.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_caret_notation_detection() {
+        let rule = create_rule();
+
+        // Valid caret notation
+        assert!(rule.is_caret_notation("^A"));
+        assert!(rule.is_caret_notation("^Z"));
+        assert!(rule.is_caret_notation("^C"));
+        assert!(rule.is_caret_notation("^@")); // NUL
+        assert!(rule.is_caret_notation("^[")); // ESC
+        assert!(rule.is_caret_notation("^]")); // GS
+        assert!(rule.is_caret_notation("^^")); // RS
+        assert!(rule.is_caret_notation("^_")); // US
+
+        // Not caret notation
+        assert!(!rule.is_caret_notation("^a")); // lowercase
+        assert!(!rule.is_caret_notation("A")); // no caret
+        assert!(!rule.is_caret_notation("^")); // caret alone
+        assert!(!rule.is_caret_notation("^1")); // digit
     }
 }
