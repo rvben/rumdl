@@ -1365,23 +1365,6 @@ impl<'a> LintContext<'a> {
                             None
                         };
 
-                        // WORKAROUND: pulldown-cmark bug with escaped brackets
-                        // Check for escaped image syntax: \![text](url)
-                        // The byte_offset points to the '[', so we check 2 bytes back for '\!'
-                        let has_escaped_bang = start_pos >= 2
-                            && content.as_bytes().get(start_pos - 2) == Some(&b'\\')
-                            && content.as_bytes().get(start_pos - 1) == Some(&b'!');
-
-                        // Check for escaped bracket: \[text](url)
-                        // The byte_offset points to the '[', so we check 1 byte back for '\'
-                        let has_escaped_bracket =
-                            start_pos >= 1 && content.as_bytes().get(start_pos - 1) == Some(&b'\\');
-
-                        if has_escaped_bang || has_escaped_bracket {
-                            text_chunks.clear();
-                            continue; // Skip: this is escaped markdown, not a real link
-                        }
-
                         // Track this position as found
                         found_positions.insert(start_pos);
 
