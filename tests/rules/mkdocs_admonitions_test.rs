@@ -83,7 +83,7 @@ fn test_mkdocs_admonitions_with_lists() {
 
 Regular text."#;
 
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
 
     // Test with MkDocs flavor
     let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);

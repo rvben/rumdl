@@ -40,7 +40,7 @@ Teste äöü ÄÖÜ ß in verschiedenen Kontexten."#;
         Box::new(MD004UnorderedListStyle::default()),
         Box::new(MD005ListIndent::default()),
         Box::new(MD007ULIndent::default()),
-        Box::new(MD032BlanksAroundLists),
+        Box::new(MD032BlanksAroundLists::default()),
     ];
 
     for rule in &rules {
@@ -104,7 +104,7 @@ Text with ü right after code block.
     // Test rules that analyze code blocks and lists
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD032BlanksAroundLists),
+        Box::new(MD032BlanksAroundLists::default()),
         Box::new(MD046CodeBlockStyle::from_config_struct(Default::default())),
     ];
 
@@ -172,7 +172,7 @@ fn test_code_block_detection_with_utf8_boundaries() {
 
     // Test that we can check rules without panicking
     // This triggers the internal list parsing and code block detection
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.check(&ctx)));
 
     // This should not panic

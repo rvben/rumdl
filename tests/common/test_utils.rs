@@ -50,7 +50,7 @@ impl InMemoryTestRunner {
             Box::new(MD001HeadingIncrement::default()),
             Box::new(MD013LineLength::default()),
             Box::new(MD022BlanksAroundHeadings::default()),
-            Box::new(MD032BlanksAroundLists),
+            Box::new(MD032BlanksAroundLists::default()),
         ];
 
         for rule in rules {

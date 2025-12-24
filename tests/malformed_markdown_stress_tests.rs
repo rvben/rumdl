@@ -118,7 +118,7 @@ fn test_malformed_markdown_edge_cases() {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD032BlanksAroundLists),
+        Box::new(MD032BlanksAroundLists::default()),
         Box::new(MD040FencedCodeLanguage),
     ];
 

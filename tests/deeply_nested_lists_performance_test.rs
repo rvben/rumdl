@@ -28,7 +28,7 @@ fn test_deeply_nested_unordered_lists_performance() {
     assert!(!ctx.list_blocks.is_empty(), "Should detect list blocks");
 
     // Test rule performance
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
     let rule_start = Instant::now();
     let warnings = rule.check(&ctx).unwrap();
     let rule_duration = rule_start.elapsed();
@@ -63,7 +63,7 @@ fn test_deeply_nested_ordered_lists_performance() {
     );
 
     // Test rule performance with ordered lists
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
     let rule_start = Instant::now();
     let warnings = rule.check(&ctx).unwrap();
     let rule_duration = rule_start.elapsed();
@@ -100,7 +100,7 @@ fn test_mixed_deeply_nested_lists_performance() {
     // Verify complex nested structure is parsed correctly
     assert!(ctx.list_blocks.len() >= 2, "Should detect multiple list blocks");
 
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
     let rule_start = Instant::now();
     let warnings = rule.check(&ctx).unwrap();
     let rule_duration = rule_start.elapsed();
@@ -135,7 +135,7 @@ fn test_extremely_wide_nested_lists_performance() {
     );
 
     // Test performance with large number of list items
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
     let rule_start = Instant::now();
     let warnings = rule.check(&ctx).unwrap();
     let rule_duration = rule_start.elapsed();
@@ -170,7 +170,7 @@ fn test_pathological_nesting_with_content_performance() {
         parsing_duration.as_millis()
     );
 
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
     let rule_start = Instant::now();
     let warnings = rule.check(&ctx).unwrap();
     let rule_duration = rule_start.elapsed();
@@ -195,7 +195,7 @@ fn test_fix_performance_on_deeply_nested_lists() {
     let content = generate_nested_lists_needing_fixes(10, 4);
 
     let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
 
     // Ensure there are warnings to fix
     let warnings = rule.check(&ctx).unwrap();
@@ -252,7 +252,7 @@ fn test_memory_usage_with_extreme_nesting() {
         "Should detect list blocks even with extreme nesting"
     );
 
-    let rule = MD032BlanksAroundLists;
+    let rule = MD032BlanksAroundLists::default();
     let rule_start = Instant::now();
     let _warnings = rule.check(&ctx).unwrap(); // Don't panic
     let rule_duration = rule_start.elapsed();

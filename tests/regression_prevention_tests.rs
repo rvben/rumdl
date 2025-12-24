@@ -26,7 +26,10 @@ fn test_pattern_1_empty_byte_ranges_prevention() {
             Box::new(MD031BlanksAroundFences::default()) as Box<dyn Rule>,
         ),
         // MD032: Should insert blank lines around lists
-        ("Text\n- Item\nText", Box::new(MD032BlanksAroundLists) as Box<dyn Rule>),
+        (
+            "Text\n- Item\nText",
+            Box::new(MD032BlanksAroundLists::default()) as Box<dyn Rule>,
+        ),
         // MD041: Should insert heading with blank line
         (
             "Text without heading",
@@ -226,7 +229,7 @@ fn test_byte_range_boundaries() {
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),
         Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD032BlanksAroundLists),
+        Box::new(MD032BlanksAroundLists::default()),
         Box::new(MD041FirstLineHeading::new(1, false)),
         Box::new(MD042NoEmptyLinks::new()),
         Box::new(MD045NoAltText::new()),

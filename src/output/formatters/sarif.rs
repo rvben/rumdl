@@ -608,7 +608,7 @@ mod tests {
     fn test_md032_integration_produces_warning_level() {
         // Test with actual MD032 rule that produces Warning severity warnings
         let content = "# Heading\n- List item without blank line before";
-        let rule = MD032BlanksAroundLists;
+        let rule = MD032BlanksAroundLists::default();
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, Some(PathBuf::from("test.md")));
         let warnings = rule.check(&ctx).expect("MD032 check should succeed");
 

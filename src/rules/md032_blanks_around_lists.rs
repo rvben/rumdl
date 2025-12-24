@@ -3,6 +3,10 @@ use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use regex::Regex;
 use std::sync::LazyLock;
+
+mod md032_config;
+pub use md032_config::MD032Config;
+
 // Detects ordered list items starting with a number other than 1
 static ORDERED_LIST_NON_ONE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([2-9]|\d{2,})\.\s").unwrap());
 
@@ -104,7 +108,15 @@ fn is_thematic_break(line: &str) -> bool {
 /// - Efficient list item detection
 /// - Pre-computation of code block lines to avoid redundant processing
 #[derive(Debug, Clone, Default)]
-pub struct MD032BlanksAroundLists;
+pub struct MD032BlanksAroundLists {
+    config: MD032Config,
+}
+
+impl MD032BlanksAroundLists {
+    pub fn from_config_struct(config: MD032Config) -> Self {
+        Self { config }
+    }
+}
 
 impl MD032BlanksAroundLists {
     /// Check if a blank line should be required before a list based on the previous line context
@@ -269,7 +281,9 @@ impl MD032BlanksAroundLists {
                             // Include lazy continuation lines (multiple consecutive lines without indent)
                             // Per CommonMark, only paragraph text can be lazy continuation
                             // Thematic breaks, code fences, etc. cannot be lazy continuations
-                            else if !line.is_blank
+                            // Only include lazy continuation if allowed by config
+                            else if self.config.allow_lazy_continuation
+                                && !line.is_blank
                                 && line.heading.is_none()
                                 && !block.item_lines.contains(&check_line)
                                 && !is_thematic_break(line_content)
@@ -484,11 +498,29 @@ impl Rule for MD032BlanksAroundLists {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        use crate::rule_config_serde::RuleConfig;
+        let default_config = MD032Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD032Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD032BlanksAroundLists)
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD032Config>(config);
+        Box::new(MD032BlanksAroundLists::from_config_struct(rule_config))
     }
 }
 
@@ -606,13 +638,13 @@ mod tests {
     use crate::rule::Rule;
 
     fn lint(content: &str) -> Vec<LintWarning> {
-        let rule = MD032BlanksAroundLists;
+        let rule = MD032BlanksAroundLists::default();
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.check(&ctx).expect("Lint check failed")
     }
 
     fn fix(content: &str) -> String {
-        let rule = MD032BlanksAroundLists;
+        let rule = MD032BlanksAroundLists::default();
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.fix(&ctx).expect("Lint fix failed")
     }
@@ -1408,5 +1440,382 @@ More text.
                 "Should warn for HR style '{hr}' without blank line. Got: {md032_warnings:?}"
             );
         }
+    }
+
+    // === LAZY CONTINUATION TESTS ===
+
+    fn lint_with_config(content: &str, config: MD032Config) -> Vec<LintWarning> {
+        let rule = MD032BlanksAroundLists::from_config_struct(config);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.check(&ctx).expect("Lint check failed")
+    }
+
+    fn fix_with_config(content: &str, config: MD032Config) -> String {
+        let rule = MD032BlanksAroundLists::from_config_struct(config);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.fix(&ctx).expect("Lint fix failed")
+    }
+
+    #[test]
+    fn test_lazy_continuation_allowed_by_default() {
+        // Default behavior: lazy continuation is allowed, no warning
+        let content = "# Heading\n\n1. List\nSome text.";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Default behavior should allow lazy continuation. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_lazy_continuation_disallowed() {
+        // With allow_lazy_continuation = false, should warn
+        let content = "# Heading\n\n1. List\nSome text.";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn when lazy continuation is disallowed. Got: {warnings:?}"
+        );
+        assert!(
+            warnings[0].message.contains("followed by blank line"),
+            "Warning message should mention blank line"
+        );
+    }
+
+    #[test]
+    fn test_lazy_continuation_fix() {
+        // With allow_lazy_continuation = false, fix should insert blank line
+        let content = "# Heading\n\n1. List\nSome text.";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let fixed = fix_with_config(content, config.clone());
+        assert_eq!(
+            fixed, "# Heading\n\n1. List\n\nSome text.",
+            "Fix should insert blank line before lazy continuation"
+        );
+
+        // Verify no warnings after fix
+        let warnings_after = lint_with_config(&fixed, config);
+        assert_eq!(warnings_after.len(), 0, "No warnings should remain after fix");
+    }
+
+    #[test]
+    fn test_lazy_continuation_multiple_lines() {
+        // Multiple lazy continuation lines
+        let content = "- Item 1\nLine 2\nLine 3";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn for lazy continuation. Got: {warnings:?}"
+        );
+
+        let fixed = fix_with_config(content, config.clone());
+        assert_eq!(
+            fixed, "- Item 1\n\nLine 2\nLine 3",
+            "Fix should insert blank line after list"
+        );
+
+        // Verify no warnings after fix
+        let warnings_after = lint_with_config(&fixed, config);
+        assert_eq!(warnings_after.len(), 0, "No warnings should remain after fix");
+    }
+
+    #[test]
+    fn test_lazy_continuation_with_indented_content() {
+        // Indented content is valid continuation, not lazy continuation
+        let content = "- Item 1\n  Indented content\nLazy text";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn for lazy text after indented content. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_lazy_continuation_properly_separated() {
+        // With proper blank line, no warning even with strict config
+        let content = "- Item 1\n\nSome text.";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn when list is properly followed by blank line. Got: {warnings:?}"
+        );
+    }
+
+    // ==================== Expert-level edge case tests ====================
+
+    #[test]
+    fn test_lazy_continuation_ordered_list_parenthesis_marker() {
+        // Ordered list with parenthesis marker (1) instead of period
+        let content = "1) First item\nLazy continuation";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn for lazy continuation with parenthesis marker"
+        );
+
+        let fixed = fix_with_config(content, config);
+        assert_eq!(fixed, "1) First item\n\nLazy continuation");
+    }
+
+    #[test]
+    fn test_lazy_continuation_followed_by_another_list() {
+        // Lazy continuation text followed by another list item
+        // In CommonMark, "Some text" becomes part of Item 1's lazy continuation,
+        // and "- Item 2" starts a new list item within the same list.
+        // This is valid list structure, not a lazy continuation warning case.
+        let content = "- Item 1\nSome text\n- Item 2";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // No MD032 warning because this is valid list structure
+        // (all content is within the list block)
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Valid list structure should not trigger lazy continuation warning"
+        );
+    }
+
+    #[test]
+    fn test_lazy_continuation_multiple_in_document() {
+        // Multiple lists with lazy continuation at end
+        // First list: "- Item 1\nLazy 1" - lazy continuation is part of list
+        // Blank line separates the lists
+        // Second list: "- Item 2\nLazy 2" - lazy continuation followed by EOF
+        // Only the second list triggers a warning (list not followed by blank)
+        let content = "- Item 1\nLazy 1\n\n- Item 2\nLazy 2";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn for second list (not followed by blank). Got: {warnings:?}"
+        );
+
+        let fixed = fix_with_config(content, config.clone());
+        let warnings_after = lint_with_config(&fixed, config);
+        assert_eq!(warnings_after.len(), 0, "No warnings should remain after fix");
+    }
+
+    #[test]
+    fn test_lazy_continuation_end_of_document_no_newline() {
+        // Lazy continuation at end of document without trailing newline
+        let content = "- Item\nNo trailing newline";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert_eq!(warnings.len(), 1, "Should warn even at end of document");
+
+        let fixed = fix_with_config(content, config);
+        assert_eq!(fixed, "- Item\n\nNo trailing newline");
+    }
+
+    #[test]
+    fn test_lazy_continuation_thematic_break_still_needs_blank() {
+        // Thematic break after list without blank line still triggers MD032
+        // The thematic break ends the list, but MD032 requires blank line separation
+        let content = "- Item 1\n---";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        // Should warn because list needs blank line before thematic break
+        assert_eq!(
+            warnings.len(),
+            1,
+            "List should need blank line before thematic break. Got: {warnings:?}"
+        );
+
+        // Verify fix adds blank line
+        let fixed = fix_with_config(content, config);
+        assert_eq!(fixed, "- Item 1\n\n---");
+    }
+
+    #[test]
+    fn test_lazy_continuation_heading_not_flagged() {
+        // Heading after list should NOT be flagged as lazy continuation
+        // (headings end lists per CommonMark)
+        let content = "- Item 1\n# Heading";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // The warning should be about missing blank line, not lazy continuation
+        // But headings interrupt lists, so the list ends at Item 1
+        assert!(
+            warnings.iter().all(|w| !w.message.contains("lazy")),
+            "Heading should not trigger lazy continuation warning"
+        );
+    }
+
+    #[test]
+    fn test_lazy_continuation_mixed_list_types() {
+        // Mixed ordered and unordered with lazy continuation
+        let content = "- Unordered\n1. Ordered\nLazy text";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert!(!warnings.is_empty(), "Should warn about structure issues");
+    }
+
+    #[test]
+    fn test_lazy_continuation_deep_nesting() {
+        // Deep nested list with lazy continuation at end
+        let content = "- Level 1\n  - Level 2\n    - Level 3\nLazy at root";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert!(
+            !warnings.is_empty(),
+            "Should warn about lazy continuation after nested list"
+        );
+
+        let fixed = fix_with_config(content, config.clone());
+        let warnings_after = lint_with_config(&fixed, config);
+        assert_eq!(warnings_after.len(), 0, "No warnings should remain after fix");
+    }
+
+    #[test]
+    fn test_lazy_continuation_with_emphasis_in_text() {
+        // Lazy continuation containing emphasis markers
+        let content = "- Item\n*emphasized* continuation";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert_eq!(warnings.len(), 1, "Should warn even with emphasis in continuation");
+
+        let fixed = fix_with_config(content, config);
+        assert_eq!(fixed, "- Item\n\n*emphasized* continuation");
+    }
+
+    #[test]
+    fn test_lazy_continuation_with_code_span() {
+        // Lazy continuation containing code span
+        let content = "- Item\n`code` continuation";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert_eq!(warnings.len(), 1, "Should warn even with code span in continuation");
+
+        let fixed = fix_with_config(content, config);
+        assert_eq!(fixed, "- Item\n\n`code` continuation");
+    }
+
+    #[test]
+    fn test_lazy_continuation_whitespace_only_line() {
+        // Line with only whitespace is NOT considered a blank line for MD032
+        // This matches CommonMark where only truly empty lines are "blank"
+        let content = "- Item\n   \nText after whitespace-only line";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        // Whitespace-only line does NOT count as blank line separator
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Whitespace-only line should NOT count as separator. Got: {warnings:?}"
+        );
+
+        // Verify fix adds proper blank line
+        let fixed = fix_with_config(content, config);
+        assert!(fixed.contains("\n\nText"), "Fix should add blank line separator");
+    }
+
+    #[test]
+    fn test_lazy_continuation_blockquote_context() {
+        // List inside blockquote with lazy continuation
+        let content = "> - Item\n> Lazy in quote";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // Inside blockquote, lazy continuation may behave differently
+        // This tests that we handle blockquote context
+        assert!(warnings.len() <= 1, "Should handle blockquote context gracefully");
+    }
+
+    #[test]
+    fn test_lazy_continuation_fix_preserves_content() {
+        // Ensure fix doesn't modify the actual content
+        let content = "- Item with special chars: <>&\nContinuation with: \"quotes\"";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let fixed = fix_with_config(content, config);
+        assert!(fixed.contains("<>&"), "Should preserve special chars");
+        assert!(fixed.contains("\"quotes\""), "Should preserve quotes");
+        assert_eq!(fixed, "- Item with special chars: <>&\n\nContinuation with: \"quotes\"");
+    }
+
+    #[test]
+    fn test_lazy_continuation_fix_idempotent() {
+        // Running fix twice should produce same result
+        let content = "- Item\nLazy";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let fixed_once = fix_with_config(content, config.clone());
+        let fixed_twice = fix_with_config(&fixed_once, config);
+        assert_eq!(fixed_once, fixed_twice, "Fix should be idempotent");
+    }
+
+    #[test]
+    fn test_lazy_continuation_config_default_allows() {
+        // Verify default config allows lazy continuation
+        let content = "- Item\nLazy text that continues";
+        let default_config = MD032Config::default();
+        assert!(
+            default_config.allow_lazy_continuation,
+            "Default should allow lazy continuation"
+        );
+        let warnings = lint_with_config(content, default_config);
+        assert_eq!(warnings.len(), 0, "Default config should not warn on lazy continuation");
+    }
+
+    #[test]
+    fn test_lazy_continuation_after_multi_line_item() {
+        // List item with proper indented continuation, then lazy text
+        let content = "- Item line 1\n  Item line 2 (indented)\nLazy (not indented)";
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config.clone());
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn only for the lazy line, not the indented line"
+        );
     }
 }
