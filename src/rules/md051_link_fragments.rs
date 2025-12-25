@@ -551,6 +551,12 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Skip wiki-links - they use a different linking system and are not validated
+            // as relative file paths
+            if matches!(link.link_type, LinkType::WikiLink { .. }) {
+                continue;
+            }
+
             let url = &link.url;
 
             // Skip external URLs
@@ -887,5 +893,56 @@ See [link](#nonexistent) for details."#;
 
         // Should not warn about files not in workspace
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_wikilinks_skipped_in_check() {
+        // Wikilinks should not trigger MD051 warnings for missing fragments
+        let rule = MD051LinkFragments::new();
+
+        let content = r#"# Test Document
+
+## Valid Heading
+
+[[Microsoft#Windows OS]]
+[[SomePage#section]]
+[[page|Display Text]]
+[[path/to/page#section]]
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Wikilinks should not trigger MD051 warnings. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_wikilinks_not_added_to_cross_file_index() {
+        // Wikilinks should not be added to the cross-file link index
+        let rule = MD051LinkFragments::new();
+
+        let content = r#"# Test Document
+
+[[Microsoft#Windows OS]]
+[[SomePage#section]]
+[Regular Link](other.md#section)
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let mut file_index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut file_index);
+
+        // Should only have one cross-file link (the regular markdown link)
+        // Wikilinks should not be added
+        let cross_file_links = &file_index.cross_file_links;
+        assert_eq!(
+            cross_file_links.len(),
+            1,
+            "Only regular markdown links should be indexed, not wikilinks. Got: {cross_file_links:?}"
+        );
+        assert_eq!(file_index.cross_file_links[0].target_path, "other.md");
+        assert_eq!(file_index.cross_file_links[0].fragment, "section");
     }
 }

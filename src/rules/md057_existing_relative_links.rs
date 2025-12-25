@@ -1931,4 +1931,68 @@ More text
         assert!(result[0].column > 0, "Should have valid column position");
         assert!(result[0].message.contains("missing.jpg"));
     }
+
+    #[test]
+    fn test_wikilinks_skipped() {
+        // Wikilinks should not trigger MD057 warnings
+        // They use a different linking system (e.g., Obsidian, wiki software)
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"# Test Document
+
+[[Microsoft#Windows OS]]
+[[SomePage]]
+[[Page With Spaces]]
+[[path/to/page#section]]
+[[page|Display Text]]
+
+This is a [real missing link](missing.md) that should be flagged.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only warn about the regular markdown link, not wikilinks
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about missing.md, not wikilinks. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("missing.md"),
+            "Warning should be for missing.md, not wikilinks"
+        );
+    }
+
+    #[test]
+    fn test_wikilinks_not_added_to_index() {
+        // Wikilinks should not be added to the cross-file link index
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"# Test Document
+
+[[Microsoft#Windows OS]]
+[[SomePage#section]]
+[Regular Link](other.md)
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let mut file_index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut file_index);
+
+        // Should only have the regular markdown link (if it's a markdown file)
+        // Wikilinks should not be added
+        let cross_file_links = &file_index.cross_file_links;
+        assert_eq!(
+            cross_file_links.len(),
+            1,
+            "Only regular markdown links should be indexed, not wikilinks. Got: {cross_file_links:?}"
+        );
+        assert_eq!(file_index.cross_file_links[0].target_path, "other.md");
+    }
 }
