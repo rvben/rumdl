@@ -131,7 +131,28 @@
     "RuleConfig": {
       "additionalProperties": true,
       "description": "Represents a rule-specific configuration",
+      "properties": {
+        "severity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Severity override for this rule (Error, Warning, or Info)"
+        }
+      },
       "type": "object"
+    },
+    "Severity": {
+      "enum": [
+        "Error",
+        "Warning",
+        "Info"
+      ],
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",

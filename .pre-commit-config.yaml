@@ -142,3 +142,11 @@ repos:
         types: [rust]
         pass_filenames: false
         stages: [pre-push]
+
+      - id: schema-check
+        name: check JSON schema is up-to-date
+        entry: mise exec -- make check-schema
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
