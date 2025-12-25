@@ -34,25 +34,14 @@ The rumdl LSP server provides:
 Add to your Neovim configuration:
 
 ```lua
-local lspconfig = require('lspconfig')
-local configs = require('lspconfig.configs')
-
--- Register rumdl if not already defined
-if not configs.rumdl then
-  configs.rumdl = {
-    default_config = {
-      cmd = { 'rumdl', 'server' },
-      filetypes = { 'markdown' },
-      root_dir = lspconfig.util.root_pattern('.rumdl.toml', '.git'),
-      single_file_support = true,
-    },
-  }
-end
-
-lspconfig.rumdl.setup({
-  -- Optional: custom settings
-  -- cmd = { 'rumdl', 'server', '--config', '/path/to/.rumdl.toml' },
+-- if you do not use nvim-lspconfig, add this rumdl config
+vim.lsp.config("rumdl", {
+  cmd = { "rumdl", "server" },
+  filetypes = { "markdown" },
+  root_markers = { ".git" },
 })
+
+vim.lsp.enable("rumdl")
 ```
 
 ### Helix
