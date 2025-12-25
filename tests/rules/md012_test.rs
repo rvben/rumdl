@@ -84,7 +84,8 @@ fn test_md012_fix_with_code_blocks() {
     let content = "Line 1\n\n\n```\n\n\nCode\n\n\n```\nLine 2\n\n\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "Line 1\n\n```\n\n\nCode\n\n\n```\nLine 2\n\n");
+    // Trailing blanks at EOF are removed (matching markdownlint-cli)
+    assert_eq!(result, "Line 1\n\n```\n\n\nCode\n\n\n```\nLine 2\n");
 }
 
 #[test]

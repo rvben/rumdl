@@ -296,13 +296,7 @@ impl Rule for MD012NoMultipleBlanks {
             }
         }
 
-        // Handle trailing blank lines
-        // After the loop, blank_count contains the number of trailing blank lines
-        // Add up to maximum allowed trailing blank lines
-        let allowed_trailing_blanks = blank_count.min(self.config.maximum.get());
-        if allowed_trailing_blanks > 0 {
-            result.extend(vec![""; allowed_trailing_blanks]);
-        }
+        // Trailing blank lines at EOF are removed entirely (matching markdownlint-cli)
 
         // Join lines and handle final newline
         let mut output = result.join("\n");
