@@ -622,7 +622,7 @@ impl Rule for MD057ExistingRelativeLinks {
                             target_path: file_path.to_string(),
                             fragment: fragment.to_string(),
                             line: link.line,
-                            column: start_pos + 1,
+                            column: url_group.start() + 1,
                         });
                     }
                 }
