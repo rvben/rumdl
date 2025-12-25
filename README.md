@@ -660,6 +660,12 @@ rumdl check --no-config README.md
 rumdl version
 ```
 
+## LSP
+
+rumdle is also available as LSP server for editor integration.
+
+For editor-specific information on setting up the LSP, refer to our [LSP documentation](https://github.com/rvben/rumdl/blob/main/docs/lsp.md)
+
 ## Configuration
 
 rumdl can be configured in several ways:
