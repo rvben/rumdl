@@ -544,14 +544,12 @@ impl FileIndex {
         false
     }
 
-    /// Add a cross-file link to the index (deduplicates by target_path, fragment, line, column)
+    /// Add a cross-file link to the index (deduplicates by target_path, fragment, line)
     pub fn add_cross_file_link(&mut self, link: CrossFileLinkIndex) {
-        // Deduplicate: multiple rules may contribute the same link
+        // Deduplicate: multiple rules may contribute the same link with different columns
+        // (e.g., MD051 uses link start, MD057 uses URL start)
         let is_duplicate = self.cross_file_links.iter().any(|existing| {
-            existing.target_path == link.target_path
-                && existing.fragment == link.fragment
-                && existing.line == link.line
-                && existing.column == link.column
+            existing.target_path == link.target_path && existing.fragment == link.fragment && existing.line == link.line
         });
         if !is_duplicate {
             self.cross_file_links.push(link);

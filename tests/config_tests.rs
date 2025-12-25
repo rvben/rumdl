@@ -833,32 +833,69 @@ line-length:
         // Use the standard Cargo environment variable for the binary path
         let binary_path = env!("CARGO_BIN_EXE_rumdl");
 
-        // Create an invalid config file
-        let invalid_json_path = temp_dir.path().join("invalid.json");
-        fs::write(&invalid_json_path, r#"{ invalid: "json" }"#).unwrap();
+        // Create an invalid config file in auto-discovery location
+        let invalid_config_path = temp_dir.path().join(".rumdl.toml");
+        fs::write(&invalid_config_path, "invalid = [toml syntax").unwrap();
 
         // Create a simple test markdown file
         let md_path = temp_dir.path().join("test.md");
         fs::write(&md_path, "# Test\n\nSome content.\n").unwrap();
 
-        // Test that --no-config bypasses config loading and succeeds even with invalid config
+        // Test that --no-config bypasses config auto-discovery and succeeds
+        // even with invalid config in the directory
         let output = Command::new(binary_path)
-            .args([
-                "check",
-                "--config",
-                invalid_json_path.to_str().unwrap(),
-                "--no-config",
-                md_path.to_str().unwrap(),
-            ])
+            .args(["check", "--no-config", md_path.to_str().unwrap()])
+            .current_dir(temp_dir.path())
             .output()
             .expect("Failed to execute command");
 
         // Should succeed because --no-config bypasses the invalid config
         assert!(
             output.status.success(),
-            "Command with --no-config should succeed even with invalid config file. stderr='{}' stdout='{}'",
+            "Command with --no-config should succeed even with invalid config in directory. stderr='{}' stdout='{}'",
             String::from_utf8_lossy(&output.stderr),
             String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    #[test]
+    fn test_config_and_no_config_flags_conflict() {
+        use std::process::Command;
+
+        let temp_dir = tempdir().unwrap();
+
+        // Use the standard Cargo environment variable for the binary path
+        let binary_path = env!("CARGO_BIN_EXE_rumdl");
+
+        // Create a valid config file
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        fs::write(&config_path, "[global]\n").unwrap();
+
+        // Create a simple test markdown file
+        let md_path = temp_dir.path().join("test.md");
+        fs::write(&md_path, "# Test\n").unwrap();
+
+        // Test that --config and --no-config together fail fast
+        let output = Command::new(binary_path)
+            .args([
+                "check",
+                "--config",
+                config_path.to_str().unwrap(),
+                "--no-config",
+                md_path.to_str().unwrap(),
+            ])
+            .output()
+            .expect("Failed to execute command");
+
+        // Should fail with a conflict error
+        assert!(
+            !output.status.success(),
+            "Command with both --config and --no-config should fail"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("cannot be used with"),
+            "Error should mention flag conflict. stderr='{stderr}'"
         );
     }
 

@@ -2477,13 +2477,14 @@ impl SourcedConfig<ConfigLoaded> {
         // This ensures project configs are reproducible across machines and
         // CI/local runs behave identically.
 
-        if skip_auto_discovery {
-            log::debug!("[rumdl-config] Skipping all config discovery due to --no-config/--isolated flag");
-            // No config loading, just apply CLI overrides at the end
-        } else if let Some(path) = config_path {
+        // Explicit config path always takes precedence
+        if let Some(path) = config_path {
             // Explicit config path provided - use ONLY this config (standalone)
             log::debug!("[rumdl-config] Explicit config_path provided: {path:?}");
             Self::load_explicit_config(&mut sourced_config, path)?;
+        } else if skip_auto_discovery {
+            log::debug!("[rumdl-config] Skipping config discovery due to --no-config/--isolated flag");
+            // No config loading, just apply CLI overrides at the end
         } else {
             // No explicit path - try auto-discovery
             log::debug!("[rumdl-config] No explicit config_path, searching default locations");

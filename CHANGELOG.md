@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.203] - 2025-12-25
+
+### Added
+
+- **Config: Implement Ruff-style config inheritance model**
+  - User config (`~/.config/rumdl/`) now serves as base, project config extends it
+  - Project-level `enable`/`disable` are additive to user config by default
+  - Clear precedence: CLI flags > project config > user config > defaults
+
+- **MD001: Recognize frontmatter `title` as implicit H1**
+  - Documents with `title:` in YAML frontmatter no longer require an H1 heading
+  - Aligns with common static site generator behavior (Jekyll, Hugo, etc.)
+
+### Fixed
+
+- **MD057/MD051: Skip wikilinks in cross-file validation** (fixes #235)
+  - Wikilinks (`[[page]]`) were incorrectly triggering "relative link does not exist" warnings
+  - Wikilinks use a different linking system (Obsidian, etc.) and should not be validated as file paths
+
+- **MD057: Fix LSP diagnostic position for cross-file links** (fixes #234)
+  - LSP was pointing to link text `[...]` instead of URL `(...)`
+  - Now correctly highlights the URL portion in editor diagnostics
+
+- **MD012: Remove all trailing blank lines at EOF**
+  - Previously only removed one trailing blank line per fix pass
+  - Now removes all consecutive trailing blank lines in a single fix
+
+- **Config: Add missing aliases for MD062/MD064/MD065 rules** (fixes #232)
+  - Added kebab-case aliases for newer rules
+  - Fixed MD069 typo in alias registration
+
+- **CLI: Fail fast when `--config` conflicts with `--no-config`/`--isolated`**
+  - These flags are contradictory and now produce a clear error instead of silently ignoring one
+
+- **Cross-file validation: Fix duplicate warnings for same link**
+  - MD051 and MD057 both contribute links to the workspace index with different column positions
+  - Deduplication now ignores column differences, preventing duplicate warnings
+
 ## [0.0.202] - 2025-12-24
 
 ### Added

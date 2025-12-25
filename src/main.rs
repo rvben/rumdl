@@ -317,7 +317,12 @@ struct Cli {
     color: String,
 
     /// Path to configuration file
-    #[arg(long, global = true, help = "Path to configuration file")]
+    #[arg(
+        long,
+        global = true,
+        help = "Path to configuration file",
+        conflicts_with_all = ["no_config", "isolated"]
+    )]
     config: Option<String>,
 
     /// Ignore all configuration files and use built-in defaults
