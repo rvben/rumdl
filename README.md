@@ -94,6 +94,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Global Options](#global-options)
   - [Exit Codes](#exit-codes)
   - [Usage Examples](#usage-examples)
+- [LSP](#lsp)
 - [Configuration](#configuration)
   - [Configuration Discovery](#configuration-discovery)
   - [Editor Support (JSON Schema)](#editor-support-json-schema)
