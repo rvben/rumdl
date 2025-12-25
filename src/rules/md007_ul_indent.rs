@@ -47,28 +47,48 @@ impl MD007ULIndent {
         visual_col
     }
 
-    /// Determine the effective style to use for this check.
-    /// When style is not explicitly set and indent != 2, we auto-select:
-    /// - Pure unordered lists → fixed style (markdownlint compatible)
-    /// - Mixed ordered/unordered → text-aligned (avoids oscillation)
-    fn effective_style(&self, ctx: &crate::lint_context::LintContext) -> md007_config::IndentStyle {
-        // If style was explicitly set, always use it
+    /// Calculate expected indentation for a nested list item.
+    ///
+    /// This uses per-parent logic rather than document-wide style selection:
+    /// - When parent is **ordered**: align with parent's text (handles variable-width markers)
+    /// - When parent is **unordered**: use configured indent (fixed-width markers)
+    ///
+    /// If user explicitly sets `style`, that choice is respected uniformly.
+    fn calculate_expected_indent(
+        &self,
+        nesting_level: usize,
+        parent_info: Option<(bool, usize)>, // (is_ordered, content_visual_col)
+    ) -> usize {
+        if nesting_level == 0 {
+            return 0;
+        }
+
+        // If user explicitly set style, respect their choice uniformly
         if self.config.style_explicit {
-            return self.config.style;
+            return match self.config.style {
+                md007_config::IndentStyle::Fixed => nesting_level * self.config.indent.get() as usize,
+                md007_config::IndentStyle::TextAligned => {
+                    parent_info.map_or(nesting_level * 2, |(_, content_col)| content_col)
+                }
+            };
         }
 
-        // If indent is the default (2), no need for auto-switch
-        // (text-aligned and fixed produce same results with indent=2)
-        if self.config.indent.get() == 2 {
-            return self.config.style;
-        }
-
-        // Auto-select: fixed for pure unordered lists, text-aligned for mixed
-        // Use cached method from LintContext for optimal performance
-        if ctx.has_mixed_list_nesting() {
-            md007_config::IndentStyle::TextAligned
-        } else {
-            md007_config::IndentStyle::Fixed
+        // Smart default: per-parent type decision
+        match parent_info {
+            Some((true, parent_content_col)) => {
+                // Parent is ordered: align with parent's text position
+                // This handles variable-width markers ("1." vs "10." vs "100.")
+                parent_content_col
+            }
+            Some((false, _)) => {
+                // Parent is unordered: use configured indent
+                // Unordered markers have fixed width, so user's indent preference applies
+                nesting_level * self.config.indent.get() as usize
+            }
+            None => {
+                // No parent found (shouldn't happen at nesting_level > 0)
+                nesting_level * self.config.indent.get() as usize
+            }
         }
     }
 }
@@ -85,9 +105,6 @@ impl Rule for MD007ULIndent {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
         let mut list_stack: Vec<(usize, usize, bool, usize)> = Vec::new(); // Stack of (marker_visual_col, line_num, is_ordered, content_visual_col) for tracking nesting
-
-        // Determine effective style: auto-select based on document content when appropriate
-        let effective_style = self.effective_style(ctx);
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             // Skip if this line is in a code block, front matter, or mkdocstrings
@@ -190,34 +207,16 @@ impl Rule for MD007ULIndent {
                 // Now stack contains only parent items
                 let nesting_level = list_stack.len();
 
-                // Calculate expected indent first to determine expected content position
+                // Get parent info for per-parent calculation
+                let parent_info = list_stack
+                    .get(nesting_level.wrapping_sub(1))
+                    .map(|&(_, _, is_ordered, content_col)| (is_ordered, content_col));
+
+                // Calculate expected indent using per-parent logic
                 let expected_indent = if self.config.start_indented {
                     self.config.start_indent.get() as usize + (nesting_level * self.config.indent.get() as usize)
                 } else {
-                    match effective_style {
-                        md007_config::IndentStyle::Fixed => {
-                            // Fixed style: simple multiples of indent
-                            nesting_level * self.config.indent.get() as usize
-                        }
-                        md007_config::IndentStyle::TextAligned => {
-                            // Text-aligned style: child's marker aligns with parent's text content
-                            if nesting_level > 0 {
-                                // Check if parent is an ordered list
-                                if let Some(&(_, _parent_line_idx, _is_ordered, parent_content_visual_col)) =
-                                    list_stack.get(nesting_level - 1)
-                                {
-                                    // Child marker is positioned where parent's text starts
-                                    parent_content_visual_col
-                                } else {
-                                    // No parent at that level - for text-aligned, use standard alignment
-                                    // Each level aligns with previous level's text position
-                                    nesting_level * 2
-                                }
-                            } else {
-                                0 // First level, no indentation needed
-                            }
-                        }
-                    }
+                    self.calculate_expected_indent(nesting_level, parent_info)
                 };
 
                 // Add current item to stack
@@ -1203,17 +1202,18 @@ tags:
 
     #[test]
     fn test_issue_209_still_fixed() {
-        // Verify issue #209 (oscillation) is still fixed
+        // Verify issue #209 (oscillation) is still fixed when style is explicitly set
+        // With issue #236 fix, explicit style must be set to get pure text-aligned behavior
         let config = MD007Config {
             indent: crate::types::IndentSize::from_const(3),
             start_indented: false,
             start_indent: crate::types::IndentSize::from_const(2),
-            style: md007_config::IndentStyle::TextAligned, // Default
-            style_explicit: false,                         // Not explicitly set
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: true, // Explicit style to test text-aligned behavior
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
-        // Mixed list from issue #209 - should use text-aligned, no oscillation
+        // Mixed list from issue #209 - with explicit text-aligned, no oscillation
         let content = r#"# Header 1
 
 - **Second item**:
@@ -1226,7 +1226,7 @@ tags:
 
         assert!(
             result.is_empty(),
-            "Issue #209: Mixed lists should use text-aligned and have no issues, got: {result:?}"
+            "Issue #209: With explicit text-aligned style, should have no issues, got: {result:?}"
         );
     }
 

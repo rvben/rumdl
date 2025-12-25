@@ -1051,12 +1051,14 @@ style = "fixed"
        - Third subpoint
 "#;
 
-            // Config from issue #209
+            // Config from issue #209 - explicitly use text-aligned style
+            // to verify no oscillation with that style setting
             let config = r#"[global]
 enable = ["MD005", "MD007"]
 
 [MD007]
 indent = 3
+style = "text-aligned"
 "#;
 
             fs::write(&test_file, content).unwrap();
@@ -1108,11 +1110,13 @@ indent = 3
        - First subpoint
 "#;
 
+            // Explicitly use text-aligned style to test no oscillation
             let config = r#"[global]
 enable = ["MD005", "MD007"]
 
 [MD007]
 indent = 3
+style = "text-aligned"
 "#;
 
             fs::write(&test_file, content).unwrap();
@@ -1211,13 +1215,14 @@ style = "text-aligned"
        - First subpoint
 "#;
 
-            // indent=3 but NO explicit style - should default to text-aligned
-            // Previously this would auto-switch to fixed style and cause oscillation
+            // Explicitly use text-aligned style to verify no oscillation with that style
+            // With issue #236 fix, style must be explicit to get pure text-aligned behavior
             let config = r#"[global]
 enable = ["MD005", "MD007"]
 
 [MD007]
 indent = 3
+style = "text-aligned"
 "#;
 
             fs::write(&test_file, content).unwrap();
@@ -1340,13 +1345,15 @@ indent = 5
         let test_file = temp_dir.path().join("test.md");
         let config_file = temp_dir.path().join(".rumdl.toml");
 
-        // Mixed list - should use text-aligned style, not fixed
+        // Mixed list - with issue #236 fix, bullets under unordered use configured indent
+        // but bullets under ordered still use text-aligned
         // Use consistent markers to avoid MD004 issues
         let content = r#"# Title
 
 * Unordered item
-  * Nested unordered (2 spaces - text-aligned)
-    1. Ordered child (3 spaces - text-aligned)
+    * Nested unordered (4 spaces - configured indent)
+        1. Ordered child
+           * Deeply nested bullet (text-aligned with ordered)
 "#;
 
         let config = r#"[global]
@@ -1369,11 +1376,61 @@ indent = 4
         let stdout = String::from_utf8_lossy(&output.stdout);
         let exit_code = output.status.code().unwrap_or(-1);
 
-        // With mixed lists, text-aligned style should be used, so this should be valid
-        // (text-aligned doesn't require strict multiples of indent)
+        // With issue #236 fix, bullets under unordered use configured indent (4)
+        // and bullets under ordered use text-aligned
         assert!(
             stdout.contains("No issues found") && exit_code == 0,
-            "With indent=4 and mixed lists, text-aligned style should be used.\n\
+            "With indent=4, bullets under unordered should use 4-space indent.\n\
+             stdout: {stdout}\n\
+             exit code: {exit_code}"
+        );
+    }
+
+    /// Test for issue #236: indent config is respected when document has mixed lists
+    /// https://github.com/rvben/rumdl/issues/236
+    #[test]
+    fn test_issue_236_indent_config_respected_in_mixed_docs() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let config_file = temp_dir.path().join(".rumdl.toml");
+
+        // Exact content from issue #236 - pure unordered + mixed list in same doc
+        let content = r#"# Some Heading
+
+- one item
+    - another item
+- another item
+
+## Heading
+
+1. Some Text.
+   - a bullet list inside a numbered list.
+2. Hello World.
+"#;
+
+        // Config from issue #236
+        let config = r#"[ul-indent]
+indent = 4
+"#;
+
+        fs::write(&test_file, content).unwrap();
+        fs::write(&config_file, config).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        // Issue #236: The pure unordered list should use 4-space indent
+        // and the bullet under ordered list should use text-aligned (3 spaces)
+        assert!(
+            stdout.contains("No issues found") && exit_code == 0,
+            "Issue #236: indent=4 should be respected for pure unordered sections.\n\
              stdout: {stdout}\n\
              exit code: {exit_code}"
         );
