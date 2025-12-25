@@ -25,7 +25,7 @@ status-level = "pass"
 # Skip performance and memory tests in CI (they're flaky due to resource variability)
 # Exclude specific integration test binaries and performance-related test functions
 # Including perf_regression_issue_148 which contains timing-based complexity tests
-default-filter = 'not (package(rumdl) and binary(deeply_nested_lists_performance_test)) and not (package(rumdl) and binary(performance_validation_tests)) and not (package(rumdl) and binary(perf_check)) and not binary(perf_regression_issue_148) and not binary(rule_complexity_regression_test) and not test(/performance|benchmark|memory|linear_complexity/)'
+default-filter = 'not (package(rumdl) and binary(deeply_nested_lists_performance_test)) and not (package(rumdl) and binary(performance_validation_tests)) and not (package(rumdl) and binary(perf_check)) and not binary(perf_regression_issue_148) and not binary(rule_complexity_regression_test) and not test(/performance|benchmark|memory|linear_complexity|scaling/)'
 
 # More conservative in CI
 test-threads = "num-cpus"
