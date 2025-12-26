@@ -17,7 +17,7 @@ use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
 use crate::lsp::types::{IndexState, IndexUpdate};
 use crate::utils::anchor_styles::AnchorStyle;
-use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, WorkspaceIndex};
+use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex, extract_cross_file_links};
 
 /// Supported markdown file extensions
 const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"];
@@ -184,9 +184,9 @@ impl IndexWorker {
             }
         }
 
-        // Extract cross-file links
-        // Use pulldown-cmark to find links pointing to other files
-        for link in find_cross_file_links(content) {
+        // Extract cross-file links using the shared utility
+        // This ensures consistent position tracking with MD057
+        for link in extract_cross_file_links(&ctx) {
             file_index.add_cross_file_link(link);
         }
 
@@ -370,109 +370,9 @@ async fn collect_markdown_files_recursive(dir: &PathBuf, files: &mut Vec<PathBuf
     Ok(())
 }
 
-/// Find cross-file links in content
-fn find_cross_file_links(content: &str) -> Vec<CrossFileLinkIndex> {
-    use pulldown_cmark::{Event, Parser, Tag};
-
-    let mut links = Vec::new();
-    let parser = Parser::new(content);
-
-    let mut current_line = 1;
-    let mut current_col = 1;
-
-    for event in parser {
-        match event {
-            Event::Start(Tag::Link { dest_url, .. }) | Event::Start(Tag::Image { dest_url, .. }) => {
-                let url = dest_url.as_ref();
-
-                // Skip external URLs and anchor-only links
-                if url.starts_with("http://")
-                    || url.starts_with("https://")
-                    || url.starts_with("mailto:")
-                    || url.starts_with('#')
-                {
-                    continue;
-                }
-
-                // Parse the URL for file path and fragment
-                let (file_path, fragment) = if let Some(hash_pos) = url.find('#') {
-                    (&url[..hash_pos], &url[hash_pos + 1..])
-                } else {
-                    (url, "")
-                };
-
-                // Only track links that point to files (with or without fragments)
-                if !file_path.is_empty() {
-                    links.push(CrossFileLinkIndex {
-                        target_path: file_path.to_string(),
-                        fragment: fragment.to_string(),
-                        line: current_line,
-                        column: current_col,
-                    });
-                }
-            }
-            Event::Text(text) => {
-                // Update position tracking
-                for ch in text.chars() {
-                    if ch == '\n' {
-                        current_line += 1;
-                        current_col = 1;
-                    } else {
-                        current_col += 1;
-                    }
-                }
-            }
-            Event::SoftBreak | Event::HardBreak => {
-                current_line += 1;
-                current_col = 1;
-            }
-            _ => {}
-        }
-    }
-
-    links
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_find_cross_file_links() {
-        let content = r#"
-# Heading
-
-See [other file](./other.md) for more info.
-
-Also check [section](./guide.md#install) and [external](https://example.com).
-
-[Same file anchor](#local) is ignored.
-"#;
-
-        let links = find_cross_file_links(content);
-
-        assert_eq!(links.len(), 2);
-
-        assert_eq!(links[0].target_path, "./other.md");
-        assert_eq!(links[0].fragment, "");
-
-        assert_eq!(links[1].target_path, "./guide.md");
-        assert_eq!(links[1].fragment, "install");
-    }
-
-    #[test]
-    fn test_find_cross_file_links_images() {
-        let content = r#"
-![Image](./images/photo.png)
-
-![External](https://example.com/img.png)
-"#;
-
-        let links = find_cross_file_links(content);
-
-        assert_eq!(links.len(), 1);
-        assert_eq!(links[0].target_path, "./images/photo.png");
-    }
 
     #[test]
     fn test_build_file_index() {
@@ -499,5 +399,37 @@ More text with [link](./other.md#section).
         assert_eq!(index.cross_file_links.len(), 1);
         assert_eq!(index.cross_file_links[0].target_path, "./other.md");
         assert_eq!(index.cross_file_links[0].fragment, "section");
+    }
+
+    #[test]
+    fn test_build_file_index_column_positions() {
+        // Verify that column positions are correct (fix for issue #234)
+        let content = "See [link](./file.md) here.\n";
+
+        let index = IndexWorker::build_file_index(content);
+
+        assert_eq!(index.cross_file_links.len(), 1);
+        assert_eq!(index.cross_file_links[0].target_path, "./file.md");
+        assert_eq!(index.cross_file_links[0].line, 1);
+        // "See [link](" = 11 chars, so column 12 is where "./file.md" starts
+        assert_eq!(index.cross_file_links[0].column, 12);
+    }
+
+    #[test]
+    fn test_build_file_index_multiple_links() {
+        let content = "First [a](./a.md) and [b](./b.md#section) links.\n";
+
+        let index = IndexWorker::build_file_index(content);
+
+        assert_eq!(index.cross_file_links.len(), 2);
+
+        // First link: "First [a](" = 10 chars, column 11
+        assert_eq!(index.cross_file_links[0].target_path, "./a.md");
+        assert_eq!(index.cross_file_links[0].column, 11);
+
+        // Second link: "First [a](./a.md) and [b](" = 26 chars, column 27
+        assert_eq!(index.cross_file_links[1].target_path, "./b.md");
+        assert_eq!(index.cross_file_links[1].fragment, "section");
+        assert_eq!(index.cross_file_links[1].column, 27);
     }
 }

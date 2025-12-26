@@ -5,7 +5,7 @@
 
 use crate::rule::{CrossFileScope, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::element_cache::ElementCache;
-use crate::workspace_index::{CrossFileLinkIndex, FileIndex};
+use crate::workspace_index::{FileIndex, extract_cross_file_links};
 use regex::Regex;
 use std::collections::HashMap;
 use std::env;
@@ -104,13 +104,6 @@ const MARKDOWN_EXTENSIONS: &[&str] = &[
     ".qmd",
     ".rmd",
 ];
-
-/// Check if a path has a markdown extension (case-insensitive)
-#[inline]
-fn is_markdown_file(path: &str) -> bool {
-    let path_lower = path.to_lowercase();
-    MARKDOWN_EXTENSIONS.iter().any(|ext| path_lower.ends_with(ext))
-}
 
 /// Rule MD057: Existing relative links should point to valid files or directories.
 #[derive(Debug, Clone, Default)]
@@ -545,88 +538,10 @@ impl Rule for MD057ExistingRelativeLinks {
     }
 
     fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, index: &mut FileIndex) {
-        let content = ctx.content;
-
-        // Early returns for performance
-        if content.is_empty() || !content.contains("](") {
-            return;
-        }
-
-        // Pre-collect lines to avoid repeated line iteration
-        let lines: Vec<&str> = content.lines().collect();
-        let element_cache = ElementCache::new(content);
-        let line_index = &ctx.line_index;
-
-        for link in &ctx.links {
-            let line_idx = link.line - 1;
-            if line_idx >= lines.len() {
-                continue;
-            }
-
-            let line = lines[line_idx];
-            if !line.contains("](") {
-                continue;
-            }
-
-            // Find all links in this line
-            for link_match in LINK_START_REGEX.find_iter(line) {
-                let start_pos = link_match.start();
-                let end_pos = link_match.end();
-
-                // Calculate absolute position for code span detection
-                let line_start_byte = line_index.get_line_start_byte(line_idx + 1).unwrap_or(0);
-                let absolute_start_pos = line_start_byte + start_pos;
-
-                // Skip if in code span
-                if element_cache.is_in_code_span(absolute_start_pos) {
-                    continue;
-                }
-
-                // Extract the URL (group 1) and fragment (group 2)
-                // The regex separates URL and fragment: group 1 excludes #, group 2 captures #fragment
-                // Try angle-bracket regex first (handles URLs with parens)
-                let caps_result = URL_EXTRACT_ANGLE_BRACKET_REGEX
-                    .captures_at(line, end_pos - 1)
-                    .or_else(|| URL_EXTRACT_REGEX.captures_at(line, end_pos - 1));
-
-                if let Some(caps) = caps_result
-                    && let Some(url_group) = caps.get(1)
-                {
-                    let file_path = url_group.as_str().trim();
-
-                    // Skip empty, external, template variables, absolute URL paths,
-                    // framework aliases, or fragment-only URLs
-                    if file_path.is_empty()
-                        || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
-                        || file_path.starts_with("www.")
-                        || file_path.starts_with('#')
-                        || file_path.starts_with("{{")
-                        || file_path.starts_with("{%")
-                        || file_path.starts_with('/')
-                        || file_path.starts_with('~')
-                        || file_path.starts_with('@')
-                    {
-                        continue;
-                    }
-
-                    // Strip query parameters before indexing (e.g., `file.md?raw=true` -> `file.md`)
-                    let file_path = Self::strip_query_and_fragment(file_path);
-
-                    // Get fragment from capture group 2 (includes # prefix)
-                    let fragment = caps.get(2).map(|m| m.as_str().trim_start_matches('#')).unwrap_or("");
-
-                    // Only index markdown file links for cross-file validation
-                    // Non-markdown files (images, media) are validated via filesystem in check()
-                    if is_markdown_file(file_path) {
-                        index.add_cross_file_link(CrossFileLinkIndex {
-                            target_path: file_path.to_string(),
-                            fragment: fragment.to_string(),
-                            line: link.line,
-                            column: url_group.start() + 1,
-                        });
-                    }
-                }
-            }
+        // Use the shared utility for cross-file link extraction
+        // This ensures consistent position tracking between CLI and LSP
+        for link in extract_cross_file_links(ctx) {
+            index.add_cross_file_link(link);
         }
     }
 
@@ -726,6 +641,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace_index::CrossFileLinkIndex;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;

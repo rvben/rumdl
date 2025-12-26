@@ -18,9 +18,175 @@
 //! [N bytes: postcard-serialized WorkspaceIndex]
 //! ```
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+use crate::lint_context::LintContext;
+use crate::utils::element_cache::ElementCache;
+
+// =============================================================================
+// Shared cross-file link extraction utilities
+//
+// These regexes and helpers are the canonical implementation for extracting
+// cross-file links. Both MD057 and LSP use this shared code path for correct
+// position tracking.
+// =============================================================================
+
+/// Regex to match the start of a link
+static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\]]*\]").unwrap());
+
+/// Regex to extract the URL from an angle-bracketed markdown link
+/// Format: `](<URL>)` or `](<URL> "title")`
+static URL_EXTRACT_ANGLE_BRACKET_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\]\(\s*<([^>]+)>(#[^\)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
+
+/// Regex to extract the URL from a normal markdown link (without angle brackets)
+/// Format: `](URL)` or `](URL "title")`
+static URL_EXTRACT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"]\(\s*([^>)\s#]+)(#[^)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
+
+/// Regex to detect URLs with explicit schemes
+static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([a-zA-Z][a-zA-Z0-9+.-]*://|[a-zA-Z][a-zA-Z0-9+.-]*:|www\.)").unwrap());
+
+/// Supported markdown file extensions
+const MARKDOWN_EXTENSIONS: &[&str] = &[
+    ".md",
+    ".markdown",
+    ".mdx",
+    ".mkd",
+    ".mkdn",
+    ".mdown",
+    ".mdwn",
+    ".qmd",
+    ".rmd",
+];
+
+/// Check if a path has a markdown extension (case-insensitive)
+#[inline]
+fn is_markdown_file(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    MARKDOWN_EXTENSIONS.iter().any(|ext| path_lower.ends_with(ext))
+}
+
+/// Strip query parameters and fragments from a URL path
+/// Returns the path portion before `?` or `#`
+fn strip_query_and_fragment(url: &str) -> &str {
+    let query_pos = url.find('?');
+    let fragment_pos = url.find('#');
+
+    match (query_pos, fragment_pos) {
+        (Some(q), Some(f)) => &url[..q.min(f)],
+        (Some(q), None) => &url[..q],
+        (None, Some(f)) => &url[..f],
+        (None, None) => url,
+    }
+}
+
+/// Extract cross-file links from content using correct regex-based position tracking.
+///
+/// This is the canonical implementation used by both MD057 and LSP to ensure
+/// consistent and correct column positions for diagnostic reporting.
+///
+/// Returns a vector of `CrossFileLinkIndex` entries, one for each markdown file
+/// link found in the content.
+pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
+    let content = ctx.content;
+
+    // Early returns for performance
+    if content.is_empty() || !content.contains("](") {
+        return Vec::new();
+    }
+
+    let mut links = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let element_cache = ElementCache::new(content);
+    let line_index = &ctx.line_index;
+
+    // Track which lines we've already processed to avoid duplicates
+    // (ctx.links may have multiple entries for the same line)
+    let mut processed_lines = HashSet::new();
+
+    for link in &ctx.links {
+        let line_idx = link.line - 1;
+        if line_idx >= lines.len() {
+            continue;
+        }
+
+        // Skip if we've already processed this line
+        if !processed_lines.insert(line_idx) {
+            continue;
+        }
+
+        let line = lines[line_idx];
+        if !line.contains("](") {
+            continue;
+        }
+
+        // Find all links in this line
+        for link_match in LINK_START_REGEX.find_iter(line) {
+            let start_pos = link_match.start();
+            let end_pos = link_match.end();
+
+            // Calculate absolute position for code span detection
+            let line_start_byte = line_index.get_line_start_byte(line_idx + 1).unwrap_or(0);
+            let absolute_start_pos = line_start_byte + start_pos;
+
+            // Skip if in code span
+            if element_cache.is_in_code_span(absolute_start_pos) {
+                continue;
+            }
+
+            // Extract the URL (group 1) and fragment (group 2)
+            // Try angle-bracket regex first (handles URLs with parens)
+            let caps_result = URL_EXTRACT_ANGLE_BRACKET_REGEX
+                .captures_at(line, end_pos - 1)
+                .or_else(|| URL_EXTRACT_REGEX.captures_at(line, end_pos - 1));
+
+            if let Some(caps) = caps_result
+                && let Some(url_group) = caps.get(1)
+            {
+                let file_path = url_group.as_str().trim();
+
+                // Skip empty, external, template variables, absolute URL paths,
+                // framework aliases, or fragment-only URLs
+                if file_path.is_empty()
+                    || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
+                    || file_path.starts_with("www.")
+                    || file_path.starts_with('#')
+                    || file_path.starts_with("{{")
+                    || file_path.starts_with("{%")
+                    || file_path.starts_with('/')
+                    || file_path.starts_with('~')
+                    || file_path.starts_with('@')
+                {
+                    continue;
+                }
+
+                // Strip query parameters before indexing
+                let file_path = strip_query_and_fragment(file_path);
+
+                // Get fragment from capture group 2 (includes # prefix)
+                let fragment = caps.get(2).map(|m| m.as_str().trim_start_matches('#')).unwrap_or("");
+
+                // Only index markdown file links for cross-file validation
+                if is_markdown_file(file_path) {
+                    links.push(CrossFileLinkIndex {
+                        target_path: file_path.to_string(),
+                        fragment: fragment.to_string(),
+                        line: link.line,
+                        column: url_group.start() + 1,
+                    });
+                }
+            }
+        }
+    }
+
+    links
+}
 
 /// Magic bytes identifying a workspace index cache file
 #[cfg(feature = "native")]
@@ -1176,5 +1342,189 @@ mod tests {
             assert!(heading.is_some());
             assert_eq!(heading.unwrap().line, i + 1);
         }
+    }
+
+    // =============================================================================
+    // Tests for extract_cross_file_links utility
+    // =============================================================================
+
+    #[test]
+    fn test_extract_cross_file_links_basic() {
+        use crate::config::MarkdownFlavor;
+
+        let content = "# Test\n\nSee [link](./other.md) for info.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_path, "./other.md");
+        assert_eq!(links[0].fragment, "");
+        assert_eq!(links[0].line, 3);
+        // "See [link](" = 11 chars, so column 12 is where "./other.md" starts
+        assert_eq!(links[0].column, 12);
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_with_fragment() {
+        use crate::config::MarkdownFlavor;
+
+        let content = "Check [guide](./guide.md#install) here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_path, "./guide.md");
+        assert_eq!(links[0].fragment, "install");
+        assert_eq!(links[0].line, 1);
+        // "Check [guide](" = 14 chars, so column 15 is where "./guide.md" starts
+        assert_eq!(links[0].column, 15);
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_multiple_on_same_line() {
+        use crate::config::MarkdownFlavor;
+
+        let content = "See [a](a.md) and [b](b.md) here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        assert_eq!(links.len(), 2);
+
+        assert_eq!(links[0].target_path, "a.md");
+        assert_eq!(links[0].line, 1);
+        // "See [a](" = 8 chars, so column 9
+        assert_eq!(links[0].column, 9);
+
+        assert_eq!(links[1].target_path, "b.md");
+        assert_eq!(links[1].line, 1);
+        // "See [a](a.md) and [b](" = 22 chars, so column 23
+        assert_eq!(links[1].column, 23);
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_angle_brackets() {
+        use crate::config::MarkdownFlavor;
+
+        let content = "See [link](<path/with (parens).md>) here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_path, "path/with (parens).md");
+        assert_eq!(links[0].line, 1);
+        // "See [link](<" = 12 chars, so column 13
+        assert_eq!(links[0].column, 13);
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_skips_external() {
+        use crate::config::MarkdownFlavor;
+
+        let content = r#"
+[external](https://example.com)
+[mailto](mailto:test@example.com)
+[local](./local.md)
+[fragment](#section)
+[absolute](/docs/page.md)
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        // Only the local markdown link should be extracted
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_path, "./local.md");
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_skips_non_markdown() {
+        use crate::config::MarkdownFlavor;
+
+        let content = r#"
+[image](./photo.png)
+[doc](./readme.md)
+[pdf](./document.pdf)
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        // Only markdown files are indexed for cross-file validation
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_path, "./readme.md");
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_skips_code_spans() {
+        use crate::config::MarkdownFlavor;
+
+        let content = "Normal [link](./file.md) and `[code](./ignored.md)` here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        // Only the link outside code span should be extracted
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_path, "./file.md");
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_with_query_params() {
+        use crate::config::MarkdownFlavor;
+
+        let content = "See [doc](./file.md?raw=true) here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        assert_eq!(links.len(), 1);
+        // Query params should be stripped
+        assert_eq!(links[0].target_path, "./file.md");
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_empty_content() {
+        use crate::config::MarkdownFlavor;
+
+        let content = "";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        assert!(links.is_empty());
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_no_links() {
+        use crate::config::MarkdownFlavor;
+
+        let content = "# Just a heading\n\nSome text without links.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        assert!(links.is_empty());
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_position_accuracy_issue_234() {
+        // This test verifies the fix for GitHub issue #234
+        // The LSP was reporting incorrect column positions for MD057 diagnostics
+        use crate::config::MarkdownFlavor;
+
+        let content = r#"# Test Document
+
+Here is a [broken link](nonexistent-file.md) that should trigger MD057.
+
+And another [link](also-missing.md) on this line.
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx);
+
+        assert_eq!(links.len(), 2);
+
+        // First link: "Here is a [broken link](" = 24 chars, column 25
+        assert_eq!(links[0].target_path, "nonexistent-file.md");
+        assert_eq!(links[0].line, 3);
+        assert_eq!(links[0].column, 25);
+
+        // Second link: "And another [link](" = 19 chars, column 20
+        assert_eq!(links[1].target_path, "also-missing.md");
+        assert_eq!(links[1].line, 5);
+        assert_eq!(links[1].column, 20);
     }
 }
