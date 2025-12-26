@@ -15,39 +15,6 @@ impl MD065BlanksAroundHorizontalRules {
         line.trim().is_empty()
     }
 
-    /// Check if a line is a horizontal rule (---, ***, ___)
-    fn is_horizontal_rule(line: &str) -> bool {
-        // CommonMark: HRs can have 0-3 spaces of leading indentation, not tabs
-        let leading_spaces = line.len() - line.trim_start_matches(' ').len();
-        if leading_spaces > 3 || line.starts_with('\t') {
-            return false;
-        }
-
-        let trimmed = line.trim();
-        if trimmed.len() < 3 {
-            return false;
-        }
-
-        // Check for patterns like ---, ***, ___ (with optional spaces between)
-        let chars: Vec<char> = trimmed.chars().collect();
-        let first_non_space = chars.iter().find(|&&c| c != ' ');
-
-        if let Some(&marker) = first_non_space {
-            if marker != '-' && marker != '*' && marker != '_' {
-                return false;
-            }
-
-            // Count marker characters (ignoring spaces)
-            let marker_count = chars.iter().filter(|&&c| c == marker).count();
-            let other_count = chars.iter().filter(|&&c| c != marker && c != ' ').count();
-
-            // Must have at least 3 markers and only spaces otherwise
-            marker_count >= 3 && other_count == 0
-        } else {
-            false
-        }
-    }
-
     /// Check if this might be a setext heading underline (not a horizontal rule)
     fn is_setext_heading_marker(lines: &[&str], line_index: usize) -> bool {
         if line_index == 0 {
@@ -133,15 +100,10 @@ impl Rule for MD065BlanksAroundHorizontalRules {
 
         let lines: Vec<&str> = content.lines().collect();
 
-        for (i, line) in lines.iter().enumerate() {
-            // Skip lines in code blocks or front matter
-            if let Some(line_info) = ctx.lines.get(i)
-                && (line_info.in_code_block || line_info.in_front_matter)
-            {
-                continue;
-            }
-
-            if !Self::is_horizontal_rule(line) {
+        for (i, line_info) in ctx.lines.iter().enumerate() {
+            // Use pre-computed is_horizontal_rule from LineInfo
+            // This already excludes code blocks, frontmatter, and does proper HR detection
+            if !line_info.is_horizontal_rule {
                 continue;
             }
 
@@ -505,26 +467,28 @@ Only paragraphs.";
 
     #[test]
     fn test_is_horizontal_rule() {
+        use crate::lint_context::is_horizontal_rule_line;
+
         // Valid horizontal rules
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("---"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("----"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("***"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("****"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("___"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("____"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("- - -"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("* * *"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("_ _ _"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("  ---  "));
+        assert!(is_horizontal_rule_line("---"));
+        assert!(is_horizontal_rule_line("----"));
+        assert!(is_horizontal_rule_line("***"));
+        assert!(is_horizontal_rule_line("****"));
+        assert!(is_horizontal_rule_line("___"));
+        assert!(is_horizontal_rule_line("____"));
+        assert!(is_horizontal_rule_line("- - -"));
+        assert!(is_horizontal_rule_line("* * *"));
+        assert!(is_horizontal_rule_line("_ _ _"));
+        assert!(is_horizontal_rule_line("  ---  "));
 
         // Invalid horizontal rules
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("--"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("**"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("__"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("- -"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("text"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule(""));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("==="));
+        assert!(!is_horizontal_rule_line("--"));
+        assert!(!is_horizontal_rule_line("**"));
+        assert!(!is_horizontal_rule_line("__"));
+        assert!(!is_horizontal_rule_line("- -"));
+        assert!(!is_horizontal_rule_line("text"));
+        assert!(!is_horizontal_rule_line(""));
+        assert!(!is_horizontal_rule_line("==="));
     }
 
     #[test]
@@ -967,22 +931,22 @@ More text.";
 
     #[test]
     fn test_hr_detection_edge_cases() {
-        // Test the is_horizontal_rule function with edge cases
+        use crate::lint_context::is_horizontal_rule_line;
 
-        // Valid HRs with various spacing
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("   ---"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("---   "));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("   ---   "));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("*  *  *"));
-        assert!(MD065BlanksAroundHorizontalRules::is_horizontal_rule("_    _    _"));
+        // Valid HRs with various spacing (0-3 leading spaces allowed)
+        assert!(is_horizontal_rule_line("   ---"));
+        assert!(is_horizontal_rule_line("---   "));
+        assert!(is_horizontal_rule_line("   ---   "));
+        assert!(is_horizontal_rule_line("*  *  *"));
+        assert!(is_horizontal_rule_line("_    _    _"));
 
         // Invalid patterns
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("--a"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("**a"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("-*-"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("- * _"));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("   "));
-        assert!(!MD065BlanksAroundHorizontalRules::is_horizontal_rule("\t---"));
+        assert!(!is_horizontal_rule_line("--a"));
+        assert!(!is_horizontal_rule_line("**a"));
+        assert!(!is_horizontal_rule_line("-*-"));
+        assert!(!is_horizontal_rule_line("- * _"));
+        assert!(!is_horizontal_rule_line("   "));
+        assert!(!is_horizontal_rule_line("\t---")); // Tabs not allowed per CommonMark
     }
 
     #[test]

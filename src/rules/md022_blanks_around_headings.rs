@@ -396,8 +396,11 @@ impl Rule for MD022BlanksAroundHeadings {
                     {
                         // Skip HTML comments - they are transparent for blank line counting
                         continue;
-                    } else if ctx.lines[j].in_front_matter || trimmed == "---" {
+                    } else if ctx.lines[j].in_front_matter {
                         // Skip frontmatter - first heading after frontmatter doesn't need blank line above
+                        // Note: We only check in_front_matter flag, NOT the string "---", because
+                        // a standalone "---" is a horizontal rule and should NOT exempt headings
+                        // from requiring blank lines above
                         hit_frontmatter_end = true;
                         break;
                     } else {
@@ -1116,6 +1119,78 @@ Final content.";
         assert!(
             warnings_toml.is_empty(),
             "TOML frontmatter is also transparent for MD022"
+        );
+    }
+
+    #[test]
+    fn test_horizontal_rule_not_treated_as_frontmatter() {
+        // Issue #238: Horizontal rules (---) should NOT be treated as frontmatter.
+        // A heading after a horizontal rule MUST have a blank line above it.
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // Case 1: Heading immediately after horizontal rule - SHOULD warn
+        let content = "Some content\n\n---\n# Heading after HR";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            !warnings.is_empty(),
+            "Heading after horizontal rule without blank line SHOULD trigger MD022"
+        );
+        assert!(
+            warnings.iter().any(|w| w.line == 4),
+            "Warning should be on line 4 (the heading line)"
+        );
+
+        // Case 2: Heading with blank line after HR - should NOT warn
+        let content_with_blank = "Some content\n\n---\n\n# Heading after HR";
+        let ctx_with_blank = LintContext::new(content_with_blank, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_with_blank = rule.check(&ctx_with_blank).unwrap();
+        assert!(
+            warnings_with_blank.is_empty(),
+            "Heading with blank line after HR should not trigger MD022"
+        );
+
+        // Case 3: HR at start of document followed by heading - SHOULD warn
+        let content_hr_start = "---\n# Heading";
+        let ctx_hr_start = LintContext::new(content_hr_start, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_hr_start = rule.check(&ctx_hr_start).unwrap();
+        assert!(
+            !warnings_hr_start.is_empty(),
+            "Heading after HR at document start SHOULD trigger MD022"
+        );
+
+        // Case 4: Multiple HRs then heading - SHOULD warn
+        let content_multi_hr = "Content\n\n---\n\n---\n# Heading";
+        let ctx_multi_hr = LintContext::new(content_multi_hr, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_multi_hr = rule.check(&ctx_multi_hr).unwrap();
+        assert!(
+            !warnings_multi_hr.is_empty(),
+            "Heading after multiple HRs without blank line SHOULD trigger MD022"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_vs_horizontal_rule_distinction() {
+        // Ensure we correctly distinguish between frontmatter delimiters and standalone HRs
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // Frontmatter followed by content, then HR, then heading
+        // The HR here is NOT frontmatter, so heading needs blank line
+        let content = "---\ntitle: Test\n---\n\nSome content\n\n---\n# Heading after HR";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            !warnings.is_empty(),
+            "HR after frontmatter content should still require blank line before heading"
+        );
+
+        // Same but with blank line after HR - should be fine
+        let content_ok = "---\ntitle: Test\n---\n\nSome content\n\n---\n\n# Heading after HR";
+        let ctx_ok = LintContext::new(content_ok, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_ok = rule.check(&ctx_ok).unwrap();
+        assert!(
+            warnings_ok.is_empty(),
+            "HR with blank line before heading should not warn"
         );
     }
 }

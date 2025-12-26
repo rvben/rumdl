@@ -102,6 +102,9 @@ pub struct LineInfo {
     pub in_esm_block: bool,
     /// Whether this line is a continuation of a multi-line code span from a previous line
     pub in_code_span_continuation: bool,
+    /// Whether this line is a horizontal rule (---, ***, ___, etc.)
+    /// Pre-computed for consistent detection across all rules
+    pub is_horizontal_rule: bool,
 }
 
 impl LineInfo {
@@ -2018,13 +2021,18 @@ impl<'a> LintContext<'a> {
                 None
             };
 
+            // Detect horizontal rules (only outside code blocks and frontmatter)
+            // Uses CommonMark-compliant check including leading indentation validation
+            let in_front_matter = front_matter_end > 0 && i < front_matter_end;
+            let is_hr = !in_code_block && !in_front_matter && is_horizontal_rule_line(line);
+
             lines.push(LineInfo {
                 byte_offset,
                 byte_len: line.len(),
                 indent,
                 is_blank,
                 in_code_block,
-                in_front_matter: front_matter_end > 0 && i < front_matter_end,
+                in_front_matter,
                 in_html_block: false, // Will be populated after line creation
                 in_html_comment,
                 list_item,
@@ -2033,6 +2041,7 @@ impl<'a> LintContext<'a> {
                 in_mkdocstrings,
                 in_esm_block: false, // Will be populated after line creation for MDX files
                 in_code_span_continuation: false, // Will be populated after code spans are parsed
+                is_horizontal_rule: is_hr,
             });
         }
 
@@ -3662,8 +3671,25 @@ fn has_meaningful_content_between(content: &str, current: &ListBlock, next: &Lis
     false
 }
 
-/// Check if a line is a horizontal rule (---, ***, ___)
-fn is_horizontal_rule(trimmed: &str) -> bool {
+/// Check if a line is a horizontal rule (---, ***, ___) per CommonMark spec.
+/// CommonMark rules for thematic breaks (horizontal rules):
+/// - May have 0-3 spaces of leading indentation (but NOT tabs)
+/// - Must have 3+ of the same character (-, *, or _)
+/// - May have spaces between characters
+/// - No other characters allowed
+pub fn is_horizontal_rule_line(line: &str) -> bool {
+    // CommonMark: HRs can have 0-3 spaces of leading indentation, not tabs
+    let leading_spaces = line.len() - line.trim_start_matches(' ').len();
+    if leading_spaces > 3 || line.starts_with('\t') {
+        return false;
+    }
+
+    is_horizontal_rule_content(line.trim())
+}
+
+/// Check if trimmed content matches horizontal rule pattern.
+/// Use `is_horizontal_rule_line` for full CommonMark compliance including indentation check.
+pub fn is_horizontal_rule_content(trimmed: &str) -> bool {
     if trimmed.len() < 3 {
         return false;
     }
@@ -3684,6 +3710,11 @@ fn is_horizontal_rule(trimmed: &str) -> bool {
         return count >= 3;
     }
     false
+}
+
+/// Backwards-compatible alias for `is_horizontal_rule_content`
+pub fn is_horizontal_rule(trimmed: &str) -> bool {
+    is_horizontal_rule_content(trimmed)
 }
 
 /// Check if content contains patterns that cause the markdown crate to panic
