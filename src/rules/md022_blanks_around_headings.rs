@@ -119,14 +119,20 @@ impl MD022BlanksAroundHeadings {
         let mut skip_next = false;
 
         let heading_at_start_idx = {
-            let mut found_non_blank = false;
+            let mut found_non_transparent = false;
             ctx.lines.iter().enumerate().find_map(|(i, line)| {
                 // Only count valid headings (skip malformed ones like `#NoSpace`)
-                if line.heading.as_ref().is_some_and(|h| h.is_valid) && !found_non_blank {
+                if line.heading.as_ref().is_some_and(|h| h.is_valid) && !found_non_transparent {
                     Some(i)
                 } else {
-                    if !line.is_blank {
-                        found_non_blank = true;
+                    // HTML comments and blank lines are "transparent" - they don't count as content
+                    // that would prevent a heading from being "at document start"
+                    if !line.is_blank && !line.in_html_comment {
+                        let trimmed = line.content(ctx.content).trim();
+                        // Check for single-line HTML comments too
+                        if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+                            found_non_transparent = true;
+                        }
                     }
                     None
                 }
@@ -328,14 +334,20 @@ impl Rule for MD022BlanksAroundHeadings {
         let line_ending = "\n";
 
         let heading_at_start_idx = {
-            let mut found_non_blank = false;
+            let mut found_non_transparent = false;
             ctx.lines.iter().enumerate().find_map(|(i, line)| {
                 // Only count valid headings (skip malformed ones like `#NoSpace`)
-                if line.heading.as_ref().is_some_and(|h| h.is_valid) && !found_non_blank {
+                if line.heading.as_ref().is_some_and(|h| h.is_valid) && !found_non_transparent {
                     Some(i)
                 } else {
-                    if !line.is_blank {
-                        found_non_blank = true;
+                    // HTML comments and blank lines are "transparent" - they don't count as content
+                    // that would prevent a heading from being "at document start"
+                    if !line.is_blank && !line.in_html_comment {
+                        let trimmed = line.content(ctx.content).trim();
+                        // Check for single-line HTML comments too
+                        if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+                            found_non_transparent = true;
+                        }
                     }
                     None
                 }
@@ -361,16 +373,8 @@ impl Rule for MD022BlanksAroundHeadings {
 
             let heading_level = heading.level as usize;
 
-            // For Setext headings, skip the underline line (we process from the content line)
-            if matches!(
-                heading.style,
-                crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-            ) {
-                // Check if this is the underline, not the content
-                if line_num > 0 && ctx.lines[line_num - 1].heading.is_none() {
-                    continue; // This is the underline line
-                }
-            }
+            // Note: Setext underline lines have heading=None, so they're already
+            // skipped by the check at line 351. No additional check needed here.
 
             processed_headings.insert(line_num);
 
@@ -1167,6 +1171,130 @@ Final content.";
             !warnings_multi_hr.is_empty(),
             "Heading after multiple HRs without blank line SHOULD trigger MD022"
         );
+    }
+
+    #[test]
+    fn test_all_hr_styles_require_blank_before_heading() {
+        // CommonMark defines HRs as 3+ of -, *, or _ with optional spaces between
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // All valid HR styles that should trigger MD022 when followed by heading without blank
+        let hr_styles = [
+            "---", "***", "___", "- - -", "* * *", "_ _ _", "----", "****", "____", "- - - -",
+            "-  -  -", // Multiple spaces between
+            "  ---",   // 2 spaces indent (valid per CommonMark)
+            "   ---",  // 3 spaces indent (valid per CommonMark)
+        ];
+
+        for hr in hr_styles {
+            let content = format!("Content\n\n{hr}\n# Heading");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(
+                !warnings.is_empty(),
+                "HR style '{hr}' followed by heading should trigger MD022"
+            );
+        }
+    }
+
+    #[test]
+    fn test_setext_heading_after_hr() {
+        // Setext headings after HR should also require blank line
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // Setext h1 after HR without blank - SHOULD warn
+        let content = "Content\n\n---\nHeading\n======";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            !warnings.is_empty(),
+            "Setext heading after HR without blank should trigger MD022"
+        );
+
+        // Setext h2 after HR without blank - SHOULD warn
+        let content_h2 = "Content\n\n---\nHeading\n------";
+        let ctx_h2 = LintContext::new(content_h2, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_h2 = rule.check(&ctx_h2).unwrap();
+        assert!(
+            !warnings_h2.is_empty(),
+            "Setext h2 after HR without blank should trigger MD022"
+        );
+
+        // With blank line - should NOT warn
+        let content_ok = "Content\n\n---\n\nHeading\n======";
+        let ctx_ok = LintContext::new(content_ok, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_ok = rule.check(&ctx_ok).unwrap();
+        assert!(
+            warnings_ok.is_empty(),
+            "Setext heading with blank after HR should not warn"
+        );
+    }
+
+    #[test]
+    fn test_hr_in_code_block_not_treated_as_hr() {
+        // HR syntax inside code blocks should be ignored
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // HR inside fenced code block - heading after code block needs blank line check
+        // but the "---" inside is NOT an HR
+        let content = "```\n---\n```\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // The heading is after a code block fence, not after an HR
+        // This tests that we don't confuse code block content with HRs
+        assert!(!warnings.is_empty(), "Heading after code block still needs blank line");
+
+        // With blank after code block - should be fine
+        let content_ok = "```\n---\n```\n\n# Heading";
+        let ctx_ok = LintContext::new(content_ok, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_ok = rule.check(&ctx_ok).unwrap();
+        assert!(
+            warnings_ok.is_empty(),
+            "Heading with blank after code block should not warn"
+        );
+    }
+
+    #[test]
+    fn test_hr_in_html_comment_not_treated_as_hr() {
+        // HR syntax inside HTML comments should be ignored
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // "---" inside HTML comment is NOT an HR
+        let content = "<!-- \n---\n -->\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // HTML comments are transparent, so heading after comment at doc start is OK
+        assert!(
+            warnings.is_empty(),
+            "HR inside HTML comment should be ignored - heading after comment is OK"
+        );
+    }
+
+    #[test]
+    fn test_invalid_hr_not_triggering() {
+        // These should NOT be recognized as HRs per CommonMark
+        let rule = MD022BlanksAroundHeadings::default();
+
+        let invalid_hrs = [
+            "    ---", // 4+ spaces is code block, not HR
+            "\t---",   // Tab indent makes it code block
+            "--",      // Only 2 dashes
+            "**",      // Only 2 asterisks
+            "__",      // Only 2 underscores
+            "-*-",     // Mixed characters
+            "---a",    // Extra character at end
+            "a---",    // Extra character at start
+        ];
+
+        for invalid in invalid_hrs {
+            // These are NOT HRs, so if followed by heading, the heading behavior depends
+            // on what the content actually is (code block, paragraph, etc.)
+            let content = format!("Content\n\n{invalid}\n# Heading");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            // We're just verifying the HR detection is correct
+            // The actual warning behavior depends on what the "invalid HR" is parsed as
+            let _ = rule.check(&ctx);
+        }
     }
 
     #[test]

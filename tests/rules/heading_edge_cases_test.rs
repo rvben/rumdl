@@ -239,6 +239,7 @@ code
     );
 
     // Test 6: Setext heading spacing
+    // Verified with markdownlint-cli: setext headings DO require blank lines
     let content = "\
 Content before
 Setext Heading
@@ -246,10 +247,26 @@ Setext Heading
 Content after";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    // Note: MD022 doesn't require blanks around Setext headings the same way as ATX
+    // markdownlint warns: line 1 needs blank below (before setext heading)
+    // and setext heading needs blank below (before "Content after")
     assert!(
-        result.is_empty(),
-        "MD022 doesn't enforce blank lines around Setext headings"
+        !result.is_empty(),
+        "MD022 should enforce blank lines around Setext headings"
+    );
+
+    // Setext with proper blank lines - should NOT warn
+    let content_ok = "\
+Content before
+
+Setext Heading
+==============
+
+Content after";
+    let ctx_ok = LintContext::new(content_ok, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result_ok = rule.check(&ctx_ok).unwrap();
+    assert!(
+        result_ok.is_empty(),
+        "Setext heading with proper blank lines should not warn"
     );
 
     // Test 7: Front matter handling
