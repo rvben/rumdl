@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.204] - 2025-12-26
+
+### Fixed
+
+- **MD007: Use per-parent indent logic instead of document-wide style**
+  - Fixed incorrect warnings when nested lists had different indentation styles
+  - Each parent list item now independently tracks its children's indentation
+
+- **MD022: Distinguish horizontal rules from frontmatter delimiters**
+  - HR patterns (`---`, `***`, `___`) after headings no longer incorrectly trigger blank line warnings
+  - Centralized HR detection in `LineInfo` for consistent behavior across rules
+
+- **LSP: Unify cross-file link extraction with MD057**
+  - LSP diagnostics now report correct column positions for MD057 warnings
+  - Created shared `extract_cross_file_links` utility used by both CLI and LSP
+  - Ensures consistent position tracking between editor and command-line
+
 ## [0.0.203] - 2025-12-25
 
 ### Added
