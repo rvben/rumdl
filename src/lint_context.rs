@@ -2,6 +2,7 @@ use crate::config::MarkdownFlavor;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use crate::utils::element_cache::ElementCache;
+use crate::utils::regex_cache::URL_SIMPLE_REGEX;
 use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::borrow::Cow;
@@ -58,12 +59,7 @@ static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 static REF_DEF_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#).unwrap());
 
-// Pattern for bare URLs - allows parentheses in paths for Wikipedia-style URLs
-static BARE_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(https?|ftp)://[^\s<>\[\]\\'"`]+(?:\.[^\s<>\[\]\\'"`]+)*(?::\d+)?(?:/[^\s<>\[\]\\'"`]*)?(?:\?[^\s<>\[\]\\'"`]*)?(?:#[^\s<>\[\]\\'"`]*)?"#
-    ).unwrap()
-});
+// Pattern for bare URLs - uses centralized URL pattern from regex_cache
 
 // Pattern for email addresses
 static BARE_EMAIL_PATTERN: LazyLock<Regex> =
@@ -3304,7 +3300,7 @@ impl<'a> LintContext<'a> {
         let mut bare_urls = Vec::with_capacity(content.matches("http").count() + content.matches('@').count());
 
         // Check for bare URLs (not in angle brackets or markdown links)
-        for cap in BARE_URL_PATTERN.captures_iter(content) {
+        for cap in URL_SIMPLE_REGEX.captures_iter(content) {
             let full_match = cap.get(0).unwrap();
             let match_start = full_match.start();
             let match_end = full_match.end();

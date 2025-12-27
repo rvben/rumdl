@@ -3,12 +3,15 @@
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_url_range};
-use crate::utils::regex_cache::{EMAIL_PATTERN, get_cached_fancy_regex, get_cached_regex};
+use crate::utils::regex_cache::{
+    EMAIL_PATTERN, URL_IPV6_STR, URL_STANDARD_STR, URL_WWW_STR, get_cached_fancy_regex, get_cached_regex,
+};
 
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 
-// URL detection patterns
+// URL detection patterns - core URL patterns are imported from regex_cache
+// These local patterns are MD034-specific for markdown constructs
 const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?)://|@|www\."#;
 const CUSTOM_PROTOCOL_PATTERN_STR: &str = r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#;
 const MARKDOWN_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
@@ -18,23 +21,10 @@ const ANGLE_LINK_PATTERN_STR: &str =
     r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
 const BADGE_LINK_LINE_STR: &str = r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#;
 const MARKDOWN_IMAGE_PATTERN_STR: &str = r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
-// URL regex that allows parentheses in path/query/fragment for Wikipedia-style URLs
-// The trim_trailing_punctuation function handles unbalanced trailing parens
-// Host part excludes / so path is matched separately (allowing parens in path)
-const SIMPLE_URL_REGEX_STR: &str = r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`/\]]+)(?:/[^\s<>\[\]\\'\"`]*)?(?:\?[^\s<>\[\]\\'\"`]*)?(?:#[^\s<>\[\]\\'\"`]*)?"#;
-// Pattern to detect www URLs without protocol (e.g., www.example.com)
-// Matches www. followed by domain name with at least one dot and a valid TLD
-// Note: Uses standard regex. Negative lookbehind (no / or @ before www) is checked in code.
-// Also allows parentheses in path for consistency with SIMPLE_URL_REGEX_STR
-const WWW_URL_REGEX_STR: &str = r#"www\.(?:[a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}(?:/[^\s<>\[\]\\'\"`]*)?"#;
-// IPv6 URLs also allow parentheses in path for consistency
-const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]\\'\"`]*)?(?:\?[^\s<>\[\]\\'\"`]*)?(?:#[^\s<>\[\]\\'\"`]*)?"#;
 // Reference definition pattern - matches [label]: URL with optional title
-// Supports: [ref]: https://... or [ref]: <https://...> or [ref]: https://... "title"
 const REFERENCE_DEF_RE_STR: &str = r"^\s*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)";
 const MULTILINE_LINK_CONTINUATION_STR: &str = r#"^[^\[]*\]\(.*\)"#;
 // Pattern to match shortcut/collapsed reference links: [text] or [text][]
-// This includes [URL] which should not be flagged as a bare URL
 const SHORTCUT_REF_PATTERN_STR: &str = r#"\[([^\[\]]+)\](?!\s*[\[(])"#;
 
 /// Reusable buffers for check_line to reduce allocations
@@ -217,7 +207,7 @@ impl MD034NoBareUrls {
         buffers.urls_found.clear();
 
         // First, find IPv6 URLs (they need special handling)
-        if let Ok(re) = get_cached_regex(IPV6_URL_REGEX_STR) {
+        if let Ok(re) = get_cached_regex(URL_IPV6_STR) {
             for mat in re.find_iter(line) {
                 let url_str = mat.as_str();
                 buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
@@ -225,7 +215,7 @@ impl MD034NoBareUrls {
         }
 
         // Then find regular URLs
-        if let Ok(re) = get_cached_regex(SIMPLE_URL_REGEX_STR) {
+        if let Ok(re) = get_cached_regex(URL_STANDARD_STR) {
             for mat in re.find_iter(line) {
                 let url_str = mat.as_str();
 
@@ -255,7 +245,7 @@ impl MD034NoBareUrls {
         }
 
         // Find www URLs without protocol (e.g., www.example.com)
-        if let Ok(re) = get_cached_regex(WWW_URL_REGEX_STR) {
+        if let Ok(re) = get_cached_regex(URL_WWW_STR) {
             for mat in re.find_iter(line) {
                 let url_str = mat.as_str();
                 let start_pos = mat.start();

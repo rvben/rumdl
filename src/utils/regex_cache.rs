@@ -185,14 +185,122 @@ macro_rules! fancy_regex_cached {
 // Also make the macro available directly from this module
 pub use crate::regex_lazy;
 
-// URL patterns - allow parentheses in paths for Wikipedia-style URLs
-// The trim_trailing_punctuation in MD034 handles unbalanced trailing parens
-pub static URL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?:https?|ftp)://[^\s<>\[\]'"]+[^\s<>\[\]"'.,]"#).unwrap());
-pub static BARE_URL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:https?|ftp)://[^\s<>]+[^\s<>.]").unwrap());
-pub static URL_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"((?:https?|ftp)://[^\s<>]+[^\s<>.,])").unwrap());
+// =============================================================================
+// URL REGEX PATTERNS - Centralized URL Detection
+// =============================================================================
+//
+// ## Pattern Hierarchy (use the most specific pattern for your needs):
+//
+// | Pattern              | Use Case                                    | Parens | Trailing Punct |
+// |----------------------|---------------------------------------------|--------|----------------|
+// | URL_STANDARD_REGEX   | MD034 bare URL detection with auto-fix      | Yes    | Captured*      |
+// | URL_WWW_REGEX        | www.domain URLs without protocol            | Yes    | Captured*      |
+// | URL_IPV6_REGEX       | IPv6 URLs like https://[::1]/path           | Yes    | Captured*      |
+// | URL_QUICK_CHECK_REGEX| Fast early-exit check (contains URL?)       | N/A    | N/A            |
+// | URL_SIMPLE_REGEX     | Content detection, line length exemption    | No     | Excluded       |
+//
+// *Trailing punctuation is captured by the regex; use trim_trailing_punctuation() to clean.
+//
+// ## Design Principles:
+// 1. Parentheses in paths are allowed for Wikipedia-style URLs (Issue #240)
+// 2. Host portion excludes / so path is captured separately
+// 3. Unbalanced trailing parens are handled by trim_trailing_punctuation()
+// 4. All patterns exclude angle brackets <> to avoid matching autolinks
+//
+// ## URL Structure: protocol://host[:port][/path][?query][#fragment]
+
+/// Pattern for standard HTTP(S)/FTP(S) URLs with full path support.
+///
+/// Use this for bare URL detection where you need the complete URL including
+/// Wikipedia-style parentheses in paths. Trailing punctuation like `,;.!?` may
+/// be captured and should be trimmed by the caller.
+///
+/// # Examples
+/// - `https://example.com/path_(with_parens)?query#fragment`
+/// - `https://en.wikipedia.org/wiki/Rust_(programming_language)`
+pub const URL_STANDARD_STR: &str = concat!(
+    r#"(?:https?|ftps?|ftp)://"#, // Protocol
+    r#"(?:"#,
+    r#"\[[0-9a-fA-F:%.\-a-zA-Z]+\]"#, // IPv6 host OR
+    r#"|"#,
+    r#"[^\s<>\[\]()\\'\"`/]+"#, // Standard host (no parens, no /)
+    r#")"#,
+    r#"(?::\d+)?"#,                 // Optional port
+    r#"(?:/[^\s<>\[\]\\'\"`]*)?"#,  // Optional path (allows parens)
+    r#"(?:\?[^\s<>\[\]\\'\"`]*)?"#, // Optional query (allows parens)
+    r#"(?:#[^\s<>\[\]\\'\"`]*)?"#,  // Optional fragment (allows parens)
+);
+
+/// Pattern for www URLs without protocol.
+///
+/// Matches URLs starting with `www.` that lack a protocol prefix.
+/// These should be converted to proper URLs or flagged as bare URLs.
+pub const URL_WWW_STR: &str = concat!(
+    r#"www\.(?:[a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}"#, // www.domain.tld
+    r#"(?:/[^\s<>\[\]\\'\"`]*)?"#,                         // Optional path (allows parens)
+);
+
+/// Pattern for IPv6 URLs specifically.
+///
+/// Matches URLs with IPv6 addresses in brackets, including zone identifiers.
+/// Examples: `https://[::1]/path`, `https://[fe80::1%eth0]:8080/`
+pub const URL_IPV6_STR: &str = concat!(
+    r#"(?:https?|ftps?|ftp)://"#,
+    r#"\[[0-9a-fA-F:%.\-a-zA-Z]+\]"#, // IPv6 host in brackets
+    r#"(?::\d+)?"#,                   // Optional port
+    r#"(?:/[^\s<>\[\]\\'\"`]*)?"#,    // Optional path
+    r#"(?:\?[^\s<>\[\]\\'\"`]*)?"#,   // Optional query
+    r#"(?:#[^\s<>\[\]\\'\"`]*)?"#,    // Optional fragment
+);
+
+/// Quick check pattern for early exits.
+///
+/// Use this for fast pre-filtering before running more expensive patterns.
+/// Matches if the text likely contains a URL or email address.
+pub const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?|ftp)://|@|www\."#;
+
+/// Simple URL pattern for content detection.
+///
+/// Less strict pattern that excludes trailing sentence punctuation (.,).
+/// Use for line length exemption checks or content characteristic detection
+/// where you just need to know if a URL exists, not extract it precisely.
+pub const URL_SIMPLE_STR: &str = r#"(?:https?|ftps?|ftp)://[^\s<>]+[^\s<>.,]"#;
+
+// Pre-compiled static patterns for performance
+
+/// Standard URL regex - primary pattern for bare URL detection (MD034).
+/// See [`URL_STANDARD_STR`] for documentation.
+pub static URL_STANDARD_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(URL_STANDARD_STR).unwrap());
+
+/// WWW URL regex - for URLs starting with www. without protocol.
+/// See [`URL_WWW_STR`] for documentation.
+pub static URL_WWW_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(URL_WWW_STR).unwrap());
+
+/// IPv6 URL regex - for URLs with IPv6 addresses.
+/// See [`URL_IPV6_STR`] for documentation.
+pub static URL_IPV6_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(URL_IPV6_STR).unwrap());
+
+/// Quick check regex - fast early-exit test.
+/// See [`URL_QUICK_CHECK_STR`] for documentation.
+pub static URL_QUICK_CHECK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(URL_QUICK_CHECK_STR).unwrap());
+
+/// Simple URL regex - for content detection and line length exemption.
+/// See [`URL_SIMPLE_STR`] for documentation.
+pub static URL_SIMPLE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(URL_SIMPLE_STR).unwrap());
+
+// Deprecated aliases - use the canonical names above instead.
+// These exist only for backwards compatibility with existing code.
+
+#[deprecated(since = "0.0.205", note = "use URL_SIMPLE_REGEX instead")]
+#[doc(hidden)]
+pub static URL_REGEX: LazyLock<Regex> = LazyLock::new(|| URL_SIMPLE_REGEX.clone());
+
+#[deprecated(since = "0.0.205", note = "use URL_SIMPLE_REGEX instead")]
+#[doc(hidden)]
+pub static BARE_URL_REGEX: LazyLock<Regex> = LazyLock::new(|| URL_SIMPLE_REGEX.clone());
+
+/// Alias for `URL_SIMPLE_REGEX`. Used by MD013 for line length exemption.
+pub static URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| URL_SIMPLE_REGEX.clone());
 
 // Heading patterns
 pub static ATX_HEADING_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s+|$)").unwrap());
@@ -299,6 +407,13 @@ pub static BLOCKQUOTE_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r
 // MD013 specific patterns
 pub static IMAGE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^!\[.*?\]\[.*?\]$").unwrap());
 pub static LINK_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap());
+/// Greedy URL pattern for finding URLs in text for length calculation.
+///
+/// Pattern `https?://\S+` matches until whitespace, which may include trailing
+/// punctuation. This is intentional for MD013 line length calculation where
+/// we replace URLs with fixed-length placeholders.
+///
+/// For precise URL extraction, use `URL_STANDARD_REGEX` instead.
 pub static URL_IN_TEXT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://\S+").unwrap());
 pub static SENTENCE_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[.!?]\s+[A-Z]").unwrap());
 pub static ABBREVIATION: LazyLock<Regex> = LazyLock::new(|| {
@@ -752,10 +867,10 @@ mod tests {
     #[test]
     fn test_static_regex_patterns() {
         // Test URL patterns
-        assert!(URL_REGEX.is_match("https://example.com"));
-        assert!(URL_REGEX.is_match("http://test.org/path"));
-        assert!(URL_REGEX.is_match("ftp://files.com"));
-        assert!(!URL_REGEX.is_match("not a url"));
+        assert!(URL_SIMPLE_REGEX.is_match("https://example.com"));
+        assert!(URL_SIMPLE_REGEX.is_match("http://test.org/path"));
+        assert!(URL_SIMPLE_REGEX.is_match("ftp://files.com"));
+        assert!(!URL_SIMPLE_REGEX.is_match("not a url"));
 
         // Test heading patterns
         assert!(ATX_HEADING_REGEX.is_match("# Heading"));
@@ -818,5 +933,184 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+    }
+
+    // ==========================================================================
+    // Comprehensive URL Regex Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_url_standard_basic() {
+        // Basic HTTP/HTTPS URLs
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com"));
+        assert!(URL_STANDARD_REGEX.is_match("http://example.com"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/path"));
+        assert!(URL_STANDARD_REGEX.is_match("ftp://files.example.com"));
+        assert!(URL_STANDARD_REGEX.is_match("ftps://secure.example.com"));
+
+        // Should not match non-URLs
+        assert!(!URL_STANDARD_REGEX.is_match("not a url"));
+        assert!(!URL_STANDARD_REGEX.is_match("example.com"));
+        assert!(!URL_STANDARD_REGEX.is_match("www.example.com"));
+    }
+
+    #[test]
+    fn test_url_standard_with_path() {
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/path/to/page"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/path/to/page.html"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/path/to/page/"));
+    }
+
+    #[test]
+    fn test_url_standard_with_query() {
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com?query=value"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/path?query=value"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/path?a=1&b=2"));
+    }
+
+    #[test]
+    fn test_url_standard_with_fragment() {
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com#section"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/path#section"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com/path?query=value#section"));
+    }
+
+    #[test]
+    fn test_url_standard_with_port() {
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com:8080"));
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com:443/path"));
+        assert!(URL_STANDARD_REGEX.is_match("http://localhost:3000"));
+        assert!(URL_STANDARD_REGEX.is_match("https://192.168.1.1:8080/path"));
+    }
+
+    #[test]
+    fn test_url_standard_wikipedia_style_parentheses() {
+        // Wikipedia-style URLs with parentheses in path (Issue #240)
+        let url = "https://en.wikipedia.org/wiki/Rust_(programming_language)";
+        assert!(URL_STANDARD_REGEX.is_match(url));
+
+        // Verify the full URL is captured
+        let cap = URL_STANDARD_REGEX.find(url).unwrap();
+        assert_eq!(cap.as_str(), url);
+
+        // Multiple parentheses pairs
+        let url2 = "https://example.com/path_(foo)_(bar)";
+        let cap2 = URL_STANDARD_REGEX.find(url2).unwrap();
+        assert_eq!(cap2.as_str(), url2);
+    }
+
+    #[test]
+    fn test_url_standard_ipv6() {
+        // IPv6 addresses in URLs
+        assert!(URL_STANDARD_REGEX.is_match("https://[::1]/path"));
+        assert!(URL_STANDARD_REGEX.is_match("https://[2001:db8::1]:8080/path"));
+        assert!(URL_STANDARD_REGEX.is_match("http://[fe80::1%eth0]/"));
+    }
+
+    #[test]
+    fn test_url_www_basic() {
+        // www URLs without protocol
+        assert!(URL_WWW_REGEX.is_match("www.example.com"));
+        assert!(URL_WWW_REGEX.is_match("www.example.co.uk"));
+        assert!(URL_WWW_REGEX.is_match("www.sub.example.com"));
+
+        // Should not match plain domains without www
+        assert!(!URL_WWW_REGEX.is_match("example.com"));
+
+        // Note: https://www.example.com DOES match because it contains "www."
+        // The URL_WWW_REGEX is designed to find www. URLs that lack a protocol
+        // Use URL_STANDARD_REGEX for full URLs with protocols
+        assert!(URL_WWW_REGEX.is_match("https://www.example.com"));
+    }
+
+    #[test]
+    fn test_url_www_with_path() {
+        assert!(URL_WWW_REGEX.is_match("www.example.com/path"));
+        assert!(URL_WWW_REGEX.is_match("www.example.com/path/to/page"));
+        assert!(URL_WWW_REGEX.is_match("www.example.com/path_(with_parens)"));
+    }
+
+    #[test]
+    fn test_url_ipv6_basic() {
+        // IPv6 specific patterns
+        assert!(URL_IPV6_REGEX.is_match("https://[::1]/"));
+        assert!(URL_IPV6_REGEX.is_match("http://[2001:db8::1]/path"));
+        assert!(URL_IPV6_REGEX.is_match("https://[fe80::1]:8080/path"));
+        assert!(URL_IPV6_REGEX.is_match("ftp://[::ffff:192.168.1.1]/file"));
+    }
+
+    #[test]
+    fn test_url_ipv6_with_zone_id() {
+        // IPv6 with zone identifiers
+        assert!(URL_IPV6_REGEX.is_match("https://[fe80::1%eth0]/path"));
+        assert!(URL_IPV6_REGEX.is_match("http://[fe80::1%25eth0]:8080/"));
+    }
+
+    #[test]
+    fn test_url_simple_detection() {
+        // Simple pattern for content characteristic detection
+        assert!(URL_SIMPLE_REGEX.is_match("https://example.com"));
+        assert!(URL_SIMPLE_REGEX.is_match("http://test.org/path"));
+        assert!(URL_SIMPLE_REGEX.is_match("ftp://files.com/file.zip"));
+        assert!(!URL_SIMPLE_REGEX.is_match("not a url"));
+    }
+
+    #[test]
+    fn test_url_quick_check() {
+        // Quick check pattern for early exits
+        assert!(URL_QUICK_CHECK_REGEX.is_match("https://example.com"));
+        assert!(URL_QUICK_CHECK_REGEX.is_match("http://example.com"));
+        assert!(URL_QUICK_CHECK_REGEX.is_match("ftp://files.com"));
+        assert!(URL_QUICK_CHECK_REGEX.is_match("www.example.com"));
+        assert!(URL_QUICK_CHECK_REGEX.is_match("user@example.com"));
+        assert!(!URL_QUICK_CHECK_REGEX.is_match("just plain text"));
+    }
+
+    #[test]
+    fn test_url_edge_cases() {
+        // URLs with special characters that should be excluded
+        let url = "https://example.com/path";
+        assert!(URL_STANDARD_REGEX.is_match(url));
+
+        // URL followed by punctuation - the regex captures trailing punctuation
+        // because trimming is done by `trim_trailing_punctuation()` in the rule
+        let text = "Check https://example.com, it's great!";
+        let cap = URL_STANDARD_REGEX.find(text).unwrap();
+        // The comma IS captured by the regex - rule-level trimming handles this
+        assert!(cap.as_str().ends_with(','));
+
+        // URL in angle brackets should still be found
+        let text2 = "See <https://example.com> for more";
+        assert!(URL_STANDARD_REGEX.is_match(text2));
+
+        // URL ending at angle bracket should stop at >
+        let cap2 = URL_STANDARD_REGEX.find(text2).unwrap();
+        assert!(!cap2.as_str().contains('>'));
+    }
+
+    #[test]
+    fn test_url_with_complex_paths() {
+        // Complex real-world URLs
+        let urls = [
+            "https://github.com/owner/repo/blob/main/src/file.rs#L123",
+            "https://docs.example.com/api/v2/endpoint?format=json&page=1",
+            "https://cdn.example.com/assets/images/logo.png?v=2023",
+            "https://search.example.com/results?q=test+query&filter=all",
+        ];
+
+        for url in urls {
+            assert!(URL_STANDARD_REGEX.is_match(url), "Should match: {url}");
+        }
+    }
+
+    #[test]
+    fn test_url_pattern_strings_are_valid() {
+        // Verify patterns compile into valid regexes by accessing them
+        assert!(URL_STANDARD_REGEX.is_match("https://example.com"));
+        assert!(URL_WWW_REGEX.is_match("www.example.com"));
+        assert!(URL_IPV6_REGEX.is_match("https://[::1]/"));
+        assert!(URL_QUICK_CHECK_REGEX.is_match("https://example.com"));
+        assert!(URL_SIMPLE_REGEX.is_match("https://example.com"));
     }
 }
