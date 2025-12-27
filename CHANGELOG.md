@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.205] - 2025-12-27
+
+### Fixed
+
+- **MD037: Skip multi-line inline code spans**
+  - Asterisks inside code spans that cross line boundaries no longer trigger false positives
+  - Uses pulldown-cmark for accurate multi-line code span detection
+
+- **MD031: Don't require blank line after frontmatter**
+  - Code blocks and admonitions immediately after YAML/TOML frontmatter no longer trigger warnings
+  - Matches markdownlint behavior for frontmatter handling
+
+- **MD034: Handle URLs with parentheses in path** (fixes #240)
+  - URLs like `https://example.com/page_(1)` no longer incorrectly flag the closing parenthesis
+  - Centralized URL pattern handling for consistent behavior
+
+- **MD046: Detect mixed whitespace indented code blocks**
+  - Indented code blocks using tabs or mixed whitespace are now properly detected
+  - 4-space indented fences correctly identified as indented code blocks
+
+- **Heading fixes: Preserve original whitespace**
+  - Auto-fix for heading rules now preserves the original spacing around heading text
+
+- **CLI: Support rule aliases in --enable/--disable flags**
+  - Rule aliases (e.g., `blanks-around-fences` for MD031) now work with CLI flags
+
+### Changed
+
+- **Regex patterns: Centralize URL detection**
+  - Consolidated URL patterns with documentation for maintainability
+  - Removed unused URL_REGEX and BARE_URL_REGEX
+
+- **Tab expansion: Consolidate into shared utility**
+  - CommonMark-compliant tab expansion now uses shared `visual_indent` utility
+  - Consistent indentation detection across all rules
+
 ## [0.0.204] - 2025-12-26
 
 ### Fixed

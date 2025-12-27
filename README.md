@@ -328,7 +328,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.0.204
+    rev: v0.0.205
     hooks:
       - id: rumdl      # Lint only (fails on issues)
       - id: rumdl-fmt  # Auto-format (fixes what it can)
@@ -362,7 +362,7 @@ However, for pre-commit workflows where you want to exclude certain files even w
    ```yaml
    repos:
      - repo: https://github.com/rvben/rumdl-pre-commit
-       rev: v0.0.204
+       rev: v0.0.205
        hooks:
          - id: rumdl
            args: [--force-exclude]  # Respect exclude patterns from config
