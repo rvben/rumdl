@@ -135,6 +135,13 @@ impl MD031BlanksAroundFences {
             !self.is_in_list(line_index, lines)
         }
     }
+
+    /// Check if the current line is immediately after frontmatter (prev line is closing delimiter)
+    fn is_right_after_frontmatter(line_index: usize, ctx: &crate::lint_context::LintContext) -> bool {
+        line_index > 0
+            && ctx.lines.get(line_index - 1).is_some_and(|info| info.in_front_matter)
+            && ctx.lines.get(line_index).is_some_and(|info| !info.in_front_matter)
+    }
 }
 
 impl Rule for MD031BlanksAroundFences {
@@ -167,7 +174,12 @@ impl Rule for MD031BlanksAroundFences {
             // Check for MkDocs admonition start
             if is_mkdocs && mkdocs_admonitions::is_admonition_start(line) {
                 // Check for blank line before admonition (similar to code blocks)
-                if i > 0 && !Self::is_empty_line(lines[i - 1]) && self.should_require_blank_line(i, &lines) {
+                // Skip if right after frontmatter
+                if i > 0
+                    && !Self::is_empty_line(lines[i - 1])
+                    && !Self::is_right_after_frontmatter(i, ctx)
+                    && self.should_require_blank_line(i, &lines)
+                {
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
                     warnings.push(LintWarning {
@@ -283,7 +295,12 @@ impl Rule for MD031BlanksAroundFences {
                     current_fence_marker = Some(fence_marker);
 
                     // Check for blank line before opening fence
-                    if i > 0 && !Self::is_empty_line(lines[i - 1]) && self.should_require_blank_line(i, &lines) {
+                    // Skip if right after frontmatter
+                    if i > 0
+                        && !Self::is_empty_line(lines[i - 1])
+                        && !Self::is_right_after_frontmatter(i, ctx)
+                        && self.should_require_blank_line(i, &lines)
+                    {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
                         warnings.push(LintWarning {
@@ -364,7 +381,12 @@ impl Rule for MD031BlanksAroundFences {
                     current_fence_marker = Some(fence_marker);
 
                     // Add blank line before fence if needed
-                    if i > 0 && !Self::is_empty_line(lines[i - 1]) && self.should_require_blank_line(i, &lines) {
+                    // Skip if right after frontmatter
+                    if i > 0
+                        && !Self::is_empty_line(lines[i - 1])
+                        && !Self::is_right_after_frontmatter(i, ctx)
+                        && self.should_require_blank_line(i, &lines)
+                    {
                         result.push(String::new());
                     }
 
@@ -663,5 +685,77 @@ echo "nested"
         // Should add blank lines when list_items is true
         let expected = "1. First item\n\n   ```python\n   code()\n   ```\n\n2. Second item";
         assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_no_warning_after_frontmatter() {
+        // Code block immediately after frontmatter should not trigger MD031
+        // This matches markdownlint behavior
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = "---\ntitle: Test\n---\n```\ncode\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should not flag missing blank line before code block after frontmatter
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for code block after frontmatter, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_does_not_add_blank_after_frontmatter() {
+        // Fix should not add blank line between frontmatter and code block
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = "---\ntitle: Test\n---\n```\ncode\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should not add blank line after frontmatter
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_frontmatter_with_blank_line_before_code() {
+        // If there's already a blank line between frontmatter and code, that's fine
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = "---\ntitle: Test\n---\n\n```\ncode\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_no_warning_for_admonition_after_frontmatter() {
+        // Admonition immediately after frontmatter should not trigger MD031
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = "---\ntitle: Test\n---\n!!! note\n    This is a note";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for admonition after frontmatter, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_toml_frontmatter_before_code() {
+        // TOML frontmatter should also be handled
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = "+++\ntitle = \"Test\"\n+++\n```\ncode\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for code block after TOML frontmatter, got: {warnings:?}"
+        );
     }
 }
