@@ -92,7 +92,7 @@ impl ContentCharacteristics {
             if !chars.has_images && line.contains("![") {
                 chars.has_images = true;
             }
-            if !chars.has_code && (line.contains('`') || line.contains("~~~")) {
+            if !chars.has_code && (line.contains('`') || line.contains("~~~") || line.starts_with("    ")) {
                 chars.has_code = true;
             }
             if !chars.has_emphasis && (line.contains('*') || line.contains('_')) {
@@ -464,6 +464,10 @@ mod tests {
         assert!(chars.has_code);
 
         let chars = ContentCharacteristics::analyze("~~~\ncode block\n~~~");
+        assert!(chars.has_code);
+
+        // Test indented code blocks (4 spaces)
+        let chars = ContentCharacteristics::analyze("Text\n\n    indented code\n\nMore text");
         assert!(chars.has_code);
 
         // Test emphasis
