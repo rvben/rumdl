@@ -4,15 +4,15 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_url_range};
 use crate::utils::regex_cache::{
-    EMAIL_PATTERN, URL_IPV6_STR, URL_STANDARD_STR, URL_WWW_STR, get_cached_fancy_regex, get_cached_regex,
+    EMAIL_PATTERN, URL_IPV6_STR, URL_QUICK_CHECK_STR, URL_STANDARD_STR, URL_WWW_STR, get_cached_fancy_regex,
+    get_cached_regex,
 };
 
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 
-// URL detection patterns - core URL patterns are imported from regex_cache
-// These local patterns are MD034-specific for markdown constructs
-const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?)://|@|www\."#;
+// MD034-specific patterns for markdown constructs
+// Core URL patterns (URL_QUICK_CHECK_STR, URL_STANDARD_STR, etc.) are imported from regex_cache
 const CUSTOM_PROTOCOL_PATTERN_STR: &str = r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#;
 const MARKDOWN_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
 const MARKDOWN_EMPTY_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(\)"#;
