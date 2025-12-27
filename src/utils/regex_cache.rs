@@ -288,17 +288,6 @@ pub static URL_QUICK_CHECK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(
 /// See [`URL_SIMPLE_STR`] for documentation.
 pub static URL_SIMPLE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(URL_SIMPLE_STR).unwrap());
 
-// Deprecated aliases - use the canonical names above instead.
-// These exist only for backwards compatibility with existing code.
-
-#[deprecated(since = "0.0.205", note = "use URL_SIMPLE_REGEX instead")]
-#[doc(hidden)]
-pub static URL_REGEX: LazyLock<Regex> = LazyLock::new(|| URL_SIMPLE_REGEX.clone());
-
-#[deprecated(since = "0.0.205", note = "use URL_SIMPLE_REGEX instead")]
-#[doc(hidden)]
-pub static BARE_URL_REGEX: LazyLock<Regex> = LazyLock::new(|| URL_SIMPLE_REGEX.clone());
-
 /// Alias for `URL_SIMPLE_REGEX`. Used by MD013 for line length exemption.
 pub static URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| URL_SIMPLE_REGEX.clone());
 
