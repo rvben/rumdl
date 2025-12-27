@@ -1669,6 +1669,90 @@ lines_above = 2
         // Config should be usable
         assert!(config.global.enable.contains(&"MD022".to_string()));
     }
+
+    #[test]
+    fn test_resolve_rule_name_canonical() {
+        // Canonical IDs should resolve to themselves
+        assert_eq!(resolve_rule_name("MD001"), "MD001");
+        assert_eq!(resolve_rule_name("MD013"), "MD013");
+        assert_eq!(resolve_rule_name("MD069"), "MD069");
+    }
+
+    #[test]
+    fn test_resolve_rule_name_aliases() {
+        // Aliases should resolve to canonical IDs
+        assert_eq!(resolve_rule_name("heading-increment"), "MD001");
+        assert_eq!(resolve_rule_name("line-length"), "MD013");
+        assert_eq!(resolve_rule_name("no-bare-urls"), "MD034");
+        assert_eq!(resolve_rule_name("ul-style"), "MD004");
+    }
+
+    #[test]
+    fn test_resolve_rule_name_case_insensitive() {
+        // Case should not matter
+        assert_eq!(resolve_rule_name("HEADING-INCREMENT"), "MD001");
+        assert_eq!(resolve_rule_name("Heading-Increment"), "MD001");
+        assert_eq!(resolve_rule_name("md001"), "MD001");
+        assert_eq!(resolve_rule_name("MD001"), "MD001");
+    }
+
+    #[test]
+    fn test_resolve_rule_name_underscore_to_hyphen() {
+        // Underscores should be converted to hyphens
+        assert_eq!(resolve_rule_name("heading_increment"), "MD001");
+        assert_eq!(resolve_rule_name("line_length"), "MD013");
+        assert_eq!(resolve_rule_name("no_bare_urls"), "MD034");
+    }
+
+    #[test]
+    fn test_resolve_rule_name_unknown() {
+        // Unknown names should fall back to normalization
+        assert_eq!(resolve_rule_name("custom-rule"), "custom-rule");
+        assert_eq!(resolve_rule_name("CUSTOM_RULE"), "custom-rule");
+        assert_eq!(resolve_rule_name("md999"), "MD999"); // Looks like an MD rule
+    }
+
+    #[test]
+    fn test_resolve_rule_names_basic() {
+        let result = resolve_rule_names("MD001,line-length,heading-increment");
+        assert!(result.contains("MD001"));
+        assert!(result.contains("MD013")); // line-length
+        // Note: heading-increment also resolves to MD001, so set should contain MD001 and MD013
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_rule_names_with_whitespace() {
+        let result = resolve_rule_names("  MD001 , line-length , MD034  ");
+        assert!(result.contains("MD001"));
+        assert!(result.contains("MD013"));
+        assert!(result.contains("MD034"));
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_resolve_rule_names_empty_entries() {
+        let result = resolve_rule_names("MD001,,MD013,");
+        assert!(result.contains("MD001"));
+        assert!(result.contains("MD013"));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_rule_names_empty_string() {
+        let result = resolve_rule_names("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_rule_names_mixed() {
+        // Mix of canonical IDs, aliases, and unknown
+        let result = resolve_rule_names("MD001,line-length,custom-rule");
+        assert!(result.contains("MD001"));
+        assert!(result.contains("MD013"));
+        assert!(result.contains("custom-rule"));
+        assert_eq!(result.len(), 3);
+    }
 }
 
 /// Configuration source with clear precedence hierarchy.
@@ -2971,12 +3055,37 @@ static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! {
 /// Resolve a rule name alias to its canonical form with O(1) perfect hash lookup
 /// Converts rule aliases (like "ul-style", "line-length") to canonical IDs (like "MD004", "MD013")
 /// Returns None if the rule name is not recognized
-pub(crate) fn resolve_rule_name_alias(key: &str) -> Option<&'static str> {
+pub fn resolve_rule_name_alias(key: &str) -> Option<&'static str> {
     // Normalize: uppercase and replace underscores with hyphens
     let normalized_key = key.to_ascii_uppercase().replace('_', "-");
 
     // O(1) perfect hash lookup
     RULE_ALIAS_MAP.get(normalized_key.as_str()).copied()
+}
+
+/// Resolves a rule name to its canonical ID, supporting both rule IDs and aliases.
+/// Returns the canonical ID (e.g., "MD001") for any valid input:
+/// - "MD001" → "MD001" (canonical)
+/// - "heading-increment" → "MD001" (alias)
+/// - "HEADING_INCREMENT" → "MD001" (case-insensitive, underscore variant)
+///
+/// For unknown names, falls back to normalization (uppercase for MDxxx pattern, otherwise kebab-case).
+pub fn resolve_rule_name(name: &str) -> String {
+    resolve_rule_name_alias(name)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| normalize_key(name))
+}
+
+/// Resolves a comma-separated list of rule names to canonical IDs.
+/// Handles CLI input like "MD001,line-length,heading-increment".
+/// Empty entries and whitespace are filtered out.
+pub fn resolve_rule_names(input: &str) -> std::collections::HashSet<String> {
+    input
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(resolve_rule_name)
+        .collect()
 }
 
 /// Represents a config validation warning or error

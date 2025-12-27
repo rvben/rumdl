@@ -6,7 +6,7 @@ use colored::*;
 use core::error::Error;
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
-use rumdl_config::normalize_key;
+use rumdl_config::{resolve_rule_name, resolve_rule_names};
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
@@ -40,45 +40,27 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
     // 2. Determine the final list of enabled rules based on precedence
     let final_rules: Vec<Box<dyn Rule>>;
 
-    // Rule names provided via CLI flags
-    let cli_enable_set: Option<HashSet<&str>> = args
-        .enable
-        .as_deref()
-        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
-    let cli_disable_set: Option<HashSet<&str>> = args
-        .disable
-        .as_deref()
-        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
-    let cli_extend_enable_set: Option<HashSet<&str>> = args
-        .extend_enable
-        .as_deref()
-        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
-    let cli_extend_disable_set: Option<HashSet<&str>> = args
-        .extend_disable
-        .as_deref()
-        .map(|s| s.split(',').map(|r| r.trim()).filter(|r| !r.is_empty()).collect());
+    // Rule names provided via CLI flags (resolved to canonical IDs)
+    let cli_enable_set: Option<HashSet<String>> = args.enable.as_deref().map(resolve_rule_names);
+    let cli_disable_set: Option<HashSet<String>> = args.disable.as_deref().map(resolve_rule_names);
+    let cli_extend_enable_set: Option<HashSet<String>> = args.extend_enable.as_deref().map(resolve_rule_names);
+    let cli_extend_disable_set: Option<HashSet<String>> = args.extend_disable.as_deref().map(resolve_rule_names);
 
-    // Rule names provided via config file
-    let config_enable_set: HashSet<&str> = config.global.enable.iter().map(|s| s.as_str()).collect();
-
-    let config_disable_set: HashSet<&str> = config.global.disable.iter().map(|s| s.as_str()).collect();
+    // Rule names provided via config file (resolved to canonical IDs for consistent comparison)
+    let config_enable_set: HashSet<String> = config.global.enable.iter().map(|s| resolve_rule_name(s)).collect();
+    let config_disable_set: HashSet<String> = config.global.disable.iter().map(|s| resolve_rule_name(s)).collect();
 
     if let Some(enabled_cli) = &cli_enable_set {
         // CLI --enable completely overrides config (ruff --select behavior)
-        let enabled_cli_normalized: HashSet<String> = enabled_cli.iter().map(|s| normalize_key(s)).collect();
-        let _all_rule_names: Vec<String> = all_rules.iter().map(|r| normalize_key(r.name())).collect();
+        // CLI names are already resolved to canonical IDs
         let mut filtered_rules = all_rules
             .into_iter()
-            .filter(|rule| enabled_cli_normalized.contains(&normalize_key(rule.name())))
+            .filter(|rule| enabled_cli.contains(rule.name()))
             .collect::<Vec<_>>();
 
         // Apply CLI --disable to remove rules from the enabled set (ruff-like behavior)
         if let Some(disabled_cli) = &cli_disable_set {
-            filtered_rules.retain(|rule| {
-                let rule_name_upper = rule.name();
-                let rule_name_lower = normalize_key(rule_name_upper);
-                !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
-            });
+            filtered_rules.retain(|rule| !disabled_cli.contains(rule.name()));
         }
 
         final_rules = filtered_rules;
@@ -86,12 +68,9 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
         // Handle extend flags (additive with config)
         let mut current_rules = all_rules;
 
-        // Start with config enable if present
+        // Start with config enable if present (config set already resolved to canonical IDs)
         if !config_enable_set.is_empty() {
-            current_rules.retain(|rule| {
-                let normalized_rule_name = normalize_key(rule.name());
-                config_enable_set.contains(normalized_rule_name.as_str())
-            });
+            current_rules.retain(|rule| config_enable_set.contains(rule.name()));
         }
 
         // Add CLI extend-enable rules
@@ -99,47 +78,34 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
             // If we started with all rules (no config enable), keep all rules
             // If we started with config enable, we need to re-filter with extended set
             if !config_enable_set.is_empty() {
-                let mut extended_enable_set = config_enable_set.clone();
-                for rule in extend_enabled_cli {
-                    extended_enable_set.insert(rule);
-                }
+                // Merge config enable set with CLI extend-enable (both already canonical IDs)
+                let extended_enable_set: HashSet<&str> = config_enable_set
+                    .iter()
+                    .map(|s| s.as_str())
+                    .chain(extend_enabled_cli.iter().map(|s| s.as_str()))
+                    .collect();
 
                 // Re-filter with extended set
                 current_rules = rumdl_lib::rules::all_rules(config)
                     .into_iter()
-                    .filter(|rule| {
-                        let normalized_rule_name = normalize_key(rule.name());
-                        extended_enable_set.contains(normalized_rule_name.as_str())
-                    })
+                    .filter(|rule| extended_enable_set.contains(rule.name()))
                     .collect();
             }
         }
 
-        // Apply config disable
+        // Apply config disable (config set already resolved to canonical IDs)
         if !config_disable_set.is_empty() {
-            current_rules.retain(|rule| {
-                let normalized_rule_name = normalize_key(rule.name());
-                !config_disable_set.contains(normalized_rule_name.as_str())
-            });
+            current_rules.retain(|rule| !config_disable_set.contains(rule.name()));
         }
 
-        // Apply CLI extend-disable
+        // Apply CLI extend-disable (already resolved to canonical IDs)
         if let Some(extend_disabled_cli) = &cli_extend_disable_set {
-            current_rules.retain(|rule| {
-                let rule_name_upper = rule.name();
-                let rule_name_lower = normalize_key(rule_name_upper);
-                !extend_disabled_cli.contains(rule_name_upper)
-                    && !extend_disabled_cli.contains(rule_name_lower.as_str())
-            });
+            current_rules.retain(|rule| !extend_disabled_cli.contains(rule.name()));
         }
 
-        // Apply CLI disable
+        // Apply CLI disable (already resolved to canonical IDs)
         if let Some(disabled_cli) = &cli_disable_set {
-            current_rules.retain(|rule| {
-                let rule_name_upper = rule.name();
-                let rule_name_lower = normalize_key(rule_name_upper);
-                !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
-            });
+            current_rules.retain(|rule| !disabled_cli.contains(rule.name()));
         }
 
         final_rules = current_rules;
@@ -149,32 +115,21 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
         let mut current_rules = all_rules;
 
         // Step 2a: Apply config `enable` (if specified).
-        // If config.enable is not empty, it acts as an *exclusive* list.
+        // Config set already resolved to canonical IDs.
         if !config_enable_set.is_empty() {
-            current_rules.retain(|rule| {
-                let normalized_rule_name = normalize_key(rule.name());
-                config_enable_set.contains(normalized_rule_name.as_str())
-            });
+            current_rules.retain(|rule| config_enable_set.contains(rule.name()));
         }
 
         // Step 2b: Apply config `disable`.
-        // Remove rules specified in config.disable from the current set.
+        // Config set already resolved to canonical IDs.
         if !config_disable_set.is_empty() {
-            current_rules.retain(|rule| {
-                let normalized_rule_name = normalize_key(rule.name());
-                let is_disabled = config_disable_set.contains(normalized_rule_name.as_str());
-                !is_disabled // Keep if NOT disabled
-            });
+            current_rules.retain(|rule| !config_disable_set.contains(rule.name()));
         }
 
-        // Step 2c: Apply CLI `disable`.
+        // Step 2c: Apply CLI `disable` (already resolved to canonical IDs).
         // Remove rules specified in cli.disable from the result of steps 2a & 2b.
         if let Some(disabled_cli) = &cli_disable_set {
-            current_rules.retain(|rule| {
-                let rule_name_upper = rule.name();
-                let rule_name_lower = normalize_key(rule_name_upper);
-                !disabled_cli.contains(rule_name_upper) && !disabled_cli.contains(rule_name_lower.as_str())
-            });
+            current_rules.retain(|rule| !disabled_cli.contains(rule.name()));
         }
 
         final_rules = current_rules; // Assign the final filtered vector
