@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockStyle;
+use crate::utils::element_cache::ElementCache;
 use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::calculate_line_range;
 use toml;
@@ -28,32 +29,12 @@ impl MD046CodeBlockStyle {
         Self { config }
     }
 
-    /// Calculate effective indentation in columns, accounting for tab expansion
-    ///
-    /// Per CommonMark, tabs expand to the next tab stop (columns 4, 8, 12, ...).
-    /// This means:
-    /// - " \t" (1 space + tab) → 4 columns
-    /// - "  \t" (2 spaces + tab) → 4 columns
-    /// - "   \t" (3 spaces + tab) → 4 columns
-    /// - "\t" (just tab) → 4 columns
-    fn effective_indent(line: &str) -> usize {
-        let mut column = 0;
-        for c in line.chars() {
-            match c {
-                ' ' => column += 1,
-                '\t' => column = (column / 4 + 1) * 4, // Round up to next tab stop
-                _ => break,
-            }
-        }
-        column
-    }
-
     /// Check if line has valid fence indentation per CommonMark spec (0-3 spaces)
     ///
     /// Per CommonMark 0.31.2: "An opening code fence may be indented 0-3 spaces."
     /// 4+ spaces of indentation makes it an indented code block instead.
     fn has_valid_fence_indent(line: &str) -> bool {
-        Self::effective_indent(line) < 4
+        ElementCache::calculate_indentation_width_default(line) < 4
     }
 
     /// Check if a line is a valid fenced code block start per CommonMark spec
@@ -261,7 +242,7 @@ impl MD046CodeBlockStyle {
         let line = lines[i];
 
         // Check if indented by at least 4 columns (accounting for tab expansion)
-        let indent = Self::effective_indent(line);
+        let indent = ElementCache::calculate_indentation_width_default(line);
         if indent < 4 {
             return false;
         }
@@ -280,7 +261,7 @@ impl MD046CodeBlockStyle {
         // OR if the previous line is also an indented code block (continuation)
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
         let prev_is_indented_code = i > 0
-            && Self::effective_indent(lines[i - 1]) >= 4
+            && ElementCache::calculate_indentation_width_default(lines[i - 1]) >= 4
             && !in_list_context[i - 1]
             && !(is_mkdocs && in_tab_context[i - 1]);
 

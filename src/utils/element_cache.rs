@@ -122,9 +122,16 @@ impl ElementCache {
         Self::compute_content_hash(content) == self.content_hash
     }
 
-    /// Calculate the visual indentation width of a string, expanding tabs to spaces
-    /// Default tab width is 4 spaces
-    fn calculate_indentation_width(indent_str: &str, tab_width: usize) -> usize {
+    /// Calculate the visual indentation width of a string, expanding tabs to spaces.
+    ///
+    /// Per CommonMark, tabs expand to the next tab stop (columns 4, 8, 12, ...).
+    /// This means:
+    /// - " \t" (1 space + tab) → 4 columns
+    /// - "  \t" (2 spaces + tab) → 4 columns
+    /// - "   \t" (3 spaces + tab) → 4 columns
+    /// - "\t" (just tab) → 4 columns
+    /// - "    " (4 spaces) → 4 columns
+    pub fn calculate_indentation_width(indent_str: &str, tab_width: usize) -> usize {
         let mut width = 0;
         for ch in indent_str.chars() {
             if ch == '\t' {
@@ -141,7 +148,7 @@ impl ElementCache {
     }
 
     /// Calculate the visual indentation width using default tab width of 4
-    fn calculate_indentation_width_default(indent_str: &str) -> usize {
+    pub fn calculate_indentation_width_default(indent_str: &str) -> usize {
         Self::calculate_indentation_width(indent_str, 4)
     }
 

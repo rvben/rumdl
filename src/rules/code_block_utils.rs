@@ -1,3 +1,4 @@
+use crate::utils::element_cache::ElementCache;
 use crate::utils::range_utils::LineIndex;
 use regex::Regex;
 use std::fmt;
@@ -9,7 +10,6 @@ static FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(
 static ALTERNATE_FENCED_CODE_BLOCK_START: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap());
 static ALTERNATE_FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)~~~\s*$").unwrap());
-static INDENTED_CODE_BLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})").unwrap());
 static LIST_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-]|\d+[.)])(\s*)(.*)$").unwrap());
 
 /// Utility functions for detecting and handling code blocks in Markdown documents
@@ -69,11 +69,10 @@ impl CodeBlockUtils {
         FENCED_CODE_BLOCK_END.is_match(line) || ALTERNATE_FENCED_CODE_BLOCK_END.is_match(line)
     }
 
-    /// Check if a line is an indented code block
+    /// Check if a line is an indented code block (4+ columns of leading whitespace)
     pub fn is_indented_code_block(line: &str) -> bool {
-        // Convert tabs to spaces (1 tab = 4 spaces) for proper indentation checking
-        let expanded_line = line.replace('\t', "    ");
-        INDENTED_CODE_BLOCK.is_match(&expanded_line)
+        // Use proper tab expansion to calculate effective indentation
+        ElementCache::calculate_indentation_width_default(line) >= 4
     }
 
     /// Extracts the language specifier from a fenced code block start line
@@ -175,7 +174,7 @@ impl CodeBlockUtils {
             } else if !in_code_block[i] {
                 // Check for indented code blocks only if not already marked
                 // Do not mark as code block if the line is a list item
-                if (line.starts_with("    ") || INDENTED_CODE_BLOCK.is_match(line)) && !LIST_ITEM_RE.is_match(line) {
+                if ElementCache::calculate_indentation_width_default(line) >= 4 && !LIST_ITEM_RE.is_match(line) {
                     in_code_block[i] = true;
                 }
             }
@@ -187,7 +186,6 @@ impl CodeBlockUtils {
 
 // Cached regex patterns for better performance
 static FENCED_CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:```|~~~)").unwrap());
-static INDENTED_CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})").unwrap());
 
 /// Tracks which lines are inside code blocks and their types
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -283,9 +281,8 @@ pub fn compute_code_blocks(content: &str) -> Vec<CodeBlockState> {
             fence_marker = if line.trim().starts_with("```") { "```" } else { "~~~" };
             result.push(CodeBlockState::Fenced); // The opening fence is part of the block
         } else if !line.trim().is_empty() {
-            // Convert tabs to spaces for proper indentation checking
-            let expanded_line = line.replace('\t', "    ");
-            if INDENTED_CODE_BLOCK_PATTERN.is_match(&expanded_line) {
+            // Use proper tab expansion to check for indented code block
+            if ElementCache::calculate_indentation_width_default(line) >= 4 {
                 result.push(CodeBlockState::Indented);
             } else {
                 result.push(CodeBlockState::None);
@@ -518,10 +515,13 @@ More text";
     fn test_is_indented_code_block() {
         assert!(CodeBlockUtils::is_indented_code_block("    code"));
         assert!(CodeBlockUtils::is_indented_code_block("        more indented"));
-        // Tabs should be treated as 4 spaces each
-        assert!(CodeBlockUtils::is_indented_code_block("\tcode")); // 1 tab = 4 spaces
-        assert!(CodeBlockUtils::is_indented_code_block("\t\tcode")); // 2 tabs = 8 spaces
-        assert!(CodeBlockUtils::is_indented_code_block("  \tcode")); // 2 spaces + 1 tab = 6 spaces
+
+        // Tab expansion per CommonMark: tabs expand to next tab stop (columns 4, 8, 12, ...)
+        assert!(CodeBlockUtils::is_indented_code_block("\tcode")); // tab → column 4
+        assert!(CodeBlockUtils::is_indented_code_block("\t\tcode")); // 2 tabs → column 8
+        assert!(CodeBlockUtils::is_indented_code_block("  \tcode")); // 2 spaces + tab → column 4
+        assert!(CodeBlockUtils::is_indented_code_block(" \tcode")); // 1 space + tab → column 4
+        assert!(CodeBlockUtils::is_indented_code_block("   \tcode")); // 3 spaces + tab → column 4
 
         assert!(!CodeBlockUtils::is_indented_code_block("   code")); // Only 3 spaces
         assert!(!CodeBlockUtils::is_indented_code_block("normal text"));
