@@ -3,6 +3,7 @@
 //! This module implements text wrapping/reflow functionality that preserves
 //! Markdown elements like links, emphasis, code spans, etc.
 
+use crate::utils::element_cache::ElementCache;
 use crate::utils::is_definition_list_item;
 use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
@@ -1146,15 +1147,15 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             continue;
         }
 
-        // Preserve indented code blocks (4+ spaces or 1+ tab)
-        if line.starts_with("    ") || line.starts_with("\t") {
+        // Preserve indented code blocks (4+ columns accounting for tab expansion)
+        if ElementCache::calculate_indentation_width_default(line) >= 4 {
             // Collect all consecutive indented lines
             result.push(line.to_string());
             i += 1;
             while i < lines.len() {
                 let next_line = lines[i];
                 // Continue if next line is also indented or empty (empty lines in code blocks are ok)
-                if next_line.starts_with("    ") || next_line.starts_with("\t") || next_line.trim().is_empty() {
+                if ElementCache::calculate_indentation_width_default(next_line) >= 4 || next_line.trim().is_empty() {
                     result.push(next_line.to_string());
                     i += 1;
                 } else {
@@ -1524,8 +1525,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
         || trimmed.starts_with('#')
         || trimmed.starts_with("```")
         || trimmed.starts_with("~~~")
-        || target_line.starts_with("    ")
-        || target_line.starts_with('\t')
+        || ElementCache::calculate_indentation_width_default(target_line) >= 4
         || trimmed.starts_with('>')
         || crate::utils::table_utils::TableUtils::is_potential_table_row(target_line) // Tables
         || (trimmed.starts_with('[') && target_line.contains("]:")) // Reference definitions
@@ -1551,8 +1551,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
             || prev_trimmed.starts_with('#')
             || prev_trimmed.starts_with("```")
             || prev_trimmed.starts_with("~~~")
-            || prev_line.starts_with("    ")
-            || prev_line.starts_with('\t')
+            || ElementCache::calculate_indentation_width_default(prev_line) >= 4
             || prev_trimmed.starts_with('>')
             || crate::utils::table_utils::TableUtils::is_potential_table_row(prev_line)
             || (prev_trimmed.starts_with('[') && prev_line.contains("]:"))
@@ -1581,8 +1580,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
             || next_trimmed.starts_with('#')
             || next_trimmed.starts_with("```")
             || next_trimmed.starts_with("~~~")
-            || next_line.starts_with("    ")
-            || next_line.starts_with('\t')
+            || ElementCache::calculate_indentation_width_default(next_line) >= 4
             || next_trimmed.starts_with('>')
             || crate::utils::table_utils::TableUtils::is_potential_table_row(next_line)
             || (next_trimmed.starts_with('[') && next_line.contains("]:"))

@@ -37,6 +37,7 @@ pub use rules::*;
 
 pub use crate::lint_context::{LineInfo, LintContext, ListItemInfo};
 use crate::rule::{LintResult, Rule, RuleCategory};
+use crate::utils::element_cache::ElementCache;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
@@ -55,24 +56,9 @@ struct ContentCharacteristics {
 }
 
 /// Check if a line has enough leading whitespace to be an indented code block.
-/// Tab expansion: tabs expand to the next column that is a multiple of 4.
-/// This is a permissive heuristic - any tab in leading whitespace or 4+ spaces counts.
+/// Indented code blocks require 4+ columns of leading whitespace (with proper tab expansion).
 fn has_potential_indented_code_indent(line: &str) -> bool {
-    let mut column = 0;
-    for c in line.chars() {
-        match c {
-            ' ' => column += 1,
-            '\t' => {
-                // Tab in leading whitespace expands to at least column 4
-                return true;
-            }
-            _ => break,
-        }
-        if column >= 4 {
-            return true;
-        }
-    }
-    false
+    ElementCache::calculate_indentation_width_default(line) >= 4
 }
 
 impl ContentCharacteristics {

@@ -50,13 +50,62 @@ fn test_is_indented_code_block() {
     assert!(CodeBlockUtils::is_indented_code_block("    code"));
     assert!(CodeBlockUtils::is_indented_code_block("     code with more indent"));
     assert!(CodeBlockUtils::is_indented_code_block("      still indented"));
-    assert!(CodeBlockUtils::is_indented_code_block("\tcode with tab")); // Tabs are treated as 4 spaces
+    assert!(CodeBlockUtils::is_indented_code_block("\tcode with tab")); // Tab at column 0 → column 4
 
     // Test invalid indented code blocks
     assert!(!CodeBlockUtils::is_indented_code_block("code"));
     assert!(!CodeBlockUtils::is_indented_code_block("  code")); // Only 2 spaces
     assert!(!CodeBlockUtils::is_indented_code_block("   code")); // Only 3 spaces
     assert!(!CodeBlockUtils::is_indented_code_block("")); // Empty line
+}
+
+/// Test CommonMark-compliant tab expansion for indented code blocks.
+/// Tabs expand to the next column that is a multiple of 4 (per CommonMark spec).
+/// This ensures mixed space+tab patterns are handled correctly.
+#[test]
+fn test_is_indented_code_block_tab_expansion() {
+    // Per CommonMark: tabs expand to next column that is a multiple of 4
+    // Tab at column 0 → column 4
+    assert!(CodeBlockUtils::is_indented_code_block("\tcode")); // col 0 → 4
+
+    // Tab at column 1 → column 4 (expands 3 columns)
+    assert!(CodeBlockUtils::is_indented_code_block(" \tcode")); // 1 space + tab = col 4
+
+    // Tab at column 2 → column 4 (expands 2 columns)
+    assert!(CodeBlockUtils::is_indented_code_block("  \tcode")); // 2 spaces + tab = col 4
+
+    // Tab at column 3 → column 4 (expands 1 column)
+    assert!(CodeBlockUtils::is_indented_code_block("   \tcode")); // 3 spaces + tab = col 4
+
+    // Tab at column 4 → column 8 (expands to next 4-boundary)
+    assert!(CodeBlockUtils::is_indented_code_block("    \tcode")); // 4 spaces + tab = col 8
+
+    // Multiple tabs
+    assert!(CodeBlockUtils::is_indented_code_block("\t\tcode")); // col 0 → 4 → 8
+
+    // Mixed: 1 space, tab (→ col 4), then more content
+    assert!(CodeBlockUtils::is_indented_code_block(" \t ")); // 1 space + tab = col 4, then space
+
+    // Edge cases that would FAIL with naive `starts_with("    ") || starts_with('\t')`:
+    // These patterns don't start with 4 spaces and don't start with tab,
+    // but still reach 4+ columns due to proper tab expansion
+    assert!(
+        CodeBlockUtils::is_indented_code_block(" \tcode"),
+        "1 space + tab should reach column 4"
+    );
+    assert!(
+        CodeBlockUtils::is_indented_code_block("  \tcode"),
+        "2 spaces + tab should reach column 4"
+    );
+    assert!(
+        CodeBlockUtils::is_indented_code_block("   \tcode"),
+        "3 spaces + tab should reach column 4"
+    );
+
+    // These should NOT be indented code blocks (< 4 columns)
+    assert!(!CodeBlockUtils::is_indented_code_block("   code")); // 3 spaces = col 3
+    assert!(!CodeBlockUtils::is_indented_code_block("  code")); // 2 spaces = col 2
+    assert!(!CodeBlockUtils::is_indented_code_block(" code")); // 1 space = col 1
 }
 
 #[test]
