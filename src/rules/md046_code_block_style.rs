@@ -28,25 +28,32 @@ impl MD046CodeBlockStyle {
         Self { config }
     }
 
+    /// Calculate effective indentation in columns, accounting for tab expansion
+    ///
+    /// Per CommonMark, tabs expand to the next tab stop (columns 4, 8, 12, ...).
+    /// This means:
+    /// - " \t" (1 space + tab) → 4 columns
+    /// - "  \t" (2 spaces + tab) → 4 columns
+    /// - "   \t" (3 spaces + tab) → 4 columns
+    /// - "\t" (just tab) → 4 columns
+    fn effective_indent(line: &str) -> usize {
+        let mut column = 0;
+        for c in line.chars() {
+            match c {
+                ' ' => column += 1,
+                '\t' => column = (column / 4 + 1) * 4, // Round up to next tab stop
+                _ => break,
+            }
+        }
+        column
+    }
+
     /// Check if line has valid fence indentation per CommonMark spec (0-3 spaces)
     ///
     /// Per CommonMark 0.31.2: "An opening code fence may be indented 0-3 spaces."
     /// 4+ spaces of indentation makes it an indented code block instead.
     fn has_valid_fence_indent(line: &str) -> bool {
-        // Count leading spaces (tabs count as 4 spaces per CommonMark)
-        let mut indent = 0;
-        for c in line.chars() {
-            match c {
-                ' ' => indent += 1,
-                '\t' => indent += 4,
-                _ => break,
-            }
-            // Per CommonMark: 4+ spaces means this is NOT a valid fence opener
-            if indent >= 4 {
-                return false;
-            }
-        }
-        true
+        Self::effective_indent(line) < 4
     }
 
     /// Check if a line is a valid fenced code block start per CommonMark spec
@@ -253,8 +260,9 @@ impl MD046CodeBlockStyle {
 
         let line = lines[i];
 
-        // Check if indented by at least 4 spaces or tab
-        if !(line.starts_with("    ") || line.starts_with("\t")) {
+        // Check if indented by at least 4 columns (accounting for tab expansion)
+        let indent = Self::effective_indent(line);
+        if indent < 4 {
             return false;
         }
 
@@ -272,7 +280,7 @@ impl MD046CodeBlockStyle {
         // OR if the previous line is also an indented code block (continuation)
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
         let prev_is_indented_code = i > 0
-            && (lines[i - 1].starts_with("    ") || lines[i - 1].starts_with("\t"))
+            && Self::effective_indent(lines[i - 1]) >= 4
             && !in_list_context[i - 1]
             && !(is_mkdocs && in_tab_context[i - 1]);
 
@@ -769,7 +777,11 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // Quick check for code blocks before processing
-        if !ctx.content.contains("```") && !ctx.content.contains("~~~") && !ctx.content.contains("    ") {
+        if !ctx.content.contains("```")
+            && !ctx.content.contains("~~~")
+            && !ctx.content.contains("    ")
+            && !ctx.content.contains('\t')
+        {
             return Ok(Vec::new());
         }
 
@@ -1203,6 +1215,46 @@ mod tests {
 
         // Indented blocks should be flagged when fenced style is required
         assert!(!result.is_empty());
+        assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_fenced_style_with_tab_indented_blocks() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "Text\n\n\ttab indented code\n\tmore code\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Tab-indented blocks should also be flagged when fenced style is required
+        assert!(!result.is_empty());
+        assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_fenced_style_with_mixed_whitespace_indented_blocks() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        // 2 spaces + tab = 4 columns due to tab expansion (tab goes to column 4)
+        let content = "Text\n\n  \tmixed indent code\n  \tmore code\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Mixed whitespace indented blocks should also be flagged
+        assert!(
+            !result.is_empty(),
+            "Mixed whitespace (2 spaces + tab) should be detected as indented code"
+        );
+        assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_fenced_style_with_one_space_tab_indent() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        // 1 space + tab = 4 columns (tab expands to next tab stop at column 4)
+        let content = "Text\n\n \ttab after one space\n \tmore code\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(!result.is_empty(), "1 space + tab should be detected as indented code");
         assert!(result[0].message.contains("Use fenced code blocks"));
     }
 

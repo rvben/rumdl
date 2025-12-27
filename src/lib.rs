@@ -54,6 +54,27 @@ struct ContentCharacteristics {
     has_images: bool,      // ![alt](url)
 }
 
+/// Check if a line has enough leading whitespace to be an indented code block.
+/// Tab expansion: tabs expand to the next column that is a multiple of 4.
+/// This is a permissive heuristic - any tab in leading whitespace or 4+ spaces counts.
+fn has_potential_indented_code_indent(line: &str) -> bool {
+    let mut column = 0;
+    for c in line.chars() {
+        match c {
+            ' ' => column += 1,
+            '\t' => {
+                // Tab in leading whitespace expands to at least column 4
+                return true;
+            }
+            _ => break,
+        }
+        if column >= 4 {
+            return true;
+        }
+    }
+    false
+}
+
 impl ContentCharacteristics {
     fn analyze(content: &str) -> Self {
         let mut chars = Self { ..Default::default() };
@@ -92,7 +113,9 @@ impl ContentCharacteristics {
             if !chars.has_images && line.contains("![") {
                 chars.has_images = true;
             }
-            if !chars.has_code && (line.contains('`') || line.contains("~~~") || line.starts_with("    ")) {
+            if !chars.has_code
+                && (line.contains('`') || line.contains("~~~") || has_potential_indented_code_indent(line))
+            {
                 chars.has_code = true;
             }
             if !chars.has_emphasis && (line.contains('*') || line.contains('_')) {
@@ -468,6 +491,18 @@ mod tests {
 
         // Test indented code blocks (4 spaces)
         let chars = ContentCharacteristics::analyze("Text\n\n    indented code\n\nMore text");
+        assert!(chars.has_code);
+
+        // Test tab-indented code blocks
+        let chars = ContentCharacteristics::analyze("Text\n\n\ttab indented code\n\nMore text");
+        assert!(chars.has_code);
+
+        // Test mixed whitespace indented code (2 spaces + tab = 4 columns)
+        let chars = ContentCharacteristics::analyze("Text\n\n  \tmixed indent code\n\nMore text");
+        assert!(chars.has_code);
+
+        // Test 1 space + tab (also 4 columns due to tab expansion)
+        let chars = ContentCharacteristics::analyze("Text\n\n \ttab after space\n\nMore text");
         assert!(chars.has_code);
 
         // Test emphasis
