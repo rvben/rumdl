@@ -28,7 +28,40 @@ impl MD046CodeBlockStyle {
         Self { config }
     }
 
+    /// Check if line has valid fence indentation per CommonMark spec (0-3 spaces)
+    ///
+    /// Per CommonMark 0.31.2: "An opening code fence may be indented 0-3 spaces."
+    /// 4+ spaces of indentation makes it an indented code block instead.
+    fn has_valid_fence_indent(line: &str) -> bool {
+        // Count leading spaces (tabs count as 4 spaces per CommonMark)
+        let mut indent = 0;
+        for c in line.chars() {
+            match c {
+                ' ' => indent += 1,
+                '\t' => indent += 4,
+                _ => break,
+            }
+            // Per CommonMark: 4+ spaces means this is NOT a valid fence opener
+            if indent >= 4 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if a line is a valid fenced code block start per CommonMark spec
+    ///
+    /// Per CommonMark 0.31.2: "A code fence is a sequence of at least three consecutive
+    /// backtick characters (`) or tilde characters (~). An opening code fence may be
+    /// indented 0-3 spaces."
+    ///
+    /// This means 4+ spaces of indentation makes it an indented code block instead,
+    /// where the fence characters become literal content.
     fn is_fenced_code_block_start(&self, line: &str) -> bool {
+        if !Self::has_valid_fence_indent(line) {
+            return false;
+        }
+
         let trimmed = line.trim_start();
         trimmed.starts_with("```") || trimmed.starts_with("~~~")
     }
@@ -283,6 +316,96 @@ impl MD046CodeBlockStyle {
         in_tab_context
     }
 
+    /// Categorize indented blocks for fix behavior
+    ///
+    /// Returns two vectors:
+    /// - `is_misplaced`: Lines that are part of a complete misplaced fenced block (dedent only)
+    /// - `contains_fences`: Lines that contain fence markers but aren't a complete block (skip fixing)
+    ///
+    /// A misplaced fenced block is a contiguous indented block that:
+    /// 1. Starts with a valid fence opener (``` or ~~~)
+    /// 2. Ends with a matching fence closer
+    ///
+    /// An unsafe block contains fence markers but isn't complete - wrapping would create invalid markdown.
+    fn categorize_indented_blocks(
+        &self,
+        lines: &[&str],
+        is_mkdocs: bool,
+        in_list_context: &[bool],
+        in_tab_context: &[bool],
+    ) -> (Vec<bool>, Vec<bool>) {
+        let mut is_misplaced = vec![false; lines.len()];
+        let mut contains_fences = vec![false; lines.len()];
+
+        // Find contiguous indented blocks and categorize them
+        let mut i = 0;
+        while i < lines.len() {
+            // Find the start of an indented block
+            if !self.is_indented_code_block_with_context(lines, i, is_mkdocs, in_list_context, in_tab_context) {
+                i += 1;
+                continue;
+            }
+
+            // Found start of an indented block - collect all contiguous lines
+            let block_start = i;
+            let mut block_end = i;
+
+            while block_end < lines.len()
+                && self.is_indented_code_block_with_context(
+                    lines,
+                    block_end,
+                    is_mkdocs,
+                    in_list_context,
+                    in_tab_context,
+                )
+            {
+                block_end += 1;
+            }
+
+            // Now we have an indented block from block_start to block_end (exclusive)
+            if block_end > block_start {
+                let first_line = lines[block_start].trim_start();
+                let last_line = lines[block_end - 1].trim_start();
+
+                // Check if first line is a fence opener
+                let is_backtick_fence = first_line.starts_with("```");
+                let is_tilde_fence = first_line.starts_with("~~~");
+
+                if is_backtick_fence || is_tilde_fence {
+                    let fence_char = if is_backtick_fence { '`' } else { '~' };
+                    let opener_len = first_line.chars().take_while(|&c| c == fence_char).count();
+
+                    // Check if last line is a matching fence closer
+                    let closer_fence_len = last_line.chars().take_while(|&c| c == fence_char).count();
+                    let after_closer = &last_line[closer_fence_len..];
+
+                    if closer_fence_len >= opener_len && after_closer.trim().is_empty() {
+                        // Complete misplaced fenced block - safe to dedent
+                        is_misplaced[block_start..block_end].fill(true);
+                    } else {
+                        // Incomplete fenced block - unsafe to wrap (would create nested fences)
+                        contains_fences[block_start..block_end].fill(true);
+                    }
+                } else {
+                    // Check if ANY line in the block contains fence markers
+                    // If so, wrapping would create invalid markdown
+                    let has_fence_markers = (block_start..block_end).any(|j| {
+                        let trimmed = lines[j].trim_start();
+                        trimmed.starts_with("```") || trimmed.starts_with("~~~")
+                    });
+
+                    if has_fence_markers {
+                        contains_fences[block_start..block_end].fill(true);
+                    }
+                }
+            }
+
+            i = block_end;
+        }
+
+        (is_misplaced, contains_fences)
+    }
+
     fn check_unclosed_code_blocks(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -306,7 +429,8 @@ impl MD046CodeBlockStyle {
             }
 
             // Check for fence markers (``` or ~~~)
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            // Per CommonMark: fence must have 0-3 spaces of indentation
+            if Self::has_valid_fence_indent(line) && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
                 let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
 
                 // Count the fence length
@@ -722,7 +846,8 @@ impl Rule for MD046CodeBlockStyle {
             }
 
             // Check for fenced code block markers (for style checking)
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            // Per CommonMark: fence must have 0-3 spaces of indentation
+            if Self::has_valid_fence_indent(line) && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
                 if target_style == CodeBlockStyle::Indented && !in_fence {
                     // This is an opening fence marker but we want indented style
                     // Only flag the opening marker, not the closing one
@@ -834,6 +959,12 @@ impl Rule for MD046CodeBlockStyle {
             vec![false; lines.len()]
         };
 
+        // Categorize indented blocks:
+        // - misplaced_fence_lines: complete fenced blocks that were over-indented (safe to dedent)
+        // - unsafe_fence_lines: contain fence markers but aren't complete (skip fixing to avoid broken output)
+        let (misplaced_fence_lines, unsafe_fence_lines) =
+            self.categorize_indented_blocks(&lines, is_mkdocs, &in_list_context, &in_tab_context);
+
         let mut result = String::with_capacity(content.len());
         let mut in_fenced_block = false;
         let mut fenced_fence_type = None;
@@ -843,7 +974,11 @@ impl Rule for MD046CodeBlockStyle {
             let trimmed = line.trim_start();
 
             // Handle fenced code blocks
-            if !in_fenced_block && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
+            // Per CommonMark: fence must have 0-3 spaces of indentation
+            if !in_fenced_block
+                && Self::has_valid_fence_indent(line)
+                && (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+            {
                 in_fenced_block = true;
                 fenced_fence_type = Some(if trimmed.starts_with("```") { "```" } else { "~~~" });
 
@@ -894,20 +1029,33 @@ impl Rule for MD046CodeBlockStyle {
                     );
 
                 if target_style == CodeBlockStyle::Fenced {
-                    if !prev_line_is_indented && !in_indented_block {
+                    let trimmed_content = line.trim_start();
+
+                    // Check if this line is part of a misplaced fenced block
+                    // (pre-computed block-level analysis, not per-line)
+                    if misplaced_fence_lines[i] {
+                        // Just remove the indentation - this is a complete misplaced fenced block
+                        result.push_str(trimmed_content);
+                        result.push('\n');
+                    } else if unsafe_fence_lines[i] {
+                        // This block contains fence markers but isn't a complete fenced block
+                        // Wrapping would create invalid nested fences - keep as-is (don't fix)
+                        result.push_str(line);
+                        result.push('\n');
+                    } else if !prev_line_is_indented && !in_indented_block {
                         // Start of a new indented block that should be fenced
                         result.push_str("```\n");
-                        result.push_str(line.trim_start());
+                        result.push_str(trimmed_content);
                         result.push('\n');
                         in_indented_block = true;
                     } else {
                         // Inside an indented block
-                        result.push_str(line.trim_start());
+                        result.push_str(trimmed_content);
                         result.push('\n');
                     }
 
                     // Check if this is the end of the indented block
-                    let _next_line_is_indented = i < lines.len() - 1
+                    let next_line_is_indented = i < lines.len() - 1
                         && self.is_indented_code_block_with_context(
                             &lines,
                             i + 1,
@@ -915,7 +1063,12 @@ impl Rule for MD046CodeBlockStyle {
                             &in_list_context,
                             &in_tab_context,
                         );
-                    if !_next_line_is_indented && in_indented_block {
+                    // Don't close if this is an unsafe block (kept as-is)
+                    if !next_line_is_indented
+                        && in_indented_block
+                        && !misplaced_fence_lines[i]
+                        && !unsafe_fence_lines[i]
+                    {
                         result.push_str("```\n");
                         in_indented_block = false;
                     }
@@ -1754,5 +1907,216 @@ More text."#;
             "Code blocks after HTML comments should still be detected"
         );
         assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_four_space_indented_fence_is_not_valid_fence() {
+        // Per CommonMark 0.31.2: "An opening code fence may be indented 0-3 spaces."
+        // 4+ spaces means it's NOT a valid fence opener - it becomes an indented code block
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        // Valid fences (0-3 spaces)
+        assert!(rule.is_fenced_code_block_start("```"));
+        assert!(rule.is_fenced_code_block_start(" ```"));
+        assert!(rule.is_fenced_code_block_start("  ```"));
+        assert!(rule.is_fenced_code_block_start("   ```"));
+
+        // Invalid fences (4+ spaces) - these are indented code blocks instead
+        assert!(!rule.is_fenced_code_block_start("    ```"));
+        assert!(!rule.is_fenced_code_block_start("     ```"));
+        assert!(!rule.is_fenced_code_block_start("        ```"));
+
+        // Tab counts as 4 spaces per CommonMark
+        assert!(!rule.is_fenced_code_block_start("\t```"));
+    }
+
+    #[test]
+    fn test_issue_237_indented_fenced_block_detected_as_indented() {
+        // Issue #237: User has fenced code block indented by 4 spaces
+        // Per CommonMark, this should be detected as an INDENTED code block
+        // because 4+ spaces of indentation makes the fence invalid
+        //
+        // Reference: https://github.com/rvben/rumdl/issues/237
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        // This is the exact test case from issue #237
+        let content = r#"## Test
+
+    ```js
+    var foo = "hello";
+    ```
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag this as an indented code block that should use fenced style
+        assert_eq!(
+            result.len(),
+            1,
+            "4-space indented fence should be detected as indented code block"
+        );
+        assert!(
+            result[0].message.contains("Use fenced code blocks"),
+            "Expected 'Use fenced code blocks' message"
+        );
+    }
+
+    #[test]
+    fn test_three_space_indented_fence_is_valid() {
+        // 3 spaces is the maximum allowed per CommonMark - should be recognized as fenced
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        let content = r#"## Test
+
+   ```js
+   var foo = "hello";
+   ```
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // 3-space indent is valid for fenced blocks - should pass
+        assert_eq!(
+            result.len(),
+            0,
+            "3-space indented fence should be recognized as valid fenced code block"
+        );
+    }
+
+    #[test]
+    fn test_indented_style_with_deeply_indented_fenced() {
+        // When style=indented, a 4-space indented "fenced" block should still be detected
+        // as an indented code block (which is what we want!)
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+
+        let content = r#"Text
+
+    ```js
+    var foo = "hello";
+    ```
+
+More text
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // When target style is "indented", 4-space indented content is correct
+        // The fence markers become literal content in the indented code block
+        assert_eq!(
+            result.len(),
+            0,
+            "4-space indented content should be valid when style=indented"
+        );
+    }
+
+    #[test]
+    fn test_fix_misplaced_fenced_block() {
+        // Issue #237: When a fenced code block is accidentally indented 4+ spaces,
+        // the fix should just remove the indentation, not wrap in more fences
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        let content = r#"## Test
+
+    ```js
+    var foo = "hello";
+    ```
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The fix should just remove the 4-space indentation
+        let expected = r#"## Test
+
+```js
+var foo = "hello";
+```
+"#;
+
+        assert_eq!(fixed, expected, "Fix should remove indentation, not add more fences");
+    }
+
+    #[test]
+    fn test_fix_regular_indented_block() {
+        // Regular indented code blocks (without fence markers) should still be
+        // wrapped in fences when converted
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        let content = r#"Text
+
+    var foo = "hello";
+    console.log(foo);
+
+More text
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should wrap in fences
+        assert!(fixed.contains("```\nvar foo"), "Should add opening fence");
+        assert!(fixed.contains("console.log(foo);\n```"), "Should add closing fence");
+    }
+
+    #[test]
+    fn test_fix_indented_block_with_fence_like_content() {
+        // If an indented block contains fence-like content but doesn't form a
+        // complete fenced block, we should NOT autofix it because wrapping would
+        // create invalid nested fences. The block is left unchanged.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        let content = r#"Text
+
+    some code
+    ```not a fence opener
+    more code
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Block should be left unchanged to avoid creating invalid nested fences
+        assert!(fixed.contains("    some code"), "Unsafe block should be left unchanged");
+        assert!(!fixed.contains("```\nsome code"), "Should NOT wrap unsafe block");
+    }
+
+    #[test]
+    fn test_fix_mixed_indented_and_misplaced_blocks() {
+        // Mixed blocks: regular indented code followed by misplaced fenced block
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        let content = r#"Text
+
+    regular indented code
+
+More text
+
+    ```python
+    print("hello")
+    ```
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // First block should be wrapped
+        assert!(
+            fixed.contains("```\nregular indented code\n```"),
+            "First block should be wrapped in fences"
+        );
+
+        // Second block should be dedented (not wrapped)
+        assert!(
+            fixed.contains("\n```python\nprint(\"hello\")\n```"),
+            "Second block should be dedented, not double-wrapped"
+        );
+        // Should NOT have nested fences
+        assert!(
+            !fixed.contains("```\n```python"),
+            "Should not have nested fence openers"
+        );
     }
 }
