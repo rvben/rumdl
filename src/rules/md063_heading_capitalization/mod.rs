@@ -746,7 +746,7 @@ impl Rule for MD063HeadingCapitalization {
                 }
 
                 // Skip headings in code blocks (indented headings)
-                if line_info.indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     continue;
                 }
 
@@ -807,7 +807,7 @@ impl Rule for MD063HeadingCapitalization {
                 }
 
                 // Skip headings in code blocks
-                if line_info.indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     continue;
                 }
 

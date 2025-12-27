@@ -86,7 +86,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
                 // Skip headings indented 4+ spaces (they're code blocks)
-                if line_info.indent >= 4 {
+                if line_info.visual_indent >= 4 {
                     continue;
                 }
 
@@ -160,7 +160,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
 
             if let Some(heading) = &line_info.heading {
                 // Skip headings indented 4+ spaces (they're code blocks)
-                if line_info.indent >= 4 {
+                if line_info.visual_indent >= 4 {
                     lines.push(line_info.content(ctx.content).to_string());
                     continue;
                 }

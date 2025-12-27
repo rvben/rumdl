@@ -1,6 +1,7 @@
 use crate::config::MarkdownFlavor;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
+use crate::utils::element_cache::ElementCache;
 use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::borrow::Cow;
@@ -78,8 +79,12 @@ pub struct LineInfo {
     pub byte_offset: usize,
     /// Length of the line in bytes (without newline)
     pub byte_len: usize,
-    /// Number of leading spaces/tabs
+    /// Number of bytes of leading whitespace (for substring extraction)
     pub indent: usize,
+    /// Visual column width of leading whitespace (with proper tab expansion)
+    /// Per CommonMark, tabs expand to the next column that is a multiple of 4.
+    /// Use this for numeric comparisons like checking for indented code blocks (>= 4).
+    pub visual_indent: usize,
     /// Whether the line is blank (empty or only whitespace)
     pub is_blank: bool,
     /// Whether this line is inside a code block
@@ -1932,6 +1937,8 @@ impl<'a> LintContext<'a> {
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
             let indent = line.len() - line.trim_start().len();
+            // Compute visual indent with proper CommonMark tab expansion
+            let visual_indent = ElementCache::calculate_indentation_width_default(line);
 
             // Parse blockquote prefix once and reuse it (avoid redundant parsing)
             let blockquote_parse = Self::parse_blockquote_prefix(line);
@@ -2030,6 +2037,7 @@ impl<'a> LintContext<'a> {
                 byte_offset,
                 byte_len: line.len(),
                 indent,
+                visual_indent,
                 is_blank,
                 in_code_block,
                 in_front_matter,

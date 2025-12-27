@@ -212,7 +212,7 @@ impl Rule for MD026NoTrailingPunctuation {
                 }
 
                 // Skip deeply indented headings (they're code blocks)
-                if line_info.indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     continue;
                 }
 
@@ -310,7 +310,7 @@ impl Rule for MD026NoTrailingPunctuation {
                 }
 
                 // Skip deeply indented headings (they're code blocks)
-                if line_info.indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     continue;
                 }
 

@@ -217,7 +217,7 @@ impl Rule for MD025SingleTitle {
             // Skip malformed headings like `#NoSpace`
             {
                 // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
-                if line_info.indent >= 4 || line_info.in_code_block {
+                if line_info.visual_indent >= 4 || line_info.in_code_block {
                     continue;
                 }
                 target_level_headings.push(line_num);
@@ -466,7 +466,7 @@ impl Rule for MD025SingleTitle {
                 && heading.level as usize == self.config.level.as_usize()
             {
                 // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
-                if line_info.indent >= 4 || line_info.in_code_block {
+                if line_info.visual_indent >= 4 || line_info.in_code_block {
                     continue;
                 }
                 target_level_count += 1;
