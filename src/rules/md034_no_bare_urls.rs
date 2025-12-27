@@ -18,12 +18,17 @@ const ANGLE_LINK_PATTERN_STR: &str =
     r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
 const BADGE_LINK_LINE_STR: &str = r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#;
 const MARKDOWN_IMAGE_PATTERN_STR: &str = r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
-const SIMPLE_URL_REGEX_STR: &str = r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`\]]+)(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
+// URL regex that allows parentheses in path/query/fragment for Wikipedia-style URLs
+// The trim_trailing_punctuation function handles unbalanced trailing parens
+// Host part excludes / so path is matched separately (allowing parens in path)
+const SIMPLE_URL_REGEX_STR: &str = r#"(https?|ftps?)://(?:\[[0-9a-fA-F:%.]+\](?::\d+)?|[^\s<>\[\]()\\'\"`/\]]+)(?:/[^\s<>\[\]\\'\"`]*)?(?:\?[^\s<>\[\]\\'\"`]*)?(?:#[^\s<>\[\]\\'\"`]*)?"#;
 // Pattern to detect www URLs without protocol (e.g., www.example.com)
 // Matches www. followed by domain name with at least one dot and a valid TLD
 // Note: Uses standard regex. Negative lookbehind (no / or @ before www) is checked in code.
-const WWW_URL_REGEX_STR: &str = r#"www\.(?:[a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}(?:/[^\s<>\[\]()\\'\"`]*)?"#;
-const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]()\\'\"`]*)?(?:\?[^\s<>\[\]()\\'\"`]*)?(?:#[^\s<>\[\]()\\'\"`]*)?"#;
+// Also allows parentheses in path for consistency with SIMPLE_URL_REGEX_STR
+const WWW_URL_REGEX_STR: &str = r#"www\.(?:[a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}(?:/[^\s<>\[\]\\'\"`]*)?"#;
+// IPv6 URLs also allow parentheses in path for consistency
+const IPV6_URL_REGEX_STR: &str = r#"(https?|ftps?)://\[[0-9a-fA-F:%.\-a-zA-Z]+\](?::\d+)?(?:/[^\s<>\[\]\\'\"`]*)?(?:\?[^\s<>\[\]\\'\"`]*)?(?:#[^\s<>\[\]\\'\"`]*)?"#;
 // Reference definition pattern - matches [label]: URL with optional title
 // Supports: [ref]: https://... or [ref]: <https://...> or [ref]: https://... "title"
 const REFERENCE_DEF_RE_STR: &str = r"^\s*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)";

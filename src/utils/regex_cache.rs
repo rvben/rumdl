@@ -185,13 +185,14 @@ macro_rules! fancy_regex_cached {
 // Also make the macro available directly from this module
 pub use crate::regex_lazy;
 
-// URL patterns
+// URL patterns - allow parentheses in paths for Wikipedia-style URLs
+// The trim_trailing_punctuation in MD034 handles unbalanced trailing parens
 pub static URL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?:https?|ftp)://[^\s<>\[\]()'"]+[^\s<>\[\]()"'.,]"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"(?:https?|ftp)://[^\s<>\[\]'"]+[^\s<>\[\]"'.,]"#).unwrap());
 pub static BARE_URL_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?:https?|ftp)://[^\s<>]+[^\s<>.]").unwrap());
 pub static URL_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"((?:https?|ftp)://[^\s\)<>]+[^\s\)<>.,])").unwrap());
+    LazyLock::new(|| Regex::new(r"((?:https?|ftp)://[^\s<>]+[^\s<>.,])").unwrap());
 
 // Heading patterns
 pub static ATX_HEADING_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s+|$)").unwrap());

@@ -58,10 +58,10 @@ static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 static REF_DEF_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#).unwrap());
 
-// Pattern for bare URLs
+// Pattern for bare URLs - allows parentheses in paths for Wikipedia-style URLs
 static BARE_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(https?|ftp)://[^\s<>\[\]()\\'"`]+(?:\.[^\s<>\[\]()\\'"`]+)*(?::\d+)?(?:/[^\s<>\[\]()\\'"`]*)?(?:\?[^\s<>\[\]()\\'"`]*)?(?:#[^\s<>\[\]()\\'"`]*)?"#
+        r#"(https?|ftp)://[^\s<>\[\]\\'"`]+(?:\.[^\s<>\[\]\\'"`]+)*(?::\d+)?(?:/[^\s<>\[\]\\'"`]*)?(?:\?[^\s<>\[\]\\'"`]*)?(?:#[^\s<>\[\]\\'"`]*)?"#
     ).unwrap()
 });
 
