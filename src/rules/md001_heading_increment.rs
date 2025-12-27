@@ -167,7 +167,9 @@ impl Rule for MD001HeadingIncrement {
             if let Some(prev) = prev_level
                 && level > prev + 1
             {
-                let indentation = line_info.indent;
+                // Preserve original indentation (including tabs)
+                let line = line_info.content(ctx.content);
+                let original_indent = &line[..line_info.indent];
                 let heading_text = &heading.text;
 
                 // Map heading style
@@ -196,7 +198,7 @@ impl Rule for MD001HeadingIncrement {
                     severity: Severity::Error,
                     fix: Some(Fix {
                         range: ctx.line_index.line_content_range(valid_heading.line_num),
-                        replacement: format!("{}{}", " ".repeat(indentation), replacement),
+                        replacement: format!("{original_indent}{replacement}"),
                     }),
                 });
             }
@@ -255,7 +257,10 @@ impl Rule for MD001HeadingIncrement {
                 };
 
                 let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_level as u32, style);
-                fixed_lines.push(format!("{}{}", " ".repeat(line_info.indent), replacement));
+                // Preserve original indentation (including tabs)
+                let line = line_info.content(ctx.content);
+                let original_indent = &line[..line_info.indent];
+                fixed_lines.push(format!("{original_indent}{replacement}"));
 
                 prev_level = Some(fixed_level);
             } else {

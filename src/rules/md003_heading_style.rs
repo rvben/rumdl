@@ -180,8 +180,10 @@ impl Rule for MD003HeadingStyle {
                         let converted_heading =
                             HeadingUtils::convert_heading_style(&heading.text, level as u32, expected_style);
 
-                        // Add indentation
-                        let final_heading = format!("{}{}", " ".repeat(line_info.indent), converted_heading);
+                        // Preserve original indentation (including tabs)
+                        let line = line_info.content(ctx.content);
+                        let original_indent = &line[..line_info.indent];
+                        let final_heading = format!("{original_indent}{converted_heading}");
 
                         // Calculate the correct range for the heading
                         let range = ctx.line_index.line_content_range(line_num + 1);

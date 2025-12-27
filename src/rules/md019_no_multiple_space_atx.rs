@@ -119,10 +119,11 @@ impl Rule for MD019NoMultipleSpaceAtx {
                         let space_count = self.count_spaces_after_marker(trimmed, heading.marker.len());
 
                         if space_count > 1 {
-                            // Normalize to single space
+                            // Normalize to single space, preserving original indentation (including tabs)
+                            let line = line_info.content(ctx.content);
+                            let original_indent = &line[..line_info.indent];
                             lines.push(format!(
-                                "{}{} {}",
-                                " ".repeat(line_info.indent),
+                                "{original_indent}{} {}",
                                 heading.marker,
                                 trimmed[heading.marker.len()..].trim_start()
                             ));

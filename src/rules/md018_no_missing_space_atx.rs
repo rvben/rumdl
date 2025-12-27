@@ -207,12 +207,12 @@ impl Rule for MD018NoMissingSpaceAtx {
                                 severity: Severity::Warning,
                                 fix: Some(Fix {
                                     range: self.get_line_byte_range(ctx.content, line_num + 1),
-                                    replacement: format!(
-                                        "{}{} {}",
-                                        " ".repeat(line_info.indent),
-                                        heading.marker,
-                                        after_marker
-                                    ),
+                                    replacement: {
+                                        // Preserve original indentation (including tabs)
+                                        let line = line_info.content(ctx.content);
+                                        let original_indent = &line[..line_info.indent];
+                                        format!("{original_indent}{} {after_marker}", heading.marker)
+                                    },
                                 }),
                             });
                         }
@@ -274,13 +274,10 @@ impl Rule for MD018NoMissingSpaceAtx {
                         let after_marker = &trimmed[heading.marker.len()..];
                         if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t')
                         {
-                            // Add space after marker
-                            lines.push(format!(
-                                "{}{} {}",
-                                " ".repeat(line_info.indent),
-                                heading.marker,
-                                after_marker
-                            ));
+                            // Add space after marker, preserving original indentation (including tabs)
+                            let line = line_info.content(ctx.content);
+                            let original_indent = &line[..line_info.indent];
+                            lines.push(format!("{original_indent}{} {after_marker}", heading.marker));
                             fixed = true;
                         }
                     }

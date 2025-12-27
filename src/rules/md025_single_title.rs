@@ -400,9 +400,10 @@ impl Rule for MD025SingleTitle {
                                 )
                             };
 
-                            // Add indentation
-                            let indentation = " ".repeat(line_info.indent);
-                            fixed_lines.push(format!("{indentation}{replacement}"));
+                            // Preserve original indentation (including tabs)
+                            let line = line_info.content(ctx.content);
+                            let original_indent = &line[..line_info.indent];
+                            fixed_lines.push(format!("{original_indent}{replacement}"));
 
                             // For Setext headings, skip the original underline
                             if matches!(
