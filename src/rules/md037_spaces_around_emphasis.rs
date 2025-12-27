@@ -113,11 +113,13 @@ impl Rule for MD037NoSpaceInEmphasis {
                     // Calculate byte position of the warning
                     let byte_pos = line_start_pos + (warning.column - 1);
 
-                    // Skip if inside links, HTML comments, math contexts, or tables
+                    // Skip if inside links, HTML comments, math contexts, tables, or code spans
+                    // Note: is_in_code_span uses pulldown-cmark and correctly handles multi-line spans
                     if !self.is_in_link(ctx, byte_pos)
                         && !is_in_html_comment(content, byte_pos)
                         && !is_in_math_context(ctx, byte_pos)
                         && !is_in_table_cell(ctx, line_num, warning.column)
+                        && !ctx.is_in_code_span(line_num, warning.column)
                     {
                         filtered_warnings.push(warning.clone());
                     }
@@ -553,5 +555,30 @@ This has * real spaced emphasis * that should be flagged."#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(!result.is_empty(), "Real spaced emphasis should still be flagged");
+    }
+
+    #[test]
+    fn test_multiline_code_span_not_flagged() {
+        // Test for multi-line code spans - asterisks inside should not be flagged
+        // This tests the case where a code span starts on one line and ends on another
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Code span spanning multiple lines with asterisks inside
+        let content = "# Test\n\naffects the structure. `1 + 0 + 0` is parsed as `(1 + 0) +\n0` while `1 + 0 * 0` is parsed as `1 + (0 * 0)`. Since the pattern";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag asterisks inside multi-line code spans. Got: {result:?}"
+        );
+
+        // Another multi-line code span case
+        let content2 = "Text with `code that\nspans * multiple * lines` here.";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "Should not flag asterisks inside multi-line code spans. Got: {result2:?}"
+        );
     }
 }
