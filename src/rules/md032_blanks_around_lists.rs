@@ -1,4 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::element_cache::ElementCache;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use regex::Regex;
@@ -11,10 +12,10 @@ pub use md032_config::MD032Config;
 static ORDERED_LIST_NON_ONE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([2-9]|\d{2,})\.\s").unwrap());
 
 /// Check if a line is a thematic break (horizontal rule)
-/// Per CommonMark: 0-3 spaces, then 3+ of same char (-, *, _), optionally with spaces between
+/// Per CommonMark: 0-3 spaces of indentation, then 3+ of same char (-, *, _), optionally with spaces between
 fn is_thematic_break(line: &str) -> bool {
-    let leading_spaces = line.len() - line.trim_start_matches(' ').len();
-    if leading_spaces > 3 || line.starts_with('\t') {
+    // Per CommonMark, thematic breaks can have 0-3 spaces of indentation (< 4 columns)
+    if ElementCache::calculate_indentation_width_default(line) > 3 {
         return false;
     }
 

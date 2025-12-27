@@ -21,6 +21,7 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::md066_footnote_validation::{FOOTNOTE_DEF_PATTERN, strip_blockquote_prefix};
+use crate::utils::element_cache::ElementCache;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -55,11 +56,9 @@ impl MD068EmptyFootnoteDefinition {
                 // NOTE: We intentionally do NOT skip in_code_block blindly because
                 // footnote continuation uses 4-space indentation, which LintContext
                 // interprets as an indented code block. We check the stripped content
-                // to see if it's a legitimate continuation (starts with 4 spaces).
+                // to see if it's a legitimate continuation (4+ columns of indentation).
                 // If in_code_block but doesn't start with indentation, it's a fenced code block.
-                if next_line_info.in_code_block
-                    && !next_stripped.starts_with("    ")
-                    && !next_stripped.starts_with('\t')
+                if next_line_info.in_code_block && ElementCache::calculate_indentation_width_default(next_stripped) < 4
                 {
                     // This is a fenced code block, not an indented continuation
                     continue;
@@ -70,8 +69,8 @@ impl MD068EmptyFootnoteDefinition {
                     continue;
                 }
 
-                // If next non-empty line starts with indentation, it's a continuation
-                if next_stripped.starts_with("    ") || next_stripped.starts_with('\t') {
+                // If next non-empty line has 4+ columns of indentation, it's a continuation
+                if ElementCache::calculate_indentation_width_default(next_stripped) >= 4 {
                     return true;
                 }
 

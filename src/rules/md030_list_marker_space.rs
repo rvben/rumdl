@@ -6,6 +6,7 @@
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::list_utils::ListType;
+use crate::utils::element_cache::ElementCache;
 use crate::utils::range_utils::calculate_match_range;
 use toml;
 
@@ -78,8 +79,8 @@ impl Rule for MD030ListMarkerSpace {
         for line_num in list_item_lines {
             let line = lines[line_num - 1];
 
-            // Skip indented code blocks (4+ spaces or tab)
-            if line.starts_with("    ") || line.starts_with("\t") {
+            // Skip indented code blocks (4+ columns accounting for tab expansion)
+            if ElementCache::calculate_indentation_width_default(line) >= 4 {
                 continue;
             }
 
@@ -394,10 +395,10 @@ impl MD030ListMarkerSpace {
 
     /// Fix list marker spacing - handles tabs, multiple spaces, and mixed whitespace
     /// (Legacy method for backward compatibility - defaults to single-line behavior)
-    /// Check if a line is part of an indented code block (4+ spaces with blank line before)
+    /// Check if a line is part of an indented code block (4+ columns with blank line before)
     fn is_indented_code_block(&self, line: &str, line_idx: usize, lines: &[&str]) -> bool {
-        // Must start with 4+ spaces or tab
-        if !line.starts_with("    ") && !line.starts_with('\t') {
+        // Must have 4+ columns of indentation (accounting for tab expansion)
+        if ElementCache::calculate_indentation_width_default(line) < 4 {
             return false;
         }
 
@@ -424,13 +425,13 @@ impl MD030ListMarkerSpace {
             let current_line = lines[current_idx];
             let prev_line = lines[current_idx - 1];
 
-            // If current line is not indented, we've gone too far
-            if !current_line.starts_with("    ") && !current_line.starts_with('\t') {
+            // If current line is not indented (< 4 columns), we've gone too far
+            if ElementCache::calculate_indentation_width_default(current_line) < 4 {
                 break;
             }
 
             // If previous line is not indented, check if it's blank
-            if !prev_line.starts_with("    ") && !prev_line.starts_with('\t') {
+            if ElementCache::calculate_indentation_width_default(prev_line) < 4 {
                 return prev_line.trim().is_empty();
             }
 

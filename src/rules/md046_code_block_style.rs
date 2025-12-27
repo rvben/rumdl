@@ -292,7 +292,7 @@ impl MD046CodeBlockStyle {
             if let Some(tab_indent) = current_tab_indent {
                 if mkdocs_tabs::is_tab_content(line, tab_indent) {
                     in_tab_context[i] = true;
-                } else if !line.trim().is_empty() && !line.starts_with("    ") {
+                } else if !line.trim().is_empty() && ElementCache::calculate_indentation_width_default(line) < 4 {
                     // Non-indented, non-empty line ends tab context
                     current_tab_indent = None;
                 } else {
