@@ -63,14 +63,14 @@ impl MD034NoBareUrls {
             let mut balance = 0;
             let mut last_balanced_pos = url.len();
 
-            for (i, c) in url.chars().enumerate() {
+            for (byte_idx, c) in url.char_indices() {
                 if c == '(' {
                     balance += 1;
                 } else if c == ')' {
                     balance -= 1;
                     if balance < 0 {
                         // Found an unmatched closing paren
-                        last_balanced_pos = i;
+                        last_balanced_pos = byte_idx;
                         break;
                     }
                 }

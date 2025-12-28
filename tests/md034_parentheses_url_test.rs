@@ -137,3 +137,53 @@ fn test_unbalanced_trailing_paren_excluded() {
         "Unbalanced paren should remain outside: {fixed}",
     );
 }
+
+/// Test that URLs with multi-byte characters and unbalanced parentheses don't panic
+/// This tests the fix for a panic when char indices vs byte indices were confused
+#[test]
+fn test_multibyte_url_with_unbalanced_paren() {
+    // Chinese Wikipedia URL with closing paren - this used to panic
+    let content = "https://zh.wikipedia.org/wiki/百分号编码)\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let rule = MD034NoBareUrls;
+
+    // Should not panic and should detect the URL correctly
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+
+    // The unbalanced paren should be excluded from the URL
+    assert!(
+        !warnings[0].message.contains("编码)"),
+        "Unbalanced paren should not be in URL: {}",
+        warnings[0].message
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("<https://zh.wikipedia.org/wiki/百分号编码>)"),
+        "Fixed URL should have angle brackets, paren outside: {fixed}"
+    );
+}
+
+/// Test that balanced parentheses in multi-byte URLs are preserved
+#[test]
+fn test_multibyte_url_with_balanced_parens() {
+    // URL with Chinese characters AND balanced parentheses in path
+    let content = "https://example.com/路径_(测试)\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let rule = MD034NoBareUrls;
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert!(
+        warnings[0].message.contains("路径_(测试)"),
+        "URL should include balanced parentheses with multi-byte chars"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed.trim(),
+        "<https://example.com/路径_(测试)>",
+        "Fixed URL should preserve balanced parentheses"
+    );
+}

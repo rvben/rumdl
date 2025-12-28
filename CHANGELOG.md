@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.206] - 2025-12-28
+
+### Fixed
+
+- **MD013: Apply inline config before should_skip optimization** (fixes #241)
+  - Inline configuration (e.g., `<!-- markdownlint-configure-file {"MD013": {"tables": false}} -->`) was not being applied when files had short lines
+  - The should_skip optimization now uses effective config after parsing inline overrides
+
+- **CLI: Warn about unknown rules in --enable/--disable flags** (fixes #243)
+  - Using non-existent rule names now produces a warning instead of silently ignoring them
+  - Invalid rules in all config entry points (CLI flags, config files) are now validated
+
+- **MD034: Fix panic with multi-byte URLs and unbalanced parentheses**
+  - URLs containing non-ASCII characters (e.g., Chinese Wikipedia URLs) followed by unbalanced parentheses no longer cause a panic
+  - Fixed by using byte indices instead of character indices for string slicing
+
 ## [0.0.205] - 2025-12-27
 
 ### Fixed
