@@ -60,6 +60,15 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     // Normalize to LF for all internal processing
     content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf);
 
+    // Validate inline config comments and warn about unknown rules
+    if !silent {
+        let inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        let display_name = args.stdin_filename.as_deref().unwrap_or("<stdin>");
+        for warn in inline_warnings {
+            warn.print_warning(display_name);
+        }
+    }
+
     // Determine the filename to use for display and context
     let display_filename = args.stdin_filename.as_deref().unwrap_or("<stdin>");
 

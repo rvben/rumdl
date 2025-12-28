@@ -1823,6 +1823,19 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         // Do NOT exit; continue with valid config
     }
 
+    // 3b. Validate CLI rule names
+    let cli_warnings = rumdl_config::validate_cli_rule_names(
+        args.enable.as_deref(),
+        args.disable.as_deref(),
+        args.extend_enable.as_deref(),
+        args.extend_disable.as_deref(),
+    );
+    if !cli_warnings.is_empty() && !args.silent {
+        for warn in &cli_warnings {
+            eprintln!("\x1b[33m[cli warning]\x1b[0m {}", warn.message);
+        }
+    }
+
     // 4. Extract cache_dir and project_root before converting sourced
     let cache_dir_from_config = sourced
         .global

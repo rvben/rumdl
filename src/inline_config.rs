@@ -414,6 +414,11 @@ pub fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
         if let Some(start) = line.find(prefix) {
             let after_prefix = &line[start + prefix.len()..];
 
+            // Skip more specific variants (disable-line, disable-next-line, disable-file)
+            if after_prefix.starts_with('-') {
+                continue;
+            }
+
             // Global disable: <!-- markdownlint-disable -->
             if after_prefix.trim_start().starts_with("-->") {
                 return Some(Vec::new()); // Empty vec means all rules
@@ -439,6 +444,11 @@ pub fn parse_enable_comment(line: &str) -> Option<Vec<&str>> {
     for prefix in &["<!-- rumdl-enable", "<!-- markdownlint-enable"] {
         if let Some(start) = line.find(prefix) {
             let after_prefix = &line[start + prefix.len()..];
+
+            // Skip more specific variants (enable-file)
+            if after_prefix.starts_with('-') {
+                continue;
+            }
 
             // Global enable: <!-- markdownlint-enable -->
             if after_prefix.trim_start().starts_with("-->") {
@@ -596,6 +606,131 @@ pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
     None
 }
 
+/// Warning about unknown rules in inline config comments
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineConfigWarning {
+    /// The line number where the warning occurred (1-indexed)
+    pub line_number: usize,
+    /// The rule name that was not recognized
+    pub rule_name: String,
+    /// The type of inline config comment
+    pub comment_type: String,
+    /// Optional suggestion for similar rule names
+    pub suggestion: Option<String>,
+}
+
+impl InlineConfigWarning {
+    /// Format the warning message
+    pub fn format_message(&self) -> String {
+        if let Some(ref suggestion) = self.suggestion {
+            format!(
+                "Unknown rule in inline {} comment: {} (did you mean: {}?)",
+                self.comment_type, self.rule_name, suggestion
+            )
+        } else {
+            format!(
+                "Unknown rule in inline {} comment: {}",
+                self.comment_type, self.rule_name
+            )
+        }
+    }
+
+    /// Print the warning to stderr with file context
+    pub fn print_warning(&self, file_path: &str) {
+        eprintln!(
+            "\x1b[33m[inline config warning]\x1b[0m {}:{}: {}",
+            file_path,
+            self.line_number,
+            self.format_message()
+        );
+    }
+}
+
+/// Validate all inline config comments in content and return warnings for unknown rules.
+///
+/// This function extracts rule names from all types of inline config comments
+/// (disable, enable, disable-line, disable-next-line, disable-file, enable-file)
+/// and validates them against the known rule alias map.
+pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
+    use crate::config::{RULE_ALIAS_MAP, is_valid_rule_name, suggest_similar_key};
+
+    let mut warnings = Vec::new();
+    let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+
+    for (idx, line) in content.lines().enumerate() {
+        let line_num = idx + 1;
+
+        // Collect all rule names from various comment types
+        let mut rule_entries: Vec<(&str, &str)> = Vec::new();
+
+        // Check each comment type and collect rules with their type names
+        if let Some(rules) = parse_disable_comment(line) {
+            for rule in rules {
+                rule_entries.push((rule, "disable"));
+            }
+        }
+        if let Some(rules) = parse_enable_comment(line) {
+            for rule in rules {
+                rule_entries.push((rule, "enable"));
+            }
+        }
+        if let Some(rules) = parse_disable_line_comment(line) {
+            for rule in rules {
+                rule_entries.push((rule, "disable-line"));
+            }
+        }
+        if let Some(rules) = parse_disable_next_line_comment(line) {
+            for rule in rules {
+                rule_entries.push((rule, "disable-next-line"));
+            }
+        }
+        if let Some(rules) = parse_disable_file_comment(line) {
+            for rule in rules {
+                rule_entries.push((rule, "disable-file"));
+            }
+        }
+        if let Some(rules) = parse_enable_file_comment(line) {
+            for rule in rules {
+                rule_entries.push((rule, "enable-file"));
+            }
+        }
+
+        // Check configure-file comments - rule names are JSON keys
+        if let Some(json_config) = parse_configure_file_comment(line)
+            && let Some(obj) = json_config.as_object()
+        {
+            for rule_name in obj.keys() {
+                if !is_valid_rule_name(rule_name) {
+                    let suggestion = suggest_similar_key(rule_name, &all_rule_names)
+                        .map(|s| if s.starts_with("MD") { s } else { s.to_lowercase() });
+                    warnings.push(InlineConfigWarning {
+                        line_number: line_num,
+                        rule_name: rule_name.to_string(),
+                        comment_type: "configure-file".to_string(),
+                        suggestion,
+                    });
+                }
+            }
+        }
+
+        // Validate each rule name
+        for (rule_name, comment_type) in rule_entries {
+            if !is_valid_rule_name(rule_name) {
+                let suggestion = suggest_similar_key(rule_name, &all_rule_names)
+                    .map(|s| if s.starts_with("MD") { s } else { s.to_lowercase() });
+                warnings.push(InlineConfigWarning {
+                    line_number: line_num,
+                    rule_name: rule_name.to_string(),
+                    comment_type: comment_type.to_string(),
+                    suggestion,
+                });
+            }
+        }
+    }
+
+    warnings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,5 +828,123 @@ Some content after restore
         assert!(config.is_rule_disabled("MD001", 5));
         assert!(!config.is_rule_disabled("MD002", 5));
         assert!(!config.is_rule_disabled("MD003", 5));
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_unknown_rule() {
+        let content = "<!-- rumdl-disable abc -->\nSome content";
+        let warnings = validate_inline_config_rules(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line_number, 1);
+        assert_eq!(warnings[0].rule_name, "abc");
+        assert_eq!(warnings[0].comment_type, "disable");
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_valid_rule() {
+        let content = "<!-- rumdl-disable MD001 -->\nSome content";
+        let warnings = validate_inline_config_rules(content);
+        assert!(
+            warnings.is_empty(),
+            "MD001 is a valid rule, should not produce warnings"
+        );
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_alias() {
+        let content = "<!-- rumdl-disable heading-increment -->\nSome content";
+        let warnings = validate_inline_config_rules(content);
+        assert!(warnings.is_empty(), "heading-increment is a valid alias for MD001");
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_multiple_unknown() {
+        let content = r#"<!-- rumdl-disable abc xyz -->
+<!-- rumdl-disable-line foo -->
+<!-- markdownlint-disable-next-line bar -->
+"#;
+        let warnings = validate_inline_config_rules(content);
+        assert_eq!(warnings.len(), 4);
+        assert_eq!(warnings[0].rule_name, "abc");
+        assert_eq!(warnings[1].rule_name, "xyz");
+        assert_eq!(warnings[2].rule_name, "foo");
+        assert_eq!(warnings[3].rule_name, "bar");
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_suggestion() {
+        // "MD00" should suggest "MD001" (or similar)
+        let content = "<!-- rumdl-disable MD00 -->\n";
+        let warnings = validate_inline_config_rules(content);
+        assert_eq!(warnings.len(), 1);
+        // Should have a suggestion since "MD00" is close to "MD001"
+        assert!(warnings[0].suggestion.is_some());
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_file_comments() {
+        let content = "<!-- rumdl-disable-file nonexistent -->\n<!-- markdownlint-enable-file another_fake -->";
+        let warnings = validate_inline_config_rules(content);
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings[0].comment_type, "disable-file");
+        assert_eq!(warnings[1].comment_type, "enable-file");
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_global_disable() {
+        // Global disable (no specific rules) should not produce warnings
+        let content = "<!-- rumdl-disable -->\n<!-- markdownlint-enable -->";
+        let warnings = validate_inline_config_rules(content);
+        assert!(warnings.is_empty(), "Global disable/enable should not produce warnings");
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_mixed_valid_invalid() {
+        // Use MD001 and MD003 which are valid rules; abc and xyz are invalid
+        let content = "<!-- rumdl-disable MD001 abc MD003 xyz -->";
+        let warnings = validate_inline_config_rules(content);
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings[0].rule_name, "abc");
+        assert_eq!(warnings[1].rule_name, "xyz");
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_configure_file() {
+        // configure-file comments contain rule names as JSON keys
+        let content =
+            r#"<!-- rumdl-configure-file { "MD013": { "line_length": 120 }, "nonexistent": { "foo": true } } -->"#;
+        let warnings = validate_inline_config_rules(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].rule_name, "nonexistent");
+        assert_eq!(warnings[0].comment_type, "configure-file");
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_markdownlint_variants() {
+        // Test markdownlint-* variants (not just rumdl-*)
+        let content = r#"<!-- markdownlint-disable unknown_rule -->
+<!-- markdownlint-enable another_fake -->
+<!-- markdownlint-disable-line bad_rule -->
+<!-- markdownlint-disable-next-line fake_rule -->
+<!-- markdownlint-disable-file missing_rule -->
+<!-- markdownlint-enable-file nonexistent -->
+"#;
+        let warnings = validate_inline_config_rules(content);
+        assert_eq!(warnings.len(), 6);
+        assert_eq!(warnings[0].rule_name, "unknown_rule");
+        assert_eq!(warnings[1].rule_name, "another_fake");
+        assert_eq!(warnings[2].rule_name, "bad_rule");
+        assert_eq!(warnings[3].rule_name, "fake_rule");
+        assert_eq!(warnings[4].rule_name, "missing_rule");
+        assert_eq!(warnings[5].rule_name, "nonexistent");
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_markdownlint_configure_file() {
+        let content = r#"<!-- markdownlint-configure-file { "fake_rule": {} } -->"#;
+        let warnings = validate_inline_config_rules(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].rule_name, "fake_rule");
+        assert_eq!(warnings[0].comment_type, "configure-file");
     }
 }

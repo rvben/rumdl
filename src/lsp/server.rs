@@ -14,7 +14,7 @@ use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::config::Config;
+use crate::config::{Config, is_valid_rule_name};
 use crate::lint;
 use crate::lsp::index_worker::IndexWorker;
 use crate::lsp::types::{
@@ -176,47 +176,6 @@ impl RumdlLanguageServer {
         }
 
         None
-    }
-
-    /// Check if a rule name is valid (e.g., MD001-MD062, case-insensitive)
-    ///
-    /// Zero-allocation implementation using byte comparisons.
-    fn is_valid_rule_name(name: &str) -> bool {
-        let bytes = name.as_bytes();
-
-        // Check for "all" special value (case-insensitive)
-        if bytes.len() == 3
-            && bytes[0].eq_ignore_ascii_case(&b'A')
-            && bytes[1].eq_ignore_ascii_case(&b'L')
-            && bytes[2].eq_ignore_ascii_case(&b'L')
-        {
-            return true;
-        }
-
-        // Must be exactly 5 characters: "MDnnn"
-        if bytes.len() != 5 {
-            return false;
-        }
-
-        // Check "MD" prefix (case-insensitive)
-        if !bytes[0].eq_ignore_ascii_case(&b'M') || !bytes[1].eq_ignore_ascii_case(&b'D') {
-            return false;
-        }
-
-        // Parse the 3-digit number
-        let d0 = bytes[2].wrapping_sub(b'0');
-        let d1 = bytes[3].wrapping_sub(b'0');
-        let d2 = bytes[4].wrapping_sub(b'0');
-
-        // All must be digits (0-9)
-        if d0 > 9 || d1 > 9 || d2 > 9 {
-            return false;
-        }
-
-        let num = (d0 as u32) * 100 + (d1 as u32) * 10 + (d2 as u32);
-
-        // Valid rules are MD001-MD062, with gaps (no MD002, MD006, MD008, MD015-MD017)
-        matches!(num, 1 | 3..=5 | 7 | 9..=14 | 18..=62)
     }
 
     /// Apply LSP config overrides to the filtered rules
@@ -1264,21 +1223,21 @@ impl LanguageServer for RumdlLanguageServer {
             // Validate rule names in disable/enable lists
             if let Some(ref disable) = rule_settings.disable {
                 for rule in disable {
-                    if !Self::is_valid_rule_name(rule) {
+                    if !is_valid_rule_name(rule) {
                         warnings.push(format!("Unknown rule in disable list: {rule}"));
                     }
                 }
             }
             if let Some(ref enable) = rule_settings.enable {
                 for rule in enable {
-                    if !Self::is_valid_rule_name(rule) {
+                    if !is_valid_rule_name(rule) {
                         warnings.push(format!("Unknown rule in enable list: {rule}"));
                     }
                 }
             }
             // Validate rule-specific settings
             for rule_name in rule_settings.rules.keys() {
-                if !Self::is_valid_rule_name(rule_name) {
+                if !is_valid_rule_name(rule_name) {
                     warnings.push(format!("Unknown rule in settings: {rule_name}"));
                 }
             }
@@ -1299,14 +1258,14 @@ impl LanguageServer for RumdlLanguageServer {
             // Validate rule names
             if let Some(ref rules) = full_config.enable_rules {
                 for rule in rules {
-                    if !Self::is_valid_rule_name(rule) {
+                    if !is_valid_rule_name(rule) {
                         warnings.push(format!("Unknown rule in enableRules: {rule}"));
                     }
                 }
             }
             if let Some(ref rules) = full_config.disable_rules {
                 for rule in rules {
-                    if !Self::is_valid_rule_name(rule) {
+                    if !is_valid_rule_name(rule) {
                         warnings.push(format!("Unknown rule in disableRules: {rule}"));
                     }
                 }
@@ -1338,7 +1297,7 @@ impl LanguageServer for RumdlLanguageServer {
                                 ));
                             }
                             for rule in d.iter().take(MAX_RULE_LIST_SIZE) {
-                                if !Self::is_valid_rule_name(rule) {
+                                if !is_valid_rule_name(rule) {
                                     warnings.push(format!("Unknown rule in disable: {rule}"));
                                 }
                             }
@@ -1360,7 +1319,7 @@ impl LanguageServer for RumdlLanguageServer {
                                 ));
                             }
                             for rule in e.iter().take(MAX_RULE_LIST_SIZE) {
-                                if !Self::is_valid_rule_name(rule) {
+                                if !is_valid_rule_name(rule) {
                                     warnings.push(format!("Unknown rule in enable: {rule}"));
                                 }
                             }
@@ -1388,7 +1347,7 @@ impl LanguageServer for RumdlLanguageServer {
                     // Rule-specific settings (e.g., "MD013": { "lineLength": 80 })
                     _ if key.starts_with("MD") || key.starts_with("md") => {
                         let normalized = key.to_uppercase();
-                        if !Self::is_valid_rule_name(&normalized) {
+                        if !is_valid_rule_name(&normalized) {
                             warnings.push(format!("Unknown rule: {key}"));
                         }
                         rules.insert(normalized, value);
@@ -1843,49 +1802,40 @@ mod tests {
 
     #[test]
     fn test_is_valid_rule_name() {
-        // Valid rule names - basic cases
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD001"));
-        assert!(RumdlLanguageServer::is_valid_rule_name("md001")); // lowercase
-        assert!(RumdlLanguageServer::is_valid_rule_name("Md001")); // mixed case
-        assert!(RumdlLanguageServer::is_valid_rule_name("mD001")); // mixed case
-        assert!(RumdlLanguageServer::is_valid_rule_name("all")); // special value
-        assert!(RumdlLanguageServer::is_valid_rule_name("ALL")); // case insensitive
-        assert!(RumdlLanguageServer::is_valid_rule_name("All")); // mixed case
+        // Valid rule names - canonical MDxxx format
+        assert!(is_valid_rule_name("MD001"));
+        assert!(is_valid_rule_name("md001")); // lowercase
+        assert!(is_valid_rule_name("Md001")); // mixed case
+        assert!(is_valid_rule_name("mD001")); // mixed case
+        assert!(is_valid_rule_name("MD003"));
+        assert!(is_valid_rule_name("MD005"));
+        assert!(is_valid_rule_name("MD007"));
+        assert!(is_valid_rule_name("MD009"));
+        assert!(is_valid_rule_name("MD041"));
+        assert!(is_valid_rule_name("MD060"));
+        assert!(is_valid_rule_name("MD061"));
 
-        // Valid rule names - boundary conditions for each range
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD003")); // start of 3..=5
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD005")); // end of 3..=5
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD007")); // single value
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD009")); // start of 9..=14
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD014")); // end of 9..=14
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD018")); // start of 18..=62
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD062")); // end of 18..=62
+        // Valid rule names - special "all" value
+        assert!(is_valid_rule_name("all"));
+        assert!(is_valid_rule_name("ALL"));
+        assert!(is_valid_rule_name("All"));
 
-        // Valid rule names - sample from middle of range
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD041")); // mid-range
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD060")); // near end
-        assert!(RumdlLanguageServer::is_valid_rule_name("MD061")); // near end
+        // Valid rule names - aliases (new in shared implementation)
+        assert!(is_valid_rule_name("line-length")); // alias for MD013
+        assert!(is_valid_rule_name("LINE-LENGTH")); // case insensitive
+        assert!(is_valid_rule_name("heading-increment")); // alias for MD001
+        assert!(is_valid_rule_name("no-bare-urls")); // alias for MD034
+        assert!(is_valid_rule_name("ul-style")); // alias for MD004
+        assert!(is_valid_rule_name("ul_style")); // underscore variant
 
-        // Invalid rule names - gaps in numbering
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD002")); // doesn't exist
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD006")); // doesn't exist
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD008")); // doesn't exist
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD015")); // doesn't exist
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD016")); // doesn't exist
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD017")); // doesn't exist
-
-        // Invalid rule names - out of range
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD000")); // too low
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD063")); // too high
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD999")); // way too high
-
-        // Invalid format
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD13")); // missing leading zero
-        assert!(!RumdlLanguageServer::is_valid_rule_name("INVALID"));
-        assert!(!RumdlLanguageServer::is_valid_rule_name(""));
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD"));
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD0001")); // too many digits
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD1")); // not enough digits
+        // Invalid rule names - not in alias map
+        assert!(!is_valid_rule_name("MD000")); // doesn't exist
+        assert!(!is_valid_rule_name("MD999")); // doesn't exist
+        assert!(!is_valid_rule_name("MD100")); // doesn't exist
+        assert!(!is_valid_rule_name("INVALID"));
+        assert!(!is_valid_rule_name("not-a-rule"));
+        assert!(!is_valid_rule_name(""));
+        assert!(!is_valid_rule_name("random-text"));
     }
 
     #[tokio::test]
@@ -2964,22 +2914,19 @@ disable = ["MD022"]
     }
 
     #[test]
-    fn test_is_valid_rule_name_zero_alloc() {
-        // These tests verify the zero-allocation implementation works correctly
-        // by testing edge cases that might trip up byte-level parsing
+    fn test_is_valid_rule_name_edge_cases() {
+        // Test malformed MDxxx patterns - not in alias map
+        assert!(!is_valid_rule_name("MD/01")); // invalid character
+        assert!(!is_valid_rule_name("MD:01")); // invalid character
+        assert!(!is_valid_rule_name("ND001")); // 'N' instead of 'M'
+        assert!(!is_valid_rule_name("ME001")); // 'E' instead of 'D'
 
-        // Test ASCII boundary conditions
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD/01")); // '/' is before '0'
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD:01")); // ':' is after '9'
-        assert!(!RumdlLanguageServer::is_valid_rule_name("ND001")); // 'N' instead of 'M'
-        assert!(!RumdlLanguageServer::is_valid_rule_name("ME001")); // 'E' instead of 'D'
+        // Test non-ASCII characters - not in alias map
+        assert!(!is_valid_rule_name("MD0①1")); // Unicode digit
+        assert!(!is_valid_rule_name("ＭD001")); // Fullwidth M
 
-        // Test non-ASCII characters (should fail gracefully)
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD0①1")); // Unicode digit
-        assert!(!RumdlLanguageServer::is_valid_rule_name("ＭD001")); // Fullwidth M
-
-        // Test wrapping_sub edge cases
-        assert!(!RumdlLanguageServer::is_valid_rule_name("MD\x00\x00\x00")); // null bytes
+        // Test special characters - not in alias map
+        assert!(!is_valid_rule_name("MD\x00\x00\x00")); // null bytes
     }
 
     /// Generic parity test: LSP config must produce identical results to TOML config.

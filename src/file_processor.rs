@@ -806,6 +806,14 @@ pub fn process_file_with_index(
     // Normalize to LF for all internal processing
     content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf);
 
+    // Validate inline config comments and warn about unknown rules
+    if !silent {
+        let inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        for warn in inline_warnings {
+            warn.print_warning(file_path);
+        }
+    }
+
     // Early content analysis for ultra-fast skip decisions
     if content.is_empty() {
         return ProcessFileResult {

@@ -1753,6 +1753,152 @@ lines_above = 2
         assert!(result.contains("custom-rule"));
         assert_eq!(result.len(), 3);
     }
+
+    // =========================================================================
+    // Unit tests for is_valid_rule_name() and validate_cli_rule_names()
+    // =========================================================================
+
+    #[test]
+    fn test_is_valid_rule_name_canonical() {
+        // Valid canonical rule IDs
+        assert!(is_valid_rule_name("MD001"));
+        assert!(is_valid_rule_name("MD013"));
+        assert!(is_valid_rule_name("MD041"));
+        assert!(is_valid_rule_name("MD069"));
+
+        // Case insensitive
+        assert!(is_valid_rule_name("md001"));
+        assert!(is_valid_rule_name("Md001"));
+        assert!(is_valid_rule_name("mD001"));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_aliases() {
+        // Valid aliases
+        assert!(is_valid_rule_name("line-length"));
+        assert!(is_valid_rule_name("heading-increment"));
+        assert!(is_valid_rule_name("no-bare-urls"));
+        assert!(is_valid_rule_name("ul-style"));
+
+        // Case insensitive
+        assert!(is_valid_rule_name("LINE-LENGTH"));
+        assert!(is_valid_rule_name("Line-Length"));
+
+        // Underscore variant
+        assert!(is_valid_rule_name("line_length"));
+        assert!(is_valid_rule_name("ul_style"));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_special_all() {
+        assert!(is_valid_rule_name("all"));
+        assert!(is_valid_rule_name("ALL"));
+        assert!(is_valid_rule_name("All"));
+        assert!(is_valid_rule_name("aLl"));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_invalid() {
+        // Non-existent rules
+        assert!(!is_valid_rule_name("MD000"));
+        assert!(!is_valid_rule_name("MD002")); // gap in numbering
+        assert!(!is_valid_rule_name("MD006")); // gap in numbering
+        assert!(!is_valid_rule_name("MD999"));
+        assert!(!is_valid_rule_name("MD100"));
+
+        // Invalid formats
+        assert!(!is_valid_rule_name(""));
+        assert!(!is_valid_rule_name("INVALID"));
+        assert!(!is_valid_rule_name("not-a-rule"));
+        assert!(!is_valid_rule_name("random-text"));
+        assert!(!is_valid_rule_name("abc"));
+
+        // Edge cases
+        assert!(!is_valid_rule_name("MD"));
+        assert!(!is_valid_rule_name("MD1"));
+        assert!(!is_valid_rule_name("MD12"));
+    }
+
+    #[test]
+    fn test_validate_cli_rule_names_valid() {
+        // All valid - should return no warnings
+        let warnings = validate_cli_rule_names(
+            Some("MD001,MD013"),
+            Some("line-length"),
+            Some("heading-increment"),
+            Some("all"),
+        );
+        assert!(warnings.is_empty(), "Expected no warnings for valid rules");
+    }
+
+    #[test]
+    fn test_validate_cli_rule_names_invalid() {
+        // Invalid rule in --enable
+        let warnings = validate_cli_rule_names(Some("abc"), None, None, None);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("Unknown rule in --enable: abc"));
+
+        // Invalid rule in --disable
+        let warnings = validate_cli_rule_names(None, Some("xyz"), None, None);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("Unknown rule in --disable: xyz"));
+
+        // Invalid rule in --extend-enable
+        let warnings = validate_cli_rule_names(None, None, Some("nonexistent"), None);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0]
+                .message
+                .contains("Unknown rule in --extend-enable: nonexistent")
+        );
+
+        // Invalid rule in --extend-disable
+        let warnings = validate_cli_rule_names(None, None, None, Some("fake-rule"));
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0]
+                .message
+                .contains("Unknown rule in --extend-disable: fake-rule")
+        );
+    }
+
+    #[test]
+    fn test_validate_cli_rule_names_mixed() {
+        // Mix of valid and invalid
+        let warnings = validate_cli_rule_names(Some("MD001,abc,MD003"), None, None, None);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("abc"));
+    }
+
+    #[test]
+    fn test_validate_cli_rule_names_suggestions() {
+        // Typo should suggest correction
+        let warnings = validate_cli_rule_names(Some("line-lenght"), None, None, None);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("did you mean"));
+        assert!(warnings[0].message.contains("line-length"));
+    }
+
+    #[test]
+    fn test_validate_cli_rule_names_none() {
+        // All None - should return no warnings
+        let warnings = validate_cli_rule_names(None, None, None, None);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_validate_cli_rule_names_empty_string() {
+        // Empty strings should produce no warnings
+        let warnings = validate_cli_rule_names(Some(""), Some(""), Some(""), Some(""));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_validate_cli_rule_names_whitespace() {
+        // Whitespace handling
+        let warnings = validate_cli_rule_names(Some("  MD001  ,  MD013  "), None, None, None);
+        assert!(warnings.is_empty(), "Whitespace should be trimmed");
+    }
 }
 
 /// Configuration source with clear precedence hierarchy.
@@ -2915,21 +3061,19 @@ impl RuleRegistry {
 
 /// Compile-time perfect hash map for O(1) rule alias lookups
 /// Uses phf for zero-cost abstraction - compiles to direct jumps
-static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! {
+pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! {
     // Canonical names (identity mapping for consistency)
     "MD001" => "MD001",
     "MD003" => "MD003",
     "MD004" => "MD004",
     "MD005" => "MD005",
     "MD007" => "MD007",
-    "MD008" => "MD008",
     "MD009" => "MD009",
     "MD010" => "MD010",
     "MD011" => "MD011",
     "MD012" => "MD012",
     "MD013" => "MD013",
     "MD014" => "MD014",
-    "MD015" => "MD015",
     "MD018" => "MD018",
     "MD019" => "MD019",
     "MD020" => "MD020",
@@ -2995,7 +3139,6 @@ static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! {
     "NO-MULTIPLE-BLANKS" => "MD012",
     "LINE-LENGTH" => "MD013",
     "COMMANDS-SHOW-OUTPUT" => "MD014",
-    "NO-MISSING-SPACE-AFTER-LIST-MARKER" => "MD015",
     "NO-MISSING-SPACE-ATX" => "MD018",
     "NO-MULTIPLE-SPACE-ATX" => "MD019",
     "NO-MISSING-SPACE-CLOSED-ATX" => "MD020",
@@ -3088,6 +3231,73 @@ pub fn resolve_rule_names(input: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
+/// Validates rule names from CLI flags against the known rule set.
+/// Returns warnings for unknown rules with "did you mean" suggestions.
+///
+/// This provides consistent validation between config files and CLI flags.
+/// Unknown rules are warned about but don't cause failures.
+pub fn validate_cli_rule_names(
+    enable: Option<&str>,
+    disable: Option<&str>,
+    extend_enable: Option<&str>,
+    extend_disable: Option<&str>,
+) -> Vec<ConfigValidationWarning> {
+    let mut warnings = Vec::new();
+    let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+
+    let validate_list = |input: &str, flag_name: &str, warnings: &mut Vec<ConfigValidationWarning>| {
+        for name in input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            // Check for special "all" value (case-insensitive)
+            if name.eq_ignore_ascii_case("all") {
+                continue;
+            }
+            if resolve_rule_name_alias(name).is_none() {
+                let message = if let Some(suggestion) = suggest_similar_key(name, &all_rule_names) {
+                    let formatted = if suggestion.starts_with("MD") {
+                        suggestion
+                    } else {
+                        suggestion.to_lowercase()
+                    };
+                    format!("Unknown rule in {flag_name}: {name} (did you mean: {formatted}?)")
+                } else {
+                    format!("Unknown rule in {flag_name}: {name}")
+                };
+                warnings.push(ConfigValidationWarning {
+                    message,
+                    rule: Some(name.to_string()),
+                    key: None,
+                });
+            }
+        }
+    };
+
+    if let Some(e) = enable {
+        validate_list(e, "--enable", &mut warnings);
+    }
+    if let Some(d) = disable {
+        validate_list(d, "--disable", &mut warnings);
+    }
+    if let Some(ee) = extend_enable {
+        validate_list(ee, "--extend-enable", &mut warnings);
+    }
+    if let Some(ed) = extend_disable {
+        validate_list(ed, "--extend-disable", &mut warnings);
+    }
+
+    warnings
+}
+
+/// Checks if a rule name (or alias) is valid.
+/// Returns true if the name resolves to a known rule.
+/// Handles the special "all" value and all aliases.
+pub fn is_valid_rule_name(name: &str) -> bool {
+    // Check for special "all" value (case-insensitive)
+    if name.eq_ignore_ascii_case("all") {
+        return true;
+    }
+    resolve_rule_name_alias(name).is_some()
+}
+
 /// Represents a config validation warning or error
 #[derive(Debug, Clone)]
 pub struct ConfigValidationWarning {
@@ -3102,7 +3312,52 @@ fn validate_config_sourced_internal<S>(
     sourced: &SourcedConfig<S>,
     registry: &RuleRegistry,
 ) -> Vec<ConfigValidationWarning> {
-    validate_config_sourced_impl(&sourced.rules, &sourced.unknown_keys, registry)
+    let mut warnings = validate_config_sourced_impl(&sourced.rules, &sourced.unknown_keys, registry);
+
+    // Validate enable/disable arrays in [global] section
+    let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+
+    for rule_name in &sourced.global.enable.value {
+        if !is_valid_rule_name(rule_name) {
+            let message = if let Some(suggestion) = suggest_similar_key(rule_name, &all_rule_names) {
+                let formatted = if suggestion.starts_with("MD") {
+                    suggestion
+                } else {
+                    suggestion.to_lowercase()
+                };
+                format!("Unknown rule in global.enable: {rule_name} (did you mean: {formatted}?)")
+            } else {
+                format!("Unknown rule in global.enable: {rule_name}")
+            };
+            warnings.push(ConfigValidationWarning {
+                message,
+                rule: Some(rule_name.clone()),
+                key: None,
+            });
+        }
+    }
+
+    for rule_name in &sourced.global.disable.value {
+        if !is_valid_rule_name(rule_name) {
+            let message = if let Some(suggestion) = suggest_similar_key(rule_name, &all_rule_names) {
+                let formatted = if suggestion.starts_with("MD") {
+                    suggestion
+                } else {
+                    suggestion.to_lowercase()
+                };
+                format!("Unknown rule in global.disable: {rule_name} (did you mean: {formatted}?)")
+            } else {
+                format!("Unknown rule in global.disable: {rule_name}")
+            };
+            warnings.push(ConfigValidationWarning {
+                message,
+                rule: Some(rule_name.clone()),
+                key: None,
+            });
+        }
+    }
+
+    warnings
 }
 
 /// Core validation implementation that doesn't depend on SourcedConfig type parameter.
@@ -3310,7 +3565,7 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 }
 
 /// Suggest a similar key from a list of valid keys using fuzzy matching
-fn suggest_similar_key(unknown: &str, valid_keys: &[String]) -> Option<String> {
+pub fn suggest_similar_key(unknown: &str, valid_keys: &[String]) -> Option<String> {
     let unknown_lower = unknown.to_lowercase();
     let max_distance = 2.max(unknown.len() / 3); // Allow up to 2 edits or 30% of string length
 
