@@ -92,6 +92,29 @@ impl MD013LineLength {
 
         false
     }
+
+    /// Check if rule should skip based on provided config (used for inline config support)
+    fn should_skip_with_config(&self, ctx: &crate::lint_context::LintContext, config: &MD013Config) -> bool {
+        // Skip if content is empty
+        if ctx.content.is_empty() {
+            return true;
+        }
+
+        // For sentence-per-line or normalize mode, never skip based on line length
+        if config.reflow
+            && (config.reflow_mode == ReflowMode::SentencePerLine || config.reflow_mode == ReflowMode::Normalize)
+        {
+            return false;
+        }
+
+        // Quick check: if total content is shorter than line limit, definitely skip
+        if ctx.content.len() <= config.line_length.get() {
+            return true;
+        }
+
+        // Skip if no line exceeds the limit
+        !ctx.lines.iter().any(|line| line.byte_len > config.line_length.get())
+    }
 }
 
 impl Rule for MD013LineLength {
@@ -106,20 +129,7 @@ impl Rule for MD013LineLength {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
 
-        // Fast early return using should_skip
-        // But don't skip if we're in reflow mode with Normalize or SentencePerLine
-        if self.should_skip(ctx)
-            && !(self.config.reflow
-                && (self.config.reflow_mode == ReflowMode::Normalize
-                    || self.config.reflow_mode == ReflowMode::SentencePerLine))
-        {
-            return Ok(Vec::new());
-        }
-
-        // Direct implementation without DocumentStructure
-        let mut warnings = Vec::new();
-
-        // Check for inline configuration overrides
+        // Parse inline configuration FIRST so we can use effective config for should_skip
         let inline_config = crate::inline_config::InlineConfig::from_content(content);
         let config_override = inline_config.get_rule_config("MD013");
 
@@ -160,6 +170,19 @@ impl Rule for MD013LineLength {
         } else {
             self.config.clone()
         };
+
+        // Fast early return using should_skip with EFFECTIVE config (after inline overrides)
+        // But don't skip if we're in reflow mode with Normalize or SentencePerLine
+        if self.should_skip_with_config(ctx, &effective_config)
+            && !(effective_config.reflow
+                && (effective_config.reflow_mode == ReflowMode::Normalize
+                    || effective_config.reflow_mode == ReflowMode::SentencePerLine))
+        {
+            return Ok(Vec::new());
+        }
+
+        // Direct implementation without DocumentStructure
+        let mut warnings = Vec::new();
 
         // Special handling: line_length = 0 means "no line length limit"
         // Skip all line length checks, but still allow reflow if enabled
@@ -371,28 +394,7 @@ impl Rule for MD013LineLength {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty
-        if ctx.content.is_empty() {
-            return true;
-        }
-
-        // For sentence-per-line or normalize mode, never skip based on line length
-        if self.config.reflow
-            && (self.config.reflow_mode == ReflowMode::SentencePerLine
-                || self.config.reflow_mode == ReflowMode::Normalize)
-        {
-            return false;
-        }
-
-        // Quick check: if total content is shorter than line limit, definitely skip
-        if ctx.content.len() <= self.config.line_length.get() {
-            return true;
-        }
-
-        // Use more efficient check - any() with early termination instead of all()
-        !ctx.lines
-            .iter()
-            .any(|line| line.byte_len > self.config.line_length.get())
+        self.should_skip_with_config(ctx, &self.config)
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {

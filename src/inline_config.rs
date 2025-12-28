@@ -947,4 +947,36 @@ Some content after restore
         assert_eq!(warnings[0].rule_name, "fake_rule");
         assert_eq!(warnings[0].comment_type, "configure-file");
     }
+
+    #[test]
+    fn test_get_rule_config_from_configure_file() {
+        let content = r#"<!-- markdownlint-configure-file {"MD013": {"line_length": 50}} -->
+
+This is a test line."#;
+
+        let inline_config = InlineConfig::from_content(content);
+        let config_override = inline_config.get_rule_config("MD013");
+
+        assert!(config_override.is_some(), "MD013 config should be found");
+        let json = config_override.unwrap();
+        assert!(json.is_object(), "Config should be an object");
+        let obj = json.as_object().unwrap();
+        assert!(obj.contains_key("line_length"), "Should have line_length key");
+        assert_eq!(obj.get("line_length").unwrap().as_u64().unwrap(), 50);
+    }
+
+    #[test]
+    fn test_get_rule_config_tables_false() {
+        // Test that tables=false inline config is correctly parsed
+        let content = r#"<!-- markdownlint-configure-file {"MD013": {"tables": false}} -->"#;
+
+        let inline_config = InlineConfig::from_content(content);
+        let config_override = inline_config.get_rule_config("MD013");
+
+        assert!(config_override.is_some(), "MD013 config should be found");
+        let json = config_override.unwrap();
+        let obj = json.as_object().unwrap();
+        assert!(obj.contains_key("tables"), "Should have tables key");
+        assert!(!obj.get("tables").unwrap().as_bool().unwrap());
+    }
 }
