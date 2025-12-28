@@ -710,7 +710,7 @@ ul-style:
             ("no-multiple-blanks", "MD012"),
             ("line-length", "MD013"),
             ("commands-show-output", "MD014"),
-            ("no-missing-space-after-list-marker", "MD015"),
+            // MD015-017 don't exist in markdownlint
             ("no-missing-space-atx", "MD018"),
             ("no-multiple-space-atx", "MD019"),
             ("no-missing-space-closed-atx", "MD020"),
