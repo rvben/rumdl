@@ -65,6 +65,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Using Cargo (Rust)](#using-cargo-rust)
   - [Using pip (Python)](#using-pip-python)
   - [Using uv](#using-uv)
+  - [Using mise](#using-mise)
   - [Using Nix (macOS/Linux)](#using-nix-macoslinux)
   - [Using Termux User Repository (TUR) (Android)](#using-termux-user-repository-tur-android)
   - [Using Archlinux User Repository](#using-archlinux-user-repository)
@@ -152,6 +153,21 @@ uv tool install rumdl
 
 # Or run without installing
 uv tool run rumdl check .
+```
+
+### Using mise
+
+For dependency management with [mise](https://github.com/jdx/mise):
+
+```bash
+# List available versions
+mise ls-remote rumdl
+
+# Install the latest version
+mise install rumdl
+
+# Use a specific version for the project
+mise use rumdl@0.0.206
 ```
 
 ### Using Nix (macOS/Linux)
