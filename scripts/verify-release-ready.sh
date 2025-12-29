@@ -88,7 +88,24 @@ else
     ((ERRORS++))
 fi
 
-# Check 6: Verify we're on main branch
+# Check 6: Verify README.md has correct mise version
+echo -n "Checking README.md mise version... "
+if grep -q "mise use rumdl@" README.md; then
+    README_MISE_VERSION=$(grep -o "mise use rumdl@[0-9.]*" README.md | sed 's/mise use rumdl@//')
+    if [[ "$README_MISE_VERSION" == "$CARGO_VERSION" ]]; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        echo -e "${RED}ERROR: README.md mise version not updated${NC}"
+        echo "Expected: mise use rumdl@$CARGO_VERSION"
+        echo "Found: mise use rumdl@$README_MISE_VERSION"
+        ((ERRORS++))
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} (no mise example found)"
+fi
+
+# Check 7: Verify we're on main branch
 echo -n "Checking current branch... "
 CURRENT_BRANCH=$(git branch --show-current)
 if [[ "$CURRENT_BRANCH" == "main" ]]; then
@@ -98,7 +115,7 @@ else
     echo -e "${YELLOW}WARNING: Not on main branch (currently on: $CURRENT_BRANCH)${NC}"
 fi
 
-# Check 7: Verify tag doesn't already exist
+# Check 8: Verify tag doesn't already exist
 echo -n "Checking if tag v$CARGO_VERSION exists... "
 if git rev-parse "v$CARGO_VERSION" &>/dev/null; then
     echo -e "${RED}✗${NC}"
