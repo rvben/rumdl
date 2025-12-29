@@ -15,6 +15,7 @@ use memmap2::Mmap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+use std::str::FromStr;
 
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
@@ -31,6 +32,18 @@ mod file_processor;
 mod formatter;
 mod stdin_processor;
 mod watch;
+
+/// Apply CLI argument overrides to a sourced config.
+/// This centralizes the logic for CLI args overriding config values,
+/// ensuring consistency between regular check and watch mode.
+pub fn apply_cli_overrides(sourced: &mut rumdl_config::SourcedConfig, args: &CheckArgs) {
+    // Apply --flavor override if provided
+    if let Some(ref flavor_str) = args.flavor
+        && let Ok(flavor) = rumdl_config::MarkdownFlavor::from_str(flavor_str)
+    {
+        sourced.global.flavor = rumdl_config::SourcedValue::new(flavor, rumdl_config::ConfigSource::Cli);
+    }
+}
 
 /// Threshold for using memory-mapped I/O (1MB)
 const MMAP_THRESHOLD: u64 = 1024 * 1024;
@@ -545,6 +558,11 @@ pub struct CheckArgs {
     #[arg(long, value_parser = ["text", "full", "concise", "grouped", "json", "json-lines", "github", "gitlab", "pylint", "azure", "sarif", "junit"],
           help = "Output format for linting results (text, full, concise, grouped, json, json-lines, github, gitlab, pylint, azure, sarif, junit)")]
     output_format: Option<String>,
+
+    /// Markdown flavor to use for linting
+    #[arg(long, value_parser = ["standard", "mkdocs", "mdx", "quarto"],
+          help = "Markdown flavor: standard (default), mkdocs, mdx, or quarto")]
+    flavor: Option<String>,
 
     /// Read from stdin instead of files
     #[arg(long, help = "Read from stdin instead of files")]
@@ -1810,7 +1828,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     };
 
     // 2. Load sourced config (for provenance and validation)
-    let sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
+    let mut sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
 
     // 3. Validate configuration
     let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
@@ -1835,6 +1853,9 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
             eprintln!("\x1b[33m[cli warning]\x1b[0m {}", warn.message);
         }
     }
+
+    // 3c. Apply CLI argument overrides (e.g., --flavor)
+    apply_cli_overrides(&mut sourced, args);
 
     // 4. Extract cache_dir and project_root before converting sourced
     let cache_dir_from_config = sourced
