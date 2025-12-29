@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::rule::{LintWarning, Severity};
-use crate::utils::utf8_offsets::byte_offset_to_char_offset;
+use crate::utils::utf8_offsets::{byte_column_to_char_column, byte_offset_to_char_offset, get_line_content};
 
 use crate::config::{Config, MarkdownFlavor};
 use crate::fix_coordinator::FixCoordinator;
@@ -74,12 +74,21 @@ fn convert_warning_for_js(warning: &LintWarning, content: &str) -> JsWarning {
         replacement: fix.replacement.clone(),
     });
 
+    // Convert byte-based columns to character-based columns
+    let column = get_line_content(content, warning.line)
+        .map(|line| byte_column_to_char_column(line, warning.column))
+        .unwrap_or(warning.column);
+
+    let end_column = get_line_content(content, warning.end_line)
+        .map(|line| byte_column_to_char_column(line, warning.end_column))
+        .unwrap_or(warning.end_column);
+
     JsWarning {
         message: warning.message.clone(),
         line: warning.line,
-        column: warning.column,
+        column,
         end_line: warning.end_line,
-        end_column: warning.end_column,
+        end_column,
         severity: warning.severity,
         fix: js_fix,
         rule_name: warning.rule_name.clone(),
@@ -523,5 +532,136 @@ mod tests {
         // Should add trailing newline
         assert!(fixed.ends_with('\n'), "Should end with newline");
         assert_eq!(fixed, "# Heading\n\nContent with Norwegian letter \"æ\".\n");
+    }
+
+    #[test]
+    fn test_check_norwegian_letter_column_offset() {
+        // This tests the column conversion fix for rvben/obsidian-rumdl#4
+        // The bug was that column was byte-based (36) but should be char-based (35)
+        let content = "# Heading\n\nContent with Norwegian letter \"æ\".";
+
+        // Line 3 is "Content with Norwegian letter \"æ\"."
+        // Bytes: 35 (æ is 2 bytes), Chars: 34 (æ is 1 char)
+        // MD047 reports column at position after last char
+        // Byte column would be 36, char column should be 35
+
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        let result = linter.check(content);
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+
+        let md047 = warnings.iter().find(|w| w["rule_name"] == "MD047");
+        assert!(md047.is_some(), "Should have MD047 warning");
+
+        let warning = md047.unwrap();
+
+        // Column should be character-based (35), not byte-based (36)
+        assert_eq!(
+            warning["column"].as_u64().unwrap(),
+            35,
+            "Column should be char offset 35, not byte offset 36"
+        );
+        assert_eq!(
+            warning["end_column"].as_u64().unwrap(),
+            35,
+            "End column should also be char offset 35"
+        );
+
+        // Verify line is correct
+        assert_eq!(warning["line"].as_u64().unwrap(), 3);
+        assert_eq!(warning["end_line"].as_u64().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_check_multiple_multibyte_chars_column() {
+        // Test with multiple multi-byte characters to ensure column conversion works
+        // throughout a line, not just at the end
+        let content = "# æøå\n\nLine with æ and ø here.";
+
+        let config = LinterConfig {
+            disable: Some(vec!["MD047".to_string()]), // Disable MD047 to focus on other warnings
+            ..Default::default()
+        };
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        let result = linter.check(content);
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+
+        // Any warning on line 1 should have correct character-based column
+        // The heading "# æøå" is 6 bytes but 5 characters
+        for warning in &warnings {
+            let line = warning["line"].as_u64().unwrap();
+            let column = warning["column"].as_u64().unwrap();
+
+            if line == 1 {
+                // Column should never exceed character count + 1
+                // "# æøå" has 5 chars, so max column is 6
+                assert!(column <= 6, "Column {column} on line 1 exceeds char count (max 6)");
+            }
+        }
+    }
+
+    #[test]
+    fn test_check_emoji_column() {
+        // Test with emoji (4-byte UTF-8) to verify column conversion
+        let content = "# Test 👋\n\nHello";
+
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        let result = linter.check(content);
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+
+        // Verify any warnings have character-based columns
+        // Line 1 "# Test 👋" is 11 bytes but 8 characters
+        for warning in &warnings {
+            let line = warning["line"].as_u64().unwrap();
+            let column = warning["column"].as_u64().unwrap();
+
+            if line == 1 {
+                assert!(
+                    column <= 9, // 8 chars + 1 for position after
+                    "Column {column} on line 1 with emoji should be char-based (max 9), not byte-based"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_check_japanese_column() {
+        // Test with Japanese characters (3-byte UTF-8 each)
+        let content = "# 日本語\n\nTest";
+
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+        };
+
+        let result = linter.check(content);
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+
+        // Line 1 "# 日本語" is 11 bytes but 5 characters
+        for warning in &warnings {
+            let line = warning["line"].as_u64().unwrap();
+            let column = warning["column"].as_u64().unwrap();
+
+            if line == 1 {
+                assert!(
+                    column <= 6, // 5 chars + 1 for position after
+                    "Column {column} on line 1 with Japanese should be char-based (max 6), not byte-based (would be 12)"
+                );
+            }
+        }
     }
 }
