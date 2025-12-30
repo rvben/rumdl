@@ -4,7 +4,9 @@ use rumdl_lib::rules::MD029OrderedListPrefix;
 
 #[test]
 fn test_md029_fix_with_2_space_code_blocks() {
-    // Test that fix correctly handles 2-space indented code blocks breaking lists
+    // Test that fix correctly handles 2-space indented code blocks breaking lists.
+    // With 2-space indent, code blocks don't belong to list items, causing lists to break.
+    // CommonMark sees multiple separate lists, each correctly numbered from their start value.
     let rule = MD029OrderedListPrefix::default();
     let content = r#"# Title
 
@@ -33,39 +35,16 @@ fn test_md029_fix_with_2_space_code_blocks() {
   sudo dnf install ...
   ```"#;
 
-    let expected = r#"# Title
-
-1. Test 1
-
-  ```sh
-  sudo dnf install ...
-  ```
-
-1. Test 2
-2. Test 3
-
-  ```sh
-  cargo install ...
-  ```
-
-1. Test 4
-
-  ```sh
-  sudo dnf install ...
-  ```
-
-1. Test 5
-
-  ```sh
-  sudo dnf install ...
-  ```"#;
+    // No changes expected - each list is correctly numbered from its start value:
+    // List 1: [1], List 2: [2,3], List 3: [4], List 4: [5]
+    let expected = content;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
     assert_eq!(
         fixed, expected,
-        "MD029 fix should correctly handle 2-space indented code blocks"
+        "No changes - each list is correctly numbered from its CommonMark start value"
     );
 }
 
@@ -105,6 +84,8 @@ fn test_md029_fix_with_4_space_code_blocks() {
 #[test]
 fn test_md029_fix_matches_check() {
     // Test that fix and check are consistent
+    // With 2 space indent, code block doesn't belong to item 1, causing list to break.
+    // CommonMark sees two lists: [1] and [2, 3], both correctly numbered.
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. First item
 
@@ -117,30 +98,31 @@ fn test_md029_fix_matches_check() {
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
-    // Get warnings from check
+    // With default style (one_or_ordered) and respecting CommonMark start values:
+    // - List 1 starts at 1: item 1 is correct
+    // - List 2 starts at 2: items 2, 3 are correct
+    // No warnings expected.
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 2, "Should detect 2 MD029 issues");
+    assert!(
+        warnings.is_empty(),
+        "No warnings - both lists are correctly numbered from their start values"
+    );
 
-    // Apply fix
+    // Apply fix (should be no-op since no warnings)
     let fixed = rule.fix(&ctx).unwrap();
 
-    // Check the fixed content - should have no warnings
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed_warnings = rule.check(&fixed_ctx).unwrap();
-
-    assert_eq!(fixed_warnings.len(), 0, "Fixed content should have no MD029 warnings");
-
-    // Verify the fix
-    assert!(
-        fixed.contains("1. Second item"),
-        "Second item should be renumbered to 1"
+    // Content should be unchanged
+    assert_eq!(
+        fixed, content,
+        "Fix should not change content when there are no warnings"
     );
-    assert!(fixed.contains("2. Third item"), "Third item should be renumbered to 2");
 }
 
 #[test]
 fn test_md029_fix_preserves_content() {
     // Test that fix only changes the numbers, not the content
+    // With 2 space indent, code block doesn't belong to item 1, causing list to break.
+    // CommonMark sees two lists: [1] and [2, 3], both correctly numbered.
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. First item with some text
 
@@ -155,16 +137,9 @@ fn test_md029_fix_preserves_content() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
-    // Check that content is preserved
-    assert!(fixed.contains("First item with some text"));
-    assert!(fixed.contains("Second item with more text"));
-    assert!(fixed.contains("Third item with even more text"));
-    assert!(fixed.contains(
-        r#"def hello():
-      print("world")"#
-    ));
-
-    // Check that numbering is fixed
-    assert!(fixed.contains("1. Second item"));
-    assert!(fixed.contains("2. Third item"));
+    // Content should be unchanged since there are no warnings
+    assert_eq!(
+        fixed, content,
+        "Fix should not change content when there are no warnings"
+    );
 }

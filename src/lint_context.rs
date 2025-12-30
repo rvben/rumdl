@@ -1997,16 +1997,22 @@ impl<'a> LintContext<'a> {
                             content_column,
                         })
                     }
-                } else if let Some((leading_spaces, number_str, delimiter, spacing, _content)) =
+                } else if let Some((leading_spaces, number_str, delimiter, spacing, content)) =
                     Self::parse_ordered_list(line_for_list_check)
                 {
                     let marker = format!("{number_str}{delimiter}");
                     let marker_column = blockquote_prefix_len + leading_spaces.len();
                     let content_column = marker_column + marker.len() + spacing.len();
 
-                    // According to CommonMark spec, ordered list items MUST have at least one space
-                    // after the marker (period or parenthesis). Without a space, it's not a list item.
-                    if spacing.is_empty() {
+                    // CommonMark spec: If content follows the marker, a space is required.
+                    // But if the line ends after the marker (empty content or whitespace-only),
+                    // no space is needed. Examples:
+                    // - "1." (valid - no content after marker)
+                    // - "1. " (valid - space before empty content)
+                    // - "1. text" (valid - space before content)
+                    // - "1.text" (INVALID - content without space)
+                    let content_after_spacing = content.trim();
+                    if spacing.is_empty() && !content_after_spacing.is_empty() {
                         None
                     } else {
                         Some(ListItemInfo {

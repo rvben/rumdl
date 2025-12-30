@@ -53,11 +53,29 @@ fn test_commonmark_respects_start_value() {
 #[test]
 fn test_list_starting_at_11_with_wrong_numbers() {
     // A list that CommonMark parses as starting at 11, but has wrong subsequent numbers
+    // NOTE: For the list to actually break, we need insufficient indent for "10. " (4 chars)
+    // 3 spaces is sufficient for "2. " (3 chars), so we need to go through 10+ items
     let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
     let content = r#"1. one
    - sub
 2. two
-   - sub (3 spaces - breaks the list!)
+   - sub
+3. three
+   - sub
+4. four
+   - sub
+5. five
+   - sub
+6. six
+   - sub
+7. seven
+   - sub
+8. eight
+   - sub
+9. nine
+   - sub
+10. ten
+   - sub (3 spaces - breaks the list! "10. " needs 4 spaces)
 11. eleven
 13. thirteen (wrong - should be 12)
 15. fifteen (wrong - should be 13)

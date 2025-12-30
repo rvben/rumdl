@@ -268,7 +268,7 @@ fn test_table_between_lists() {
 
 #[test]
 fn test_html_comment_between_lists() {
-    // Edge case: HTML comment alone might not separate lists (implementation specific)
+    // Edge case: HTML comment separates lists
     let content = r#"# Test
 
 1. First list item
@@ -283,11 +283,13 @@ fn test_html_comment_between_lists() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // HTML comments at top level separate lists, so we expect an MD029 error
-    assert_eq!(
-        result.len(),
-        1,
-        "HTML comments at top level should separate lists and cause MD029 error for incorrect numbering"
+    // CommonMark sees two separate lists:
+    // - List 1 starts at 1: items 1, 2 are correct
+    // - List 2 starts at 3: item 3 is correct
+    // With ListStyle::Ordered, we respect the CommonMark start values, so no warnings.
+    assert!(
+        result.is_empty(),
+        "No warnings - both lists are correctly numbered from their start values"
     );
 }
 

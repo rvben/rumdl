@@ -71,16 +71,24 @@ impl MD029OrderedListPrefix {
         }
     }
 
-    /// Detect the style being used in a list by checking all items for prevalence
+    /// Detect the style being used in a list by checking all items for prevalence.
+    /// The `start_value` parameter is the CommonMark-provided list start value.
     fn detect_list_style(
         items: &[(
             usize,
             &crate::lint_context::LineInfo,
             &crate::lint_context::ListItemInfo,
         )],
+        start_value: u64,
     ) -> ListStyle {
         if items.len() < 2 {
-            // With only one item, we can't determine the style, default to OneOne
+            // With only one item, check if it matches the start value
+            // If so, treat as Ordered (respects CommonMark start value)
+            // Otherwise, check if it's 1 (OneOne style)
+            let first_num = Self::parse_marker_number(&items[0].2.marker);
+            if first_num == Some(start_value as usize) {
+                return ListStyle::Ordered;
+            }
             return ListStyle::OneOne;
         }
 
@@ -279,7 +287,7 @@ impl MD029OrderedListPrefix {
             let detected_style = if let Some(doc_style) = document_wide_style.clone() {
                 Some(doc_style)
             } else if self.config.style == ListStyle::OneOrOrdered {
-                Some(Self::detect_list_style(&items))
+                Some(Self::detect_list_style(&items, start_value))
             } else {
                 None
             };
@@ -389,9 +397,9 @@ impl Rule for MD029OrderedListPrefix {
                     all_document_items.push((*line_num, *line_info, *list_item));
                 }
             }
-            // Detect style across entire document
+            // Detect style across entire document (use 1 as default for pattern detection)
             if !all_document_items.is_empty() {
-                Some(Self::detect_list_style(&all_document_items))
+                Some(Self::detect_list_style(&all_document_items, 1))
             } else {
                 None
             }
@@ -554,24 +562,25 @@ mod tests {
 
     #[test]
     fn test_performance_improvement() {
-        // This test verifies that the fix improves performance by avoiding redundant calls
+        // This test verifies the rule handles large lists without performance issues
         let rule = MD029OrderedListPrefix::default();
 
-        // Create a larger list to test performance
-        let mut content = String::new();
-        for i in 1..=100 {
-            content.push_str(&format!("{}. Item {}\n", i + 1, i)); // All wrong numbers
+        // Create a larger list with WRONG numbers: 1, 5, 10, 15, ...
+        // Starting at 1, CommonMark expects 1, 2, 3, 4, ...
+        // So items 2-100 are all wrong (expected 2, got 5; expected 3, got 10; etc.)
+        let mut content = String::from("1. Item 1\n"); // First item correct
+        for i in 2..=100 {
+            content.push_str(&format!("{}. Item {}\n", i * 5 - 5, i)); // Wrong numbers
         }
 
         let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
 
-        // This should complete without issues and produce warnings for all items
+        // This should complete without issues and produce warnings for items 2-100
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 100); // Should have warnings for all 100 items
+        assert_eq!(result.len(), 99, "Should have warnings for items 2-100 (99 items)");
 
-        // Verify first and last warnings
-        assert!(result[0].message.contains("2") && result[0].message.contains("expected 1"));
-        assert!(result[99].message.contains("101") && result[99].message.contains("expected 100"));
+        // First wrong item: "5. Item 2" (expected 2)
+        assert!(result[0].message.contains("5") && result[0].message.contains("expected 2"));
     }
 
     #[test]

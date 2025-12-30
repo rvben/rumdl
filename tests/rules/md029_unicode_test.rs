@@ -92,16 +92,13 @@ console.log('emoji 🔥');
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     // Code block at column 0 breaks the list. pulldown-cmark sees 2 lists:
-    // - List 1: item 1 at line 1
-    // - List 2: items 2 and 3 at lines 6 and 7 (should be 1 and 2)
-    // Verified with: npx markdownlint-cli -c '{"MD029": {"style": "ordered"}}' file.md
-    assert_eq!(
-        result.len(),
-        2,
-        "Code block breaks list, second list has wrong numbering"
+    // - List 1: [1] at line 1 - correct
+    // - List 2: [2, 3] at lines 6 and 7 - starts at 2, both correct
+    // With CommonMark start value support, no warnings.
+    assert!(
+        result.is_empty(),
+        "No warnings - each list correctly numbered from its start value"
     );
-    assert_eq!(result[0].line, 6);
-    assert_eq!(result[1].line, 7);
 }
 
 #[test]

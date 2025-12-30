@@ -4,10 +4,10 @@ use rumdl_lib::rules::MD029OrderedListPrefix;
 
 #[test]
 fn test_md029_2_space_code_blocks_break_lists() {
-    // Test that 2-space indented code blocks break list continuity
+    // Test that 2-space indented code blocks break list continuity.
     // CommonMark respects the start value of each new list, so items
     // that are correctly numbered within their list are not flagged.
-    let rule = MD029OrderedListPrefix::default();
+    let rule = MD029OrderedListPrefix::default(); // default is one_or_ordered
     let content = r#"# Title
 
 1. Test 1
@@ -38,23 +38,15 @@ fn test_md029_2_space_code_blocks_break_lists() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // CommonMark parses this as 4 lists:
-    // List 1: [1]
-    // List 2: [2, 3] - starts at 2, correctly numbered
-    // List 3: [4] - starts at 4, correctly numbered
-    // List 4: [5] - starts at 5, correctly numbered
-    // Only "3. Test 3" should be flagged (expected 3 in its list where start is 2)
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Should report 1 MD029 error - item 3 should be 3 in a list starting at 2"
-    );
-
-    assert_eq!(warnings[0].line, 10); // Line 10: "3. Test 3" should be "3" (2+1=3)
+    // CommonMark parses this as 4 lists, each correctly numbered from its start value:
+    // List 1: [1] - starts at 1, item 1 is correct
+    // List 2: [2, 3] - starts at 2, items 2,3 are correct (2+0=2, 2+1=3)
+    // List 3: [4] - starts at 4, item 4 is correct
+    // List 4: [5] - starts at 5, item 5 is correct
+    // With one_or_ordered style: each list is checked independently, all correct.
     assert!(
-        warnings[0].message.contains("expected 3"),
-        "Item 3 should expect 3 in its list (2, 3): {}",
-        warnings[0].message
+        warnings.is_empty(),
+        "No warnings - each list is correctly numbered from its start value"
     );
 }
 
@@ -125,8 +117,8 @@ fn test_md029_3_space_code_blocks_continue_lists() {
 
 #[test]
 fn test_md029_unindented_code_blocks_break_lists() {
-    // Test that unindented code blocks definitely break list continuity
-    // Each new list starts at the value of its first item
+    // Test that unindented code blocks definitely break list continuity.
+    // Each new list starts at the value of its first item.
     let rule = MD029OrderedListPrefix::default();
     let content = r#"# Title
 
@@ -148,13 +140,14 @@ cargo install ...
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // CommonMark parses this as 3 lists:
-    // List 1: [1] - correctly numbered
-    // List 2: [2, 3] - starts at 2, item 3 should be 3 (expected 2+1=3)
-    // List 3: [4] - starts at 4, correctly numbered
-    assert_eq!(warnings.len(), 1, "Should report 1 MD029 error for item 3 (expected 3)");
-
-    assert_eq!(warnings[0].line, 10); // "3. Test 3" expected 3
+    // CommonMark parses this as 3 lists, each correctly numbered:
+    // List 1: [1] - starts at 1, item 1 is correct
+    // List 2: [2, 3] - starts at 2, items 2,3 are correct (2+0=2, 2+1=3)
+    // List 3: [4] - starts at 4, item 4 is correct
+    assert!(
+        warnings.is_empty(),
+        "No warnings - each list is correctly numbered from its start value"
+    );
 }
 
 #[test]
@@ -179,17 +172,13 @@ fn test_md029_detection_with_2_space_code_blocks() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // CommonMark parses as:
-    // List 1: [1]
-    // List 2: [2, 3] - starts at 2, item 3 should be 3 (expected 2+1=3)
-    // List 3: [4] - starts at 4, correctly numbered
-    assert_eq!(warnings.len(), 1, "Should detect 1 MD029 issue for item 3");
-
-    assert_eq!(warnings[0].line, 8); // Line 8: "3. Test 3" should be "3."
+    // CommonMark parses as 3 lists, each correctly numbered:
+    // List 1: [1] - starts at 1, item 1 is correct
+    // List 2: [2, 3] - starts at 2, items 2,3 are correct
+    // List 3: [4] - starts at 4, item 4 is correct
     assert!(
-        warnings[0].message.contains("expected 3"),
-        "Item 3 should expect 3: {}",
-        warnings[0].message
+        warnings.is_empty(),
+        "No warnings - each list is correctly numbered from its start value"
     );
 }
 
@@ -213,7 +202,7 @@ fn test_md029_wider_markers() {
     // With "10. " (3 chars + 1 space = 4), need 4 spaces for continuation
     // 3 spaces is insufficient, so the list breaks after 10.
     // CommonMark parses as:
-    // List 1: [1, 10] - starts at 1, item 10 should be 2
+    // List 1: [1, 10] - starts at 1, item 10 should be 2 → WARNING
     // List 2: [11] - starts at 11, correctly numbered
     assert_eq!(
         warnings.len(),
@@ -224,5 +213,6 @@ fn test_md029_wider_markers() {
     // "10." should be "2." (continues from "1.")
     assert_eq!(warnings[0].line, 2);
     assert!(warnings[0].message.contains("expected 2"));
+    // Auto-fix is available because the list starts at 1
     assert!(warnings[0].fix.is_some(), "Should have auto-fix");
 }
