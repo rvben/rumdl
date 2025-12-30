@@ -67,6 +67,7 @@ fn test_md029_nested_bullets_with_code_block() {
 fn test_md029_under_indented_bullets_break_list() {
     // Under-indented bullets (2 spaces instead of 3) break list continuity per CommonMark.
     // Verified with both pulldown-cmark and markdownlint-cli.
+    // Item "3." starts a new list according to CommonMark, and is correctly numbered.
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. First item
 
@@ -78,15 +79,12 @@ fn test_md029_under_indented_bullets_break_list() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should report MD029 error - under-indented bullet breaks list continuity
-    // "3. Third item" starts a new list and should be "1."
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Under-indented bullets break list continuity per CommonMark"
+    // No warnings - CommonMark parses the second list as starting at 3,
+    // so "3. Third item" is correctly numbered for its list
+    assert!(
+        warnings.is_empty(),
+        "Item 3 is correctly numbered for its list (which starts at 3)"
     );
-    assert_eq!(warnings[0].line, 6);
-    assert!(warnings[0].message.contains("expected 1"));
 }
 
 #[test]
@@ -157,6 +155,7 @@ fn test_md029_complex_continuation_content() {
 #[test]
 fn test_md029_unindented_text_breaks_list() {
     // Test that unindented text between list items breaks continuity
+    // CommonMark parses item "3." as start of a new list, correctly numbered at 3
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. First item
 
@@ -169,15 +168,12 @@ Unindented paragraph breaks the list.
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should report MD029 error - unindented text breaks continuity
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Should report MD029 error when unindented text breaks list continuity"
+    // No warnings - CommonMark parses the second list as starting at 3,
+    // so "3. Third item" is correctly numbered for its list
+    assert!(
+        warnings.is_empty(),
+        "Item 3 is correctly numbered for its list (which starts at 3)"
     );
-
-    assert_eq!(warnings[0].line, 7); // "3. Third item" should be "1."
-    assert!(warnings[0].message.contains("expected 1"));
 }
 
 #[test]
@@ -211,6 +207,7 @@ fn test_md029_wider_marker_with_nested_list() {
 fn test_md029_wider_marker_with_under_indented_bullet() {
     // Test that "10. " with a 3-space indented bullet breaks the list
     // (3 spaces is insufficient for "10. " which requires 4+ spaces for continuation)
+    // CommonMark parses this as two lists: [1, 10] and [11]
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. First item
 
@@ -222,17 +219,14 @@ fn test_md029_wider_marker_with_under_indented_bullet() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should report 2 errors:
-    // 1. "10." should be "2." (wrong number in first list)
-    // 2. "11." should be "1." (starts a new list after the bullet breaks continuity)
-    // Verified against markdownlint-cli which shows "11." as new list with expected 1
-    assert_eq!(warnings.len(), 2, "Should report numbering errors");
+    // Should report 1 error:
+    // "10." should be "2." (wrong number in first list)
+    // "11." is correctly numbered for its list (which starts at 11)
+    assert_eq!(warnings.len(), 1, "Should report numbering error for 10");
 
     assert_eq!(warnings[0].line, 3); // "10." should be "2."
     assert!(warnings[0].message.contains("expected 2"));
-
-    assert_eq!(warnings[1].line, 6); // "11." starts new list, should be "1."
-    assert!(warnings[1].message.contains("expected 1"));
+    assert!(warnings[0].fix.is_some(), "Normal error should have fix");
 }
 
 #[test]

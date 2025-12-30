@@ -5,7 +5,8 @@ use rumdl_lib::rules::MD029OrderedListPrefix;
 #[test]
 fn test_md029_2_space_code_blocks_break_lists() {
     // Test that 2-space indented code blocks break list continuity
-    // This should match markdownlint's behavior
+    // CommonMark respects the start value of each new list, so items
+    // that are correctly numbered within their list are not flagged.
     let rule = MD029OrderedListPrefix::default();
     let content = r#"# Title
 
@@ -37,25 +38,24 @@ fn test_md029_2_space_code_blocks_break_lists() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should report 4 MD029 errors matching markdownlint
+    // CommonMark parses this as 4 lists:
+    // List 1: [1]
+    // List 2: [2, 3] - starts at 2, correctly numbered
+    // List 3: [4] - starts at 4, correctly numbered
+    // List 4: [5] - starts at 5, correctly numbered
+    // Only "3. Test 3" should be flagged (expected 3 in its list where start is 2)
     assert_eq!(
         warnings.len(),
-        4,
-        "Should report 4 MD029 errors for list items after 2-space indented code blocks"
+        1,
+        "Should report 1 MD029 error - item 3 should be 3 in a list starting at 2"
     );
 
-    // Check specific errors
-    assert_eq!(warnings[0].line, 9); // Line 9: "2. Test 2" should be "1."
-    assert!(warnings[0].message.contains("expected 1"));
-
-    assert_eq!(warnings[1].line, 10); // Line 10: "3. Test 3" should be "2."
-    assert!(warnings[1].message.contains("expected 2"));
-
-    assert_eq!(warnings[2].line, 16); // Line 16: "4. Test 4" should be "1."
-    assert!(warnings[2].message.contains("expected 1"));
-
-    assert_eq!(warnings[3].line, 22); // Line 22: "5. Test 5" should be "1."
-    assert!(warnings[3].message.contains("expected 1"));
+    assert_eq!(warnings[0].line, 10); // Line 10: "3. Test 3" should be "3" (2+1=3)
+    assert!(
+        warnings[0].message.contains("expected 3"),
+        "Item 3 should expect 3 in its list (2, 3): {}",
+        warnings[0].message
+    );
 }
 
 #[test]
@@ -126,6 +126,7 @@ fn test_md029_3_space_code_blocks_continue_lists() {
 #[test]
 fn test_md029_unindented_code_blocks_break_lists() {
     // Test that unindented code blocks definitely break list continuity
+    // Each new list starts at the value of its first item
     let rule = MD029OrderedListPrefix::default();
     let content = r#"# Title
 
@@ -147,21 +148,18 @@ cargo install ...
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should report MD029 errors for all items after unindented code blocks
-    assert_eq!(
-        warnings.len(),
-        3,
-        "Should report MD029 errors for list items after unindented code blocks"
-    );
+    // CommonMark parses this as 3 lists:
+    // List 1: [1] - correctly numbered
+    // List 2: [2, 3] - starts at 2, item 3 should be 3 (expected 2+1=3)
+    // List 3: [4] - starts at 4, correctly numbered
+    assert_eq!(warnings.len(), 1, "Should report 1 MD029 error for item 3 (expected 3)");
 
-    assert_eq!(warnings[0].line, 9); // "2. Test 2" should be "1."
-    assert_eq!(warnings[1].line, 10); // "3. Test 3" should be "2."
-    assert_eq!(warnings[2].line, 16); // "4. Test 4" should be "1."
+    assert_eq!(warnings[0].line, 10); // "3. Test 3" expected 3
 }
 
 #[test]
 fn test_md029_detection_with_2_space_code_blocks() {
-    // Test that MD029 correctly detects issues with 2-space indented code blocks
+    // Test that MD029 correctly respects CommonMark start values
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. Test 1
 
@@ -181,23 +179,24 @@ fn test_md029_detection_with_2_space_code_blocks() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should detect 3 MD029 issues
-    assert_eq!(warnings.len(), 3, "Should detect MD029 issues for items 2, 3, and 4");
+    // CommonMark parses as:
+    // List 1: [1]
+    // List 2: [2, 3] - starts at 2, item 3 should be 3 (expected 2+1=3)
+    // List 3: [4] - starts at 4, correctly numbered
+    assert_eq!(warnings.len(), 1, "Should detect 1 MD029 issue for item 3");
 
-    // Verify specific issues
-    assert_eq!(warnings[0].line, 7); // Line 7: "2. Test 2" should be "1."
-    assert!(warnings[0].message.contains("expected 1"));
-
-    assert_eq!(warnings[1].line, 8); // Line 8: "3. Test 3" should be "2."
-    assert!(warnings[1].message.contains("expected 2"));
-
-    assert_eq!(warnings[2].line, 14); // Line 14: "4. Test 4" should be "1."
-    assert!(warnings[2].message.contains("expected 1"));
+    assert_eq!(warnings[0].line, 8); // Line 8: "3. Test 3" should be "3."
+    assert!(
+        warnings[0].message.contains("expected 3"),
+        "Item 3 should expect 3: {}",
+        warnings[0].message
+    );
 }
 
 #[test]
 fn test_md029_wider_markers() {
     // Test with wider list markers like "10." which affect min_continuation_indent
+    // CommonMark respects the start value of each list
     let rule = MD029OrderedListPrefix::default();
     let content = r#"1. First item
 10. Test item with wide marker
@@ -212,18 +211,18 @@ fn test_md029_wider_markers() {
     let warnings = rule.check(&ctx).unwrap();
 
     // With "10. " (3 chars + 1 space = 4), need 4 spaces for continuation
-    // 3 spaces is insufficient, so the list should break
+    // 3 spaces is insufficient, so the list breaks after 10.
+    // CommonMark parses as:
+    // List 1: [1, 10] - starts at 1, item 10 should be 2
+    // List 2: [11] - starts at 11, correctly numbered
     assert_eq!(
         warnings.len(),
-        2,
-        "Should report MD029 errors: one for wrong initial numbering, one for break after code block"
+        1,
+        "Should report 1 MD029 error for item 10 (expected 2)"
     );
 
-    // First error: "10." should be "2." (continues from "1.")
+    // "10." should be "2." (continues from "1.")
     assert_eq!(warnings[0].line, 2);
     assert!(warnings[0].message.contains("expected 2"));
-
-    // Second error: "11." should be "1." (new list after insufficiently indented code block)
-    assert_eq!(warnings[1].line, 8);
-    assert!(warnings[1].message.contains("expected 1"));
+    assert!(warnings[0].fix.is_some(), "Should have auto-fix");
 }

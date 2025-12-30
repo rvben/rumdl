@@ -5,10 +5,21 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use std::collections::HashMap;
 use toml;
 
 mod md029_config;
 pub use md029_config::{ListStyle, MD029Config};
+
+/// Type alias for grouped list items: (list_id, items) where items are (line_num, LineInfo, ListItemInfo)
+type ListItemGroup<'a> = (
+    usize,
+    Vec<(
+        usize,
+        &'a crate::lint_context::LineInfo,
+        &'a crate::lint_context::ListItemInfo,
+    )>,
+);
 
 #[derive(Debug, Clone, Default)]
 pub struct MD029OrderedListPrefix {
@@ -37,8 +48,11 @@ impl MD029OrderedListPrefix {
         num_part.parse::<usize>().ok()
     }
 
+    /// Calculate the expected number for a list item.
+    /// The `start_value` is the CommonMark-provided start value for the list.
+    /// For style `Ordered`, items should be `start_value, start_value+1, start_value+2, ...`
     #[inline]
-    fn get_expected_number(&self, index: usize, detected_style: Option<ListStyle>) -> usize {
+    fn get_expected_number(&self, index: usize, detected_style: Option<ListStyle>, start_value: u64) -> usize {
         // Use detected_style when the configuration is auto-detect mode (OneOrOrdered or Consistent)
         // For explicit style configurations, always use the configured style
         let style = match self.config.style {
@@ -48,7 +62,7 @@ impl MD029OrderedListPrefix {
 
         match style {
             ListStyle::One | ListStyle::OneOne => 1,
-            ListStyle::Ordered => index + 1,
+            ListStyle::Ordered => (start_value as usize) + index,
             ListStyle::Ordered0 => index,
             ListStyle::OneOrOrdered | ListStyle::Consistent => {
                 // This shouldn't be reached since we handle these above
@@ -97,10 +111,17 @@ impl MD029OrderedListPrefix {
         }
     }
 
-    /// Build a map from line number to list ID using pulldown-cmark's AST.
-    /// This is the authoritative source of truth for list membership.
-    fn build_commonmark_list_membership(content: &str) -> std::collections::HashMap<usize, usize> {
+    /// Build maps from line number to list ID and list ID to start value using pulldown-cmark's AST.
+    /// This is the authoritative source of truth for list membership and respects CommonMark's
+    /// list start values (e.g., a list that starts at 11 is valid if items are 11, 12, 13...).
+    fn build_commonmark_list_membership(
+        content: &str,
+    ) -> (
+        std::collections::HashMap<usize, usize>,
+        std::collections::HashMap<usize, u64>,
+    ) {
         let mut line_to_list: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        let mut list_start_values: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
 
         // Pre-compute line start offsets for byte-to-line conversion
         let line_starts: Vec<usize> = std::iter::once(0)
@@ -118,14 +139,18 @@ impl MD029OrderedListPrefix {
         let options = Options::empty();
         let parser = Parser::new_ext(content, options);
 
-        let mut list_stack: Vec<(usize, bool)> = Vec::new(); // (list_id, is_ordered)
+        let mut list_stack: Vec<(usize, bool, u64)> = Vec::new(); // (list_id, is_ordered, start_value)
         let mut next_list_id = 0;
 
         for (event, range) in parser.into_offset_iter() {
             match event {
                 Event::Start(Tag::List(start_num)) => {
                     let is_ordered = start_num.is_some();
-                    list_stack.push((next_list_id, is_ordered));
+                    let start_value = start_num.unwrap_or(1);
+                    list_stack.push((next_list_id, is_ordered, start_value));
+                    if is_ordered {
+                        list_start_values.insert(next_list_id, start_value);
+                    }
                     next_list_id += 1;
                 }
                 Event::End(TagEnd::List(_)) => {
@@ -133,7 +158,7 @@ impl MD029OrderedListPrefix {
                 }
                 Event::Start(Tag::Item) => {
                     // Record the line number of this item and its list ID
-                    if let Some(&(list_id, is_ordered)) = list_stack.last()
+                    if let Some(&(list_id, is_ordered, _)) = list_stack.last()
                         && is_ordered
                     {
                         let line_num = byte_to_line(range.start);
@@ -144,21 +169,15 @@ impl MD029OrderedListPrefix {
             }
         }
 
-        line_to_list
+        (line_to_list, list_start_values)
     }
 
     /// Group ordered items by their CommonMark list membership.
-    /// Returns groups of (line_num, LineInfo, ListItemInfo) for each distinct list.
+    /// Returns (list_id, items) tuples for each distinct list, where items are (line_num, LineInfo, ListItemInfo).
     fn group_items_by_commonmark_list<'a>(
         ctx: &'a crate::lint_context::LintContext,
         line_to_list: &std::collections::HashMap<usize, usize>,
-    ) -> Vec<
-        Vec<(
-            usize,
-            &'a crate::lint_context::LineInfo,
-            &'a crate::lint_context::ListItemInfo,
-        )>,
-    > {
+    ) -> Vec<ListItemGroup<'a>> {
         // Collect all ordered items with their list IDs
         let mut items_with_list_id: Vec<(
             usize,
@@ -196,18 +215,20 @@ impl MD029OrderedListPrefix {
                 .push((line_num, line_info, list_item));
         }
 
-        // Convert to Vec, sort each group by line number, and sort groups by first line
-        let mut result: Vec<_> = groups.into_values().collect();
-        for group in &mut result {
-            group.sort_by_key(|(line_num, _, _)| *line_num);
+        // Convert to Vec of (list_id, items), sort each group by line number, and sort groups by first line
+        let mut result: Vec<_> = groups.into_iter().collect();
+        for (_, items) in &mut result {
+            items.sort_by_key(|(line_num, _, _)| *line_num);
         }
         // Sort groups by their first item's line number for deterministic output
-        result.sort_by_key(|group| group.first().map(|(ln, _, _)| *ln).unwrap_or(0));
+        result.sort_by_key(|(_, items)| items.first().map(|(ln, _, _)| *ln).unwrap_or(0));
 
         result
     }
 
-    /// Check a CommonMark-grouped list for correct ordering
+    /// Check a CommonMark-grouped list for correct ordering.
+    /// Uses the CommonMark start value to validate items (e.g., a list starting at 11
+    /// expects items 11, 12, 13... - no violation there).
     fn check_commonmark_list_group(
         &self,
         _ctx: &crate::lint_context::LintContext,
@@ -218,13 +239,14 @@ impl MD029OrderedListPrefix {
         )],
         warnings: &mut Vec<LintWarning>,
         document_wide_style: Option<ListStyle>,
+        start_value: u64,
     ) {
         if group.is_empty() {
             return;
         }
 
         // Group items by indentation level (marker_column) to handle nested lists
-        type LevelGroups<'a> = std::collections::HashMap<
+        type LevelGroups<'a> = HashMap<
             usize,
             Vec<(
                 usize,
@@ -232,7 +254,7 @@ impl MD029OrderedListPrefix {
                 &'a crate::lint_context::ListItemInfo,
             )>,
         >;
-        let mut level_groups: LevelGroups = std::collections::HashMap::new();
+        let mut level_groups: LevelGroups = HashMap::new();
 
         for (line_num, line_info, list_item) in group {
             level_groups
@@ -249,6 +271,10 @@ impl MD029OrderedListPrefix {
             // Sort by line number
             items.sort_by_key(|(line_num, _, _)| *line_num);
 
+            if items.is_empty() {
+                continue;
+            }
+
             // Determine style for this group
             let detected_style = if let Some(doc_style) = document_wide_style.clone() {
                 Some(doc_style)
@@ -258,10 +284,10 @@ impl MD029OrderedListPrefix {
                 None
             };
 
-            // Check each item
+            // Check each item using the CommonMark start value
             for (idx, (line_num, line_info, list_item)) in items.iter().enumerate() {
                 if let Some(actual_num) = Self::parse_marker_number(&list_item.marker) {
-                    let expected_num = self.get_expected_number(idx, detected_style.clone());
+                    let expected_num = self.get_expected_number(idx, detected_style.clone(), start_value);
 
                     if actual_num != expected_num {
                         let marker_start = line_info.byte_offset + list_item.marker_column;
@@ -288,6 +314,14 @@ impl MD029OrderedListPrefix {
                             ListStyle::Ordered0 => "configured style 'ordered0'".to_string(),
                         };
 
+                        // Only provide auto-fix when:
+                        // 1. The list starts at 1 (default numbering), OR
+                        // 2. We're using explicit 'one' style (numbers are meaningless)
+                        // When start_value > 1, the user explicitly chose that number,
+                        // so auto-fixing would destroy their intent.
+                        let should_provide_fix =
+                            start_value == 1 || matches!(self.config.style, ListStyle::One | ListStyle::OneOne);
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             message: format!(
@@ -298,10 +332,14 @@ impl MD029OrderedListPrefix {
                             end_line: *line_num,
                             end_column: list_item.marker_column + number_len + 1,
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: marker_start..marker_start + number_len,
-                                replacement: expected_num.to_string(),
-                            }),
+                            fix: if should_provide_fix {
+                                Some(Fix {
+                                    range: marker_start..marker_start + number_len,
+                                    replacement: expected_num.to_string(),
+                                })
+                            } else {
+                                None
+                            },
                         });
                     }
                 }
@@ -332,9 +370,10 @@ impl Rule for MD029OrderedListPrefix {
 
         let mut warnings = Vec::new();
 
-        // Use pulldown-cmark's AST for authoritative list membership.
-        // This fixes issues where heuristic-based grouping incorrectly splits lists.
-        let line_to_list = Self::build_commonmark_list_membership(ctx.content);
+        // Use pulldown-cmark's AST for authoritative list membership and start values.
+        // This respects CommonMark's list start values (e.g., a list starting at 11
+        // expects items 11, 12, 13... - no violation there).
+        let (line_to_list, list_start_values) = Self::build_commonmark_list_membership(ctx.content);
         let list_groups = Self::group_items_by_commonmark_list(ctx, &line_to_list);
 
         if list_groups.is_empty() {
@@ -345,8 +384,8 @@ impl Rule for MD029OrderedListPrefix {
         let document_wide_style = if self.config.style == ListStyle::Consistent {
             // Collect ALL ordered items from ALL groups
             let mut all_document_items = Vec::new();
-            for group in &list_groups {
-                for (line_num, line_info, list_item) in group {
+            for (_, items) in &list_groups {
+                for (line_num, line_info, list_item) in items {
                     all_document_items.push((*line_num, *line_info, *list_item));
                 }
             }
@@ -360,9 +399,10 @@ impl Rule for MD029OrderedListPrefix {
             None
         };
 
-        // Process each CommonMark-defined list group
-        for group in list_groups {
-            self.check_commonmark_list_group(ctx, &group, &mut warnings, document_wide_style.clone());
+        // Process each CommonMark-defined list group with its start value
+        for (list_id, items) in list_groups {
+            let start_value = list_start_values.get(&list_id).copied().unwrap_or(1);
+            self.check_commonmark_list_group(ctx, &items, &mut warnings, document_wide_style.clone(), start_value);
         }
 
         // Sort warnings by line number for deterministic output
