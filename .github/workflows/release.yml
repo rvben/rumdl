@@ -116,8 +116,9 @@ jobs:
               mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility musllinux_1_2 --zig
               ;;
             *-gnu)
-              # Use manylinux2014 for standard glibc Linux distributions
-              mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux2014 --zig
+              # Use manylinux_2_28 for standard glibc Linux distributions
+              # (manylinux2014 doesn't support newer glibc symbols like __cxa_thread_atexit_impl)
+              mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux_2_28 --zig
               ;;
             *)
               # Native compilation for Windows and macOS
