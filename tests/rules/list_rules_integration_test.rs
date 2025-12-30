@@ -101,9 +101,9 @@ fn test_complex_nested_mixed_lists() {
 * Unordered list item
   1. Ordered nested item
   2. Another ordered nested item
+  4. Wrong number in same list (MD029 violation)
 + Mixed marker style (MD004 violation)
    * Wrong indent 3 spaces (MD005, MD007 violations)
-  5. Wrong ordered number (MD029 violation)
 * Back to proper unordered";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
