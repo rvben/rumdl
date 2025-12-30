@@ -342,9 +342,18 @@ impl Rule for MD057ExistingRelativeLinks {
             // Pre-collect lines to avoid repeated line iteration
             let lines: Vec<&str> = content.lines().collect();
 
+            // Track which lines we've already processed to avoid duplicates
+            // (ctx.links may have multiple entries for the same line, especially with malformed markdown)
+            let mut processed_lines = std::collections::HashSet::new();
+
             for link in &ctx.links {
                 let line_idx = link.line - 1;
                 if line_idx >= lines.len() {
+                    continue;
+                }
+
+                // Skip if we've already processed this line
+                if !processed_lines.insert(line_idx) {
                     continue;
                 }
 
@@ -386,6 +395,13 @@ impl Rule for MD057ExistingRelativeLinks {
 
                         // Skip empty URLs
                         if url.is_empty() {
+                            continue;
+                        }
+
+                        // Skip rustdoc intra-doc links (backtick-wrapped URLs)
+                        // These are Rust API references, not file paths
+                        // Example: [`f32::is_subnormal`], [`Vec::push`]
+                        if url.starts_with('`') && url.ends_with('`') {
                             continue;
                         }
 
@@ -576,8 +592,9 @@ impl Rule for MD057ExistingRelativeLinks {
             // Normalize the path (handle .., ., etc.)
             let target_path = normalize_path(&target_path);
 
-            // Check if the target file exists
-            let file_exists = workspace_index.contains_file(&target_path) || target_path.exists();
+            // Check if the target file exists, also trying markdown extensions for extensionless links
+            let file_exists =
+                workspace_index.contains_file(&target_path) || file_exists_or_markdown_extension(&target_path);
 
             if !file_exists {
                 // For .html/.htm links, check if a corresponding markdown source exists

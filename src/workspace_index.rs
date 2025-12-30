@@ -152,7 +152,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
                 let file_path = url_group.as_str().trim();
 
                 // Skip empty, external, template variables, absolute URL paths,
-                // framework aliases, or fragment-only URLs
+                // framework aliases, fragment-only URLs, or rustdoc intra-doc links
                 if file_path.is_empty()
                     || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
                     || file_path.starts_with("www.")
@@ -162,6 +162,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
                     || file_path.starts_with('/')
                     || file_path.starts_with('~')
                     || file_path.starts_with('@')
+                    || (file_path.starts_with('`') && file_path.ends_with('`'))
                 {
                     continue;
                 }

@@ -23,6 +23,7 @@
 ///   - Child
 /// ```
 use crate::filtered_lines::FilteredLinesExt;
+use crate::lint_context::is_horizontal_rule_line;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -65,6 +66,12 @@ impl Rule for MD069NoDuplicateListMarkers {
             let line = filtered_line.content;
 
             if let Some(caps) = DUPLICATE_MARKER_REGEX.captures(line) {
+                // Skip horizontal rules (e.g., "* * *", "- - -", "_ _ _")
+                // These are valid thematic breaks, not duplicate list markers
+                if is_horizontal_rule_line(line) {
+                    continue;
+                }
+
                 let indent = caps.get(1).map_or("", |m| m.as_str());
                 let first_marker = caps.get(2).map_or("", |m| m.as_str());
                 let spaces_after_first = caps.get(3).map_or("", |m| m.as_str());
@@ -139,6 +146,14 @@ impl Rule for MD069NoDuplicateListMarkers {
             }
 
             if let Some(caps) = DUPLICATE_MARKER_REGEX.captures(line) {
+                // Skip horizontal rules (e.g., "* * *", "- - -", "_ _ _")
+                // These are valid thematic breaks, not duplicate list markers
+                if is_horizontal_rule_line(line) {
+                    result.push_str(line);
+                    result.push('\n');
+                    continue;
+                }
+
                 let indent = caps.get(1).map_or("", |m| m.as_str());
                 let second_marker = caps.get(4).map_or("", |m| m.as_str());
                 let spaces_after_first = caps.get(3).map_or("", |m| m.as_str());
@@ -422,5 +437,43 @@ mod tests {
         let warnings = check(content);
         // Should match - - and leave "- text"
         assert_eq!(warnings.len(), 1);
+    }
+
+    // === Horizontal rule tests ===
+
+    #[test]
+    fn test_horizontal_rule_dash_no_false_positive() {
+        // - - - is a valid horizontal rule (thematic break), not duplicate markers
+        let warnings = check("- - -");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_horizontal_rule_asterisk_no_false_positive() {
+        // * * * is a valid horizontal rule
+        let warnings = check("* * *");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_horizontal_rule_many_dashes_no_false_positive() {
+        // - - - - - is still a valid horizontal rule
+        let warnings = check("- - - - -");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_horizontal_rule_with_spaces_no_false_positive() {
+        // Horizontal rules with extra spaces are still valid
+        let warnings = check("-  -  -");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_fix_preserves_horizontal_rules() {
+        // Horizontal rules should not be "fixed"
+        let content = "- - -\n* * *\n- - duplicate";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- - -\n* * *\n- duplicate");
     }
 }

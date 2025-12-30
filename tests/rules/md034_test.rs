@@ -1022,3 +1022,161 @@ fn test_www_urls_without_protocol() {
         "Message should contain the www URL"
     );
 }
+
+// =============================================================================
+// URL boundary detection tests
+// =============================================================================
+
+/// Test that URLs inside markdown links are not flagged (basic case)
+#[test]
+fn test_url_inside_markdown_link_not_flagged() {
+    let rule = MD034NoBareUrls;
+
+    let content = "[Link text](https://example.com)";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL inside markdown link should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test URL inside markdown link followed by text
+#[test]
+fn test_url_inside_markdown_link_with_trailing_text() {
+    let rule = MD034NoBareUrls;
+
+    let content = "See [here](https://example.com) for details.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL inside markdown link should NOT be flagged even with trailing text: {result:?}"
+    );
+}
+
+/// Test multiple markdown links on the same line
+#[test]
+fn test_multiple_markdown_links_same_line() {
+    let rule = MD034NoBareUrls;
+
+    let content = "[Link1](https://example.com) and [Link2](https://test.com) are both valid.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Multiple URLs inside markdown links should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test URL inside image syntax
+#[test]
+fn test_url_inside_image_not_flagged() {
+    let rule = MD034NoBareUrls;
+
+    let content = "![Alt text](https://example.com/image.png)";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL inside image syntax should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test URL inside nested parentheses (complex boundary)
+#[test]
+fn test_url_with_nested_parentheses_in_link() {
+    let rule = MD034NoBareUrls;
+
+    // Wikipedia-style URL inside a markdown link
+    let content = "[Rust](https://en.wikipedia.org/wiki/Rust_(programming_language))";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL with nested parens inside markdown link should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test that bare URLs outside links ARE still flagged
+#[test]
+fn test_bare_url_outside_link_still_flagged() {
+    let rule = MD034NoBareUrls;
+
+    let content = "Visit https://example.com for more info.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Bare URL outside markdown link SHOULD be flagged");
+    assert!(result[0].message.contains("https://example.com"));
+}
+
+/// Test mixed: markdown link and bare URL on same line
+#[test]
+fn test_markdown_link_and_bare_url_same_line() {
+    let rule = MD034NoBareUrls;
+
+    let content = "[Good link](https://example.com) but also https://bare.url here";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the bare URL, not the one in the markdown link
+    assert_eq!(result.len(), 1, "Should flag only the bare URL, got: {result:?}");
+    assert!(
+        result[0].message.contains("https://bare.url"),
+        "Should flag the bare URL, not the markdown link URL"
+    );
+}
+
+/// Test URL starting inside link construct (boundary edge case)
+#[test]
+fn test_url_starting_inside_link_boundary() {
+    let rule = MD034NoBareUrls;
+
+    // URL detection might find a URL that extends beyond the link boundary
+    // if the link has complex structure. The fix ensures we check if the URL
+    // *starts* inside the construct, not if it's entirely contained.
+    let content = "[Link](https://example.com/path)";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL starting inside link should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test URL in angle brackets (autolink) not flagged
+#[test]
+fn test_url_in_angle_brackets_not_flagged() {
+    let rule = MD034NoBareUrls;
+
+    let content = "Contact us at <https://example.com>";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL in angle brackets (autolink) should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test URL in reference definition not flagged
+#[test]
+fn test_url_in_reference_definition_boundary() {
+    let rule = MD034NoBareUrls;
+
+    let content = "[ref]: https://example.com\n\nSee [ref] for details.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL in reference definition should NOT be flagged: {result:?}"
+    );
+}

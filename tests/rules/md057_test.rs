@@ -504,3 +504,350 @@ fn test_query_parameters_stripped() {
         "Should warn about missing document.md"
     );
 }
+
+// =============================================================================
+// Extension-less links with fragments tests
+// =============================================================================
+
+/// Test that extension-less links with fragments resolve correctly when .md file exists
+#[test]
+fn test_extensionless_link_with_fragment_to_existing_md_file() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create docs/guide.md
+    let docs_dir = base_path.join("docs");
+    std::fs::create_dir_all(&docs_dir).unwrap();
+    File::create(docs_dir.join("guide.md"))
+        .unwrap()
+        .write_all(b"# Guide\n\n## Installation\n")
+        .unwrap();
+
+    let content = r#"
+# Test
+
+[Link to guide](docs/guide#installation)
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Should not warn about extension-less link when .md file exists: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test multiple extension-less link patterns
+#[test]
+fn test_extensionless_link_patterns() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create various files
+    File::create(base_path.join("readme.md"))
+        .unwrap()
+        .write_all(b"# Readme")
+        .unwrap();
+    File::create(base_path.join("CONTRIBUTING.md"))
+        .unwrap()
+        .write_all(b"# Contributing")
+        .unwrap();
+
+    let docs_dir = base_path.join("docs");
+    std::fs::create_dir_all(&docs_dir).unwrap();
+    File::create(docs_dir.join("api.md"))
+        .unwrap()
+        .write_all(b"# API")
+        .unwrap();
+
+    let content = r#"
+# Test Extension-less Links
+
+[Readme](readme#section)
+[Contributing](CONTRIBUTING#how-to)
+[API Docs](docs/api#methods)
+[Missing](missing#section)
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only warn about the missing file
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected 1 warning for missing file, got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(
+        result[0].message.contains("missing"),
+        "Expected warning about 'missing', got: {}",
+        result[0].message
+    );
+}
+
+/// Test extension-less links without fragments (should still work)
+#[test]
+fn test_extensionless_link_without_fragment() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    File::create(base_path.join("guide.md"))
+        .unwrap()
+        .write_all(b"# Guide")
+        .unwrap();
+
+    // Note: Extension-less links without fragments may or may not resolve
+    // depending on the file system and context. This test documents current behavior.
+    let content = "[Link](guide)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // With extension-less resolution, guide -> guide.md should work
+    assert!(
+        result.is_empty(),
+        "Extension-less link to existing .md file should resolve: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+// =============================================================================
+// Rustdoc backtick-wrapped URL tests
+// =============================================================================
+
+/// Test that rustdoc intra-doc links are not flagged
+#[test]
+fn test_rustdoc_backtick_links_not_flagged() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Rust Documentation
+
+See [`f32::is_subnormal`] for details on subnormal floats.
+
+Check [`Vec::push`] for adding elements.
+
+The [`Result::unwrap`] method panics on error.
+
+[`f32::is_subnormal`]: https://doc.rust-lang.org/std/primitive.f32.html#method.is_subnormal
+[`Vec::push`]: https://doc.rust-lang.org/std/vec/struct.Vec.html#method.push
+[`Result::unwrap`]: https://doc.rust-lang.org/std/result/enum.Result.html#method.unwrap
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Rustdoc backtick links should not be flagged: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test various rustdoc link patterns
+#[test]
+fn test_rustdoc_link_patterns() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Rustdoc Link Patterns
+
+- [`panic!`] - macro
+- [`Option`] - type
+- [`std::fmt`] - module
+- [`Iterator::next`] - trait method
+- [`String::new`] - associated function
+- [`Error`] - trait
+- [`Err`] - enum variant
+- [`Formatter`] - struct
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Rustdoc backtick reference links should not be flagged: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test that regular broken links are still flagged alongside rustdoc links
+#[test]
+fn test_rustdoc_links_mixed_with_regular_links() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    File::create(base_path.join("existing.md"))
+        .unwrap()
+        .write_all(b"# Existing")
+        .unwrap();
+
+    let content = r#"
+# Mixed Links
+
+See [`Vec::push`] for details.
+
+[Valid link](existing.md)
+[Broken link](missing.md)
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only warn about missing.md, not rustdoc links or existing.md
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected 1 warning, got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(
+        result[0].message.contains("missing.md"),
+        "Expected warning about missing.md"
+    );
+}
+
+/// Test inline rustdoc links (not reference style)
+#[test]
+fn test_rustdoc_inline_backtick_links() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Inline Rustdoc Links
+
+Check [`Option`](https://doc.rust-lang.org/std/option/enum.Option.html) for details.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Inline rustdoc links with external URLs should not be flagged: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+// =============================================================================
+// Duplicate warning prevention tests
+// =============================================================================
+
+/// Test that malformed links don't produce duplicate warnings
+#[test]
+fn test_no_duplicate_warnings_for_malformed_links() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Content with malformed link that could potentially match multiple patterns
+    let content = r#"
+# Test
+
+[Broken link](missing.md)
+[Another broken](also-missing.md)
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Count warnings per line
+    let mut line_counts = std::collections::HashMap::new();
+    for warning in &result {
+        *line_counts.entry(warning.line).or_insert(0) += 1;
+    }
+
+    // Each line should have at most one warning
+    for (line, count) in &line_counts {
+        assert_eq!(*count, 1, "Line {line} has {count} warnings, expected at most 1");
+    }
+}
+
+/// Test that reference-style links don't produce duplicate warnings
+#[test]
+fn test_no_duplicate_warnings_for_reference_links() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Test
+
+[Link text][ref]
+[Another][ref]
+
+[ref]: missing.md
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not have duplicate warnings for the same reference definition
+    let messages: Vec<_> = result.iter().map(|w| &w.message).collect();
+
+    // Allow multiple warnings if they're on different lines, but not duplicates
+    assert!(
+        result.len() <= 3,
+        "Too many warnings, possible duplicates: {messages:?}"
+    );
+}
+
+/// Test complex document with multiple link types doesn't produce duplicates
+#[test]
+fn test_complex_document_no_duplicates() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    File::create(base_path.join("exists.md"))
+        .unwrap()
+        .write_all(b"# Exists")
+        .unwrap();
+
+    let content = r#"
+# Complex Document
+
+[Valid](exists.md)
+[Missing](missing.md)
+[Fragment only](#section)
+[External](https://example.com)
+[Missing with fragment](missing.md#section)
+
+## References
+
+[ref1]: missing.md
+[ref2]: exists.md
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Count warnings per file reference
+    let mut file_warnings: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for warning in &result {
+        // Extract the file path from the warning message
+        if warning.message.contains("missing.md") {
+            *file_warnings.entry("missing.md".to_string()).or_insert(0) += 1;
+        }
+    }
+
+    // missing.md appears multiple times in content but shouldn't produce excessive warnings
+    let missing_count = file_warnings.get("missing.md").unwrap_or(&0);
+    assert!(
+        *missing_count <= 3,
+        "Too many warnings for missing.md ({missing_count}), possible duplicates"
+    );
+}

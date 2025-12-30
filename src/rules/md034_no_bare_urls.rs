@@ -273,7 +273,7 @@ impl MD034NoBareUrls {
         }
 
         // Process found URLs
-        for &(start, end, ref url_str) in buffers.urls_found.iter() {
+        for &(start, _end, ref url_str) in buffers.urls_found.iter() {
             // Skip custom protocols
             if get_cached_regex(CUSTOM_PROTOCOL_PATTERN_STR)
                 .map(|re| re.is_match(url_str))
@@ -283,16 +283,19 @@ impl MD034NoBareUrls {
             }
 
             // Check if this URL is inside a markdown link, angle bracket, or image
+            // We check if the URL starts within a construct, not if it's entirely contained.
+            // This handles cases where URL detection may include trailing characters
+            // that extend past the construct boundary (e.g., parentheses).
             let mut is_inside_construct = false;
             for &(link_start, link_end) in buffers.markdown_link_ranges.iter() {
-                if start >= link_start && end <= link_end {
+                if start >= link_start && start < link_end {
                     is_inside_construct = true;
                     break;
                 }
             }
 
             for &(img_start, img_end) in buffers.image_ranges.iter() {
-                if start >= img_start && end <= img_end {
+                if start >= img_start && start < img_end {
                     is_inside_construct = true;
                     break;
                 }
