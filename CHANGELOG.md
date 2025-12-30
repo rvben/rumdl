@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.207] - 2025-12-30
+
+### Added
+
+- **CLI: Add `--flavor` option to override markdown flavor**
+  - New CLI flag allows overriding the markdown flavor for a single run
+  - Options: `commonmark`, `gfm` (GitHub Flavored Markdown)
+  - Useful for testing files against different markdown specifications
+
+### Fixed
+
+- **MD029: Respect CommonMark list start values and preserve user intent** (fixes #247)
+  - Ordered lists starting at values other than 1 (e.g., `11.`, `12.`, `13.`) are now validated correctly
+  - Auto-fix no longer destroys user intent by changing `11.` to `1.` in properly numbered lists
+  - Lists with `start` attribute > 1 will warn but not auto-fix, preserving semantic numbering
+
+- **WASM: Convert byte-based columns to character offsets for JavaScript**
+  - Column positions in WASM output now use character offsets instead of byte offsets
+  - Fixes incorrect highlighting in editors when files contain multi-byte UTF-8 characters
+
+### Changed
+
+- **Docs: Add mise as an installation option**
+  - README now includes mise (formerly rtx) as an alternative installation method
+
 ## [0.0.206] - 2025-12-28
 
 ### Fixed
