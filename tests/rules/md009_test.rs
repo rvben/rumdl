@@ -358,3 +358,235 @@ fn test_md009_nested_blockquotes() {
     assert_eq!(result.len(), 1); // Only line 2 with 3 spaces
     assert_eq!(result[0].line, 2);
 }
+
+// ============================================================================
+// Issue #248: Multi-byte character fix range tests
+// These tests verify that fix ranges are correctly calculated for lines
+// containing multi-byte UTF-8 characters (like €, 你, 🎉)
+// ============================================================================
+
+#[test]
+fn test_md009_euro_sign_fix_range() {
+    // Issue #248: Euro sign (€) is 3 bytes in UTF-8
+    // The fix range must use character positions, not byte positions
+    let rule = MD009TrailingSpaces::new(2, true); // strict mode to catch all trailing spaces
+    let content = "- 1€ expenses \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].line, 1);
+
+    // Verify the fix range produces correct output when applied
+    let fix = warnings[0].fix.as_ref().expect("Should have fix");
+
+    // "- 1€ expenses " = 14 characters, 16 bytes (€ = 3 bytes)
+    // Trailing space is at character position 14 (byte position 16)
+    // Fix range should be 15..16 (byte range for the trailing space)
+    assert_eq!(fix.range.start, 15);
+    assert_eq!(fix.range.end, 16);
+
+    // Verify the actual fix works correctly
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "- 1€ expenses\n");
+}
+
+#[test]
+fn test_md009_multiple_euro_signs_fix_range() {
+    let rule = MD009TrailingSpaces::new(2, true);
+    let content = "€100 + €50 = €150   \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].line, 1);
+    assert_eq!(warnings[0].message, "3 trailing spaces found");
+
+    let fix = warnings[0].fix.as_ref().expect("Should have fix");
+    // "€100 + €50 = €150" = 17 characters, 23 bytes (3 € signs × 3 bytes each = 9 extra bytes)
+    // 3 trailing spaces at byte positions 23, 24, 25
+    assert_eq!(fix.range.start, 23);
+    assert_eq!(fix.range.end, 26);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "€100 + €50 = €150\n");
+}
+
+#[test]
+fn test_md009_cjk_characters_fix_range() {
+    let rule = MD009TrailingSpaces::new(2, true);
+    // Chinese: 你好世界 = 4 characters, 12 bytes (3 bytes each)
+    let content = "Hello 你好世界   \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+
+    let fix = warnings[0].fix.as_ref().expect("Should have fix");
+    // "Hello 你好世界" = 10 characters, 18 bytes
+    // 3 trailing spaces at byte positions 18, 19, 20
+    assert_eq!(fix.range.start, 18);
+    assert_eq!(fix.range.end, 21);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Hello 你好世界\n");
+}
+
+#[test]
+fn test_md009_emoji_fix_range() {
+    let rule = MD009TrailingSpaces::new(2, true);
+    // Emoji 🎉 is 4 bytes in UTF-8
+    let content = "Party 🎉🎉🎉   \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+
+    let fix = warnings[0].fix.as_ref().expect("Should have fix");
+    // "Party 🎉🎉🎉" = 9 characters, 18 bytes (3 emoji × 4 bytes = 12, + 6 ASCII)
+    // 3 trailing spaces at byte positions 18, 19, 20
+    assert_eq!(fix.range.start, 18);
+    assert_eq!(fix.range.end, 21);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Party 🎉🎉🎉\n");
+}
+
+#[test]
+fn test_md009_mixed_multibyte_fix_range() {
+    let rule = MD009TrailingSpaces::new(2, true);
+    // Mix of ASCII, Euro, CJK, and emoji
+    let content = "Price: €100 你好 🎉  \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].message, "2 trailing spaces found");
+
+    // Verify the fix works correctly
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Price: €100 你好 🎉\n");
+}
+
+#[test]
+fn test_md009_issue_248_exact_repro() {
+    // Exact reproduction of issue #248
+    let rule = MD009TrailingSpaces::new(2, true);
+    let content = "- foobar \n- 1€ expenses \n\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    // Line 1: 1 trailing space -> flagged
+    // Line 2: 1 trailing space after multi-byte char -> flagged
+    assert_eq!(warnings.len(), 2);
+
+    // Verify both lines have valid fix ranges
+    for warning in &warnings {
+        let fix = warning.fix.as_ref().expect("Should have fix");
+        assert!(fix.range.start < fix.range.end, "Fix range should not be empty");
+    }
+
+    // Verify the fix works correctly
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "- foobar\n- 1€ expenses\n\n");
+}
+
+#[test]
+fn test_md009_warning_based_fix_multibyte() {
+    // Test that warning-based fixes (used by LSP) work correctly with multi-byte chars
+    use rumdl_lib::utils::fix_utils::apply_warning_fixes;
+
+    let rule = MD009TrailingSpaces::new(2, true);
+    let content = "- 1€ expenses \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+
+    // Apply warning-based fixes (simulates LSP formatting)
+    let fixed = apply_warning_fixes(content, &warnings).expect("Should apply fixes");
+    assert_eq!(fixed, "- 1€ expenses\n");
+}
+
+#[test]
+fn test_md009_multiple_lines_multibyte_fix() {
+    // Test multiple lines with multi-byte characters
+    use rumdl_lib::utils::fix_utils::apply_warning_fixes;
+
+    let rule = MD009TrailingSpaces::new(2, true);
+    let content = "€ price  \n¥ yen   \n£ pound \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 3);
+
+    // Apply warning-based fixes
+    let fixed = apply_warning_fixes(content, &warnings).expect("Should apply fixes");
+    assert_eq!(fixed, "€ price\n¥ yen\n£ pound\n");
+}
+
+#[test]
+fn test_md009_column_positions_multibyte() {
+    // Verify column positions are character-based, not byte-based
+    let rule = MD009TrailingSpaces::new(2, true);
+    let content = "€€€   \n"; // 3 euro signs (9 bytes) + 3 spaces
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+
+    // Column should be character position 4 (after 3 euro signs), not byte position 10
+    assert_eq!(warnings[0].column, 4);
+    // End column should be character position 7 (after 3 trailing spaces)
+    assert_eq!(warnings[0].end_column, 7);
+}
+
+#[test]
+fn test_md009_korean_fix_range() {
+    // Korean characters (3 bytes each in UTF-8)
+    let rule = MD009TrailingSpaces::new(2, true);
+    let content = "안녕하세요   \n"; // "Hello" in Korean + 3 trailing spaces
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+
+    let fix = warnings[0].fix.as_ref().expect("Should have fix");
+    // "안녕하세요" = 5 characters, 15 bytes
+    // 3 trailing spaces at byte positions 15, 16, 17
+    assert_eq!(fix.range.start, 15);
+    assert_eq!(fix.range.end, 18);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "안녕하세요\n");
+}
+
+#[test]
+fn test_md009_combining_characters_fix() {
+    // Test with combining characters (e.g., é as e + combining acute)
+    let rule = MD009TrailingSpaces::new(2, true);
+    // Using precomposed é (U+00E9, 2 bytes) vs decomposed e + ́ (1 + 2 bytes)
+    let content = "café   \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "café\n");
+}
+
+#[test]
+fn test_md009_list_with_multibyte_marker_content() {
+    // Test list items where the content after marker contains multi-byte chars
+    let rule = MD009TrailingSpaces::new(2, true);
+    let content = "- 价格: €50   \n- 價格: ¥100  \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 2);
+
+    // Verify fixes work
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "- 价格: €50\n- 價格: ¥100\n");
+}

@@ -152,7 +152,7 @@ impl Rule for MD009TrailingSpaces {
                 fix: Some(Fix {
                     range: _line_index.line_col_to_byte_range_with_length(
                         line_num + 1,
-                        trimmed.len() + 1,
+                        trimmed.chars().count() + 1,
                         trailing_spaces,
                     ),
                     replacement: if !self.config.strict
