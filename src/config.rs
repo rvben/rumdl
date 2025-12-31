@@ -2346,7 +2346,14 @@ impl SourcedConfig<ConfigLoaded> {
     /// Finds project root by walking up from start_dir looking for .git directory.
     /// Falls back to start_dir if no .git found.
     fn find_project_root_from(start_dir: &Path) -> std::path::PathBuf {
-        let mut current = start_dir.to_path_buf();
+        // Convert relative paths to absolute to ensure correct traversal
+        let mut current = if start_dir.is_relative() {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(start_dir))
+                .unwrap_or_else(|_| start_dir.to_path_buf())
+        } else {
+            start_dir.to_path_buf()
+        };
         const MAX_DEPTH: usize = 100;
 
         for _ in 0..MAX_DEPTH {
