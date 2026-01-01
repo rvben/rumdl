@@ -111,8 +111,27 @@ fn text_ends_with_abbreviation(text: &str, abbreviations: &HashSet<String>) -> b
     abbreviations.contains(&last_word.to_lowercase())
 }
 
+/// Check if a character is CJK sentence-ending punctuation
+/// These include: 。(ideographic full stop), ！(fullwidth exclamation), ？(fullwidth question)
+fn is_cjk_sentence_ending(c: char) -> bool {
+    matches!(c, '。' | '！' | '？')
+}
+
+/// Check if a character is a CJK character (Chinese, Japanese, Korean)
+fn is_cjk_char(c: char) -> bool {
+    // CJK Unified Ideographs and common extensions
+    matches!(c,
+        '\u{4E00}'..='\u{9FFF}' |   // CJK Unified Ideographs
+        '\u{3400}'..='\u{4DBF}' |   // CJK Unified Ideographs Extension A
+        '\u{3040}'..='\u{309F}' |   // Hiragana
+        '\u{30A0}'..='\u{30FF}' |   // Katakana
+        '\u{AC00}'..='\u{D7AF}'     // Hangul Syllables
+    )
+}
+
 /// Detect if a character position is a sentence boundary
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
+/// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
 fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>) -> bool {
     let chars: Vec<char> = text.chars().collect();
 
@@ -120,19 +139,67 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         return false;
     }
 
-    // Check for sentence-ending punctuation
     let c = chars[pos];
+    let next_char = chars[pos + 1];
+
+    // Check for CJK sentence-ending punctuation (。, ！, ？)
+    // CJK punctuation doesn't require space or uppercase after it
+    if is_cjk_sentence_ending(c) {
+        // Skip any trailing emphasis markers
+        let mut after_punct_pos = pos + 1;
+        while after_punct_pos < chars.len() && (chars[after_punct_pos] == '*' || chars[after_punct_pos] == '_') {
+            after_punct_pos += 1;
+        }
+
+        // Skip whitespace
+        while after_punct_pos < chars.len() && chars[after_punct_pos].is_whitespace() {
+            after_punct_pos += 1;
+        }
+
+        // Check if we have more content (any non-whitespace)
+        if after_punct_pos >= chars.len() {
+            return false;
+        }
+
+        // Skip leading emphasis markers
+        while after_punct_pos < chars.len() && (chars[after_punct_pos] == '*' || chars[after_punct_pos] == '_') {
+            after_punct_pos += 1;
+        }
+
+        if after_punct_pos >= chars.len() {
+            return false;
+        }
+
+        // For CJK, we accept any character as the start of the next sentence
+        // (no uppercase requirement, since CJK doesn't have case)
+        return true;
+    }
+
+    // Check for ASCII sentence-ending punctuation
     if c != '.' && c != '!' && c != '?' {
         return false;
     }
 
-    // Must be followed by at least one space
-    if chars[pos + 1] != ' ' {
+    // Must be followed by space, or by emphasis marker followed by space (end of emphasis)
+    let (_space_pos, after_space_pos) = if next_char == ' ' {
+        // Normal case: punctuation followed by space
+        (pos + 1, pos + 2)
+    } else if (next_char == '*' || next_char == '_') && pos + 2 < chars.len() && chars[pos + 2] == ' ' {
+        // Sentence ends with emphasis: "sentence.* " or "sentence._ "
+        (pos + 2, pos + 3)
+    } else if (next_char == '*' || next_char == '_')
+        && pos + 3 < chars.len()
+        && chars[pos + 2] == next_char
+        && chars[pos + 3] == ' '
+    {
+        // Sentence ends with bold: "sentence.** " or "sentence.__ "
+        (pos + 3, pos + 4)
+    } else {
         return false;
-    }
+    };
 
-    // Skip all whitespace after the punctuation to find the start of the next sentence
-    let mut next_char_pos = pos + 2;
+    // Skip all whitespace after the space to find the start of the next sentence
+    let mut next_char_pos = after_space_pos;
     while next_char_pos < chars.len() && chars[next_char_pos].is_whitespace() {
         next_char_pos += 1;
     }
@@ -142,8 +209,20 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         return false;
     }
 
-    // Next character after space(s) must be uppercase (new sentence indicator)
-    if !chars[next_char_pos].is_uppercase() {
+    // Skip leading emphasis markers to find the actual first letter
+    let mut first_letter_pos = next_char_pos;
+    while first_letter_pos < chars.len() && (chars[first_letter_pos] == '*' || chars[first_letter_pos] == '_') {
+        first_letter_pos += 1;
+    }
+
+    // Check if we reached the end after skipping emphasis
+    if first_letter_pos >= chars.len() {
+        return false;
+    }
+
+    // First character of next sentence must be uppercase or CJK
+    let first_char = chars[first_letter_pos];
+    if !first_char.is_uppercase() && !is_cjk_char(first_char) {
         return false;
     }
 
@@ -156,8 +235,8 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         }
 
         // Check for decimal numbers (e.g., "3.14")
-        // Make sure to check if next_char_pos is within bounds
-        if chars[pos - 1].is_numeric() && next_char_pos < chars.len() && chars[next_char_pos].is_numeric() {
+        // Make sure to check if first_letter_pos is within bounds
+        if chars[pos - 1].is_numeric() && first_letter_pos < chars.len() && chars[first_letter_pos].is_numeric() {
             return false;
         }
     }
@@ -187,11 +266,18 @@ fn split_into_sentences_with_set(text: &str, abbreviations: &HashSet<String>) ->
         current_sentence.push(c);
 
         if is_sentence_boundary(text, pos, abbreviations) {
-            // Include the space after sentence if it exists
+            // Consume any trailing emphasis markers (they belong to the current sentence)
+            while chars.peek() == Some(&'*') || chars.peek() == Some(&'_') {
+                current_sentence.push(chars.next().unwrap());
+                pos += 1;
+            }
+
+            // Consume the space after the sentence
             if chars.peek() == Some(&' ') {
                 chars.next();
                 pos += 1;
             }
+
             sentences.push(current_sentence.trim().to_string());
             current_sentence.clear();
         }
@@ -1005,13 +1091,35 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                 }
                 "italic" => {
                     // Check for italic text *text*
-                    if let Some(italic_end) = remaining[1..].find('*') {
-                        let italic_text = &remaining[1..1 + italic_end];
+                    // Must find closing * that isn't part of ** (bold)
+                    let search_text = &remaining[1..];
+                    let mut italic_end = None;
+                    let chars: Vec<char> = search_text.chars().collect();
+                    let mut i = 0;
+                    while i < chars.len() {
+                        if chars[i] == '*' {
+                            // Check if this is part of ** (bold marker)
+                            let is_double =
+                                (i + 1 < chars.len() && chars[i + 1] == '*') || (i > 0 && chars[i - 1] == '*');
+                            if !is_double {
+                                italic_end = Some(i);
+                                break;
+                            }
+                            // Skip ** pairs
+                            if i + 1 < chars.len() && chars[i + 1] == '*' {
+                                i += 2;
+                                continue;
+                            }
+                        }
+                        i += 1;
+                    }
+                    if let Some(end) = italic_end {
+                        let italic_text = &remaining[1..1 + end];
                         elements.push(Element::Italic {
                             content: italic_text.to_string(),
                             underscore: false,
                         });
-                        remaining = &remaining[1 + italic_end + 1..];
+                        remaining = &remaining[1 + end + 1..];
                     } else {
                         // No closing *, treat as text
                         elements.push(Element::Text("*".to_string()));
@@ -1020,13 +1128,35 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                 }
                 "italic_underscore" => {
                     // Check for italic text _text_
-                    if let Some(italic_end) = remaining[1..].find('_') {
-                        let italic_text = &remaining[1..1 + italic_end];
+                    // Must find closing _ that isn't part of __ (bold)
+                    let search_text = &remaining[1..];
+                    let mut italic_end = None;
+                    let chars: Vec<char> = search_text.chars().collect();
+                    let mut i = 0;
+                    while i < chars.len() {
+                        if chars[i] == '_' {
+                            // Check if this is part of __ (bold marker)
+                            let is_double =
+                                (i + 1 < chars.len() && chars[i + 1] == '_') || (i > 0 && chars[i - 1] == '_');
+                            if !is_double {
+                                italic_end = Some(i);
+                                break;
+                            }
+                            // Skip __ pairs
+                            if i + 1 < chars.len() && chars[i + 1] == '_' {
+                                i += 2;
+                                continue;
+                            }
+                        }
+                        i += 1;
+                    }
+                    if let Some(end) = italic_end {
+                        let italic_text = &remaining[1..1 + end];
                         elements.push(Element::Italic {
                             content: italic_text.to_string(),
                             underscore: true,
                         });
-                        remaining = &remaining[1 + italic_end + 1..];
+                        remaining = &remaining[1 + end + 1..];
                     } else {
                         // No closing _, treat as text
                         elements.push(Element::Text("_".to_string()));

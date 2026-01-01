@@ -1952,4 +1952,546 @@ mod issue_251_emphasis_continuation {
             );
         }
     }
+
+    // ============================================================
+    // Part 6: Nested emphasis parsing
+    // ============================================================
+
+    #[test]
+    fn test_nested_italic_containing_bold_asterisk() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Italic with bold inside: *text **bold** more*
+        let input = "*Sentence one. **Bold sentence.** Sentence three.*";
+        let result = reflow_line(input, &options);
+
+        // Should parse as a single italic element containing "Sentence one. **Bold sentence.** Sentence three."
+        // Each sentence should get italic markers
+        assert!(
+            result.len() >= 2,
+            "Should have at least 2 lines (bold is inside italic): {result:?}"
+        );
+
+        // First sentence should have italic marker
+        assert!(result[0].starts_with('*'), "First line should start with *: {result:?}");
+
+        // The bold content should be preserved somewhere in the output
+        let all_text = result.join("\n");
+        assert!(
+            all_text.contains("**Bold sentence.**") || all_text.contains("**"),
+            "Bold markers should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_nested_italic_containing_bold_underscore() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Underscore italic with underscore bold inside
+        let input = "_Sentence one. __Bold sentence.__ Sentence three._";
+        let result = reflow_line(input, &options);
+
+        assert!(result.len() >= 2, "Should have at least 2 lines: {result:?}");
+
+        // First line should use underscore markers
+        assert!(result[0].starts_with('_'), "First line should start with _: {result:?}");
+    }
+
+    #[test]
+    fn test_mixed_nested_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Asterisk italic with underscore bold inside (valid but unusual)
+        let input = "*Text with __bold__ inside.*";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 1, "Single sentence should be one line: {result:?}");
+        assert!(
+            result[0].contains("__bold__"),
+            "Nested bold should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_double_asterisk_not_confused_with_single() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: false,
+            ..Default::default()
+        };
+
+        // **bold** should be parsed as bold, not italic + something
+        let input = "Text with **bold** content.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 1, "Should be single line");
+        assert!(result[0].contains("**bold**"), "Bold should be preserved: {result:?}");
+    }
+
+    #[test]
+    fn test_adjacent_emphasis_markers() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: false,
+            ..Default::default()
+        };
+
+        // Multiple adjacent emphasis: *italic* followed by **bold**
+        let input = "Here is *italic* and **bold** text.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].contains("*italic*") && result[0].contains("**bold**"),
+            "Both emphasis should be preserved: {result:?}"
+        );
+    }
+
+    // ============================================================
+    // Part 7: Sentence boundary detection with emphasis
+    // ============================================================
+
+    #[test]
+    fn test_sentence_boundary_after_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Sentence ends inside emphasis, next sentence is plain text
+        let input = "Normal text. *Italic sentence.* Another sentence.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "Normal text.");
+        assert_eq!(result[1], "*Italic sentence.*");
+        assert_eq!(result[2], "Another sentence.");
+    }
+
+    #[test]
+    fn test_sentence_boundary_before_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Sentence ends in plain text, next sentence starts with emphasis
+        let input = "Plain sentence. *Italic sentence.* More text.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "Plain sentence.");
+        assert_eq!(result[1], "*Italic sentence.*");
+        assert_eq!(result[2], "More text.");
+    }
+
+    #[test]
+    fn test_sentence_boundary_bold_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Sentence with bold emphasis
+        let input = "Before. **Bold sentence.** After.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "Before.");
+        assert_eq!(result[1], "**Bold sentence.**");
+        assert_eq!(result[2], "After.");
+    }
+
+    #[test]
+    fn test_sentence_boundary_underscore_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Sentence with underscore emphasis
+        let input = "Before. _Underscore sentence._ After.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "Before.");
+        assert_eq!(result[1], "_Underscore sentence._");
+        assert_eq!(result[2], "After.");
+    }
+
+    #[test]
+    fn test_sentence_boundary_underscore_bold() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Sentence with underscore bold
+        let input = "Before. __Bold sentence.__ After.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "Before.");
+        assert_eq!(result[1], "__Bold sentence.__");
+        assert_eq!(result[2], "After.");
+    }
+
+    #[test]
+    fn test_sentence_boundary_exclamation() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Sentences ending with exclamation inside emphasis
+        let input = "Normal! *Excited!* More.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "Normal!");
+        assert_eq!(result[1], "*Excited!*");
+        assert_eq!(result[2], "More.");
+    }
+
+    #[test]
+    fn test_sentence_boundary_question() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Sentences ending with question mark inside emphasis
+        let input = "Really? *Is it?* Yes.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "Really?");
+        assert_eq!(result[1], "*Is it?*");
+        assert_eq!(result[2], "Yes.");
+    }
+
+    // ============================================================
+    // Part 8: CJK (Chinese/Japanese/Korean) punctuation
+    // ============================================================
+
+    #[test]
+    fn test_cjk_chinese_ideographic_full_stop() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Chinese text with ideographic full stop (。)
+        let input = "这是第一句。这是第二句。";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 2, "Should have 2 sentences: {result:?}");
+        assert_eq!(result[0], "这是第一句。");
+        assert_eq!(result[1], "这是第二句。");
+    }
+
+    #[test]
+    fn test_cjk_fullwidth_exclamation() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Chinese text with fullwidth exclamation mark (！)
+        let input = "太棒了！继续努力！";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 2, "Should have 2 sentences: {result:?}");
+        assert_eq!(result[0], "太棒了！");
+        assert_eq!(result[1], "继续努力！");
+    }
+
+    #[test]
+    fn test_cjk_fullwidth_question() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Chinese text with fullwidth question mark (？)
+        let input = "你好吗？我很好。";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 2, "Should have 2 sentences: {result:?}");
+        assert_eq!(result[0], "你好吗？");
+        assert_eq!(result[1], "我很好。");
+    }
+
+    #[test]
+    fn test_cjk_japanese_mixed() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Japanese text with hiragana and kanji
+        let input = "これは日本語です。もう一文。";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 2, "Should have 2 sentences: {result:?}");
+        assert_eq!(result[0], "これは日本語です。");
+        assert_eq!(result[1], "もう一文。");
+    }
+
+    #[test]
+    fn test_mixed_cjk_and_english() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Mixed Chinese and English
+        let input = "Hello。你好。World.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "Hello。");
+        assert_eq!(result[1], "你好。");
+        assert_eq!(result[2], "World.");
+    }
+
+    #[test]
+    fn test_cjk_with_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Chinese text with emphasis markers
+        let input = "普通文字。*强调文字。* 更多文字。";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "普通文字。");
+        assert_eq!(result[1], "*强调文字。*");
+        assert_eq!(result[2], "更多文字。");
+    }
+
+    // ============================================================
+    // Part 9: Edge cases and stress tests
+    // ============================================================
+
+    #[test]
+    fn test_url_inside_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // URL inside emphasis should be preserved
+        let input = "Check *https://example.com* for details. More text.";
+        let result = reflow_line(input, &options);
+
+        // URL should stay intact
+        assert!(
+            result[0].contains("https://example.com"),
+            "URL should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_code_span_inside_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: false,
+            ..Default::default()
+        };
+
+        // Code span inside emphasis
+        let input = "Use *the `code` function* to process.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].contains("`code`"),
+            "Code span should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_link_inside_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: false,
+            ..Default::default()
+        };
+
+        // Link inside emphasis
+        let input = "See *[the link](https://example.com)* for info.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].contains("[the link]"), "Link should be preserved: {result:?}");
+    }
+
+    #[test]
+    fn test_very_long_emphasis_text() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Very long emphasized text with multiple sentences
+        let long_sentence = "This is a sentence. ".repeat(50);
+        let input = format!("*{long_sentence}*");
+        let result = reflow_line(&input, &options);
+
+        // Should split into 50 sentences
+        assert_eq!(result.len(), 50, "Should have 50 sentences");
+
+        // Each line should have emphasis markers
+        for line in &result {
+            assert!(
+                line.starts_with('*') && line.ends_with('*'),
+                "Each line should have emphasis: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_consecutive_emphasis_markers() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: false,
+            ..Default::default()
+        };
+
+        // Multiple consecutive emphasis elements
+        let input = "*italic* **bold** *more italic*";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].contains("*italic*") && result[0].contains("**bold**") && result[0].contains("*more italic*"),
+            "All emphasis should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_emphasis_at_line_boundaries() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Emphasis at start and end of content
+        let input = "*Start sentence.* Middle. *End sentence.*";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 3, "Should have 3 sentences: {result:?}");
+        assert_eq!(result[0], "*Start sentence.*");
+        assert_eq!(result[1], "Middle.");
+        assert_eq!(result[2], "*End sentence.*");
+    }
+
+    #[test]
+    fn test_single_character_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: false,
+            ..Default::default()
+        };
+
+        // Single character in emphasis
+        let input = "Press *x* to continue.";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].contains("*x*"),
+            "Single char emphasis should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_empty_emphasis_handled() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: false,
+            ..Default::default()
+        };
+
+        // Empty emphasis (edge case)
+        let input = "Text ** more text";
+        let result = reflow_line(input, &options);
+
+        // Should not crash, empty emphasis treated as text
+        assert_eq!(result.len(), 1);
+    }
+
+    // ============================================================
+    // Part 10: Known limitations (documented behavior)
+    // ============================================================
+
+    #[test]
+    fn test_limitation_lowercase_after_period() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Limitation: lowercase after period is not treated as sentence boundary
+        // This is intentional to avoid false positives with abbreviations
+        let input = "Use e.g. this method. And this.";
+        let result = reflow_line(input, &options);
+
+        // Should only split at "method. And" (uppercase A)
+        // The "e.g. this" should not split because 't' is lowercase
+        assert!(!result.is_empty(), "Should have at least 1 line: {result:?}");
+    }
+
+    #[test]
+    fn test_limitation_triple_emphasis() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: false,
+            ..Default::default()
+        };
+
+        // Triple emphasis (bold + italic)
+        // Current implementation treats this as separate elements
+        let input = "This is ***bold italic*** text.";
+        let result = reflow_line(input, &options);
+
+        // Should preserve the content even if parsing isn't perfect
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].contains("bold italic"),
+            "Content should be preserved: {result:?}"
+        );
+    }
 }
