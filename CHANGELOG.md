@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.208] - 2026-01-01
+
+### Fixed
+
+- **MD007: Resolve false positives on nested unordered lists in ordered lists** (fixes #247)
+  - Nested unordered lists inside ordered lists now calculate expected indent based on parent's content column
+  - Fixes ping-pong bug where MD007 fix would then trigger MD005, destroying nesting structure
+
+- **MD009: Correct byte offset calculation for multi-byte characters**
+  - Column positions now correctly account for UTF-8 multi-byte characters
+  - Fixes incorrect warning positions when lines contain non-ASCII characters
+
+- **MD027: Continue HTML block detection until blank line after closing tag**
+  - CommonMark type 6 HTML blocks (like `<table>`) now correctly extend until the first blank line
+  - Prevents false positives for blockquote indentation inside HTML tables
+
+- **MD034: Resolve false positives for URLs in angle brackets and parentheses**
+  - URLs inside angle brackets (`<https://example.com>`) no longer trigger bare URL warnings
+  - URLs inside parentheses with descriptions are properly handled
+
+- **MD037: Mask inline math spans before emphasis detection**
+  - Asterisks inside inline math (`$p * q$`) no longer interfere with emphasis detection
+  - Fixes false negatives where valid `* spaced emphasis *` was not detected
+
+- **MD051: URL-decode CJK fragments before anchor matching**
+  - Japanese, Korean, and Chinese heading fragments are now properly matched
+  - URL-encoded fragments (e.g., `#%E6%97%A5%E6%9C%AC%E8%AA%9E`) correctly resolve to decoded anchors
+
+- **MD057: Resolve false positives for email addresses and file references**
+  - Email-style patterns and file references with @ symbols no longer trigger GitHub username warnings
+
+- **MD069: Resolve false positives for nested strikethrough**
+  - Properly handles strikethrough markers that appear in nested contexts
+
+- **Config: Handle relative paths in find_project_root_from**
+  - Configuration discovery now works correctly with relative file paths
+
+- **Reflow: Preserve Hugo shortcodes as atomic elements**
+  - Hugo shortcodes (`{{< >}}` and `{{% %}}`) are no longer broken across lines during text reflow
+
 ## [0.0.207] - 2025-12-30
 
 ### Added
