@@ -1679,3 +1679,147 @@ indent = 4
         );
     }
 }
+
+// Tests for Issue #247: MD007 false positives on nested unordered lists in ordered lists
+mod issue247_nested_unordered_in_ordered {
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD007ULIndent;
+
+    /// Test that nested unordered lists within ordered lists don't trigger false positives
+    /// This was the ping-pong bug: MD007 would change 5→4 spaces, then MD005 would change 4→3
+    /// destroying the document's nesting structure
+    #[test]
+    fn test_nested_unordered_in_ordered_no_false_positives() {
+        let rule = MD007ULIndent::default();
+
+        // This content should have NO errors (matches markdownlint-cli behavior)
+        // Structure:
+        // - Ordered item "1. " at column 0, content starts at column 3
+        // - Unordered child "- " at 3 spaces, content at column 5
+        // - Unordered grandchild "- " at 5 spaces (3 + 2 = parent content column)
+        let content = r#"# Header
+
+1. First
+   - Abc abc
+
+2. Second
+   - Abc abc
+   - Xyz
+     - Aaa
+     - Bbb
+
+3. Third
+   - Thirty one
+     - Hello
+     - World
+   - Thirty two
+     - One
+     - More
+"#;
+
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "Nested unordered lists in ordered lists should not trigger MD007.\n\
+             markdownlint-cli shows no errors for this structure.\n\
+             Got {} warnings: {:?}",
+            warnings.len(),
+            warnings
+        );
+    }
+
+    /// Test that fix preserves nested structure (no ping-pong)
+    #[test]
+    fn test_fix_preserves_nested_structure() {
+        let rule = MD007ULIndent::default();
+
+        let content = r#"1. First
+   - Xyz
+     - Aaa
+     - Bbb
+"#;
+
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be unchanged - structure is already correct
+        assert_eq!(fixed, content, "Fix should not modify already-correct nested structure");
+    }
+
+    /// Test the simple case: unordered under ordered at proper indent
+    #[test]
+    fn test_simple_unordered_under_ordered() {
+        let rule = MD007ULIndent::default();
+
+        // Single level: bullet should be at 3 spaces (aligns with "1. " content)
+        let content = r#"1. Ordered item
+   - Bullet under ordered
+"#;
+
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(warnings.is_empty(), "Bullet at 3 spaces under '1. ' should be valid");
+    }
+
+    /// Test double-digit ordered list (issue #247 original case)
+    #[test]
+    fn test_double_digit_ordered_list() {
+        let rule = MD007ULIndent::default();
+
+        // For "10. " (4 chars), content starts at column 4
+        // Child bullet should be at 4 spaces
+        let content = r#"10. Item ten
+    - sub
+11. Item eleven
+    - sub
+12. Item twelve
+"#;
+
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(warnings.is_empty(), "Bullets at 4 spaces under '10. ' should be valid");
+    }
+
+    /// Test that parent's content column is used, not nesting_level × indent_size
+    #[test]
+    fn test_parent_content_column_used() {
+        let rule = MD007ULIndent::default();
+
+        // Parent "- Xyz" at 3 spaces has content at column 5
+        // Child should be at 5 spaces, not 4 (which would be nesting_level × 2)
+        let content = r#"1. First
+   - Xyz
+     - Child at 5 spaces
+"#;
+
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "Child at parent's content column (5) should be valid, not nesting_level × indent (4)"
+        );
+    }
+
+    /// Test deeply nested structure
+    #[test]
+    fn test_deeply_nested_mixed_lists() {
+        let rule = MD007ULIndent::default();
+
+        let content = r#"1. Level 1 ordered
+   - Level 2 unordered (3 spaces)
+     - Level 3 unordered (5 spaces)
+       - Level 4 unordered (7 spaces)
+"#;
+
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(warnings.is_empty(), "Deeply nested mixed lists should work correctly");
+    }
+}

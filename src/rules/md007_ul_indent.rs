@@ -80,10 +80,22 @@ impl MD007ULIndent {
                 // This handles variable-width markers ("1." vs "10." vs "100.")
                 parent_content_col
             }
-            Some((false, _)) => {
-                // Parent is unordered: use configured indent
-                // Unordered markers have fixed width, so user's indent preference applies
-                nesting_level * self.config.indent.get() as usize
+            Some((false, parent_content_col)) => {
+                // Parent is unordered: check if it's at the expected fixed position
+                // If yes, continue with fixed style (for pure unordered lists)
+                // If no, parent is offset (e.g., inside ordered list), use text-aligned
+                let parent_level = nesting_level.saturating_sub(1);
+                let expected_parent_marker = parent_level * self.config.indent.get() as usize;
+                // Parent's marker column is content column minus marker width (2 for "- ")
+                let parent_marker_col = parent_content_col.saturating_sub(2);
+
+                if parent_marker_col == expected_parent_marker {
+                    // Parent is at expected fixed position, continue with fixed style
+                    nesting_level * self.config.indent.get() as usize
+                } else {
+                    // Parent is offset, use text-aligned
+                    parent_content_col
+                }
             }
             None => {
                 // No parent found (shouldn't happen at nesting_level > 0)
