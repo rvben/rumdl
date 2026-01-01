@@ -55,8 +55,8 @@ impl Rule for MD027MultipleSpacesBlockquote {
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
-            // Skip lines in code blocks
-            if line_info.in_code_block {
+            // Skip lines in code blocks and HTML blocks
+            if line_info.in_code_block || line_info.in_html_block {
                 continue;
             }
 
