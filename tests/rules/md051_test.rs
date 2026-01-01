@@ -2336,3 +2336,331 @@ Link to [non-existent](nonexistent#section).
         );
     }
 }
+
+// =============================================================================
+// URL-Encoded CJK Fragment Tests
+// =============================================================================
+// When documentation tools, browsers, or CI/CD systems generate markdown links
+// with CJK fragments, they often URL-encode non-ASCII characters. Both forms
+// should work: raw CJK (#インストール) and URL-encoded (#%E3%82%A4...).
+
+mod url_encoded_cjk_tests {
+    use super::*;
+    use rumdl_lib::config::{Config, MarkdownFlavor};
+    use rumdl_lib::rules::MD051LinkFragments;
+    use rumdl_lib::workspace_index::WorkspaceIndex;
+    use std::fs;
+    use tempfile::tempdir;
+
+    /// Test: Raw CJK fragment should work (baseline)
+    #[test]
+    fn test_raw_cjk_fragment_works() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Target file with Japanese heading
+        let target_file = base_path.join("target.md");
+        fs::write(&target_file, "# Target\n\n## インストール\n\nContent here.\n").unwrap();
+
+        // Source file with raw CJK link
+        let source_file = base_path.join("source.md");
+        fs::write(&source_file, "# Source\n\n[Install](target.md#インストール)\n").unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        let target_content = fs::read_to_string(&target_file).unwrap();
+        let source_content = fs::read_to_string(&source_file).unwrap();
+
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content, &rules, false, MarkdownFlavor::default(), None, None);
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(target_file.clone(), target_index);
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert!(warnings.is_empty(), "Raw CJK fragment should work: {warnings:?}");
+    }
+
+    /// Test: URL-encoded Japanese fragment should work
+    /// "インストール" URL-encoded = "%E3%82%A4%E3%83%B3%E3%82%B9%E3%83%88%E3%83%BC%E3%83%AB"
+    #[test]
+    fn test_url_encoded_japanese_fragment() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let target_file = base_path.join("target.md");
+        fs::write(&target_file, "# Target\n\n## インストール\n\nContent here.\n").unwrap();
+
+        // Source file with URL-encoded CJK link
+        let source_file = base_path.join("source.md");
+        fs::write(
+            &source_file,
+            "# Source\n\n[Install](target.md#%E3%82%A4%E3%83%B3%E3%82%B9%E3%83%88%E3%83%BC%E3%83%AB)\n",
+        )
+        .unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        let target_content = fs::read_to_string(&target_file).unwrap();
+        let source_content = fs::read_to_string(&source_file).unwrap();
+
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content, &rules, false, MarkdownFlavor::default(), None, None);
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(target_file.clone(), target_index);
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "URL-encoded Japanese fragment should match raw anchor: {warnings:?}"
+        );
+    }
+
+    /// Test: URL-encoded Korean fragment should work
+    /// "한국어" URL-encoded = "%ED%95%9C%EA%B5%AD%EC%96%B4"
+    #[test]
+    fn test_url_encoded_korean_fragment() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let target_file = base_path.join("target.md");
+        fs::write(&target_file, "# Target\n\n## 한국어\n\nKorean content.\n").unwrap();
+
+        let source_file = base_path.join("source.md");
+        fs::write(
+            &source_file,
+            "# Source\n\n[Korean](target.md#%ED%95%9C%EA%B5%AD%EC%96%B4)\n",
+        )
+        .unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        let target_content = fs::read_to_string(&target_file).unwrap();
+        let source_content = fs::read_to_string(&source_file).unwrap();
+
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content, &rules, false, MarkdownFlavor::default(), None, None);
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(target_file.clone(), target_index);
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "URL-encoded Korean fragment should match raw anchor: {warnings:?}"
+        );
+    }
+
+    /// Test: URL-encoded Chinese fragment should work
+    /// "中文" URL-encoded = "%E4%B8%AD%E6%96%87"
+    #[test]
+    fn test_url_encoded_chinese_fragment() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let target_file = base_path.join("target.md");
+        fs::write(&target_file, "# Target\n\n## 中文\n\nChinese content.\n").unwrap();
+
+        let source_file = base_path.join("source.md");
+        fs::write(&source_file, "# Source\n\n[Chinese](target.md#%E4%B8%AD%E6%96%87)\n").unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        let target_content = fs::read_to_string(&target_file).unwrap();
+        let source_content = fs::read_to_string(&source_file).unwrap();
+
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content, &rules, false, MarkdownFlavor::default(), None, None);
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(target_file.clone(), target_index);
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "URL-encoded Chinese fragment should match raw anchor: {warnings:?}"
+        );
+    }
+
+    /// Test: Mixed encoding (ASCII + URL-encoded CJK)
+    /// "mixed-テスト" with テスト URL-encoded = "mixed-%E3%83%86%E3%82%B9%E3%83%88"
+    #[test]
+    fn test_mixed_encoding_fragment() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let target_file = base_path.join("target.md");
+        fs::write(&target_file, "# Target\n\n## Mixed テスト\n\nMixed content.\n").unwrap();
+
+        let source_file = base_path.join("source.md");
+        // GitHub generates: #mixed-テスト, URL-encoded: #mixed-%E3%83%86%E3%82%B9%E3%83%88
+        fs::write(
+            &source_file,
+            "# Source\n\n[Mixed](target.md#mixed-%E3%83%86%E3%82%B9%E3%83%88)\n",
+        )
+        .unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        let target_content = fs::read_to_string(&target_file).unwrap();
+        let source_content = fs::read_to_string(&source_file).unwrap();
+
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content, &rules, false, MarkdownFlavor::default(), None, None);
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(target_file.clone(), target_index);
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "Mixed ASCII + URL-encoded CJK should work: {warnings:?}"
+        );
+    }
+
+    /// Test: Invalid URL encoding falls back gracefully
+    #[test]
+    fn test_invalid_url_encoding_fallback() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let target_file = base_path.join("target.md");
+        fs::write(&target_file, "# Target\n\n## Valid Heading\n\nContent.\n").unwrap();
+
+        // Invalid URL encoding: %ZZ is not valid
+        let source_file = base_path.join("source.md");
+        fs::write(&source_file, "# Source\n\n[Bad](target.md#%ZZ%invalid)\n").unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        let target_content = fs::read_to_string(&target_file).unwrap();
+        let source_content = fs::read_to_string(&source_file).unwrap();
+
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content, &rules, false, MarkdownFlavor::default(), None, None);
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(target_file.clone(), target_index);
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        // Should still warn (invalid encoding doesn't match any anchor)
+        assert_eq!(warnings.len(), 1, "Invalid URL encoding should warn");
+    }
+
+    /// Test: Case-insensitive URL encoding (%E3 vs %e3)
+    #[test]
+    fn test_url_encoding_case_insensitive() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let target_file = base_path.join("target.md");
+        fs::write(&target_file, "# Target\n\n## テスト\n\nContent.\n").unwrap();
+
+        // Use lowercase hex: %e3%83%86%e3%82%b9%e3%83%88 instead of %E3%83%86%E3%82%B9%E3%83%88
+        let source_file = base_path.join("source.md");
+        fs::write(
+            &source_file,
+            "# Source\n\n[Test](target.md#%e3%83%86%e3%82%b9%e3%83%88)\n",
+        )
+        .unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        let target_content = fs::read_to_string(&target_file).unwrap();
+        let source_content = fs::read_to_string(&source_file).unwrap();
+
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content, &rules, false, MarkdownFlavor::default(), None, None);
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(target_file.clone(), target_index);
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert!(warnings.is_empty(), "Lowercase URL encoding should work: {warnings:?}");
+    }
+
+    /// Test: CJK heading with spaces becomes hyphenated anchor
+    /// "한국어 테스트" -> "#한국어-테스트" URL-encoded = "#%ED%95%9C%EA%B5%AD%EC%96%B4-%ED%85%8C%EC%8A%A4%ED%8A%B8"
+    #[test]
+    fn test_url_encoded_cjk_with_spaces() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let target_file = base_path.join("target.md");
+        fs::write(&target_file, "# Target\n\n## 한국어 테스트\n\nContent.\n").unwrap();
+
+        // GitHub converts spaces to hyphens: 한국어-테스트
+        let source_file = base_path.join("source.md");
+        fs::write(
+            &source_file,
+            "# Source\n\n[Test](target.md#%ED%95%9C%EA%B5%AD%EC%96%B4-%ED%85%8C%EC%8A%A4%ED%8A%B8)\n",
+        )
+        .unwrap();
+
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        let target_content = fs::read_to_string(&target_file).unwrap();
+        let source_content = fs::read_to_string(&source_file).unwrap();
+
+        let (_, target_index) =
+            rumdl_lib::lint_and_index(&target_content, &rules, false, MarkdownFlavor::default(), None, None);
+        let (_, source_index) =
+            rumdl_lib::lint_and_index(&source_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(target_file.clone(), target_index);
+        workspace_index.insert_file(source_file.clone(), source_index.clone());
+
+        let md051 = MD051LinkFragments::default();
+        let warnings = md051
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "URL-encoded CJK with spaces->hyphens should work: {warnings:?}"
+        );
+    }
+}

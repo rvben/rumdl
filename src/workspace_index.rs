@@ -28,6 +28,52 @@ use crate::lint_context::LintContext;
 use crate::utils::element_cache::ElementCache;
 
 // =============================================================================
+// URL Decoding Helper
+// =============================================================================
+
+/// Convert a hex digit character to its numeric value (0-15)
+fn hex_digit_to_value(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// URL-decode a string, handling percent-encoded characters.
+/// Returns the decoded string, or the original if decoding fails.
+/// Used for matching URL-encoded CJK fragments against raw anchors.
+fn url_decode(s: &str) -> String {
+    // Fast path: no percent signs means no encoding
+    if !s.contains('%') {
+        return s.to_string();
+    }
+
+    let bytes = s.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            // Try to parse the two hex digits following %
+            let hex1 = bytes[i + 1];
+            let hex2 = bytes[i + 2];
+            if let (Some(d1), Some(d2)) = (hex_digit_to_value(hex1), hex_digit_to_value(hex2)) {
+                result.push(d1 * 16 + d2);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+
+    // Convert to UTF-8, falling back to original if invalid
+    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
+}
+
+// =============================================================================
 // Shared cross-file link extraction utilities
 //
 // These regexes and helpers are the canonical implementation for extracting
@@ -657,12 +703,30 @@ impl FileIndex {
     /// - HTML anchors (from <a id="..."> or <element id="...">)
     /// - Attribute anchors (from { #id } syntax on non-heading elements)
     ///
-    /// Matching is case-insensitive.
+    /// Matching is case-insensitive. URL-encoded anchors (e.g., CJK characters
+    /// like `%E6%97%A5%E6%9C%AC%E8%AA%9E` for `日本語`) are decoded before matching.
     pub fn has_anchor(&self, anchor: &str) -> bool {
         let lower = anchor.to_lowercase();
-        self.anchor_to_heading.contains_key(&lower)
+
+        // Fast path: try exact match first
+        if self.anchor_to_heading.contains_key(&lower)
             || self.html_anchors.contains(&lower)
             || self.attribute_anchors.contains(&lower)
+        {
+            return true;
+        }
+
+        // Slow path: if anchor contains percent-encoding, try decoded version
+        if anchor.contains('%') {
+            let decoded = url_decode(anchor).to_lowercase();
+            if decoded != lower {
+                return self.anchor_to_heading.contains_key(&decoded)
+                    || self.html_anchors.contains(&decoded)
+                    || self.attribute_anchors.contains(&decoded);
+            }
+        }
+
+        false
     }
 
     /// Add an HTML anchor (from <a id="..."> or <element id="..."> tags)

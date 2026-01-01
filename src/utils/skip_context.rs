@@ -16,8 +16,15 @@ use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// Enhanced inline math pattern that handles both single $ and double $$ delimiters
-static INLINE_MATH_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$(?:\$)?[^$]+\$(?:\$)?").unwrap());
+/// Enhanced inline math pattern that handles both single $ and double $$ delimiters.
+/// Matches:
+/// - Display math: $$...$$ (zero or more non-$ characters)
+/// - Inline math: $...$ (zero or more non-$ non-newline characters)
+///
+/// The display math pattern is tried first to correctly handle $$content$$.
+/// Critically, both patterns allow ZERO characters between delimiters,
+/// so empty math like $$ or $ $ is consumed and won't pair with other $ signs.
+static INLINE_MATH_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$\$[^$]*\$\$|\$[^$\n]*\$").unwrap());
 
 /// Range representing a span of bytes (start inclusive, end exclusive)
 #[derive(Debug, Clone, Copy)]
