@@ -385,10 +385,18 @@ enum Element {
     HugoShortcode(String),
     /// Inline code `code`
     Code(String),
-    /// Bold text **text**
-    Bold(String),
-    /// Italic text *text*
-    Italic(String),
+    /// Bold text **text** or __text__
+    Bold {
+        content: String,
+        /// True if underscore markers (__), false for asterisks (**)
+        underscore: bool,
+    },
+    /// Italic text *text* or _text_
+    Italic {
+        content: String,
+        /// True if underscore marker (_), false for asterisk (*)
+        underscore: bool,
+    },
 }
 
 impl std::fmt::Display for Element {
@@ -428,8 +436,20 @@ impl std::fmt::Display for Element {
             Element::HtmlEntity(s) => write!(f, "{s}"),
             Element::HugoShortcode(s) => write!(f, "{s}"),
             Element::Code(s) => write!(f, "`{s}`"),
-            Element::Bold(s) => write!(f, "**{s}**"),
-            Element::Italic(s) => write!(f, "*{s}*"),
+            Element::Bold { content, underscore } => {
+                if *underscore {
+                    write!(f, "__{content}__")
+                } else {
+                    write!(f, "**{content}**")
+                }
+            }
+            Element::Italic { content, underscore } => {
+                if *underscore {
+                    write!(f, "_{content}_")
+                } else {
+                    write!(f, "*{content}*")
+                }
+            }
         }
     }
 }
@@ -475,8 +495,8 @@ impl Element {
             Element::HtmlEntity(s) => s.chars().count(),                     // &nbsp; - already complete
             Element::HugoShortcode(s) => s.chars().count(),                  // {{< ... >}} - already complete
             Element::Code(s) => s.chars().count() + 2,                       // `code`
-            Element::Bold(s) => s.chars().count() + 4,                       // **text**
-            Element::Italic(s) => s.chars().count() + 2,                     // *text*
+            Element::Bold { content, .. } => content.chars().count() + 4,    // **text** or __text__
+            Element::Italic { content, .. } => content.chars().count() + 2,  // *text* or _text_
         }
     }
 }
@@ -660,12 +680,25 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
             next_special = pos;
             special_type = "bold";
         }
+        if let Some(pos) = remaining.find("__")
+            && pos < next_special
+        {
+            next_special = pos;
+            special_type = "bold_underscore";
+        }
         if let Some(pos) = remaining.find('*')
             && pos < next_special
             && !remaining[pos..].starts_with("**")
         {
             next_special = pos;
             special_type = "italic";
+        }
+        if let Some(pos) = remaining.find('_')
+            && pos < next_special
+            && !remaining[pos..].starts_with("__")
+        {
+            next_special = pos;
+            special_type = "italic_underscore";
         }
 
         // Determine which pattern to process first
@@ -941,10 +974,13 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                     }
                 }
                 "bold" => {
-                    // Check for bold text
+                    // Check for bold text **text**
                     if let Some(bold_end) = remaining[2..].find("**") {
                         let bold_text = &remaining[2..2 + bold_end];
-                        elements.push(Element::Bold(bold_text.to_string()));
+                        elements.push(Element::Bold {
+                            content: bold_text.to_string(),
+                            underscore: false,
+                        });
                         remaining = &remaining[2 + bold_end + 2..];
                     } else {
                         // No closing **, treat as text
@@ -952,15 +988,48 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                         remaining = &remaining[2..];
                     }
                 }
+                "bold_underscore" => {
+                    // Check for bold text __text__
+                    if let Some(bold_end) = remaining[2..].find("__") {
+                        let bold_text = &remaining[2..2 + bold_end];
+                        elements.push(Element::Bold {
+                            content: bold_text.to_string(),
+                            underscore: true,
+                        });
+                        remaining = &remaining[2 + bold_end + 2..];
+                    } else {
+                        // No closing __, treat as text
+                        elements.push(Element::Text("__".to_string()));
+                        remaining = &remaining[2..];
+                    }
+                }
                 "italic" => {
-                    // Check for italic text
+                    // Check for italic text *text*
                     if let Some(italic_end) = remaining[1..].find('*') {
                         let italic_text = &remaining[1..1 + italic_end];
-                        elements.push(Element::Italic(italic_text.to_string()));
+                        elements.push(Element::Italic {
+                            content: italic_text.to_string(),
+                            underscore: false,
+                        });
                         remaining = &remaining[1 + italic_end + 1..];
                     } else {
                         // No closing *, treat as text
                         elements.push(Element::Text("*".to_string()));
+                        remaining = &remaining[1..];
+                    }
+                }
+                "italic_underscore" => {
+                    // Check for italic text _text_
+                    if let Some(italic_end) = remaining[1..].find('_') {
+                        let italic_text = &remaining[1..1 + italic_end];
+                        elements.push(Element::Italic {
+                            content: italic_text.to_string(),
+                            underscore: true,
+                        });
+                        remaining = &remaining[1 + italic_end + 1..];
+                    } else {
+                        // No closing _, treat as text
+                        elements.push(Element::Text("_".to_string()));
                         remaining = &remaining[1..];
                     }
                 }
@@ -1028,11 +1097,30 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
                     }
                 }
             } else {
-                // No sentence boundary found, continue accumulating
-                current_line = combined;
+                // Single sentence - check if it's complete
+                let trimmed = combined.trim();
+                let ends_with_sentence_punct =
+                    trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+
+                if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed, &abbreviations) {
+                    // Complete single sentence - emit it
+                    lines.push(trimmed.to_string());
+                    current_line.clear();
+                } else {
+                    // Incomplete sentence - continue accumulating
+                    current_line = combined;
+                }
             }
+        } else if let Element::Italic { content, underscore } = element {
+            // Handle italic elements - may contain multiple sentences that need continuation
+            let marker = if *underscore { "_" } else { "*" };
+            handle_emphasis_sentence_split(content, marker, &abbreviations, &mut current_line, &mut lines);
+        } else if let Element::Bold { content, underscore } = element {
+            // Handle bold elements - may contain multiple sentences that need continuation
+            let marker = if *underscore { "__" } else { "**" };
+            handle_emphasis_sentence_split(content, marker, &abbreviations, &mut current_line, &mut lines);
         } else {
-            // Non-text elements (Code, Bold, Italic, etc.)
+            // Non-text, non-emphasis elements (Code, Links, etc.)
             // Add space before element if needed (unless it's after an opening paren/bracket)
             if !current_line.is_empty()
                 && !current_line.ends_with(' ')
@@ -1050,6 +1138,91 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
         lines.push(current_line.trim().to_string());
     }
     lines
+}
+
+/// Handle splitting emphasis content at sentence boundaries while preserving markers
+fn handle_emphasis_sentence_split(
+    content: &str,
+    marker: &str,
+    abbreviations: &HashSet<String>,
+    current_line: &mut String,
+    lines: &mut Vec<String>,
+) {
+    // Split the emphasis content into sentences
+    let sentences = split_into_sentences_with_set(content, abbreviations);
+
+    if sentences.len() <= 1 {
+        // Single sentence or no boundaries - treat as atomic
+        if !current_line.is_empty()
+            && !current_line.ends_with(' ')
+            && !current_line.ends_with('(')
+            && !current_line.ends_with('[')
+        {
+            current_line.push(' ');
+        }
+        current_line.push_str(marker);
+        current_line.push_str(content);
+        current_line.push_str(marker);
+
+        // Check if the emphasis content ends with sentence punctuation - if so, emit
+        let trimmed = content.trim();
+        let ends_with_punct = trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+        if ends_with_punct && !text_ends_with_abbreviation(trimmed, abbreviations) {
+            lines.push(current_line.clone());
+            current_line.clear();
+        }
+    } else {
+        // Multiple sentences - each gets its own emphasis markers
+        for (i, sentence) in sentences.iter().enumerate() {
+            let trimmed = sentence.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            if i == 0 {
+                // First sentence: combine with current_line and emit
+                if !current_line.is_empty()
+                    && !current_line.ends_with(' ')
+                    && !current_line.ends_with('(')
+                    && !current_line.ends_with('[')
+                {
+                    current_line.push(' ');
+                }
+                current_line.push_str(marker);
+                current_line.push_str(trimmed);
+                current_line.push_str(marker);
+
+                // Check if this is a complete sentence
+                let ends_with_punct = trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+                if ends_with_punct && !text_ends_with_abbreviation(trimmed, abbreviations) {
+                    lines.push(current_line.clone());
+                    current_line.clear();
+                }
+            } else if i == sentences.len() - 1 {
+                // Last sentence: check if complete
+                let ends_with_punct = trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+
+                let mut line = String::new();
+                line.push_str(marker);
+                line.push_str(trimmed);
+                line.push_str(marker);
+
+                if ends_with_punct && !text_ends_with_abbreviation(trimmed, abbreviations) {
+                    lines.push(line);
+                } else {
+                    // Incomplete - keep in current_line for potential continuation
+                    *current_line = line;
+                }
+            } else {
+                // Middle sentences: emit with markers
+                let mut line = String::new();
+                line.push_str(marker);
+                line.push_str(trimmed);
+                line.push_str(marker);
+                lines.push(line);
+            }
+        }
+    }
 }
 
 /// Reflow elements into lines that fit within the line length
@@ -1203,9 +1376,14 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
 
         // Preserve lists (but not horizontal rules)
-        if (trimmed.starts_with('-') && !is_horizontal_rule(trimmed))
-            || (trimmed.starts_with('*') && !is_horizontal_rule(trimmed))
-            || trimmed.starts_with('+')
+        // A valid unordered list marker must be followed by a space (or be alone on line)
+        // This prevents emphasis markers like "*text*" from being parsed as list items
+        let is_unordered_list = |s: &str, marker: char| -> bool {
+            s.starts_with(marker) && !is_horizontal_rule(s) && (s.len() == 1 || s.chars().nth(1) == Some(' '))
+        };
+        if is_unordered_list(trimmed, '-')
+            || is_unordered_list(trimmed, '*')
+            || is_unordered_list(trimmed, '+')
             || is_numbered_list_item(trimmed)
         {
             // Find the list marker and preserve indentation
@@ -1447,8 +1625,22 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 }
 
                 // Check if previous line ends with hard break (two spaces or backslash)
-                if has_hard_break(prev_line) {
-                    // Start a new part after hard break
+                // or is a complete sentence in sentence_per_line mode
+                let prev_trimmed = prev_line.trim();
+                let abbreviations = get_abbreviations(&options.abbreviations);
+                let ends_with_sentence = (prev_trimmed.ends_with('.')
+                    || prev_trimmed.ends_with('!')
+                    || prev_trimmed.ends_with('?')
+                    || prev_trimmed.ends_with(".*")
+                    || prev_trimmed.ends_with("!*")
+                    || prev_trimmed.ends_with("?*")
+                    || prev_trimmed.ends_with("._")
+                    || prev_trimmed.ends_with("!_")
+                    || prev_trimmed.ends_with("?_"))
+                    && !text_ends_with_abbreviation(prev_trimmed.trim_end_matches(['*', '_']), &abbreviations);
+
+                if has_hard_break(prev_line) || (options.sentence_per_line && ends_with_sentence) {
+                    // Start a new part after hard break or complete sentence
                     paragraph_parts.push(current_part.join(" "));
                     current_part = vec![next_line];
                 } else {
@@ -1474,7 +1666,8 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
 
                 // Preserve hard break by ensuring last line of part ends with hard break marker
                 // Use two spaces as the default hard break format for reflows
-                if j < paragraph_parts.len() - 1 && !result.is_empty() {
+                // But don't add hard breaks in sentence_per_line mode - lines are already separate
+                if j < paragraph_parts.len() - 1 && !result.is_empty() && !options.sentence_per_line {
                     let last_idx = result.len() - 1;
                     if !has_hard_break(&result[last_idx]) {
                         result[last_idx].push_str("  ");

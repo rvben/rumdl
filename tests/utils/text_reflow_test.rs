@@ -1521,3 +1521,435 @@ mod issue_170_nested_link_image {
         );
     }
 }
+
+/// Issue #251: Sentence reflow & formatting markers (bold, italic)
+/// When reflowing multi-sentence emphasized text, emphasis markers should
+/// continue across line breaks to maintain formatting on each line.
+mod issue_251_emphasis_continuation {
+    use super::*;
+
+    // ============================================================
+    // Part 1: Underscore emphasis parsing
+    // ============================================================
+
+    #[test]
+    fn test_underscore_italic_parsing() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "This has _italic text_ in it";
+        let result = reflow_markdown(input, &options);
+
+        // Underscore italic should be preserved
+        assert!(
+            result.contains("_italic text_"),
+            "Underscore italic should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_underscore_bold_parsing() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "This has __bold text__ in it";
+        let result = reflow_markdown(input, &options);
+
+        // Underscore bold should be preserved
+        assert!(
+            result.contains("__bold text__"),
+            "Underscore bold should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mixed_emphasis_markers() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+
+        let input = "Text with *asterisk italic* and _underscore italic_ mixed";
+        let result = reflow_markdown(input, &options);
+
+        assert!(
+            result.contains("*asterisk italic*"),
+            "Asterisk italic preserved: {result:?}"
+        );
+        assert!(
+            result.contains("_underscore italic_"),
+            "Underscore italic preserved: {result:?}"
+        );
+    }
+
+    // ============================================================
+    // Part 2: Emphasis continuation across sentence splits
+    // ============================================================
+
+    #[test]
+    fn test_asterisk_italic_sentence_continuation() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = "*Sentence one. Sentence two. Sentence three.*";
+        let result = reflow_line(input, &options);
+
+        // Each sentence should have its own italic markers
+        assert_eq!(result.len(), 3, "Should have 3 lines: {result:?}");
+        assert!(
+            result[0].starts_with('*') && result[0].ends_with('*'),
+            "First line should have italic markers: {:?}",
+            result[0]
+        );
+        assert!(
+            result[1].starts_with('*') && result[1].ends_with('*'),
+            "Second line should have italic markers: {:?}",
+            result[1]
+        );
+        assert!(
+            result[2].starts_with('*') && result[2].ends_with('*'),
+            "Third line should have italic markers: {:?}",
+            result[2]
+        );
+    }
+
+    #[test]
+    fn test_underscore_italic_sentence_continuation() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = "_Sentence one. Sentence two. Sentence three._";
+        let result = reflow_line(input, &options);
+
+        // Each sentence should have its own italic markers (underscore style)
+        assert_eq!(result.len(), 3, "Should have 3 lines: {result:?}");
+        assert!(
+            result[0].starts_with('_') && result[0].ends_with('_'),
+            "First line should have underscore markers: {:?}",
+            result[0]
+        );
+        assert!(
+            result[1].starts_with('_') && result[1].ends_with('_'),
+            "Second line should have underscore markers: {:?}",
+            result[1]
+        );
+        assert!(
+            result[2].starts_with('_') && result[2].ends_with('_'),
+            "Third line should have underscore markers: {:?}",
+            result[2]
+        );
+    }
+
+    #[test]
+    fn test_bold_sentence_continuation() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = "**Sentence one. Sentence two.**";
+        let result = reflow_line(input, &options);
+
+        // Each sentence should have its own bold markers
+        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
+        assert!(
+            result[0].starts_with("**") && result[0].ends_with("**"),
+            "First line should have bold markers: {:?}",
+            result[0]
+        );
+        assert!(
+            result[1].starts_with("**") && result[1].ends_with("**"),
+            "Second line should have bold markers: {:?}",
+            result[1]
+        );
+    }
+
+    #[test]
+    fn test_underscore_bold_sentence_continuation() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = "__Sentence one. Sentence two.__";
+        let result = reflow_line(input, &options);
+
+        // Each sentence should have its own bold markers (underscore style)
+        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
+        assert!(
+            result[0].starts_with("__") && result[0].ends_with("__"),
+            "First line should have underscore bold markers: {:?}",
+            result[0]
+        );
+        assert!(
+            result[1].starts_with("__") && result[1].ends_with("__"),
+            "Second line should have underscore bold markers: {:?}",
+            result[1]
+        );
+    }
+
+    // ============================================================
+    // Part 3: Issue #251 exact reproduction - quoted citations
+    // ============================================================
+
+    #[test]
+    fn test_issue_251_quoted_citation() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // The exact pattern from issue #251
+        let input = r#"He said, _"There is this whole spectrum of crazy futures. But the one that I feel we're almost guaranteed to get. It's the same either way"_ [^ref]."#;
+        let result = reflow_markdown(input, &options);
+
+        let lines: Vec<&str> = result.lines().collect();
+
+        // Should split into multiple sentences, each with emphasis markers
+        assert!(
+            lines.len() >= 3,
+            "Should have at least 3 lines for 3 sentences: {result:?}"
+        );
+
+        // First line should start with context and have opening emphasis
+        assert!(
+            lines[0].contains("_\"There is this whole spectrum"),
+            "First line should have opening quote with emphasis: {:?}",
+            lines[0]
+        );
+
+        // Middle lines should have emphasis markers on both ends
+        for line in &lines[1..lines.len() - 1] {
+            if !line.trim().is_empty() && !line.starts_with("He said") {
+                assert!(
+                    line.trim().starts_with('_') || line.contains("_\""),
+                    "Middle line should start with emphasis: {line:?}"
+                );
+            }
+        }
+
+        // Last line should have closing emphasis with quote and footnote
+        let last_line = lines.last().unwrap();
+        assert!(
+            last_line.contains("\"_") || last_line.ends_with("_"),
+            "Last line should have closing emphasis: {last_line:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_251_simplified() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Simplified version of issue #251
+        let input = r#"_"First sentence. Second sentence."_"#;
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
+
+        // First sentence should have opening quote inside emphasis
+        assert!(
+            result[0].starts_with("_\"") && result[0].ends_with('_'),
+            "First line: {:?}",
+            result[0]
+        );
+
+        // Second sentence should have closing quote inside emphasis
+        assert!(
+            result[1].starts_with('_') && result[1].ends_with("\"_"),
+            "Second line: {:?}",
+            result[1]
+        );
+    }
+
+    // ============================================================
+    // Part 4: Edge cases
+    // ============================================================
+
+    #[test]
+    fn test_emphasis_with_trailing_text() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Emphasis followed by non-emphasized text
+        let input = "Intro: *Sentence one. Sentence two.* And then more text.";
+        let result = reflow_markdown(input, &options);
+
+        let lines: Vec<&str> = result.lines().collect();
+
+        // The non-emphasized text should be on its own line
+        assert!(
+            lines.iter().any(|l| l.contains("And then more text")),
+            "Non-emphasized text should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_emphasis_single_sentence_no_change() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Single sentence - should not be modified
+        let input = "*Just one sentence here.*";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 1, "Single sentence should stay one line");
+        assert_eq!(result[0], "*Just one sentence here.*");
+    }
+
+    #[test]
+    fn test_emphasis_with_abbreviations() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Abbreviations should not trigger false sentence splits
+        let input = "*Talk to Dr. Smith about the results. Then report back.*";
+        let result = reflow_line(input, &options);
+
+        // Should be 2 sentences (split after "results." not after "Dr.")
+        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
+        assert!(
+            result[0].contains("Dr. Smith"),
+            "First sentence should contain Dr. Smith"
+        );
+    }
+
+    #[test]
+    fn test_nested_emphasis_sentence_split() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Bold text containing sentences - each should get markers
+        let input = "**First bold sentence. Second bold sentence.**";
+        let result = reflow_line(input, &options);
+
+        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
+
+        // Each line should have bold markers
+        for (i, line) in result.iter().enumerate() {
+            assert!(
+                line.starts_with("**") && line.ends_with("**"),
+                "Line {i} should have bold markers: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_emphasis_idempotence() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Running reflow twice should produce the same result
+        let input = "*Sentence one. Sentence two.*";
+
+        let result1 = reflow_markdown(input, &options);
+        let result2 = reflow_markdown(&result1, &options);
+
+        assert_eq!(
+            result1, result2,
+            "Reflow should be idempotent.\nFirst: {result1:?}\nSecond: {result2:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_emphasis_spans_on_line() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Multiple separate emphasis spans
+        let input = "*First italic.* Normal text. *Second italic.*";
+        let result = reflow_markdown(input, &options);
+
+        let lines: Vec<&str> = result.lines().collect();
+
+        // Should have 3 sentences on 3 lines
+        assert_eq!(lines.len(), 3, "Should have 3 lines: {result:?}");
+        assert!(lines[0].contains("*First italic.*"));
+        assert!(lines[1].contains("Normal text."));
+        assert!(lines[2].contains("*Second italic.*"));
+    }
+
+    // ============================================================
+    // Part 5: Marker type preservation
+    // ============================================================
+
+    #[test]
+    fn test_marker_type_preserved_asterisk() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = "*Sentence one. Sentence two.*";
+        let result = reflow_line(input, &options);
+
+        // All markers should be asterisks, not underscores
+        for line in &result {
+            assert!(
+                !line.contains('_'),
+                "Asterisk emphasis should not become underscore: {line:?}"
+            );
+            assert!(
+                line.starts_with('*') && line.ends_with('*'),
+                "Should use asterisk markers: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_marker_type_preserved_underscore() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = "_Sentence one. Sentence two._";
+        let result = reflow_line(input, &options);
+
+        // All markers should be underscores, not asterisks
+        for line in &result {
+            // Check that we don't have asterisks acting as emphasis markers
+            // (asterisks in content are OK, but the wrapper should be underscore)
+            assert!(
+                line.starts_with('_') && line.ends_with('_'),
+                "Should use underscore markers: {line:?}"
+            );
+        }
+    }
+}
