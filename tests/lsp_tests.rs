@@ -420,6 +420,98 @@ async fn test_diagnostic_request() {
     }
 }
 
+/// Diagnostics should clear after a document is closed.
+#[tokio::test]
+async fn test_diagnostic_clears_on_close() {
+    let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
+    let server = service.inner();
+
+    // Force default config (avoid picking up user/global config in tests).
+    let config_path = std::env::temp_dir().join("rumdl_nonexistent.toml");
+    let _ = std::fs::remove_file(&config_path);
+
+    // Initialize server
+    let init_params = InitializeParams {
+        process_id: None,
+        root_path: None, // Deprecated but required
+        root_uri: Some(Url::parse("file:///test").unwrap()),
+        initialization_options: Some(serde_json::json!({
+            "configPath": config_path.to_string_lossy(),
+        })),
+        capabilities: ClientCapabilities::default(),
+        trace: None,
+        workspace_folders: None,
+        client_info: None,
+        locale: None,
+    };
+
+    server.initialize(init_params).await.unwrap();
+    server.initialized(InitializedParams {}).await;
+
+    let uri = Url::parse("file:///test.md").unwrap();
+
+    // Open a document with a known issue (trailing spaces)
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "markdown".to_string(),
+            version: 1,
+            text: "#Heading\n\nThis is a test.".to_string(),
+        },
+    };
+
+    server.did_open(open_params).await;
+
+    let diagnostic_params = DocumentDiagnosticParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        identifier: None,
+        previous_result_id: None,
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let report = server.diagnostic(diagnostic_params).await.unwrap();
+    let items = match report {
+        DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) => {
+            report.full_document_diagnostic_report.items
+        }
+        _ => panic!("Unexpected diagnostic report type"),
+    };
+
+    assert!(
+        !items.is_empty(),
+        "Expected diagnostics for open document with a missing heading space"
+    );
+
+    // Close the document
+    server
+        .did_close(DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+        })
+        .await;
+
+    // Diagnostics should clear once the document is closed
+    let report = server
+        .diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier { uri },
+            identifier: None,
+            previous_result_id: None,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let items = match report {
+        DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) => {
+            report.full_document_diagnostic_report.items
+        }
+        _ => panic!("Unexpected diagnostic report type"),
+    };
+
+    assert!(items.is_empty(), "Expected diagnostics to clear after close");
+}
+
 /// Integration test that simulates real LSP workflow
 #[tokio::test]
 async fn test_real_workflow_integration() {
