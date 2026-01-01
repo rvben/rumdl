@@ -4,6 +4,10 @@ use std::sync::LazyLock;
 // Better detection of inline code with support for multiple backticks
 static INLINE_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(`+)([^`]|[^`].*?[^`])(`+)").unwrap());
 
+// Inline math pattern - matches both $...$ and $$...$$ syntax
+// The pattern allows zero or more characters between delimiters to handle empty math spans
+static INLINE_MATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$\$[^$]*\$\$|\$[^$\n]*\$").unwrap());
+
 // List markers pattern - used to avoid confusion with emphasis
 static LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[*+-]\s+").unwrap());
 
@@ -76,6 +80,32 @@ pub fn replace_inline_code(line: &str) -> String {
             result.replace_range(match_start + offset..match_end + offset, &placeholder);
             offset += placeholder.len() - (match_end - match_start);
         }
+    }
+
+    result
+}
+
+/// Replace inline math ($...$ and $$...$$) with placeholder characters
+/// This prevents math content from being mistaken for emphasis markers
+pub fn replace_inline_math(line: &str) -> String {
+    // Quick check: if no dollar signs, return original
+    if !line.contains('$') {
+        return line.to_string();
+    }
+
+    let mut result = line.to_string();
+    let mut offset: isize = 0;
+
+    for m in INLINE_MATH.find_iter(line) {
+        let match_start = m.start();
+        let match_end = m.end();
+        // Use 'M' instead of spaces or asterisks to avoid affecting emphasis detection
+        let placeholder = "M".repeat(match_end - match_start);
+
+        let adjusted_start = (match_start as isize + offset) as usize;
+        let adjusted_end = (match_end as isize + offset) as usize;
+        result.replace_range(adjusted_start..adjusted_end, &placeholder);
+        offset += placeholder.len() as isize - (match_end - match_start) as isize;
     }
 
     result

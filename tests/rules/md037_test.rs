@@ -607,3 +607,175 @@ fn test_issue_186_list_item_with_asterisk_in_text() {
         "Should flag actual emphasis spacing issue in list item content"
     );
 }
+
+// =============================================================================
+// Inline Math Edge Cases - LaTeX/MathJax compatibility
+// =============================================================================
+// Rumdl protects content inside math spans ($...$, $$...$$) from being
+// flagged as emphasis. These tests verify edge cases with empty, minimal,
+// and complex math spans don't cause false positives.
+
+/// Test: Empty math span ($$) should not cause false positives
+/// Bug: [^$]+ requires ≥1 char, so $$ doesn't match, causing cross-line issues
+#[test]
+fn test_md037_empty_math_span_no_false_positives() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // Empty $$ followed by real bad emphasis on same line
+    let content = "Empty $$ here and * bad emphasis *.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag the bad emphasis, not something weird
+    assert_eq!(result.len(), 1, "Should flag '* bad emphasis *' after empty $$");
+    assert!(
+        result[0].message.contains("bad emphasis"),
+        "Should flag the correct span, got: {}",
+        result[0].message
+    );
+}
+
+/// Test: Empty math span on one line, protected math on next
+/// This was the specific bug: empty $$ + $p * q$ created false match
+#[test]
+fn test_md037_empty_math_cross_line_bug() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = "Empty $$ here and * bad emphasis *.\n\nMid-line $p * q$ and then * bad emphasis *.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should flag both bad emphasis spans (lines 1 and 3)
+    // Should NOT flag anything about "* q$" or cross-line matches
+    assert_eq!(
+        result.len(),
+        2,
+        "Should flag both '* bad emphasis *' spans, not cross-line artifacts"
+    );
+
+    // Verify the correct spans are flagged
+    for warning in &result {
+        assert!(
+            warning.message.contains("bad emphasis"),
+            "Should only flag bad emphasis, got: {}",
+            warning.message
+        );
+    }
+}
+
+/// Test: Minimal math content ($a$, $b$)
+#[test]
+fn test_md037_minimal_math_content() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = "Math $a$ and $b$ should protect asterisks like $a * b$.\nBut * spaces * should flag.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Only '* spaces *' should flag, not content in math spans"
+    );
+    assert_eq!(result[0].line, 2);
+}
+
+/// Test: Multiple math spans on same line with empty $$
+#[test]
+fn test_md037_multiple_math_same_line_with_empty() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = "Math $a * b$ and $c * d$ and $$ empty and * bad *.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Only real emphasis should flag, math protects asterisks"
+    );
+    assert!(result[0].message.contains("bad"));
+}
+
+/// Test: Display math ($$...$$) with content spanning patterns
+#[test]
+fn test_md037_display_math_protection() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = r#"Inline $x * y$ math.
+Display $$a * b$$ math.
+And * bad emphasis *."#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Only bad emphasis should flag, both inline and display math protect content"
+    );
+    assert_eq!(result[0].line, 3);
+}
+
+/// Test: Whitespace-only math spans ($  $, $ $)
+#[test]
+fn test_md037_whitespace_only_math() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = "Math $  $ and $ $ should not cause issues with * bad *.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Only real emphasis should flag");
+}
+
+/// Test: Math at line boundaries
+#[test]
+fn test_md037_math_at_line_boundaries() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = r#"$start of line * with math$ and text.
+Text and $end of line$
+$entire line is math$
+Regular * bad emphasis * text."#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Only line 4 bad emphasis should flag");
+    assert_eq!(result[0].line, 4);
+}
+
+/// Test: Currency vs math (tricky case)
+#[test]
+fn test_md037_currency_not_math() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // $5 * 10 = $50 - the $ signs here could be interpreted as math
+    // This is a tricky edge case where currency notation looks like math
+    let content = "The cost is $5 * 10 = $50 total, and * this should flag *.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // At minimum, should flag the real bad emphasis
+    assert!(
+        result.iter().any(|w| w.message.contains("should flag")),
+        "Should flag real emphasis even with currency notation"
+    );
+}
+
+/// Test: Unclosed math span doesn't break parsing
+#[test]
+fn test_md037_unclosed_math_graceful() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    // Unclosed $ should not cause catastrophic backtracking or weird matches
+    let content = "This has $unclosed math and * bad emphasis * here.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should still flag the real bad emphasis
+    assert_eq!(
+        result.len(),
+        1,
+        "Unclosed math should not prevent flagging real emphasis"
+    );
+}

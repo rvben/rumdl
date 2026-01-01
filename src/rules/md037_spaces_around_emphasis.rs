@@ -5,6 +5,7 @@ use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::emphasis_utils::{
     EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
+    replace_inline_math,
 };
 use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
@@ -247,8 +248,10 @@ impl MD037NoSpaceInEmphasis {
         offset: usize,
         warnings: &mut Vec<LintWarning>,
     ) {
-        // Replace inline code to avoid false positives with emphasis markers inside backticks
+        // Replace inline code and inline math to avoid false positives
+        // with emphasis markers inside backticks or dollar signs
         let processed_content = replace_inline_code(content);
+        let processed_content = replace_inline_math(&processed_content);
 
         // Find all emphasis markers using optimized parsing
         let markers = find_emphasis_markers(&processed_content);
