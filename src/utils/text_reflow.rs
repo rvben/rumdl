@@ -7,9 +7,9 @@ use crate::utils::element_cache::ElementCache;
 use crate::utils::is_definition_list_item;
 use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
-    INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX, LINKED_IMAGE_INLINE_INLINE,
-    LINKED_IMAGE_INLINE_REF, LINKED_IMAGE_REF_INLINE, LINKED_IMAGE_REF_REF, REF_IMAGE_REGEX, REF_LINK_REGEX,
-    SHORTCUT_REF_REGEX, STRIKETHROUGH_FANCY_REGEX, WIKI_LINK_REGEX,
+    HUGO_SHORTCODE_REGEX, INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX,
+    LINKED_IMAGE_INLINE_INLINE, LINKED_IMAGE_INLINE_REF, LINKED_IMAGE_REF_INLINE, LINKED_IMAGE_REF_REF,
+    REF_IMAGE_REGEX, REF_LINK_REGEX, SHORTCUT_REF_REGEX, STRIKETHROUGH_FANCY_REGEX, WIKI_LINK_REGEX,
 };
 use std::collections::HashSet;
 
@@ -381,6 +381,8 @@ enum Element {
     HtmlTag(String),
     /// HTML entity &nbsp; or &#123;
     HtmlEntity(String),
+    /// Hugo/Go template shortcode {{< ... >}} or {{% ... %}}
+    HugoShortcode(String),
     /// Inline code `code`
     Code(String),
     /// Bold text **text**
@@ -424,6 +426,7 @@ impl std::fmt::Display for Element {
             Element::EmojiShortcode(s) => write!(f, ":{s}:"),
             Element::HtmlTag(s) => write!(f, "{s}"),
             Element::HtmlEntity(s) => write!(f, "{s}"),
+            Element::HugoShortcode(s) => write!(f, "{s}"),
             Element::Code(s) => write!(f, "`{s}`"),
             Element::Bold(s) => write!(f, "**{s}**"),
             Element::Italic(s) => write!(f, "*{s}*"),
@@ -470,6 +473,7 @@ impl Element {
             Element::EmojiShortcode(s) => s.chars().count() + 2,             // :emoji:
             Element::HtmlTag(s) => s.chars().count(),                        // <tag> - already includes brackets
             Element::HtmlEntity(s) => s.chars().count(),                     // &nbsp; - already complete
+            Element::HugoShortcode(s) => s.chars().count(),                  // {{< ... >}} - already complete
             Element::Code(s) => s.chars().count() + 2,                       // `code`
             Element::Bold(s) => s.chars().count() + 4,                       // **text**
             Element::Italic(s) => s.chars().count() + 2,                     // *text*
@@ -612,6 +616,14 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
             earliest_match = Some((m.start(), "html_entity", m));
+        }
+
+        // Check for Hugo shortcodes - {{< ... >}} or {{% ... %}}
+        // Must be checked before other patterns to avoid false sentence breaks
+        if let Ok(Some(m)) = HUGO_SHORTCODE_REGEX.find(remaining)
+            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
+        {
+            earliest_match = Some((m.start(), "hugo_shortcode", m));
         }
 
         // Check for HTML tags - <tag> </tag> <tag/>
@@ -887,6 +899,11 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                 "html_entity" => {
                     // HTML entities are captured whole
                     elements.push(Element::HtmlEntity(remaining[..match_obj.end()].to_string()));
+                    remaining = &remaining[match_obj.end()..];
+                }
+                "hugo_shortcode" => {
+                    // Hugo shortcodes are atomic elements - preserve them exactly
+                    elements.push(Element::HugoShortcode(remaining[..match_obj.end()].to_string()));
                     remaining = &remaining[match_obj.end()..];
                 }
                 "html_tag" => {

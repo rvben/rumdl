@@ -1403,4 +1403,121 @@ mod issue_170_nested_link_image {
             "Mixed patterns should all be preserved: {result:?}"
         );
     }
+
+    // Issue #249: Hugo shortcodes should be preserved as atomic elements
+    #[test]
+    fn test_hugo_shortcode_preserved() {
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Simple Hugo shortcode with periods in attributes
+        let input = r#"{{< figure src="image.png" alt="Description. More text." >}}"#;
+        let result = reflow_markdown(input, &options);
+
+        // Shortcode should not be broken at the period
+        assert!(
+            result.contains(r#"{{< figure src="image.png" alt="Description. More text." >}}"#),
+            "Hugo shortcode should be preserved as atomic unit: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_hugo_percent_shortcode_preserved() {
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Hugo template shortcode with {{% %}} delimiters
+        let input = r#"{{% notice tip %}}This is a tip. It has periods.{{% /notice %}}"#;
+        let result = reflow_markdown(input, &options);
+
+        // Content should be preserved without splitting on periods
+        assert!(
+            result.contains(r#"{{% notice tip %}}"#),
+            "Hugo template shortcode should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_hugo_shortcode_no_duplication() {
+        // Issue #249: Content was doubling each time rumdl was run
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = r#"{{< figure src="images/test.png" alt="Grid of three rows. Each comparing." >}}"#;
+
+        // Run reflow twice
+        let result1 = reflow_markdown(input, &options);
+        let result2 = reflow_markdown(&result1, &options);
+
+        // Content should be idempotent (same size after multiple runs)
+        assert_eq!(
+            result1.len(),
+            result2.len(),
+            "Hugo shortcode reflow should be idempotent. Got: first={}, second={}",
+            result1.len(),
+            result2.len()
+        );
+
+        // Content should not duplicate
+        let original_shortcode_count = input.matches("{{<").count();
+        let result_shortcode_count = result2.matches("{{<").count();
+        assert_eq!(
+            original_shortcode_count, result_shortcode_count,
+            "Number of shortcodes should not change: original={original_shortcode_count}, result={result_shortcode_count}"
+        );
+    }
+
+    #[test]
+    fn test_hugo_shortcode_multiline() {
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        // Multi-line Hugo shortcode content (collapsed to single line for testing)
+        let input =
+            r#"{{< figure src="test.png" alt="Line one. Line two. Line three." caption="A caption. With periods." >}}"#;
+        let result = reflow_markdown(input, &options);
+
+        // The shortcode should remain intact
+        assert!(
+            result.contains("{{<") && result.contains(">}}"),
+            "Hugo shortcode delimiters should be preserved: {result:?}"
+        );
+
+        // Should not duplicate content
+        assert_eq!(
+            result.matches("test.png").count(),
+            1,
+            "Image path should appear exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_hugo_shortcode_with_text_before_after() {
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let input = r#"Some text before. {{< shortcode param="value. with period." >}} And text after."#;
+        let result = reflow_markdown(input, &options);
+
+        // The shortcode should be preserved
+        assert!(
+            result.contains(r#"{{< shortcode param="value. with period." >}}"#),
+            "Shortcode should be preserved: {result:?}"
+        );
+    }
 }

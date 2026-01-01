@@ -489,6 +489,12 @@ pub static HTML_TAG_PATTERN: LazyLock<FancyRegex> =
 pub static HTML_ENTITY_REGEX: LazyLock<FancyRegex> =
     LazyLock::new(|| FancyRegex::new(r"&[a-zA-Z][a-zA-Z0-9]*;|&#\d+;|&#x[0-9a-fA-F]+;").unwrap());
 
+// Hugo/Go template shortcodes: {{< figure ... >}} and {{% shortcode %}}
+// Matches both delimiters: {{< ... >}} (shortcode) and {{% ... %}} (template)
+// Handles multi-line content with embedded quotes and newlines
+pub static HUGO_SHORTCODE_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r"\{\{[<%][\s\S]*?[%>]\}\}").unwrap());
+
 // Fourth lazy_static block for additional patterns
 // HTML comment patterns
 pub static HTML_COMMENT_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--").unwrap());
