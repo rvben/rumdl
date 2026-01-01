@@ -178,6 +178,17 @@ impl RumdlLanguageServer {
         None
     }
 
+    /// Get document content only if the document is currently open in the editor.
+    ///
+    /// We intentionally do not read from disk here because diagnostics should be
+    /// scoped to open documents. This avoids lingering diagnostics after a file
+    /// is closed when clients use pull diagnostics.
+    async fn get_open_document_content(&self, uri: &Url) -> Option<String> {
+        let docs = self.documents.read().await;
+        docs.get(uri)
+            .and_then(|entry| (!entry.from_disk).then(|| entry.content.clone()))
+    }
+
     /// Apply LSP config overrides to the filtered rules
     fn apply_lsp_config_overrides(
         &self,
@@ -1063,7 +1074,7 @@ impl LanguageServer for RumdlLanguageServer {
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                     identifier: Some("rumdl".to_string()),
                     inter_file_dependencies: true,
-                    workspace_diagnostics: true,
+                    workspace_diagnostics: false,
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 workspace: Some(WorkspaceServerCapabilities {
@@ -1751,7 +1762,7 @@ impl LanguageServer for RumdlLanguageServer {
     async fn diagnostic(&self, params: DocumentDiagnosticParams) -> JsonRpcResult<DocumentDiagnosticReportResult> {
         let uri = params.text_document.uri;
 
-        if let Some(text) = self.get_document_content(&uri).await {
+        if let Some(text) = self.get_open_document_content(&uri).await {
             match self.lint_document(&uri, &text).await {
                 Ok(diagnostics) => Ok(DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
                     RelatedFullDocumentDiagnosticReport {
