@@ -7,9 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.208] - 2026-01-01
+## [0.0.208] - 2026-01-02
+
+### Changed
+
+- **Reflow: Replace manual emphasis parsing with pulldown-cmark**
+  - Use pulldown-cmark for CommonMark-compliant emphasis, bold, and strikethrough detection
+  - Removes ~100 lines of complex manual regex-based emphasis detection
+  - Adds GFM strikethrough (`~~text~~`) support to sentence boundary detection
 
 ### Fixed
+
+- **Reflow: Continue emphasis markers across sentence splits** (fixes #251)
+  - When splitting emphasized text at sentence boundaries, each line now properly retains its emphasis markers
+  - Example: `*Sentence one. Sentence two.*` now correctly splits to `*Sentence one.*` and `*Sentence two.*`
+
+- **Reflow: Fix line_length=0 to mean "no wrapping"**
+  - Previously `line_length=0` would wrap after every word due to condition always being true
+  - Now correctly treats 0 as "unlimited line length" (no wrapping)
 
 - **MD007: Resolve false positives on nested unordered lists in ordered lists** (fixes #247)
   - Nested unordered lists inside ordered lists now calculate expected indent based on parent's content column
