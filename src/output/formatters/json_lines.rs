@@ -30,7 +30,7 @@ impl OutputFormatter for JsonLinesFormatter {
                 "column": warning.column,
                 "rule": warning.rule_name.as_deref().unwrap_or("unknown"),
                 "message": warning.message,
-                "severity": "warning",
+                "severity": warning.severity,
                 "fixable": warning.fix.is_some()
             });
 
@@ -312,10 +312,10 @@ mod tests {
     }
 
     #[test]
-    fn test_severity_always_warning() {
+    fn test_severity_levels() {
         let formatter = JsonLinesFormatter::new();
 
-        // Test that all severities are output as "warning" in the JSON
+        // Test that all severity levels are correctly output
         let warnings = vec![
             LintWarning {
                 line: 1,
@@ -337,14 +337,28 @@ mod tests {
                 severity: Severity::Error,
                 fix: None,
             },
+            LintWarning {
+                line: 3,
+                column: 1,
+                end_line: 3,
+                end_column: 5,
+                rule_name: Some("MD003".to_string()),
+                message: "Info severity".to_string(),
+                severity: Severity::Info,
+                fix: None,
+            },
         ];
 
         let output = formatter.format_warnings(&warnings, "test.md");
+        let lines: Vec<&str> = output.lines().collect();
 
-        for line in output.lines() {
-            let json: Value = serde_json::from_str(line).unwrap();
-            assert_eq!(json["severity"], "warning");
-        }
+        let json0: Value = serde_json::from_str(lines[0]).unwrap();
+        let json1: Value = serde_json::from_str(lines[1]).unwrap();
+        let json2: Value = serde_json::from_str(lines[2]).unwrap();
+
+        assert_eq!(json0["severity"], "warning");
+        assert_eq!(json1["severity"], "error");
+        assert_eq!(json2["severity"], "info");
     }
 
     #[test]

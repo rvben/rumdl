@@ -1,10 +1,10 @@
 //! Azure Pipeline logging format
 
 use crate::output::OutputFormatter;
-use crate::rule::LintWarning;
+use crate::rule::{LintWarning, Severity};
 
 /// Azure Pipeline formatter
-/// Outputs in the format: `##vso[task.logissue type=warning;sourcepath=<file>;linenumber=<line>;columnnumber=<col>;code=<rule>]<message>`
+/// Outputs in the format: `##vso[task.logissue type=<severity>;sourcepath=<file>;linenumber=<line>;columnnumber=<col>;code=<rule>]<message>`
 pub struct AzureFormatter;
 
 impl Default for AzureFormatter {
@@ -26,10 +26,16 @@ impl OutputFormatter for AzureFormatter {
         for warning in warnings {
             let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
 
+            // Map severity to Azure DevOps type (only supports "warning" and "error")
+            let issue_type = match warning.severity {
+                Severity::Error => "error",
+                Severity::Warning | Severity::Info => "warning",
+            };
+
             // Azure Pipeline logging command format
             let line = format!(
-                "##vso[task.logissue type=warning;sourcepath={};linenumber={};columnnumber={};code={}]{}",
-                file_path, warning.line, warning.column, rule_name, warning.message
+                "##vso[task.logissue type={};sourcepath={};linenumber={};columnnumber={};code={}]{}",
+                issue_type, file_path, warning.line, warning.column, rule_name, warning.message
             );
 
             output.push_str(&line);
@@ -118,7 +124,7 @@ mod tests {
         ];
 
         let output = formatter.format_warnings(&warnings, "test.md");
-        let expected = "##vso[task.logissue type=warning;sourcepath=test.md;linenumber=5;columnnumber=1;code=MD001]First warning\n##vso[task.logissue type=warning;sourcepath=test.md;linenumber=10;columnnumber=3;code=MD013]Second warning";
+        let expected = "##vso[task.logissue type=warning;sourcepath=test.md;linenumber=5;columnnumber=1;code=MD001]First warning\n##vso[task.logissue type=error;sourcepath=test.md;linenumber=10;columnnumber=3;code=MD013]Second warning";
         assert_eq!(output, expected);
     }
 
@@ -187,7 +193,7 @@ mod tests {
         let output = formatter.format_warnings(&warnings, "large.md");
         assert_eq!(
             output,
-            "##vso[task.logissue type=warning;sourcepath=large.md;linenumber=99999;columnnumber=12345;code=MD999]Edge case warning"
+            "##vso[task.logissue type=error;sourcepath=large.md;linenumber=99999;columnnumber=12345;code=MD999]Edge case warning"
         );
     }
 
@@ -261,10 +267,11 @@ mod tests {
     }
 
     #[test]
-    fn test_severity_always_warning() {
+    fn test_severity_levels() {
         let formatter = AzureFormatter::new();
 
-        // Test that all severities are output as "warning" in Azure format
+        // Test that severity levels are correctly mapped to Azure types
+        // Azure DevOps only supports "warning" and "error"
         let warnings = vec![
             LintWarning {
                 line: 1,
@@ -286,14 +293,25 @@ mod tests {
                 severity: Severity::Error,
                 fix: None,
             },
+            LintWarning {
+                line: 3,
+                column: 1,
+                end_line: 3,
+                end_column: 5,
+                rule_name: Some("MD003".to_string()),
+                message: "Info severity".to_string(),
+                severity: Severity::Info,
+                fix: None,
+            },
         ];
 
         let output = formatter.format_warnings(&warnings, "test.md");
         let lines: Vec<&str> = output.lines().collect();
 
-        // Both should use type=warning regardless of severity
+        // Warning → warning, Error → error, Info → warning (Azure only supports warning/error)
         assert!(lines[0].contains("type=warning"));
-        assert!(lines[1].contains("type=warning"));
+        assert!(lines[1].contains("type=error"));
+        assert!(lines[2].contains("type=warning"));
     }
 
     #[test]

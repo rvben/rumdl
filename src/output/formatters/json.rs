@@ -38,7 +38,7 @@ impl OutputFormatter for JsonFormatter {
                     "column": warning.column,
                     "rule": warning.rule_name.as_deref().unwrap_or("unknown"),
                     "message": warning.message,
-                    "severity": "warning",
+                    "severity": warning.severity,
                     "fixable": warning.fix.is_some(),
                     "fix": warning.fix.as_ref().map(|f| {
                         json!({
@@ -69,7 +69,7 @@ pub fn format_all_warnings_as_json(all_warnings: &[(String, Vec<LintWarning>)]) 
                 "column": warning.column,
                 "rule": warning.rule_name.as_deref().unwrap_or("unknown"),
                 "message": warning.message,
-                "severity": "warning",
+                "severity": warning.severity,
                 "fixable": warning.fix.is_some(),
                 "fix": warning.fix.as_ref().map(|f| {
                     json!({
@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(parsed[0]["column"], 1);
         assert_eq!(parsed[0]["rule"], "MD022");
         assert_eq!(parsed[0]["message"], "Headings should be surrounded by blank lines");
-        assert_eq!(parsed[0]["severity"], "warning"); // Always "warning" in current impl
+        assert_eq!(parsed[0]["severity"], "error");
         assert_eq!(parsed[0]["fixable"], true);
         assert!(!parsed[0]["fix"].is_null());
         assert_eq!(parsed[0]["fix"]["range"]["start"], 100);
@@ -405,5 +405,50 @@ mod tests {
                 .unwrap()
                 .contains("Multi\nline\nreplacement")
         );
+    }
+
+    #[test]
+    fn test_severity_levels_in_json() {
+        let formatter = JsonFormatter::new();
+        let warnings = vec![
+            LintWarning {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                rule_name: Some("MD001".to_string()),
+                message: "Error severity".to_string(),
+                severity: Severity::Error,
+                fix: None,
+            },
+            LintWarning {
+                line: 2,
+                column: 1,
+                end_line: 2,
+                end_column: 5,
+                rule_name: Some("MD002".to_string()),
+                message: "Warning severity".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            },
+            LintWarning {
+                line: 3,
+                column: 1,
+                end_line: 3,
+                end_column: 5,
+                rule_name: Some("MD003".to_string()),
+                message: "Info severity".to_string(),
+                severity: Severity::Info,
+                fix: None,
+            },
+        ];
+
+        let output = formatter.format_warnings(&warnings, "test.md");
+        let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0]["severity"], "error");
+        assert_eq!(parsed[1]["severity"], "warning");
+        assert_eq!(parsed[2]["severity"], "info");
     }
 }

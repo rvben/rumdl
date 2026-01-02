@@ -55,6 +55,7 @@ pub struct Fix {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
     Warning,
@@ -770,7 +771,7 @@ Content here"#;
         };
 
         let serialized = serde_json::to_string(&warning).unwrap();
-        assert!(serialized.contains("\"severity\":\"Warning\""));
+        assert!(serialized.contains("\"severity\":\"warning\""));
 
         let error = LintWarning {
             severity: Severity::Error,
@@ -778,7 +779,7 @@ Content here"#;
         };
 
         let serialized = serde_json::to_string(&error).unwrap();
-        assert!(serialized.contains("\"severity\":\"Error\""));
+        assert!(serialized.contains("\"severity\":\"error\""));
     }
 
     #[test]
