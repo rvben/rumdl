@@ -599,11 +599,12 @@ fn test_setext_heading_underlines_ignored() {
 #[test]
 fn test_html_blocks_skipped() {
     let rule = MD013LineLength::new(30, true, true, true, false);
-    let content = "<div class=\"very-long-class-name-that-exceeds-the-character-limit\">\n  Content\n</div>\nThis normal line is way too long for limit";
+    // Blank line after </div> ends the HTML block per CommonMark spec
+    let content = "<div class=\"very-long-class-name-that-exceeds-the-character-limit\">\n  Content\n</div>\n\nThis normal line is way too long for limit";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 4); // Only normal line flagged
+    assert_eq!(result[0].line, 5); // Only normal line flagged (after blank line)
 }
 
 #[test]
