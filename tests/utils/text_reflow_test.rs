@@ -2364,7 +2364,9 @@ mod issue_251_emphasis_continuation {
         };
 
         // Very long emphasized text with multiple sentences
-        let long_sentence = "This is a sentence. ".repeat(50);
+        // Note: Must NOT have trailing space before closing *, or CommonMark won't
+        // recognize it as a right-flanking delimiter
+        let long_sentence = "This is a sentence. ".repeat(49) + "This is a sentence.";
         let input = format!("*{long_sentence}*");
         let result = reflow_line(&input, &options);
 

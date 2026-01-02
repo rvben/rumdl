@@ -9,8 +9,9 @@ use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
     HUGO_SHORTCODE_REGEX, INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX,
     LINKED_IMAGE_INLINE_INLINE, LINKED_IMAGE_INLINE_REF, LINKED_IMAGE_REF_INLINE, LINKED_IMAGE_REF_REF,
-    REF_IMAGE_REGEX, REF_LINK_REGEX, SHORTCUT_REF_REGEX, STRIKETHROUGH_FANCY_REGEX, WIKI_LINK_REGEX,
+    REF_IMAGE_REGEX, REF_LINK_REGEX, SHORTCUT_REF_REGEX, WIKI_LINK_REGEX,
 };
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashSet;
 
 /// Options for reflowing text
@@ -145,9 +146,11 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
     // Check for CJK sentence-ending punctuation (。, ！, ？)
     // CJK punctuation doesn't require space or uppercase after it
     if is_cjk_sentence_ending(c) {
-        // Skip any trailing emphasis markers
+        // Skip any trailing emphasis/strikethrough markers
         let mut after_punct_pos = pos + 1;
-        while after_punct_pos < chars.len() && (chars[after_punct_pos] == '*' || chars[after_punct_pos] == '_') {
+        while after_punct_pos < chars.len()
+            && (chars[after_punct_pos] == '*' || chars[after_punct_pos] == '_' || chars[after_punct_pos] == '~')
+        {
             after_punct_pos += 1;
         }
 
@@ -161,8 +164,10 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
             return false;
         }
 
-        // Skip leading emphasis markers
-        while after_punct_pos < chars.len() && (chars[after_punct_pos] == '*' || chars[after_punct_pos] == '_') {
+        // Skip leading emphasis/strikethrough markers
+        while after_punct_pos < chars.len()
+            && (chars[after_punct_pos] == '*' || chars[after_punct_pos] == '_' || chars[after_punct_pos] == '~')
+        {
             after_punct_pos += 1;
         }
 
@@ -180,7 +185,7 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         return false;
     }
 
-    // Must be followed by space, or by emphasis marker followed by space (end of emphasis)
+    // Must be followed by space, or by emphasis/strikethrough marker followed by space
     let (_space_pos, after_space_pos) = if next_char == ' ' {
         // Normal case: punctuation followed by space
         (pos + 1, pos + 2)
@@ -193,6 +198,9 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         && chars[pos + 3] == ' '
     {
         // Sentence ends with bold: "sentence.** " or "sentence.__ "
+        (pos + 3, pos + 4)
+    } else if next_char == '~' && pos + 3 < chars.len() && chars[pos + 2] == '~' && chars[pos + 3] == ' ' {
+        // Sentence ends with strikethrough: "sentence.~~ "
         (pos + 3, pos + 4)
     } else {
         return false;
@@ -209,9 +217,11 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         return false;
     }
 
-    // Skip leading emphasis markers to find the actual first letter
+    // Skip leading emphasis/strikethrough markers to find the actual first letter
     let mut first_letter_pos = next_char_pos;
-    while first_letter_pos < chars.len() && (chars[first_letter_pos] == '*' || chars[first_letter_pos] == '_') {
+    while first_letter_pos < chars.len()
+        && (chars[first_letter_pos] == '*' || chars[first_letter_pos] == '_' || chars[first_letter_pos] == '~')
+    {
         first_letter_pos += 1;
     }
 
@@ -266,8 +276,8 @@ fn split_into_sentences_with_set(text: &str, abbreviations: &HashSet<String>) ->
         current_sentence.push(c);
 
         if is_sentence_boundary(text, pos, abbreviations) {
-            // Consume any trailing emphasis markers (they belong to the current sentence)
-            while chars.peek() == Some(&'*') || chars.peek() == Some(&'_') {
+            // Consume any trailing emphasis/strikethrough markers (they belong to the current sentence)
+            while chars.peek() == Some(&'*') || chars.peek() == Some(&'_') || chars.peek() == Some(&'~') {
                 current_sentence.push(chars.next().unwrap());
                 pos += 1;
             }
@@ -392,8 +402,9 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
         return reflow_elements_sentence_per_line(&elements, &options.abbreviations);
     }
 
-    // Quick check: if line is already short enough, return as-is
-    if line.chars().count() <= options.line_length {
+    // Quick check: if line is already short enough or no wrapping requested, return as-is
+    // line_length = 0 means no wrapping (unlimited line length)
+    if options.line_length == 0 || line.chars().count() <= options.line_length {
         return vec![line.to_string()];
     }
 
@@ -587,6 +598,125 @@ impl Element {
     }
 }
 
+/// An emphasis or formatting span parsed by pulldown-cmark
+#[derive(Debug, Clone)]
+struct EmphasisSpan {
+    /// Byte offset where the emphasis starts (including markers)
+    start: usize,
+    /// Byte offset where the emphasis ends (after closing markers)
+    end: usize,
+    /// The content inside the emphasis markers
+    content: String,
+    /// Whether this is strong (bold) emphasis
+    is_strong: bool,
+    /// Whether this is strikethrough (~~text~~)
+    is_strikethrough: bool,
+    /// Whether the original used underscore markers (for emphasis only)
+    uses_underscore: bool,
+}
+
+/// Extract emphasis and strikethrough spans from text using pulldown-cmark
+///
+/// This provides CommonMark-compliant emphasis parsing, correctly handling:
+/// - Nested emphasis like `*text **bold** more*`
+/// - Left/right flanking delimiter rules
+/// - Underscore vs asterisk markers
+/// - GFM strikethrough (~~text~~)
+///
+/// Returns spans sorted by start position.
+fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
+    let mut spans = Vec::new();
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+
+    // Stacks to track nested formatting with their start positions
+    let mut emphasis_stack: Vec<(usize, bool)> = Vec::new(); // (start_byte, uses_underscore)
+    let mut strong_stack: Vec<(usize, bool)> = Vec::new();
+    let mut strikethrough_stack: Vec<usize> = Vec::new();
+
+    let parser = Parser::new_ext(text, options).into_offset_iter();
+
+    for (event, range) in parser {
+        match event {
+            Event::Start(Tag::Emphasis) => {
+                // Check if this uses underscore by looking at the original text
+                let uses_underscore = text.get(range.start..range.start + 1) == Some("_");
+                emphasis_stack.push((range.start, uses_underscore));
+            }
+            Event::End(TagEnd::Emphasis) => {
+                if let Some((start_byte, uses_underscore)) = emphasis_stack.pop() {
+                    // Extract content between the markers (1 char marker on each side)
+                    let content_start = start_byte + 1;
+                    let content_end = range.end - 1;
+                    if content_end > content_start
+                        && let Some(content) = text.get(content_start..content_end)
+                    {
+                        spans.push(EmphasisSpan {
+                            start: start_byte,
+                            end: range.end,
+                            content: content.to_string(),
+                            is_strong: false,
+                            is_strikethrough: false,
+                            uses_underscore,
+                        });
+                    }
+                }
+            }
+            Event::Start(Tag::Strong) => {
+                // Check if this uses underscore by looking at the original text
+                let uses_underscore = text.get(range.start..range.start + 2) == Some("__");
+                strong_stack.push((range.start, uses_underscore));
+            }
+            Event::End(TagEnd::Strong) => {
+                if let Some((start_byte, uses_underscore)) = strong_stack.pop() {
+                    // Extract content between the markers (2 char marker on each side)
+                    let content_start = start_byte + 2;
+                    let content_end = range.end - 2;
+                    if content_end > content_start
+                        && let Some(content) = text.get(content_start..content_end)
+                    {
+                        spans.push(EmphasisSpan {
+                            start: start_byte,
+                            end: range.end,
+                            content: content.to_string(),
+                            is_strong: true,
+                            is_strikethrough: false,
+                            uses_underscore,
+                        });
+                    }
+                }
+            }
+            Event::Start(Tag::Strikethrough) => {
+                strikethrough_stack.push(range.start);
+            }
+            Event::End(TagEnd::Strikethrough) => {
+                if let Some(start_byte) = strikethrough_stack.pop() {
+                    // Extract content between the ~~ markers (2 char marker on each side)
+                    let content_start = start_byte + 2;
+                    let content_end = range.end - 2;
+                    if content_end > content_start
+                        && let Some(content) = text.get(content_start..content_end)
+                    {
+                        spans.push(EmphasisSpan {
+                            start: start_byte,
+                            end: range.end,
+                            content: content.to_string(),
+                            is_strong: false,
+                            is_strikethrough: true,
+                            uses_underscore: false,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Sort by start position
+    spans.sort_by_key(|s| s.start);
+    spans
+}
+
 /// Parse markdown elements from text preserving the raw syntax
 ///
 /// Detection order is critical:
@@ -601,7 +731,12 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
     let mut elements = Vec::new();
     let mut remaining = text;
 
+    // Pre-extract emphasis spans using pulldown-cmark for CommonMark-compliant parsing
+    let emphasis_spans = extract_emphasis_spans(text);
+
     while !remaining.is_empty() {
+        // Calculate current byte offset in original text
+        let current_offset = text.len() - remaining.len();
         // Find the earliest occurrence of any markdown pattern
         let mut earliest_match: Option<(usize, &str, fancy_regex::Match)> = None;
 
@@ -703,12 +838,7 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
             earliest_match = Some((m.start(), "inline_math", m));
         }
 
-        // Check for strikethrough - ~~text~~
-        if let Ok(Some(m)) = STRIKETHROUGH_FANCY_REGEX.find(remaining)
-            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-        {
-            earliest_match = Some((m.start(), "strikethrough", m));
-        }
+        // Note: Strikethrough is now handled by pulldown-cmark in extract_emphasis_spans
 
         // Check for emoji shortcodes - :emoji:
         if let Ok(Some(m)) = EMOJI_SHORTCODE_REGEX.find(remaining)
@@ -753,38 +883,28 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
         // Find earliest non-link special characters
         let mut next_special = remaining.len();
         let mut special_type = "";
+        let mut pulldown_emphasis: Option<&EmphasisSpan> = None;
 
+        // Check for code spans (not handled by pulldown-cmark in this context)
         if let Some(pos) = remaining.find('`')
             && pos < next_special
         {
             next_special = pos;
             special_type = "code";
         }
-        if let Some(pos) = remaining.find("**")
-            && pos < next_special
-        {
-            next_special = pos;
-            special_type = "bold";
-        }
-        if let Some(pos) = remaining.find("__")
-            && pos < next_special
-        {
-            next_special = pos;
-            special_type = "bold_underscore";
-        }
-        if let Some(pos) = remaining.find('*')
-            && pos < next_special
-            && !remaining[pos..].starts_with("**")
-        {
-            next_special = pos;
-            special_type = "italic";
-        }
-        if let Some(pos) = remaining.find('_')
-            && pos < next_special
-            && !remaining[pos..].starts_with("__")
-        {
-            next_special = pos;
-            special_type = "italic_underscore";
+
+        // Check for emphasis using pulldown-cmark's pre-extracted spans
+        // Find the earliest emphasis span that starts within remaining text
+        for span in &emphasis_spans {
+            if span.start >= current_offset && span.start < current_offset + remaining.len() {
+                let pos_in_remaining = span.start - current_offset;
+                if pos_in_remaining < next_special {
+                    next_special = pos_in_remaining;
+                    special_type = "pulldown_emphasis";
+                    pulldown_emphasis = Some(span);
+                }
+                break; // Spans are sorted by start position, so first match is earliest
+            }
         }
 
         // Determine which pattern to process first
@@ -995,16 +1115,7 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                         remaining = &remaining[1..];
                     }
                 }
-                "strikethrough" => {
-                    if let Ok(Some(caps)) = STRIKETHROUGH_FANCY_REGEX.captures(remaining) {
-                        let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        elements.push(Element::Strikethrough(text.to_string()));
-                        remaining = &remaining[match_obj.end()..];
-                    } else {
-                        elements.push(Element::Text("~~".to_string()));
-                        remaining = &remaining[2..];
-                    }
-                }
+                // Note: "strikethrough" case removed - now handled by pulldown-cmark
                 "emoji" => {
                     if let Ok(Some(caps)) = EMOJI_SHORTCODE_REGEX.captures(remaining) {
                         let emoji = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -1059,107 +1170,27 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                         break;
                     }
                 }
-                "bold" => {
-                    // Check for bold text **text**
-                    if let Some(bold_end) = remaining[2..].find("**") {
-                        let bold_text = &remaining[2..2 + bold_end];
-                        elements.push(Element::Bold {
-                            content: bold_text.to_string(),
-                            underscore: false,
-                        });
-                        remaining = &remaining[2 + bold_end + 2..];
-                    } else {
-                        // No closing **, treat as text
-                        elements.push(Element::Text("**".to_string()));
-                        remaining = &remaining[2..];
-                    }
-                }
-                "bold_underscore" => {
-                    // Check for bold text __text__
-                    if let Some(bold_end) = remaining[2..].find("__") {
-                        let bold_text = &remaining[2..2 + bold_end];
-                        elements.push(Element::Bold {
-                            content: bold_text.to_string(),
-                            underscore: true,
-                        });
-                        remaining = &remaining[2 + bold_end + 2..];
-                    } else {
-                        // No closing __, treat as text
-                        elements.push(Element::Text("__".to_string()));
-                        remaining = &remaining[2..];
-                    }
-                }
-                "italic" => {
-                    // Check for italic text *text*
-                    // Must find closing * that isn't part of ** (bold)
-                    let search_text = &remaining[1..];
-                    let mut italic_end = None;
-                    let chars: Vec<char> = search_text.chars().collect();
-                    let mut i = 0;
-                    while i < chars.len() {
-                        if chars[i] == '*' {
-                            // Check if this is part of ** (bold marker)
-                            let is_double =
-                                (i + 1 < chars.len() && chars[i + 1] == '*') || (i > 0 && chars[i - 1] == '*');
-                            if !is_double {
-                                italic_end = Some(i);
-                                break;
-                            }
-                            // Skip ** pairs
-                            if i + 1 < chars.len() && chars[i + 1] == '*' {
-                                i += 2;
-                                continue;
-                            }
+                "pulldown_emphasis" => {
+                    // Use pre-extracted emphasis/strikethrough span from pulldown-cmark
+                    if let Some(span) = pulldown_emphasis {
+                        let span_len = span.end - span.start;
+                        if span.is_strikethrough {
+                            elements.push(Element::Strikethrough(span.content.clone()));
+                        } else if span.is_strong {
+                            elements.push(Element::Bold {
+                                content: span.content.clone(),
+                                underscore: span.uses_underscore,
+                            });
+                        } else {
+                            elements.push(Element::Italic {
+                                content: span.content.clone(),
+                                underscore: span.uses_underscore,
+                            });
                         }
-                        i += 1;
-                    }
-                    if let Some(end) = italic_end {
-                        let italic_text = &remaining[1..1 + end];
-                        elements.push(Element::Italic {
-                            content: italic_text.to_string(),
-                            underscore: false,
-                        });
-                        remaining = &remaining[1 + end + 1..];
+                        remaining = &remaining[span_len..];
                     } else {
-                        // No closing *, treat as text
-                        elements.push(Element::Text("*".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                "italic_underscore" => {
-                    // Check for italic text _text_
-                    // Must find closing _ that isn't part of __ (bold)
-                    let search_text = &remaining[1..];
-                    let mut italic_end = None;
-                    let chars: Vec<char> = search_text.chars().collect();
-                    let mut i = 0;
-                    while i < chars.len() {
-                        if chars[i] == '_' {
-                            // Check if this is part of __ (bold marker)
-                            let is_double =
-                                (i + 1 < chars.len() && chars[i + 1] == '_') || (i > 0 && chars[i - 1] == '_');
-                            if !is_double {
-                                italic_end = Some(i);
-                                break;
-                            }
-                            // Skip __ pairs
-                            if i + 1 < chars.len() && chars[i + 1] == '_' {
-                                i += 2;
-                                continue;
-                            }
-                        }
-                        i += 1;
-                    }
-                    if let Some(end) = italic_end {
-                        let italic_text = &remaining[1..1 + end];
-                        elements.push(Element::Italic {
-                            content: italic_text.to_string(),
-                            underscore: true,
-                        });
-                        remaining = &remaining[1 + end + 1..];
-                    } else {
-                        // No closing _, treat as text
-                        elements.push(Element::Text("_".to_string()));
+                        // Fallback - shouldn't happen
+                        elements.push(Element::Text(remaining[..1].to_string()));
                         remaining = &remaining[1..];
                     }
                 }
@@ -1249,6 +1280,9 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
             // Handle bold elements - may contain multiple sentences that need continuation
             let marker = if *underscore { "__" } else { "**" };
             handle_emphasis_sentence_split(content, marker, &abbreviations, &mut current_line, &mut lines);
+        } else if let Element::Strikethrough(content) = element {
+            // Handle strikethrough elements - may contain multiple sentences that need continuation
+            handle_emphasis_sentence_split(content, "~~", &abbreviations, &mut current_line, &mut lines);
         } else {
             // Non-text, non-emphasis elements (Code, Links, etc.)
             // Add space before element if needed (unless it's after an opening paren/bracket)
