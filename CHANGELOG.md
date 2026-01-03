@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.209] - 2026-01-03
+
+### Fixed
+
+- **MD030: Eliminate false positives on hard-wrapped citations and continuations** (fixes #253)
+  - Replaced manual regex-based list detection with pulldown-cmark parser for context-aware list item detection
+  - Hard-wrapped citation continuations like `(Doe 2003, p.\n  1234)` no longer trigger false positives
+  - Resolves LSP formatting infinite loop (adding trailing space → MD009 → removing space → MD030)
+  - Added 16 comprehensive edge case tests covering citations, blockquoted lists, URLs, ISBNs, and mathematical expressions
+
+- **Heading detection: Prevent list items from being detected as setext headings** (fixes #254)
+  - Per CommonMark spec 4.3, setext heading content cannot be a list item, ATX heading, blockquote, thematic break, code fence, or HTML block
+  - Incomplete list items (e.g., `- Orange` followed by `-`) no longer incorrectly detected as level 2 headings
+  - Eliminates false positives in all heading-related rules (MD041, MD022, MD023, MD024, MD025, MD026, MD003, MD043)
+  - Added comprehensive validation for all CommonMark setext heading exclusions
+
+- **Output formatters: Correct severity field in JSON, JSON Lines, and Azure Pipelines formats**
+  - Fixed bug where severity was always output as "error" regardless of actual severity level
+  - JSON/JSON Lines/Azure formatters now correctly output "error", "warning", or "info" based on actual severity
+
 ## [0.0.208] - 2026-01-02
 
 ### Changed
