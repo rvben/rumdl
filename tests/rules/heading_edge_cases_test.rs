@@ -873,3 +873,117 @@ fn test_heading_rules_boundary_conditions() {
     let result = md025.check(&ctx).unwrap();
     assert!(result.is_empty(), "Whitespace-only document should have no headings");
 }
+
+/// Tests for issue #254: List items should not be detected as setext headings
+/// Per CommonMark spec 4.3, setext heading content cannot be a list item
+#[test]
+fn test_list_items_not_setext_headings() {
+    // CommonMark spec Example 99: list item followed by dashes should NOT be setext heading
+    let content = r#"- foo
+-----"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let rule = MD022BlanksAroundHeadings::default();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        0,
+        "List item should not be treated as setext heading (CommonMark Example 99)"
+    );
+
+    // Test all unordered list markers: -, *, +
+    let test_cases = vec![
+        "- Item\n---",
+        "* Item\n---",
+        "+ Item\n---",
+        "- Item\n===",
+        "* Item\n===",
+        "+ Item\n===",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD022BlanksAroundHeadings::default();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            0,
+            "List item should not be treated as setext heading: {content}"
+        );
+    }
+
+    // Test numbered lists
+    let test_cases = vec!["1. Item\n---", "2. Item\n===", "10. Item\n---"];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD022BlanksAroundHeadings::default();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            0,
+            "Numbered list should not be treated as setext heading: {content}"
+        );
+    }
+
+    // Incomplete list item (the exact case from issue #254)
+    let content = r#"- Apple
+- Orange
+-"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD022BlanksAroundHeadings::default();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        0,
+        "Incomplete list item should not trigger heading detection"
+    );
+
+    // Valid paragraph should still work as setext heading
+    let content = r#"Regular paragraph text
+----------------------"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let heading_count = ctx.valid_headings().count();
+    assert_eq!(heading_count, 1, "Valid paragraph setext heading should be detected");
+
+    // Blockquote should not be setext content
+    let content = r#"> Quote
+---"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD022BlanksAroundHeadings::default();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "Blockquote should not be setext heading content");
+
+    // Code fence should not be setext content
+    let content = r#"```rust
+---"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD022BlanksAroundHeadings::default();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "Code fence should not be setext heading content");
+
+    // HTML block should not be setext content
+    let content = r#"<div>
+---"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD022BlanksAroundHeadings::default();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "HTML block should not be setext heading content");
+
+    // Mixed lists and valid headings
+    let content = r#"- List item
+- Another item
+
+Valid Heading
+============="#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let heading_count = ctx.valid_headings().count();
+    assert_eq!(heading_count, 1, "Should detect exactly 1 heading in mixed content");
+}
