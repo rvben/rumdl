@@ -631,4 +631,274 @@ mod tests {
 
         assert_eq!(result.len(), 0, "Should not trigger MD030 on continuation line");
     }
+
+    // Expert-level edge case tests for issue #253
+
+    #[test]
+    fn test_issue_253_blockquoted_citation_continuation() {
+        // Blockquoted lists with citation continuations
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"> - Item with citation (Smith 2020, p.
+>   456) in blockquote"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag continuation in blockquoted list. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_ordered_list_continuation() {
+        // Ordered lists with citation continuations
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"1. First item with reference (Jones et al. 2019,
+   pp. 123-125)
+2. Second item"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag continuation in ordered list. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_mixed_nested_lists_with_continuation() {
+        // Mixed ordered/unordered nested lists with continuations
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Unordered item
+  1. Nested ordered with citation (Author 2021,
+     p. 789)
+  2. Another nested item"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag continuation in nested mixed lists. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_multiple_continuations_same_item() {
+        // Multiple continuation patterns in same item
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Item with multiple citations (Ref1 2020,
+  p. 100) and (Ref2 2021,
+  p. 200) and (Ref3 2022,
+  p. 300)"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag multiple continuations. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_deeply_nested_continuation() {
+        // Continuation at various nesting levels
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Level 1
+  - Level 2 with citation (Author,
+    p. 456)
+    - Level 3 with citation (Another,
+      p. 789)"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag continuations at different nesting levels. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_wrapped_url_continuation() {
+        // Real-world: Wrapped URLs that look like list markers
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- See documentation at https://example.com/path/
+  123456789/more/path
+- Another item"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag wrapped URL continuations. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_enumerated_continuation() {
+        // Wrapped enumerated lists within prose
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- The document lists three items: (1) first item, (2) second item, (3)
+  345) which should not be treated as a list marker"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag enumerated prose continuations. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_mathematical_expression_continuation() {
+        // Mathematical expressions with numbers and parentheses
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Calculate using the formula (x + y) * (a + b) where x = 123 and y =
+  456) to get the result"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag mathematical expression continuations. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_single_digit_continuation() {
+        // Boundary case: Single-digit continuation
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Text with reference (Page
+  1)"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag single-digit continuations. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_very_long_number_continuation() {
+        // Boundary case: Very long number sequence
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- ISBN reference (ISBN-13:
+  9781234567890)"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag long number continuations. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_period_delimiter_continuation() {
+        // Test period delimiter (1.) in continuations
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Reference to section (Chapter 3, Section
+  1. Introduction) for details"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag period delimiter in continuations. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_mixed_delimiters_continuation() {
+        // Both ) and . delimiters in same continuation context
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- References: (1) Smith 2020, (2) Jones 2021, and section
+  3. Additional notes"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag mixed delimiters in continuations. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_continuation_after_code_span() {
+        // Continuation after inline code
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Use `function(param1,
+  param2)` to call"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag continuations after code spans. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_continuation_with_emphasis() {
+        // Continuation with emphasis markers
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- See *important note (page
+  123)* for details"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not flag continuations with emphasis. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_actual_nested_list_still_detected() {
+        // NEGATIVE TEST: Actual nested list items should still be detected for spacing issues
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Parent item
+  1.Child without space"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should still detect actual list items without proper spacing. Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 2, "Error should be on the actual list item line");
+    }
+
+    #[test]
+    fn test_issue_253_actual_list_after_continuation() {
+        // Ensure actual list items after continuations are still checked
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Item with citation (Author,
+  p. 123)
+  1.Actual nested item without space"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should detect actual list items after continuations. Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 3, "Error should be on the nested list item");
+    }
 }
