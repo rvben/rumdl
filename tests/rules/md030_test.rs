@@ -552,4 +552,83 @@ mod tests {
         let expected = "* Single line\n*   Multi-line item\n   with continuation\n1. Single ordered\n1.    Multi-line ordered\n     with continuation";
         assert_eq!(fixed, expected, "Multi-line spacing should be fixed correctly");
     }
+
+    // Tests for issue #253: MD030 false positive on hard-wrapped brackets
+    // https://github.com/rvben/rumdl/issues/253
+
+    #[test]
+    fn test_issue_253_citation_continuation() {
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- foobar foobar foobar foobar foobar foobar foobar foobar foobar (Doe 2003, p.
+  1234)"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should NOT trigger MD030 on the continuation line "  1234)"
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not trigger MD030 on continuation lines. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_multiple_citations() {
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Citation example (Author 2023, p.
+  1234)
+
+- Reference with number (see item
+  99)
+
+* Multiple digits (total:
+  123456)"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should NOT trigger MD030 on any continuation lines
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not trigger MD030 on continuation lines. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_valid_nested_lists() {
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Unordered item
+  1) Nested ordered item with parenthesis
+  2) Another nested item
+
+* Another unordered
+  1. Nested with period
+  2. More nested"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should NOT trigger MD030 on nested lists
+        assert_eq!(
+            result.len(),
+            0,
+            "Should not trigger MD030 on properly formatted nested lists. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_253_lsp_formatting_loop_prevention() {
+        // This test ensures that continuation lines like "  1234)" don't trigger
+        // MD030, which was causing an LSP formatting loop:
+        // 1. MD030 would add a space → triggers MD009 (trailing space)
+        // 2. MD009 fix removes trailing space → triggers MD030 again
+        // 3. Infinite loop
+
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"- Text with citation (Author 2003, p.
+  1234)"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 0, "Should not trigger MD030 on continuation line");
+    }
 }

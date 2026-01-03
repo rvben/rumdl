@@ -1770,6 +1770,107 @@ impl<'a> LintContext<'a> {
         Some((&line[..total_prefix_len], remaining))
     }
 
+    /// Detect list items using pulldown-cmark for context-aware parsing
+    /// Returns a map of byte_offset -> (is_ordered, marker, marker_column, content_column)
+    /// This eliminates false positives on continuation lines that look like list items
+    fn detect_list_items_with_pulldown(
+        content: &str,
+        line_offsets: &[usize],
+        flavor: MarkdownFlavor,
+    ) -> std::collections::HashMap<usize, (bool, String, usize, usize, Option<usize>)> {
+        use std::collections::HashMap;
+
+        let mut list_items = HashMap::new();
+
+        // Use the same options as the main parsing to ensure consistency
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_FOOTNOTES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        options.insert(Options::ENABLE_TASKLISTS);
+        // Always enable GFM features for consistency with existing behavior
+        options.insert(Options::ENABLE_GFM);
+
+        // Suppress unused variable warning
+        let _ = flavor;
+
+        let parser = Parser::new_ext(content, options).into_offset_iter();
+        let mut list_depth: usize = 0;
+        let mut list_stack: Vec<bool> = Vec::new(); // Stack to track ordered state per depth
+
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::List(start_number)) => {
+                    list_depth += 1;
+                    list_stack.push(start_number.is_some());
+                }
+                Event::End(TagEnd::List(_)) => {
+                    list_depth = list_depth.saturating_sub(1);
+                    list_stack.pop();
+                }
+                Event::Start(Tag::Item) if list_depth > 0 => {
+                    // Get the ordered state for the CURRENT (innermost) list
+                    let current_list_is_ordered = list_stack.last().copied().unwrap_or(false);
+                    // Find which line this byte offset corresponds to
+                    let item_start = range.start;
+
+                    // Binary search to find the line number
+                    let line_idx = match line_offsets.binary_search(&item_start) {
+                        Ok(idx) => idx,
+                        Err(idx) => idx.saturating_sub(1),
+                    };
+
+                    if line_idx < line_offsets.len() {
+                        let line_start = line_offsets[line_idx];
+                        let line_end = line_offsets.get(line_idx + 1).copied().unwrap_or(content.len());
+                        let line = &content[line_start..line_end.min(content.len())];
+
+                        // Strip trailing newline
+                        let line = line
+                            .strip_suffix('\n')
+                            .or_else(|| line.strip_suffix("\r\n"))
+                            .unwrap_or(line);
+
+                        // Strip blockquote prefix if present
+                        let blockquote_parse = Self::parse_blockquote_prefix(line);
+                        let (blockquote_prefix_len, line_to_parse) = if let Some((prefix, content)) = blockquote_parse {
+                            (prefix.len(), content)
+                        } else {
+                            (0, line)
+                        };
+
+                        // Parse the list marker from the actual line
+                        if current_list_is_ordered {
+                            if let Some((leading_spaces, number_str, delimiter, spacing, _content)) =
+                                Self::parse_ordered_list(line_to_parse)
+                            {
+                                let marker = format!("{number_str}{delimiter}");
+                                let marker_column = blockquote_prefix_len + leading_spaces.len();
+                                let content_column = marker_column + marker.len() + spacing.len();
+                                let number = number_str.parse().ok();
+
+                                list_items.insert(line_start, (true, marker, marker_column, content_column, number));
+                            }
+                        } else if let Some((leading_spaces, marker, spacing, _content)) =
+                            Self::parse_unordered_list(line_to_parse)
+                        {
+                            let marker_column = blockquote_prefix_len + leading_spaces.len();
+                            let content_column = marker_column + 1 + spacing.len();
+
+                            list_items.insert(
+                                line_start,
+                                (false, marker.to_string(), marker_column, content_column, None),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        list_items
+    }
+
     /// Fast unordered list parser - replaces regex for 5-10x speedup
     /// Matches: ^(\s*)([-*+])([ \t]*)(.*)
     /// Returns: Some((leading_ws, marker, spacing, content)) or None
@@ -1926,6 +2027,9 @@ impl<'a> LintContext<'a> {
         // Pre-compute which lines are in code blocks
         let code_block_map = Self::compute_code_block_line_map(content, line_offsets, code_blocks);
 
+        // Use pulldown-cmark to detect list items (context-aware, eliminates false positives)
+        let list_item_map = Self::detect_list_items_with_pulldown(content, line_offsets, flavor);
+
         // Detect front matter boundaries FIRST, before any other parsing
         // Use FrontMatterUtils to detect all types of front matter (YAML, TOML, JSON, malformed)
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
@@ -1961,74 +2065,20 @@ impl<'a> LintContext<'a> {
                 byte_offset,
                 line_end_offset,
             );
-            let list_item = if !(in_code_block
-                || is_blank
-                || in_mkdocstrings
-                || in_html_comment
-                || (front_matter_end > 0 && i < front_matter_end))
-            {
-                // Strip blockquote prefix if present for list detection (reuse cached result)
-                let (line_for_list_check, blockquote_prefix_len) = if let Some((prefix, content)) = blockquote_parse {
-                    (content, prefix.len())
-                } else {
-                    (&**line, 0)
-                };
-
-                if let Some((leading_spaces, marker, spacing, _content)) =
-                    Self::parse_unordered_list(line_for_list_check)
-                {
-                    let marker_column = blockquote_prefix_len + leading_spaces.len();
-                    let content_column = marker_column + 1 + spacing.len();
-
-                    // According to CommonMark spec, unordered list items MUST have at least one space
-                    // after the marker (-, *, or +). Without a space, it's not a list item.
-                    // This also naturally handles cases like:
-                    // - *emphasis* (not a list)
-                    // - **bold** (not a list)
-                    // - --- (horizontal rule, not a list)
-                    if spacing.is_empty() {
-                        None
-                    } else {
-                        Some(ListItemInfo {
-                            marker: marker.to_string(),
-                            is_ordered: false,
-                            number: None,
-                            marker_column,
-                            content_column,
-                        })
-                    }
-                } else if let Some((leading_spaces, number_str, delimiter, spacing, content)) =
-                    Self::parse_ordered_list(line_for_list_check)
-                {
-                    let marker = format!("{number_str}{delimiter}");
-                    let marker_column = blockquote_prefix_len + leading_spaces.len();
-                    let content_column = marker_column + marker.len() + spacing.len();
-
-                    // CommonMark spec: If content follows the marker, a space is required.
-                    // But if the line ends after the marker (empty content or whitespace-only),
-                    // no space is needed. Examples:
-                    // - "1." (valid - no content after marker)
-                    // - "1. " (valid - space before empty content)
-                    // - "1. text" (valid - space before content)
-                    // - "1.text" (INVALID - content without space)
-                    let content_after_spacing = content.trim();
-                    if spacing.is_empty() && !content_after_spacing.is_empty() {
-                        None
-                    } else {
-                        Some(ListItemInfo {
-                            marker,
-                            is_ordered: true,
-                            number: number_str.parse().ok(),
-                            marker_column,
-                            content_column,
-                        })
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            // Use pulldown-cmark's list detection for context-aware parsing
+            // This eliminates false positives on continuation lines (issue #253)
+            let list_item =
+                list_item_map
+                    .get(&byte_offset)
+                    .map(
+                        |(is_ordered, marker, marker_column, content_column, number)| ListItemInfo {
+                            marker: marker.clone(),
+                            is_ordered: *is_ordered,
+                            number: *number,
+                            marker_column: *marker_column,
+                            content_column: *content_column,
+                        },
+                    );
 
             // Detect horizontal rules (only outside code blocks and frontmatter)
             // Uses CommonMark-compliant check including leading indentation validation

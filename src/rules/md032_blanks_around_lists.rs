@@ -1143,20 +1143,21 @@ mod tests {
 
     #[test]
     fn test_fix_handles_tabs_and_spaces() {
-        // Per markdownlint-cli: trailing text is lazy continuation, only preceding blank needed
+        // Tab at line start = 4 spaces = indented code (not a list item per CommonMark)
+        // Only the space-indented line is a real list item
         let content = "Text\n\t- Item with tab\n  - Item with spaces\nText";
         let warnings = lint(content);
-        // The tab-indented item and space-indented item may be seen as separate lists
-        // Per markdownlint-cli behavior, we expect at least 1 warning
+        // Per markdownlint-cli: only line 3 (space-indented) is a list needing blanks
         assert!(!warnings.is_empty(), "Should warn for missing blank before list");
 
         // Test that warnings have fixes
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
-        // Only add blank before, not after (trailing text is lazy continuation)
-        let expected = "Text\n\n\t- Item with tab\n  - Item with spaces\nText";
-        assert_eq!(fixed_content, expected, "Fix should preserve original indentation");
+        // Add blank before the actual list item (line 3), not the tab-indented code (line 2)
+        // Trailing text is lazy continuation, so no blank after
+        let expected = "Text\n\t- Item with tab\n\n  - Item with spaces\nText";
+        assert_eq!(fixed_content, expected, "Fix should add blank before list item");
 
         // Verify fix resolves the issue
         let warnings_after_fix = lint(&fixed_content);

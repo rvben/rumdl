@@ -989,10 +989,13 @@ Even more text";
     #[test]
     fn test_list_with_tabs() {
         let rule = MD005ListIndent::default();
-        let content = "* Item 1\n\t* Tab indented\n  * Space indented";
+        // Tab at line start = 4 spaces = indented code per CommonMark, NOT a nested list
+        // MD010 catches hard tabs, MD005 checks nested list indent consistency
+        // This test now uses actual nested lists with mixed indentation
+        let content = "* Item 1\n   * Wrong indent (3 spaces)\n  * Correct indent (2 spaces)";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Should detect inconsistent indentation
+        // Should detect inconsistent indentation (3 spaces vs 2 spaces)
         assert!(!result.is_empty());
     }
 
