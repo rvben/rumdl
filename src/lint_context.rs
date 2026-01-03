@@ -2343,6 +2343,60 @@ impl<'a> LintContext<'a> {
                         continue;
                     }
 
+                    // Per CommonMark spec 4.3, setext heading content cannot be interpretable as:
+                    // list item, ATX heading, block quote, thematic break, code fence, or HTML block
+                    let content_line = line.trim();
+
+                    // Skip list items (-, *, +) and thematic breaks (---, ***, etc.)
+                    if content_line.starts_with('-') || content_line.starts_with('*') || content_line.starts_with('+') {
+                        continue;
+                    }
+
+                    // Skip underscore thematic breaks (___)
+                    if content_line.starts_with('_') {
+                        let non_ws: String = content_line.chars().filter(|c| !c.is_whitespace()).collect();
+                        if non_ws.len() >= 3 && non_ws.chars().all(|c| c == '_') {
+                            continue;
+                        }
+                    }
+
+                    // Skip numbered lists (1. Item, 2. Item, etc.)
+                    if let Some(first_char) = content_line.chars().next()
+                        && first_char.is_ascii_digit()
+                    {
+                        let num_end = content_line.chars().take_while(|c| c.is_ascii_digit()).count();
+                        if num_end < content_line.len() {
+                            let next = content_line.chars().nth(num_end);
+                            if next == Some('.') || next == Some(')') {
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Skip ATX headings
+                    if ATX_HEADING_REGEX.is_match(line) {
+                        continue;
+                    }
+
+                    // Skip blockquotes
+                    if content_line.starts_with('>') {
+                        continue;
+                    }
+
+                    // Skip code fences
+                    let trimmed_start = line.trim_start();
+                    if trimmed_start.len() >= 3 {
+                        let first_three: String = trimmed_start.chars().take(3).collect();
+                        if first_three == "```" || first_three == "~~~" {
+                            continue;
+                        }
+                    }
+
+                    // Skip HTML blocks
+                    if content_line.starts_with('<') {
+                        continue;
+                    }
+
                     let underline = next_line.trim();
 
                     let level = if underline.starts_with('=') { 1 } else { 2 };
