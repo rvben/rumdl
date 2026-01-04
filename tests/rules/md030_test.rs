@@ -1179,4 +1179,142 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content, "Decimal numbers should not be modified by fix");
     }
+
+    // ===== EMPHASIS DETECTION TESTS =====
+    // These test proper detection of emphasis patterns to avoid false positives
+
+    #[test]
+    fn test_single_emphasis_not_flagged_as_list() {
+        // Single emphasis like *italic* should NOT be flagged as list items
+        let rule = MD030ListMarkerSpace::default();
+        let content = "*Reading view* is the default\n*Another italic* phrase";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Single emphasis patterns should not be flagged as list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_emphasis_in_blockquote_not_flagged() {
+        // Emphasis inside blockquotes should NOT be flagged as list items
+        // This was a real-world false positive from obsidian-help repo
+        let rule = MD030ListMarkerSpace::default();
+        let content = "> *Q1. How do I activate my license?*\n> *Q2. Can I try before paying?*";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Emphasis in blockquotes should not be flagged as list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_emphasis_in_nested_blockquote_not_flagged() {
+        // Nested blockquotes with emphasis
+        let rule = MD030ListMarkerSpace::default();
+        let content = "> > *Nested emphasis*\n> > > *Deeply nested*";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Emphasis in nested blockquotes should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_emphasis_fix_not_modified() {
+        // Fix should not modify emphasis patterns
+        let rule = MD030ListMarkerSpace::default();
+        let content = "*Italic text*\n*Another italic*";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Emphasis patterns should not be modified by fix");
+    }
+
+    #[test]
+    fn test_emphasis_in_blockquote_fix_not_modified() {
+        // Fix should not modify emphasis in blockquotes
+        let rule = MD030ListMarkerSpace::default();
+        let content = "> *Italic in quote*\n> *Another italic*";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Emphasis in blockquotes should not be modified by fix");
+    }
+
+    #[test]
+    fn test_actual_list_in_blockquote_still_flagged() {
+        // Actual list items in blockquotes with missing space SHOULD be flagged
+        // This ensures we didn't over-correct and miss real issues
+        let rule = MD030ListMarkerSpace::default();
+        // Note: "*Item" starts with uppercase, so it triggers "clear user intent"
+        let content = "> *Item without space";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // This should be flagged because:
+        // 1. "*Item" has no closing *, so it's not emphasis
+        // 2. "Item" starts with uppercase (clear user intent)
+        assert_eq!(
+            result.len(),
+            1,
+            "Actual list items (not emphasis) should still be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_emphasis_vs_list_disambiguation() {
+        // Mix of emphasis and actual list items
+        let rule = MD030ListMarkerSpace::default();
+        let content = "*italic text*\n* Valid list item\n*Another italic*";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should correctly distinguish emphasis from list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_underscore_emphasis_not_flagged() {
+        // Underscore emphasis patterns - these use _ not * so shouldn't interact
+        // with list detection, but good to verify
+        let rule = MD030ListMarkerSpace::default();
+        let content = "_Italic text_\n_Another italic_";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Underscore emphasis should not trigger any issues. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mixed_emphasis_and_lists_in_blockquote() {
+        // Real-world scenario: blockquote with both emphasis and actual lists
+        let rule = MD030ListMarkerSpace::default();
+        let content = "> *This is emphasis*\n> \n> * This is a list item\n> * Another item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should handle mixed emphasis and lists in blockquotes. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_faq_callout_pattern_not_flagged() {
+        // Real-world Obsidian FAQ pattern: `> [!FAQ]- Q1. Question`
+        // The `[` after marker should be flagged as list needing space
+        // But this tests the bracketed callout which has valid spacing
+        let rule = MD030ListMarkerSpace::default();
+        let content = "> [!FAQ]- Q1. How do I do this?\n> Answer here.\n>\n> [!FAQ]- Q2. Another question?";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "FAQ callout patterns should not be flagged. Got: {result:?}"
+        );
+    }
 }
