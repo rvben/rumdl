@@ -1777,6 +1777,7 @@ impl<'a> LintContext<'a> {
         content: &str,
         line_offsets: &[usize],
         flavor: MarkdownFlavor,
+        front_matter_end: usize,
     ) -> std::collections::HashMap<usize, (bool, String, usize, usize, Option<usize>)> {
         use std::collections::HashMap;
 
@@ -1826,6 +1827,11 @@ impl<'a> LintContext<'a> {
                     if item_start < content.len() && content.as_bytes()[item_start] == b'\n' {
                         // Item starts at newline - it actually belongs to the next line
                         line_idx += 1;
+                    }
+
+                    // Skip list items in frontmatter (they are YAML/TOML syntax, not Markdown)
+                    if front_matter_end > 0 && line_idx < front_matter_end {
+                        continue;
                     }
 
                     if line_idx < line_offsets.len() {
@@ -2035,12 +2041,12 @@ impl<'a> LintContext<'a> {
         // Pre-compute which lines are in code blocks
         let code_block_map = Self::compute_code_block_line_map(content, line_offsets, code_blocks);
 
-        // Use pulldown-cmark to detect list items (context-aware, eliminates false positives)
-        let list_item_map = Self::detect_list_items_with_pulldown(content, line_offsets, flavor);
-
         // Detect front matter boundaries FIRST, before any other parsing
         // Use FrontMatterUtils to detect all types of front matter (YAML, TOML, JSON, malformed)
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
+
+        // Use pulldown-cmark to detect list items (context-aware, eliminates false positives)
+        let list_item_map = Self::detect_list_items_with_pulldown(content, line_offsets, flavor, front_matter_end);
 
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
