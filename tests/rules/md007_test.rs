@@ -752,20 +752,21 @@ mod excessive_indentation_bug_fix {
 
     #[test]
     fn test_md007_deeply_nested_lists_vs_code_blocks() {
-        // Test that deeply indented list items are correctly distinguished from actual code blocks
+        // Test that deeply indented content (8+ spaces) is treated as code blocks, not lists
+        // Per CommonMark, 8+ spaces of indentation creates an indented code block, not nested lists
+        // markdownlint agrees: it reports 0 MD007 warnings for this content
         let test = "# Document\n\n- Top level list\n        - 8 spaces (should be 2)\n            - 12 spaces (should be 4)\n\nRegular paragraph.\n\n    This is an actual code block (4 spaces, not a list)\n    It continues here";
 
         let rule = MD007ULIndent::default();
         let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
 
-        // Should detect excessive indentation in list items (lines 4 and 5)
-        assert!(warnings.len() >= 2, "Should detect excessive list indentation");
-
-        // The actual code block (lines 9-10) should NOT trigger MD007
+        // Per CommonMark, 8+ spaces creates code blocks, not nested list items
+        // Only line 3 ("- Top level list") is a list item, which has correct indentation (0 spaces)
+        // So MD007 should report 0 warnings
         assert!(
-            !warnings.iter().any(|w| w.line >= 9),
-            "Actual code blocks should not trigger MD007"
+            warnings.is_empty(),
+            "Expected no MD007 warnings (deeply indented lines are code blocks, not lists), got: {warnings:?}"
         );
     }
 
@@ -773,25 +774,33 @@ mod excessive_indentation_bug_fix {
     fn test_md007_with_4_space_config() {
         // Test with MD007 configured for 4-space indents
         // With smart auto-detection, pure unordered lists use fixed style
-        // Fixed style: level 0 = 0, level 1 = 4, level 2 = 8
+        // Fixed style: level 0 = 0, level 1 = 4, level 2 = 8, level 3 = 12
         let test = "- Item 1\n    - Item 2 with 4 spaces\n     - Item 3 with 5 spaces\n      - Item 4 with 6 spaces\n        - Item 5 with 8 spaces";
 
         let rule = MD007ULIndent::new(4);
         let ctx = LintContext::new(test, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
 
-        // With fixed style:
-        // Line 1: 0 spaces (level 0) - correct
-        // Line 2: 4 spaces (level 1) - correct
-        // Line 3: 5 spaces - wrong, should be 4 (level 1 sibling) or 8 (level 2)
-        // Line 4: 6 spaces - wrong, should be 4 (level 1 sibling) or 8 (level 2)
-        // Line 5: 8 spaces (level 2) - correct
+        // Per CommonMark/pulldown-cmark list detection:
+        // Line 1: 0 spaces, level 0 - list item (correct)
+        // Line 2: 4 spaces, level 1 - nested list item (correct for indent=4)
+        // Line 3: 5 spaces, level 2 - nested deeper (wrong: expected 8, got 5)
+        // Line 4: 6 spaces - NOT a list item per CommonMark (content of previous item)
+        // Line 5: 8 spaces, level 3 - nested even deeper (wrong: expected 12, got 8)
+        //
+        // Note: Line 4 is not detected as a list item because CommonMark parsing
+        // doesn't treat it as such - it's continuation content. This matches markdownlint.
 
-        assert!(warnings.len() >= 2, "Should detect indentation issues on lines 3 and 4");
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Should detect indentation issues on lines 3 and 5, got: {warnings:?}"
+        );
 
-        // Lines 3 and 4 should have warnings (wrong indentation)
+        // Line 3 should have warning (5 spaces, expected 8 for depth 2)
         assert!(warnings.iter().any(|w| w.line == 3), "Line 3 should have warning");
-        assert!(warnings.iter().any(|w| w.line == 4), "Line 4 should have warning");
+        // Line 5 should have warning (8 spaces, expected 12 for depth 3)
+        assert!(warnings.iter().any(|w| w.line == 5), "Line 5 should have warning");
     }
 
     #[test]

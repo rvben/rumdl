@@ -1770,9 +1770,26 @@ impl<'a> LintContext<'a> {
         Some((&line[..total_prefix_len], remaining))
     }
 
-    /// Detect list items using pulldown-cmark for context-aware parsing
-    /// Returns a map of byte_offset -> (is_ordered, marker, marker_column, content_column)
-    /// This eliminates false positives on continuation lines that look like list items
+    /// Detect list items using pulldown-cmark for CommonMark-compliant parsing.
+    ///
+    /// Returns a HashMap keyed by line byte offset, containing:
+    /// `(is_ordered, marker, marker_column, content_column, number)`
+    ///
+    /// ## Why pulldown-cmark?
+    /// Using pulldown-cmark instead of regex ensures we only detect actual list items,
+    /// not lines that merely look like lists (e.g., continuation paragraphs, code blocks).
+    /// This fixes issue #253 where continuation lines were falsely detected.
+    ///
+    /// ## Tab indentation quirk
+    /// Pulldown-cmark reports nested list items at the newline character position
+    /// when tab indentation is used. For example, in `"* Item\n\t- Nested"`,
+    /// the nested item is reported at byte 7 (the `\n`), not byte 8 (the `\t`).
+    /// We detect this and advance to the correct line.
+    ///
+    /// ## HashMap key strategy
+    /// We use `entry().or_insert()` because pulldown-cmark may emit multiple events
+    /// that resolve to the same line (after newline adjustment). The first event
+    /// for each line is authoritative.
     fn detect_list_items_with_pulldown(
         content: &str,
         line_offsets: &[usize],
@@ -1783,7 +1800,6 @@ impl<'a> LintContext<'a> {
 
         let mut list_items = HashMap::new();
 
-        // Use the same options as the main parsing to ensure consistency
         let mut options = Options::empty();
         options.insert(Options::ENABLE_TABLES);
         options.insert(Options::ENABLE_FOOTNOTES);
@@ -1797,7 +1813,7 @@ impl<'a> LintContext<'a> {
 
         let parser = Parser::new_ext(content, options).into_offset_iter();
         let mut list_depth: usize = 0;
-        let mut list_stack: Vec<bool> = Vec::new(); // Stack to track ordered state per depth
+        let mut list_stack: Vec<bool> = Vec::new();
 
         for (event, range) in parser {
             match event {
@@ -1821,11 +1837,10 @@ impl<'a> LintContext<'a> {
                         Err(idx) => idx.saturating_sub(1),
                     };
 
-                    // Handle case where pulldown-cmark reports item starting at a newline
-                    // This happens when nested items immediately follow parent item text
-                    // E.g., "* Item 1\n\t- Nested" - pulldown reports nested item at byte 8 (the \n)
+                    // Pulldown-cmark reports nested list items at the newline before the item
+                    // when using tab indentation (e.g., "* Item\n\t- Nested").
+                    // Advance to the actual content line in this case.
                     if item_start < content.len() && content.as_bytes()[item_start] == b'\n' {
-                        // Item starts at newline - it actually belongs to the next line
                         line_idx += 1;
                     }
 
@@ -1835,9 +1850,9 @@ impl<'a> LintContext<'a> {
                     }
 
                     if line_idx < line_offsets.len() {
-                        let line_start = line_offsets[line_idx];
+                        let line_start_byte = line_offsets[line_idx];
                         let line_end = line_offsets.get(line_idx + 1).copied().unwrap_or(content.len());
-                        let line = &content[line_start..line_end.min(content.len())];
+                        let line = &content[line_start_byte..line_end.min(content.len())];
 
                         // Strip trailing newline
                         let line = line
@@ -1863,7 +1878,13 @@ impl<'a> LintContext<'a> {
                                 let content_column = marker_column + marker.len() + spacing.len();
                                 let number = number_str.parse().ok();
 
-                                list_items.insert(line_start, (true, marker, marker_column, content_column, number));
+                                list_items.entry(line_start_byte).or_insert((
+                                    true,
+                                    marker,
+                                    marker_column,
+                                    content_column,
+                                    number,
+                                ));
                             }
                         } else if let Some((leading_spaces, marker, spacing, _content)) =
                             Self::parse_unordered_list(line_to_parse)
@@ -1871,10 +1892,13 @@ impl<'a> LintContext<'a> {
                             let marker_column = blockquote_prefix_len + leading_spaces.len();
                             let content_column = marker_column + 1 + spacing.len();
 
-                            list_items.insert(
-                                line_start,
-                                (false, marker.to_string(), marker_column, content_column, None),
-                            );
+                            list_items.entry(line_start_byte).or_insert((
+                                false,
+                                marker.to_string(),
+                                marker_column,
+                                content_column,
+                                None,
+                            ));
                         }
                     }
                 }

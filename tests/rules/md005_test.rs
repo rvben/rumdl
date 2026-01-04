@@ -187,3 +187,139 @@ fn test_invalid_complex_nesting() {
         "* Level 1\n   * Level 2\n     * Level 3\n   * Back to 2\n     1. Ordered 3\n     2. Still 3\n* Back to 1"
     );
 }
+
+// ============================================================================
+// Tab-indented list detection tests (issue #254)
+//
+// Issue #254: Tab-indented nested lists were not detected because pulldown-cmark
+// reports item events at the newline position before the tab, not at the tab itself.
+// This caused MD004, MD005, MD007 to miss nested items entirely.
+// ============================================================================
+
+/// Regression test: Tab-indented nested lists must be detected.
+///
+/// Before the fix, pulldown-cmark reported the nested item at byte 8 (the newline),
+/// which mapped to line 1 instead of line 2. The fix detects this and advances
+/// to the correct line.
+#[test]
+fn test_tab_indented_list_detection_regression() {
+    let content = "* Item 1\n\t- Nested with tab";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // Both items MUST be detected - this was broken before the fix
+    let detected: Vec<_> = ctx
+        .lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| l.list_item.as_ref().map(|item| (i + 1, &item.marker)))
+        .collect();
+
+    assert_eq!(
+        detected.len(),
+        2,
+        "Regression: Both list items must be detected. Got: {detected:?}"
+    );
+    assert_eq!(detected[0], (1, &"*".to_string()), "Line 1 should have '*' marker");
+    assert_eq!(detected[1], (2, &"-".to_string()), "Line 2 should have '-' marker");
+}
+
+/// Verify that rules actually WORK with tab-indented lists, not just detection.
+#[test]
+fn test_tab_indented_list_rules_work() {
+    use rumdl_lib::rules::MD004UnorderedListStyle;
+
+    // MD004 should detect inconsistent markers in tab-indented lists
+    let rule = MD004UnorderedListStyle::default();
+    let content = "- Item 1\n\t* Nested with wrong marker";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "MD004 should detect wrong marker on tab-indented nested item"
+    );
+    assert_eq!(warnings[0].line, 2, "Warning should be on line 2");
+}
+
+#[test]
+fn test_tab_indented_nested_lists() {
+    // Tab indentation should be detected correctly
+    let content = "* Item 1\n\t- Nested with tab\n\t\t+ Double tab nested";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // All 3 items should be detected as list items
+    let list_item_count = ctx.lines.iter().filter(|l| l.list_item.is_some()).count();
+    assert_eq!(list_item_count, 3, "All 3 tab-indented list items should be detected");
+}
+
+#[test]
+fn test_mixed_tab_and_space_indentation() {
+    // Mixed tab/space indentation should be detected
+    let content = "- Item 1\n  - Space nested\n\t- Tab nested";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let list_item_count = ctx.lines.iter().filter(|l| l.list_item.is_some()).count();
+    assert_eq!(
+        list_item_count, 3,
+        "Mixed tab/space nested lists should all be detected"
+    );
+}
+
+#[test]
+fn test_toml_frontmatter_lists_not_detected() {
+    // TOML frontmatter lists should not be detected as Markdown lists
+    let content = r#"+++
+title = "Test"
+tags = ["tag1", "tag2"]
+[[items]]
+name = "item1"
+[[items]]
+name = "item2"
++++
+
+# Heading
+
+- Actual list item"#;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // Only the actual Markdown list should be detected
+    let list_lines: Vec<_> = ctx
+        .lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.list_item.is_some())
+        .collect();
+
+    assert_eq!(
+        list_lines.len(),
+        1,
+        "Only the Markdown list after frontmatter should be detected"
+    );
+}
+
+#[test]
+fn test_blockquote_with_tab_indented_list() {
+    // Blockquoted lists with tab indentation
+    let content = "> - Item 1\n>\t- Tab nested in blockquote";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let list_item_count = ctx.lines.iter().filter(|l| l.list_item.is_some()).count();
+    assert_eq!(list_item_count, 2, "Blockquoted tab-indented lists should be detected");
+}
+
+#[test]
+fn test_deeply_indented_content_not_list() {
+    // Lines with 8+ spaces of indentation should be code blocks, not lists
+    // Per CommonMark, 4+ spaces of indentation (after accounting for list context) creates a code block
+    let content = "- Item 1\n        - 8 spaces should be code block";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // Only the first item should be detected as a list item
+    // The second line is treated as an indented code block per CommonMark
+    let list_item_count = ctx.lines.iter().filter(|l| l.list_item.is_some()).count();
+    assert_eq!(
+        list_item_count, 1,
+        "8+ space indentation should be treated as code block, not list"
+    );
+}
