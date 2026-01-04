@@ -393,6 +393,16 @@ impl MD030ListMarkerSpace {
             let before_dot = &trimmed[..dot_pos];
             if before_dot.chars().all(|c| c.is_ascii_digit()) && !before_dot.is_empty() {
                 let after_dot = &trimmed[dot_pos + 1..];
+
+                // Skip decimal numbers: 3.14, 2.5, etc.
+                // If content after dot starts with digit, it's likely a decimal not a list
+                if !after_dot.is_empty() && !after_dot.starts_with(' ') && !after_dot.starts_with('\t') {
+                    let first_char = after_dot.chars().next().unwrap_or(' ');
+                    if first_char.is_ascii_digit() {
+                        return None;
+                    }
+                }
+
                 let marker = format!("{before_dot}.");
                 if let Some(fixed) = self.fix_marker_spacing(&marker, after_dot, indent, is_multi_line, true) {
                     return Some(format!("{blockquote_prefix}{fixed}"));

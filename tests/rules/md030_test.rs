@@ -1169,4 +1169,14 @@ mod tests {
             "HTML comment content should be preserved, real items fixed"
         );
     }
+
+    #[test]
+    fn test_decimal_numbers_fix_not_modified() {
+        // Decimal numbers like 3.14, 2.5 should not be modified by fix
+        let rule = MD030ListMarkerSpace::default();
+        let content = "3.14 is pi\n2.5 is half of 5\n10.25 is also a decimal";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Decimal numbers should not be modified by fix");
+    }
 }
