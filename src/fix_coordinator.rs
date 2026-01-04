@@ -72,6 +72,11 @@ impl FixCoordinator {
         dependencies.insert("MD022", vec!["MD012"]);
         dependencies.insert("MD023", vec!["MD012"]);
 
+        // MD070 (nested fence collision) MUST run before:
+        // - MD040 (code language) - MD070 changes block structure, making orphan fences into content
+        // - MD031 (blanks around fences) - same reason
+        dependencies.insert("MD070", vec!["MD040", "MD031"]);
+
         Self { dependencies }
     }
 

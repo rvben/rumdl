@@ -200,6 +200,7 @@ Severity affects:
 | [MD040](md040.md) | Fenced code language | Fenced code blocks should have a language specified |
 | [MD046](md046.md) | Code block style     | Code block style                                    |
 | [MD048](md048.md) | Code fence style     | Code fence style                                    |
+| [MD070](md070.md) | Nested code fence    | Nested fence collision detection                    |
 
 ## Link and Image Rules
 
