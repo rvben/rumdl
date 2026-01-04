@@ -81,10 +81,24 @@ impl ContentCharacteristics {
             }
 
             // Quick character-based detection (more efficient than regex)
-            if !chars.has_lists && (line.contains("* ") || line.contains("- ") || line.contains("+ ")) {
+            // Include patterns without spaces to enable user-intention detection (MD030)
+            if !chars.has_lists
+                && (line.contains("* ")
+                    || line.contains("- ")
+                    || line.contains("+ ")
+                    || trimmed.starts_with("* ")
+                    || trimmed.starts_with("- ")
+                    || trimmed.starts_with("+ ")
+                    || trimmed.starts_with('*')
+                    || trimmed.starts_with('-')
+                    || trimmed.starts_with('+'))
+            {
                 chars.has_lists = true;
             }
-            if !chars.has_lists && line.chars().next().is_some_and(|c| c.is_ascii_digit()) && line.contains(". ") {
+            if !chars.has_lists
+                && line.chars().next().is_some_and(|c| c.is_ascii_digit())
+                && (line.contains(". ") || line.contains('.'))
+            {
                 chars.has_lists = true;
             }
             if !chars.has_links
@@ -635,12 +649,13 @@ mod tests {
         let chars = ContentCharacteristics::analyze("--"); // Two dashes, valid setext
         assert!(chars.has_headings);
 
-        // Test list detection edge cases
-        let chars = ContentCharacteristics::analyze("*emphasis*"); // Not a list
-        assert!(!chars.has_lists);
+        // Test list detection - we now include potential list patterns (with or without space)
+        // to support user-intention detection in MD030
+        let chars = ContentCharacteristics::analyze("*emphasis*"); // Could be list or emphasis
+        assert!(chars.has_lists); // Run list rules to be safe
 
-        let chars = ContentCharacteristics::analyze("1.Item"); // No space after period
-        assert!(!chars.has_lists);
+        let chars = ContentCharacteristics::analyze("1.Item"); // Could be list without space
+        assert!(chars.has_lists); // Run list rules for user-intention detection
 
         // Test blockquote must be at start of line
         let chars = ContentCharacteristics::analyze("text > not a quote");

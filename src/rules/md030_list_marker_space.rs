@@ -366,7 +366,7 @@ impl MD030ListMarkerSpace {
                     break;
                 }
 
-                // Skip patterns that don't look like list items
+                // Skip patterns that don't CLEARLY look like list items
                 if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t') {
                     let first_char = after_marker.chars().next().unwrap_or(' ');
 
@@ -377,6 +377,15 @@ impl MD030ListMarkerSpace {
 
                     // Skip glob/filename patterns: *.txt, *.md, etc.
                     if *marker == "*" && first_char == '.' {
+                        break;
+                    }
+
+                    // For CLEAR user intent, only fix if:
+                    // 1. Starts with uppercase letter (strong list indicator), OR
+                    // 2. Starts with [ or ( (link/paren content)
+                    let is_clear_intent = first_char.is_ascii_uppercase() || first_char == '[' || first_char == '(';
+
+                    if !is_clear_intent {
                         break;
                     }
                 }
@@ -394,14 +403,30 @@ impl MD030ListMarkerSpace {
             if before_dot.chars().all(|c| c.is_ascii_digit()) && !before_dot.is_empty() {
                 let after_dot = &trimmed[dot_pos + 1..];
 
-                // Skip decimal numbers: 3.14, 2.5, etc.
-                // If content after dot starts with digit, it's likely a decimal not a list
-                if !after_dot.is_empty() && !after_dot.starts_with(' ') && !after_dot.starts_with('\t') {
+                // Skip empty items
+                if after_dot.is_empty() {
+                    return None;
+                }
+
+                // For NO-SPACE case (content directly after dot), apply "clear user intent" filter
+                if !after_dot.starts_with(' ') && !after_dot.starts_with('\t') {
                     let first_char = after_dot.chars().next().unwrap_or(' ');
+
+                    // Skip decimal numbers: 3.14, 2.5, etc.
                     if first_char.is_ascii_digit() {
                         return None;
                     }
+
+                    // For CLEAR user intent, only fix if:
+                    // 1. Starts with uppercase letter (strong list indicator), OR
+                    // 2. Starts with [ or ( (link/paren content)
+                    let is_clear_intent = first_char.is_ascii_uppercase() || first_char == '[' || first_char == '(';
+
+                    if !is_clear_intent {
+                        return None;
+                    }
                 }
+                // For items with spaces (including multiple spaces), always let fix_marker_spacing handle it
 
                 let marker = format!("{before_dot}.");
                 if let Some(fixed) = self.fix_marker_spacing(&marker, after_dot, indent, is_multi_line, true) {
@@ -469,9 +494,8 @@ impl MD030ListMarkerSpace {
                 }
 
                 // Only flag if there's content directly after the marker (no space, no tab)
-                // AND the content looks like actual list item content (starts with alphanumeric, [, etc.)
+                // AND the content CLEARLY looks like list item content
                 if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t') {
-                    // Ensure this looks like intentional list content
                     let first_char = after_marker.chars().next().unwrap_or(' ');
 
                     // Skip signed numbers: -1, +1, -123, etc.
@@ -479,13 +503,19 @@ impl MD030ListMarkerSpace {
                         break;
                     }
 
-                    // Skip glob/filename patterns: *.txt, *.md, etc.
+                    // Skip glob/filename patterns: *.txt, *.md, *.[ext], etc.
                     if *marker == "*" && first_char == '.' {
                         break;
                     }
 
-                    if !first_char.is_alphanumeric() && first_char != '[' && first_char != '(' {
-                        break; // Doesn't look like a list item
+                    // For CLEAR user intent, only flag if:
+                    // 1. Starts with uppercase letter (strong list indicator), OR
+                    // 2. Starts with [ or ( (link/paren content)
+                    // Lowercase content is ambiguous (could be flag, glob, etc.)
+                    let is_clear_intent = first_char.is_ascii_uppercase() || first_char == '[' || first_char == '(';
+
+                    if !is_clear_intent {
+                        break;
                     }
 
                     let is_multi_line = self.is_multi_line_for_unrecognized(line_num, lines);
@@ -526,11 +556,15 @@ impl MD030ListMarkerSpace {
                 let after_dot = &trimmed[dot_pos + 1..];
                 // Only flag if there's content directly after the marker (no space, no tab)
                 if !after_dot.is_empty() && !after_dot.starts_with(' ') && !after_dot.starts_with('\t') {
-                    // Ensure this looks like intentional list content
                     let first_char = after_dot.chars().next().unwrap_or(' ');
-                    // Don't flag if content starts with a digit (likely a decimal like 3.14)
-                    // List items typically start with letters, brackets, or parentheses
-                    if first_char.is_alphabetic() || first_char == '[' || first_char == '(' {
+
+                    // For CLEAR user intent, only flag if:
+                    // 1. Starts with uppercase letter (strong list indicator), OR
+                    // 2. Starts with [ or ( (link/paren content)
+                    // Lowercase and digits are ambiguous (could be decimal, version, etc.)
+                    let is_clear_intent = first_char.is_ascii_uppercase() || first_char == '[' || first_char == '(';
+
+                    if is_clear_intent {
                         let is_multi_line = self.is_multi_line_for_unrecognized(line_num, lines);
                         let expected_spaces = self.get_expected_spaces(ListType::Ordered, is_multi_line);
 
