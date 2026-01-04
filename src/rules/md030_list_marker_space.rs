@@ -65,87 +65,101 @@ impl Rule for MD030ListMarkerSpace {
             return Ok(warnings);
         }
 
-        // Pre-filter lines that are actually list items
-        let mut list_item_lines = Vec::new();
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if line_info.list_item.is_some() && !line_info.in_code_block {
-                list_item_lines.push(line_num + 1);
-            }
-        }
-
-        // Collect lines once instead of in every is_multi_line_list_item call
+        // Collect lines once
         let lines: Vec<&str> = ctx.content.lines().collect();
 
-        for line_num in list_item_lines {
-            let line = lines[line_num - 1];
+        // Track which lines we've already processed (to avoid duplicates)
+        let mut processed_lines = std::collections::HashSet::new();
 
-            // Skip indented code blocks (4+ columns accounting for tab expansion)
-            if ElementCache::calculate_indentation_width_default(line) >= 4 {
-                continue;
-            }
+        // First pass: Check parser-recognized list items
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            if line_info.list_item.is_some() && !line_info.in_code_block {
+                let line_num_1based = line_num + 1;
+                processed_lines.insert(line_num_1based);
 
-            // Use pre-computed list item information
-            // LintContext already handles blockquotes by stripping prefixes and
-            // storing correct marker_column/content_column values
-            if let Some(line_info) = ctx.line_info(line_num)
-                && let Some(list_info) = &line_info.list_item
-            {
-                let list_type = if list_info.is_ordered {
-                    ListType::Ordered
-                } else {
-                    ListType::Unordered
-                };
+                let line = lines[line_num];
 
-                // Calculate actual spacing after marker
-                let marker_end = list_info.marker_column + list_info.marker.len();
-                let actual_spaces = list_info.content_column.saturating_sub(marker_end);
+                // Skip indented code blocks (4+ columns accounting for tab expansion)
+                if ElementCache::calculate_indentation_width_default(line) >= 4 {
+                    continue;
+                }
 
-                // Determine if this is a multi-line list item
-                let is_multi_line = self.is_multi_line_list_item(ctx, line_num, &lines);
-                let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
+                if let Some(list_info) = &line_info.list_item {
+                    let list_type = if list_info.is_ordered {
+                        ListType::Ordered
+                    } else {
+                        ListType::Unordered
+                    };
 
-                // MD030 only checks for incorrect number of spaces, not tabs
-                // Tabs are handled by MD010 (no-hard-tabs), matching markdownlint behavior
-                // Check if spacing is incorrect
-                if actual_spaces != expected_spaces {
-                    // Calculate precise character range for the problematic spacing
-                    let whitespace_start_pos = marker_end;
-                    let whitespace_len = actual_spaces;
+                    // Calculate actual spacing after marker
+                    let marker_end = list_info.marker_column + list_info.marker.len();
+                    let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
-                    // Calculate the range that needs to be replaced (the entire whitespace after marker)
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_match_range(line_num, line, whitespace_start_pos, whitespace_len);
+                    // Determine if this is a multi-line list item
+                    let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, &lines);
+                    let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
 
-                    // Generate the correct replacement text (just the correct spacing)
-                    let correct_spaces = " ".repeat(expected_spaces);
+                    if actual_spaces != expected_spaces {
+                        let whitespace_start_pos = marker_end;
+                        let whitespace_len = actual_spaces;
 
-                    // Calculate byte positions for the fix range
-                    let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                    let whitespace_start_byte = line_start_byte + whitespace_start_pos;
-                    let whitespace_end_byte = whitespace_start_byte + whitespace_len;
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(line_num_1based, line, whitespace_start_pos, whitespace_len);
 
-                    let fix = Some(crate::rule::Fix {
-                        range: whitespace_start_byte..whitespace_end_byte,
-                        replacement: correct_spaces,
-                    });
+                        let correct_spaces = " ".repeat(expected_spaces);
+                        let line_start_byte = ctx.line_offsets.get(line_num).copied().unwrap_or(0);
+                        let whitespace_start_byte = line_start_byte + whitespace_start_pos;
+                        let whitespace_end_byte = whitespace_start_byte + whitespace_len;
 
-                    // Generate appropriate message
-                    let message =
-                        format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})");
+                        let fix = Some(crate::rule::Fix {
+                            range: whitespace_start_byte..whitespace_end_byte,
+                            replacement: correct_spaces,
+                        });
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        severity: Severity::Warning,
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message,
-                        fix,
-                    });
+                        let message =
+                            format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})");
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            severity: Severity::Warning,
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message,
+                            fix,
+                        });
+                    }
                 }
             }
         }
+
+        // Second pass: Detect list-like patterns the parser didn't recognize
+        // This handles cases like "1.Text" where there's no space after the marker
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+
+            // Skip if already processed or in code block/front matter
+            if processed_lines.contains(&line_num) {
+                continue;
+            }
+            if let Some(line_info) = ctx.lines.get(line_idx)
+                && (line_info.in_code_block || line_info.in_front_matter)
+            {
+                continue;
+            }
+
+            // Skip indented code blocks
+            if self.is_indented_code_block(line, line_idx, &lines) {
+                continue;
+            }
+
+            // Try to detect list-like patterns using regex-based detection
+            if let Some(warning) = self.check_unrecognized_list_marker(ctx, line, line_num, &lines) {
+                warnings.push(warning);
+            }
+        }
+
         Ok(warnings)
     }
 
@@ -199,30 +213,19 @@ impl Rule for MD030ListMarkerSpace {
             return Ok(content.to_string());
         }
 
-        // DocumentStructure is no longer used for optimization
         let lines: Vec<&str> = content.lines().collect();
         let mut result_lines = Vec::with_capacity(lines.len());
-
-        // Pre-compute which lines need potential fixes
-        let mut needs_check = vec![false; lines.len()];
-        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
-            if line_info.list_item.is_some() && !line_info.in_code_block {
-                needs_check[line_idx] = true;
-            }
-        }
 
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
-            // Quick check: if this line doesn't need checking, just add it
-            if !needs_check[line_idx] {
+            // Skip lines in code blocks or front matter
+            if let Some(line_info) = ctx.lines.get(line_idx)
+                && (line_info.in_code_block || line_info.in_front_matter)
+            {
                 result_lines.push(line.to_string());
                 continue;
             }
-
-            // Skip if in front matter
-            // Note: Front matter checking is handled by LintContext directly
-            // No additional front matter check needed here
 
             // Skip if this is an indented code block (4+ spaces with blank line before)
             if self.is_indented_code_block(line, line_idx, &lines) {
@@ -230,7 +233,10 @@ impl Rule for MD030ListMarkerSpace {
                 continue;
             }
 
-            // Try to fix list marker spacing (handles blockquotes internally)
+            // Use regex-based detection to find list markers, not parser detection.
+            // This ensures we fix spacing on ALL lines that look like list items,
+            // even if the parser doesn't recognize them due to strict nesting rules.
+            // User intention matters: if it looks like a list item, fix it.
             let is_multi_line = self.is_multi_line_list_item(ctx, line_num, &lines);
             if let Some(fixed_line) = self.try_fix_list_marker_spacing_with_context(line, is_multi_line) {
                 result_lines.push(fixed_line);
@@ -312,25 +318,35 @@ impl MD030ListMarkerSpace {
             return None;
         }
 
-        // Fix if there are multiple spaces
+        // Calculate expected spacing based on list type and context
+        let expected_spaces = if is_ordered {
+            if is_multi_line {
+                self.config.ol_multi.get()
+            } else {
+                self.config.ol_single.get()
+            }
+        } else if is_multi_line {
+            self.config.ul_multi.get()
+        } else {
+            self.config.ul_single.get()
+        };
+
+        // Case 1: No space after marker (content directly follows marker)
+        // User intention: they meant to write a list item but forgot the space
+        if !after_marker.is_empty() && !after_marker.starts_with(' ') {
+            let spaces = " ".repeat(expected_spaces);
+            return Some(format!("{indent}{marker}{spaces}{after_marker}"));
+        }
+
+        // Case 2: Multiple spaces after marker
         if after_marker.starts_with("  ") {
             let content = after_marker.trim_start_matches(' ');
             if !content.is_empty() {
-                // Use appropriate configuration based on list type and whether it's multi-line
-                let spaces = if is_ordered {
-                    if is_multi_line {
-                        " ".repeat(self.config.ol_multi.get())
-                    } else {
-                        " ".repeat(self.config.ol_single.get())
-                    }
-                } else if is_multi_line {
-                    " ".repeat(self.config.ul_multi.get())
-                } else {
-                    " ".repeat(self.config.ul_single.get())
-                };
+                let spaces = " ".repeat(expected_spaces);
                 return Some(format!("{indent}{marker}{spaces}{content}"));
             }
         }
+
         None
     }
 
@@ -393,8 +409,137 @@ impl MD030ListMarkerSpace {
         (prefix, remaining)
     }
 
-    /// Fix list marker spacing - handles tabs, multiple spaces, and mixed whitespace
-    /// (Legacy method for backward compatibility - defaults to single-line behavior)
+    /// Detect list-like patterns that the parser didn't recognize (e.g., "1.Text" with no space)
+    /// This implements user-intention-based detection: if it looks like a list item, flag it
+    fn check_unrecognized_list_marker(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line: &str,
+        line_num: usize,
+        lines: &[&str],
+    ) -> Option<LintWarning> {
+        // Strip blockquote prefix to analyze the content
+        let (_blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
+
+        let trimmed = content.trim_start();
+        let indent_len = content.len() - trimmed.len();
+
+        // Note: We intentionally do NOT skip continuation lines here.
+        // Even if a line is indented after a list item, if it looks like a new list item
+        // (starts with *, -, +, or number.), we want to flag the missing space.
+        // The user's intention matters more than strict CommonMark parsing.
+
+        // Check for unordered list markers (*, -, +) without proper spacing
+        for marker in &["*", "-", "+"] {
+            if let Some(after_marker) = trimmed.strip_prefix(marker) {
+                // Skip if this is emphasis (**, __, ++) or other non-list patterns
+                // A list marker followed immediately by the same character is likely emphasis
+                if after_marker.starts_with(*marker) {
+                    break;
+                }
+
+                // Only flag if there's content directly after the marker (no space, no tab)
+                // AND the content looks like actual list item content (starts with alphanumeric, [, etc.)
+                if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t') {
+                    // Ensure this looks like intentional list content
+                    let first_char = after_marker.chars().next().unwrap_or(' ');
+                    if !first_char.is_alphanumeric() && first_char != '[' && first_char != '(' {
+                        break; // Doesn't look like a list item
+                    }
+
+                    let is_multi_line = self.is_multi_line_for_unrecognized(line_num, lines);
+                    let expected_spaces = self.get_expected_spaces(ListType::Unordered, is_multi_line);
+
+                    let marker_pos = indent_len;
+                    let marker_end = marker_pos + marker.len();
+
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_match_range(line_num, line, marker_end, 0);
+
+                    let correct_spaces = " ".repeat(expected_spaces);
+                    let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                    let fix_position = line_start_byte + marker_end;
+
+                    return Some(LintWarning {
+                        rule_name: Some("MD030".to_string()),
+                        severity: Severity::Warning,
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!("Spaces after list markers (Expected: {expected_spaces}; Actual: 0)"),
+                        fix: Some(crate::rule::Fix {
+                            range: fix_position..fix_position,
+                            replacement: correct_spaces,
+                        }),
+                    });
+                }
+                break; // Found a marker, don't check others
+            }
+        }
+
+        // Check for ordered list markers (digits followed by .) without proper spacing
+        if let Some(dot_pos) = trimmed.find('.') {
+            let before_dot = &trimmed[..dot_pos];
+            if before_dot.chars().all(|c| c.is_ascii_digit()) && !before_dot.is_empty() {
+                let after_dot = &trimmed[dot_pos + 1..];
+                // Only flag if there's content directly after the marker (no space, no tab)
+                if !after_dot.is_empty() && !after_dot.starts_with(' ') && !after_dot.starts_with('\t') {
+                    // Ensure this looks like intentional list content
+                    let first_char = after_dot.chars().next().unwrap_or(' ');
+                    // Don't flag if content starts with a digit (likely a decimal like 3.14)
+                    // List items typically start with letters, brackets, or parentheses
+                    if first_char.is_alphabetic() || first_char == '[' || first_char == '(' {
+                        let is_multi_line = self.is_multi_line_for_unrecognized(line_num, lines);
+                        let expected_spaces = self.get_expected_spaces(ListType::Ordered, is_multi_line);
+
+                        let marker = format!("{before_dot}.");
+                        let marker_pos = indent_len;
+                        let marker_end = marker_pos + marker.len();
+
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(line_num, line, marker_end, 0);
+
+                        let correct_spaces = " ".repeat(expected_spaces);
+                        let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                        let fix_position = line_start_byte + marker_end;
+
+                        return Some(LintWarning {
+                            rule_name: Some("MD030".to_string()),
+                            severity: Severity::Warning,
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: format!("Spaces after list markers (Expected: {expected_spaces}; Actual: 0)"),
+                            fix: Some(crate::rule::Fix {
+                                range: fix_position..fix_position,
+                                replacement: correct_spaces,
+                            }),
+                        });
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Simplified multi-line check for unrecognized list items
+    fn is_multi_line_for_unrecognized(&self, line_num: usize, lines: &[&str]) -> bool {
+        // For unrecognized list items, we can't rely on parser info
+        // Check if the next line exists and appears to be a continuation
+        if line_num < lines.len() {
+            let next_line = lines[line_num]; // line_num is 1-based, so this is the next line
+            let next_trimmed = next_line.trim();
+            // If next line is non-empty and indented, it might be a continuation
+            if !next_trimmed.is_empty() && next_line.starts_with(' ') {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Check if a line is part of an indented code block (4+ columns with blank line before)
     fn is_indented_code_block(&self, line: &str, line_idx: usize, lines: &[&str]) -> bool {
         // Must have 4+ columns of indentation (accounting for tab expansion)

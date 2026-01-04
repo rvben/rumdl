@@ -66,45 +66,51 @@ mod tests {
 
     #[test]
     fn test_missing_space_after_list_marker_unordered() {
+        // User intention: these look like list items missing spaces, so flag them
         let rule = MD030ListMarkerSpace::default();
         let content = "*Item 1\n-Item 2\n+Item 3";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // These look like intended list items missing spaces, but per current detection logic
-        // they are not detected as list items (matching markdownlint behavior)
-        assert_eq!(result.len(), 0);
+        // User-intention-based detection: flag all lines that look like list items
+        assert_eq!(result.len(), 3, "Should detect 3 unordered list items missing spaces");
     }
 
     #[test]
     fn test_missing_space_after_list_marker_ordered() {
+        // User intention: these look like list items missing spaces, so flag them
         let rule = MD030ListMarkerSpace::default();
         let content = "1.First\n2.Second\n3.Third";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // These look like intended list items missing spaces, but per current detection logic
-        // they are not detected as list items (matching markdownlint behavior)
-        assert_eq!(result.len(), 0);
+        // User-intention-based detection: flag all lines that look like list items
+        assert_eq!(result.len(), 3, "Should detect 3 ordered list items missing spaces");
     }
 
     #[test]
     fn test_mixed_list_types_missing_space() {
+        // User intention: these look like list items missing spaces, so flag them
         let rule = MD030ListMarkerSpace::default();
         let content = "*Item 1\n1.First\n-Item 2\n2.Second";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // These look like intended list items missing spaces, but per current detection logic
-        // they are not detected as list items (matching markdownlint behavior)
-        assert_eq!(result.len(), 0);
+        // User-intention-based detection: flag all lines that look like list items
+        assert_eq!(result.len(), 4, "Should detect 4 list items missing spaces");
     }
 
     #[test]
     fn test_nested_lists_missing_space() {
+        // User intention: nested items that look like list items should be flagged
         let rule = MD030ListMarkerSpace::default();
         let content = "* Item 1\n  *Nested 1\n  *Nested 2\n* Item 2";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Per CommonMark and markdownlint, these are not valid list items, so no warnings expected
-        assert_eq!(result.len(), 0);
+        // User-intention-based detection: flag nested items missing spaces
+        // Note: Lines 2 and 3 look like nested list items with missing spaces
+        assert_eq!(
+            result.len(),
+            2,
+            "Should detect 2 nested list items missing spaces. Got: {result:?}"
+        );
     }
 
     #[test]
@@ -128,12 +134,17 @@ mod tests {
 
     #[test]
     fn test_preserve_indentation() {
+        // User intention: indented items that look like list items should be flagged
         let rule = MD030ListMarkerSpace::default();
         let content = "  *Item 1\n    *Item 2\n      *Item 3";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Per CommonMark and markdownlint, these are not valid list items, so no warnings expected
-        assert_eq!(result.len(), 0);
+        // User-intention-based detection: flag all lines that look like list items
+        assert_eq!(
+            result.len(),
+            3,
+            "Should detect 3 indented list items missing spaces. Got: {result:?}"
+        );
     }
 
     #[test]
@@ -900,5 +911,161 @@ mod tests {
             "Should detect actual list items after continuations. Got: {result:?}"
         );
         assert_eq!(result[0].line, 3, "Error should be on the nested list item");
+    }
+
+    // ========================================================================
+    // User-intention-based detection: edge cases
+    // ========================================================================
+
+    #[test]
+    fn test_emphasis_not_flagged_as_list() {
+        // **bold** and similar patterns should NOT be flagged as list items
+        let rule = MD030ListMarkerSpace::default();
+        let content = "**bold text**\n--not a list--\n++also not++";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Emphasis patterns should not be flagged as list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_missing_space_unordered() {
+        // Verify fix adds missing space for unordered list items
+        let rule = MD030ListMarkerSpace::default();
+        let content = "*Item without space";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "* Item without space", "Fix should add space after marker");
+    }
+
+    #[test]
+    fn test_fix_missing_space_ordered() {
+        // Verify fix adds missing space for ordered list items
+        let rule = MD030ListMarkerSpace::default();
+        let content = "1.First item\n2.Second item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "1. First item\n2. Second item",
+            "Fix should add space after ordered markers"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_valid_spacing() {
+        // Valid list items should not be modified
+        let rule = MD030ListMarkerSpace::default();
+        let content = "* Valid item\n- Also valid\n1. Ordered valid";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Valid spacing should be preserved");
+    }
+
+    #[test]
+    fn test_mixed_valid_and_invalid_spacing() {
+        // Mix of valid and invalid list items
+        let rule = MD030ListMarkerSpace::default();
+        let content = "* Valid\n*Invalid\n- Also valid\n-Also invalid";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "Should detect 2 invalid items (lines 2 and 4). Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[1].line, 4);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "* Valid\n* Invalid\n- Also valid\n- Also invalid",
+            "Fix should correct invalid items while preserving valid ones"
+        );
+    }
+
+    #[test]
+    fn test_special_characters_after_marker() {
+        // Special characters that don't look like list content should not be flagged
+        let rule = MD030ListMarkerSpace::default();
+        // These don't look like intentional list items
+        let content = "*#heading\n-=separator\n+!exclaim";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Special characters after marker should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_bracket_content_flagged() {
+        // Content starting with [ looks like a link in a list item
+        let rule = MD030ListMarkerSpace::default();
+        let content = "*[link](url)\n-[another](url2)";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "Links without space after marker should be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_parentheses_content_flagged() {
+        // Content starting with ( looks like intentional list content
+        let rule = MD030ListMarkerSpace::default();
+        let content = "*(parenthetical)\n1.(also parenthetical)";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "Parenthetical content without space should be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_list_missing_space() {
+        // List items inside blockquotes with missing space
+        let rule = MD030ListMarkerSpace::default();
+        let content = "> *Item in blockquote\n> 1.Ordered in blockquote";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "List items in blockquotes missing spaces should be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_large_ordered_number_missing_space() {
+        // Large ordered list numbers with missing space
+        let rule = MD030ListMarkerSpace::default();
+        let content = "100.Hundredth item\n999.Nine ninety nine";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "Large ordered numbers missing space should be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_decimal_not_flagged() {
+        // Decimal numbers should not be flagged (e.g., "3.14 is pi")
+        let rule = MD030ListMarkerSpace::default();
+        let content = "3.14 is pi\n2.5 is half of 5";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // These have space after the dot, so they're valid (if detected as lists) or not lists at all
+        assert!(
+            result.is_empty(),
+            "Decimal numbers with space should not be flagged. Got: {result:?}"
+        );
     }
 }
