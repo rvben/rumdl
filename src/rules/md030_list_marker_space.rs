@@ -366,6 +366,13 @@ impl MD030ListMarkerSpace {
                     break;
                 }
 
+                // Skip if this looks like emphasis: *text* or _text_
+                // Use simple heuristic here (fix function has no ctx access)
+                // Being conservative is fine for autofix
+                if *marker == "*" && after_marker.contains('*') {
+                    break;
+                }
+
                 // Skip patterns that don't CLEARLY look like list items
                 if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t') {
                     let first_char = after_marker.chars().next().unwrap_or(' ');
@@ -474,7 +481,8 @@ impl MD030ListMarkerSpace {
         lines: &[&str],
     ) -> Option<LintWarning> {
         // Strip blockquote prefix to analyze the content
-        let (_blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
+        let (blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
+        let prefix_len = blockquote_prefix.len();
 
         let trimmed = content.trim_start();
         let indent_len = content.len() - trimmed.len();
@@ -490,6 +498,16 @@ impl MD030ListMarkerSpace {
                 // Skip if this is emphasis (**, __, ++) or other non-list patterns
                 // A list marker followed immediately by the same character is likely emphasis
                 if after_marker.starts_with(*marker) {
+                    break;
+                }
+
+                // Skip if this line starts with emphasis (use parsed emphasis spans)
+                // Account for blockquote prefix when comparing column positions
+                let emphasis_spans = ctx.emphasis_spans_on_line(line_num);
+                if emphasis_spans
+                    .iter()
+                    .any(|span| span.start_col == prefix_len + indent_len)
+                {
                     break;
                 }
 
