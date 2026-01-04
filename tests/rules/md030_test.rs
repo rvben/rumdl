@@ -1068,4 +1068,105 @@ mod tests {
             "Decimal numbers with space should not be flagged. Got: {result:?}"
         );
     }
+
+    // ===== ROBUSTNESS EDGE CASE TESTS =====
+
+    #[test]
+    fn test_html_comments_skipped() {
+        // List-like content inside HTML comments should not be flagged
+        let rule = MD030ListMarkerSpace::default();
+        let content = "<!-- *Item in comment -->\n<!-- -Another -->\n* Real item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Content inside HTML comments should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_comments_skipped() {
+        // Multi-line HTML comments with list-like content
+        let rule = MD030ListMarkerSpace::default();
+        let content = "<!--\n*Item in comment\n-Another item\n-->\n* Real item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multi-line HTML comment content should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_signed_numbers_not_flagged() {
+        // Signed numbers like -1, +1, -123 should not be flagged as list items
+        let rule = MD030ListMarkerSpace::default();
+        let content = "-1 is negative one\n+1 is positive one\n-123 is also negative";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Signed numbers should not be flagged as list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_signed_numbers_fix_not_modified() {
+        // Fix should not modify signed numbers
+        let rule = MD030ListMarkerSpace::default();
+        let content = "-1 is negative\n+1 is positive";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Signed numbers should not be modified by fix");
+    }
+
+    #[test]
+    fn test_glob_patterns_not_flagged() {
+        // Glob/filename patterns like *.txt should not be flagged
+        let rule = MD030ListMarkerSpace::default();
+        let content = "*.txt\n*.md\n*.rs";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Glob patterns should not be flagged as list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_glob_patterns_fix_not_modified() {
+        // Fix should not modify glob patterns
+        let rule = MD030ListMarkerSpace::default();
+        let content = "*.txt\n*.md";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Glob patterns should not be modified by fix");
+    }
+
+    #[test]
+    fn test_mixed_valid_content_with_edge_cases() {
+        // Mix of actual list items and edge cases
+        let rule = MD030ListMarkerSpace::default();
+        let content = "* Valid list item\n-1 is a number\n*.txt is a pattern\n- Another valid item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag valid items or edge cases. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_fix_preserves_content() {
+        // Fix should preserve HTML comment content unchanged
+        let rule = MD030ListMarkerSpace::default();
+        let content = "<!--\n*  Extra spaces in comment\n-->\n*  Real item with extra spaces";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let expected = "<!--\n*  Extra spaces in comment\n-->\n* Real item with extra spaces";
+        assert_eq!(
+            fixed, expected,
+            "HTML comment content should be preserved, real items fixed"
+        );
+    }
 }

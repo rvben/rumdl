@@ -144,7 +144,7 @@ impl Rule for MD030ListMarkerSpace {
                 continue;
             }
             if let Some(line_info) = ctx.lines.get(line_idx)
-                && (line_info.in_code_block || line_info.in_front_matter)
+                && (line_info.in_code_block || line_info.in_front_matter || line_info.in_html_comment)
             {
                 continue;
             }
@@ -219,9 +219,9 @@ impl Rule for MD030ListMarkerSpace {
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
-            // Skip lines in code blocks or front matter
+            // Skip lines in code blocks, front matter, or HTML comments
             if let Some(line_info) = ctx.lines.get(line_idx)
-                && (line_info.in_code_block || line_info.in_front_matter)
+                && (line_info.in_code_block || line_info.in_front_matter || line_info.in_html_comment)
             {
                 result_lines.push(line.to_string());
                 continue;
@@ -361,6 +361,26 @@ impl MD030ListMarkerSpace {
         // Check for unordered list markers
         for marker in &["*", "-", "+"] {
             if let Some(after_marker) = trimmed.strip_prefix(marker) {
+                // Skip emphasis patterns (**, --, ++)
+                if after_marker.starts_with(*marker) {
+                    break;
+                }
+
+                // Skip patterns that don't look like list items
+                if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t') {
+                    let first_char = after_marker.chars().next().unwrap_or(' ');
+
+                    // Skip signed numbers: -1, +1, -123, etc.
+                    if (*marker == "-" || *marker == "+") && first_char.is_ascii_digit() {
+                        break;
+                    }
+
+                    // Skip glob/filename patterns: *.txt, *.md, etc.
+                    if *marker == "*" && first_char == '.' {
+                        break;
+                    }
+                }
+
                 if let Some(fixed) = self.fix_marker_spacing(marker, after_marker, indent, is_multi_line, false) {
                     return Some(format!("{blockquote_prefix}{fixed}"));
                 }
@@ -443,6 +463,17 @@ impl MD030ListMarkerSpace {
                 if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t') {
                     // Ensure this looks like intentional list content
                     let first_char = after_marker.chars().next().unwrap_or(' ');
+
+                    // Skip signed numbers: -1, +1, -123, etc.
+                    if (*marker == "-" || *marker == "+") && first_char.is_ascii_digit() {
+                        break;
+                    }
+
+                    // Skip glob/filename patterns: *.txt, *.md, etc.
+                    if *marker == "*" && first_char == '.' {
+                        break;
+                    }
+
                     if !first_char.is_alphanumeric() && first_char != '[' && first_char != '(' {
                         break; // Doesn't look like a list item
                     }
