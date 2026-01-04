@@ -1815,10 +1815,18 @@ impl<'a> LintContext<'a> {
                     let item_start = range.start;
 
                     // Binary search to find the line number
-                    let line_idx = match line_offsets.binary_search(&item_start) {
+                    let mut line_idx = match line_offsets.binary_search(&item_start) {
                         Ok(idx) => idx,
                         Err(idx) => idx.saturating_sub(1),
                     };
+
+                    // Handle case where pulldown-cmark reports item starting at a newline
+                    // This happens when nested items immediately follow parent item text
+                    // E.g., "* Item 1\n\t- Nested" - pulldown reports nested item at byte 8 (the \n)
+                    if item_start < content.len() && content.as_bytes()[item_start] == b'\n' {
+                        // Item starts at newline - it actually belongs to the next line
+                        line_idx += 1;
+                    }
 
                     if line_idx < line_offsets.len() {
                         let line_start = line_offsets[line_idx];
