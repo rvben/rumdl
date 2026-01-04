@@ -71,11 +71,15 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+            # Configure jemalloc for 64K pages to support 16K page systems (Asahi Linux, RPi5)
+            # See: https://github.com/rvben/rumdl/issues/256
+            jemalloc_page_size: '16'
           # Linux musl targets (static binaries for Alpine Linux)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
+            jemalloc_page_size: '16'
           # Windows and macOS targets
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -109,6 +113,9 @@ jobs:
 
       # Build wheel
       - name: Build wheel
+        env:
+          # Set jemalloc page size for aarch64-linux to support 16K page systems
+          JEMALLOC_SYS_WITH_LG_PAGE: ${{ matrix.jemalloc_page_size }}
         run: |
           case "${{ matrix.target }}" in
             *-musl)
@@ -129,6 +136,9 @@ jobs:
 
       # Build binary
       - name: Build binary
+        env:
+          # Set jemalloc page size for aarch64-linux to support 16K page systems
+          JEMALLOC_SYS_WITH_LG_PAGE: ${{ matrix.jemalloc_page_size }}
         run: |
           case "${{ matrix.target }}" in
             *-linux-*)
@@ -141,6 +151,17 @@ jobs:
               cargo build --release --target ${{ matrix.target }} --bin rumdl
               ;;
           esac
+        shell: bash
+
+      # Smoketest: verify binary runs (skip cross-compiled aarch64-linux)
+      - name: Verify binary
+        if: ${{ !contains(matrix.target, 'aarch64-unknown-linux') }}
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ./target/${{ matrix.target }}/release/rumdl.exe --version
+          else
+            ./target/${{ matrix.target }}/release/rumdl --version
+          fi
         shell: bash
 
       # Create release archives

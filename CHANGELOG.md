@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.209] - 2026-01-03
+## [0.0.209] - 2026-01-04
 
 ### Fixed
+
+- **Release: Fix pre-built aarch64-linux binaries for 16K page systems** (fixes #256)
+  - Pre-built binaries for `aarch64-unknown-linux-gnu` and `aarch64-unknown-linux-musl` now work on Asahi Linux and Raspberry Pi 5
+  - Set `JEMALLOC_SYS_WITH_LG_PAGE=16` to configure jemalloc for 64K page compatibility
+  - Previously crashed with "Unsupported system page size" on systems with 16K or 64K pages
+
+- **List detection: Filter out YAML/TOML lists in frontmatter**
+  - Frontmatter arrays like `tags: [foo, bar]` no longer incorrectly detected as markdown lists
+  - Fixes false positives in MD004, MD005, MD007, MD030, and other list-related rules
+
+- **List detection: Handle nested list items and tab indentation**
+  - Nested items where content begins on the next line are now correctly parsed
+  - Tab-indented nested lists now properly detected and validated
 
 - **MD030: Eliminate false positives on hard-wrapped citations and continuations** (fixes #253)
   - Replaced manual regex-based list detection with pulldown-cmark parser for context-aware list item detection
