@@ -529,7 +529,10 @@ pub struct CheckArgs {
     /// Respect .gitignore files when scanning directories
     #[arg(
         long,
+        num_args(0..=1),
+        require_equals(true),
         default_value = "true",
+        default_missing_value = "true",
         help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)"
     )]
     respect_gitignore: bool,
