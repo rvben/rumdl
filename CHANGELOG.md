@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.210] - 2026-01-05
+
+### Added
+
+- **MD071: Blank line after frontmatter** (new rule)
+  - Enforces a blank line between frontmatter closing delimiter and document content
+  - Supports YAML (`---`) and TOML (`+++`) frontmatter formats
+  - Auto-fixable
+
+- **MD072: Frontmatter key sort** (new rule, disabled by default)
+  - Checks that frontmatter keys are sorted alphabetically
+  - Supports YAML and TOML frontmatter
+  - Configurable `ignore` list for keys to exclude from sorting
+  - Enable with `MD072.enabled = true` in configuration
+  - Auto-fixable
+
+### Fixed
+
+- **MD022: Support kramdown Inline Attribute Lists** (fixes #259)
+  - IAL syntax like `{: .class #id}` immediately after headings no longer triggers blank line warnings
+  - IAL lines are treated as part of the heading element
+  - Multiple consecutive IAL lines supported
+  - Fix function preserves IAL attachment to headings
+
+- **MD046: Use pulldown-cmark for code block detection**
+  - More reliable code block detection using CommonMark-compliant parser
+  - Fixes edge cases with nested and consecutive code blocks
+
+- **MD072: Fix JSON depth tracking and regex initialization**
+  - Use LazyLock for regex to avoid recompilation
+  - Fix JSON nested object depth tracking when extracting keys
+
+- **MD072: Stop at TOML table headers when extracting keys**
+  - TOML table headers like `[section]` now properly terminate key extraction
+
 ## [0.0.209] - 2026-01-05
 
 ### Added
