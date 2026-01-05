@@ -1534,4 +1534,147 @@ Final content.";
 
         assert_eq!(fixed_once, fixed_twice, "Fix should be idempotent");
     }
+
+    #[test]
+    fn test_kramdown_ial_whitespace_line_between_not_attached() {
+        // A whitespace-only line (not truly blank) between heading and IAL
+        // means the IAL is NOT attached to the heading
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n   \n{:.class}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Whitespace-only line is treated as blank, so IAL is NOT attached
+        // The warning should be about the line after heading (whitespace line)
+        // since {:.class} starts a new block
+        assert!(
+            warnings.is_empty(),
+            "Whitespace between heading and IAL means IAL is not attached"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_html_comment_between() {
+        // HTML comment between heading and IAL means IAL is NOT attached to heading
+        // IAL must immediately follow the element it modifies
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n<!-- comment -->\n{:.class}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // HTML comment creates separation - IAL is not attached to heading
+        // Warning is generated because heading doesn't have blank line below
+        // (the comment is transparent, but IAL is not attached)
+        assert_eq!(
+            warnings.len(),
+            1,
+            "IAL not attached when comment is between: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_generic_attribute() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:data-toc=\"true\" style=\"color: red\"}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(warnings.is_empty(), "Generic attributes should be recognized as IAL");
+    }
+
+    #[test]
+    fn test_kramdown_ial_fix_multiple_lines_preserves_all() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.class1}\n{:#id}\n{:data-x=\"y\"}\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // All IAL lines should be preserved
+        assert!(fixed.contains("{:.class1}"), "First IAL should be preserved");
+        assert!(fixed.contains("{:#id}"), "Second IAL should be preserved");
+        assert!(fixed.contains("{:data-x=\"y\"}"), "Third IAL should be preserved");
+        // Blank line should be after all IALs, before content
+        assert!(
+            fixed.contains("{:data-x=\"y\"}\n\nContent"),
+            "Blank line should be after all IALs"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_crlf_line_endings() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\r\n{:.class}\r\n\r\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(warnings.is_empty(), "CRLF should work correctly with IAL");
+    }
+
+    #[test]
+    fn test_kramdown_ial_invalid_patterns_not_recognized() {
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // Space before colon - not valid IAL
+        let content = "# Heading\n{ :.class}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Invalid IAL syntax should trigger warning");
+
+        // Missing colon entirely
+        let content2 = "# Heading\n{.class}\n\nContent.";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let warnings2 = rule.check(&ctx2).unwrap();
+        // {.class} IS valid kramdown syntax (starts with .)
+        assert!(warnings2.is_empty(), "{{.class}} is valid kramdown block attribute");
+
+        // Just text in braces
+        let content3 = "# Heading\n{just text}\n\nContent.";
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard, None);
+        let warnings3 = rule.check(&ctx3).unwrap();
+        assert_eq!(
+            warnings3.len(),
+            1,
+            "Text in braces is not IAL and should trigger warning"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_toc_marker() {
+        // {:toc} is a special kramdown table of contents marker
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:toc}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // {:toc} starts with {: so it's recognized as IAL
+        assert!(warnings.is_empty(), "{{:toc}} should be recognized as IAL");
+    }
+
+    #[test]
+    fn test_kramdown_ial_mixed_headings_in_document() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = r#"# ATX Heading
+{:.atx-class}
+
+Content after ATX.
+
+Setext Heading
+--------------
+{:#setext-id}
+
+Content after Setext.
+
+## Another ATX
+{:.another}
+
+More content."#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "Mixed headings with IAL should all work: {warnings:?}"
+        );
+    }
 }
