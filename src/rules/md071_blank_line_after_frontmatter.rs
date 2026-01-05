@@ -46,18 +46,17 @@ impl Rule for MD071BlankLineAfterFrontmatter {
             && !next_line.trim().is_empty()
         {
             // Missing blank line after frontmatter
-            let line_index = &ctx.line_index;
+            let end_col = lines.get(fm_end_line - 1).map_or(1, |l| l.len() + 1);
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 message: "Missing blank line after frontmatter".to_string(),
                 line: fm_end_line, // Report on the closing delimiter line
                 column: 1,
                 end_line: fm_end_line,
-                end_column: lines.get(fm_end_line - 1).map_or(1, |l| l.len() + 1),
+                end_column: end_col,
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: line_index
-                        .line_col_to_byte_range(fm_end_line, lines.get(fm_end_line - 1).map_or(1, |l| l.len() + 1)),
+                    range: ctx.line_index.line_col_to_byte_range(fm_end_line, end_col),
                     replacement: "\n".to_string(),
                 }),
             });
@@ -117,6 +116,8 @@ impl Rule for MD071BlankLineAfterFrontmatter {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    // ==================== Basic Tests ====================
 
     #[test]
     fn test_no_frontmatter() {
@@ -232,5 +233,202 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
+    }
+
+    // ==================== Edge Case Tests ====================
+
+    #[test]
+    fn test_whitespace_only_line_after_frontmatter_is_not_blank() {
+        // A line with only spaces is NOT a blank line
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: Test\n---\n   \n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Whitespace-only line should be treated as blank (trim().is_empty())
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_tab_only_line_after_frontmatter() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: Test\n---\n\t\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Tab-only line should be treated as blank
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_crlf_line_endings() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\r\ntitle: Test\r\n---\r\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should detect missing blank line with CRLF
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_crlf_with_blank_line() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\r\ntitle: Test\r\n---\r\n\r\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_empty_yaml_frontmatter() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\n---\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Empty frontmatter still needs blank line after
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_empty_yaml_frontmatter_with_blank_line() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_frontmatter_with_blank_lines_inside() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: Test\n\nauthor: John\n---\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Blank lines inside frontmatter don't affect the rule
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_frontmatter_trailing_whitespace_on_delimiter() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: Test\n---   \n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Trailing whitespace on delimiter should still trigger
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_frontmatter_only_file() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: Only frontmatter\n---\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Trailing newline only, no actual content - no warning needed
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_frontmatter_with_triple_dash_inside_value() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: \"Test --- with dashes\"\n---\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // The dashes inside the value shouldn't affect parsing
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_fix_preserves_content_after_frontmatter() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: Test\n---\n# Heading\n\nParagraph 1.\n\nParagraph 2.\n\n- List item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Verify content is preserved
+        assert!(fixed.contains("# Heading"));
+        assert!(fixed.contains("Paragraph 1."));
+        assert!(fixed.contains("Paragraph 2."));
+        assert!(fixed.contains("- List item"));
+        // Verify blank line was added
+        assert!(fixed.contains("---\n\n#"));
+    }
+
+    #[test]
+    fn test_fix_toml_frontmatter() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "+++\ntitle = \"Test\"\n+++\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("+++\n\n#"));
+    }
+
+    #[test]
+    fn test_fix_json_frontmatter() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "{\n\"title\": \"Test\"\n}\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("}\n\n#"));
+    }
+
+    #[test]
+    fn test_multiline_yaml_values() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ndescription: |\n  This is a\n  multiline value\ntitle: Test\n---\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_yaml_list_values() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntags:\n  - rust\n  - markdown\ntitle: Test\n---\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_unicode_content_after_frontmatter() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: Test\n---\n# 日本語の見出し";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("# 日本語の見出し"));
+    }
+
+    #[test]
+    fn test_fix_multiple_applications_still_idempotent() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ntitle: Test\n---\n# Heading";
+
+        // Apply fix 5 times
+        let mut current = content.to_string();
+        for _ in 0..5 {
+            let ctx = LintContext::new(&current, crate::config::MarkdownFlavor::Standard, None);
+            current = rule.fix(&ctx).unwrap();
+        }
+
+        // Should only have one blank line
+        assert_eq!(current.matches("\n\n").count(), 1);
+        assert!(current.contains("---\n\n#"));
     }
 }
