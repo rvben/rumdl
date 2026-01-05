@@ -1,5 +1,22 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::rules::front_matter_utils::{FrontMatterType, FrontMatterUtils};
+use serde::{Deserialize, Serialize};
+
+/// Configuration for MD072 (Frontmatter key sort)
+///
+/// This rule is disabled by default (opt-in) because alphabetical key sorting
+/// is an opinionated style choice. Many projects prefer semantic ordering.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct MD072Config {
+    /// Whether this rule is enabled (default: false - opt-in rule)
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl RuleConfig for MD072Config {
+    const RULE_NAME: &'static str = "MD072";
+}
 
 /// Rule MD072: Frontmatter key sort
 ///
@@ -8,13 +25,24 @@ use crate::rules::front_matter_utils::{FrontMatterType, FrontMatterUtils};
 /// Auto-fix is only available when frontmatter contains no comments (YAML/TOML).
 /// JSON frontmatter is always auto-fixable since JSON has no comments.
 ///
+/// **Note**: This rule is disabled by default because alphabetical key sorting
+/// is an opinionated style choice. Many projects prefer semantic ordering
+/// (title first, date second, etc.) rather than alphabetical.
+///
 /// See [docs/md072.md](../../docs/md072.md) for full documentation.
 #[derive(Clone, Default)]
-pub struct MD072FrontmatterKeySort;
+pub struct MD072FrontmatterKeySort {
+    config: MD072Config,
+}
 
 impl MD072FrontmatterKeySort {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// Create from a config struct
+    pub fn from_config_struct(config: MD072Config) -> Self {
+        Self { config }
     }
 
     /// Check if frontmatter contains comments (YAML/TOML use #)
@@ -145,6 +173,10 @@ impl Rule for MD072FrontmatterKeySort {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        if !self.config.enabled {
+            return Ok(Vec::new());
+        }
+
         let content = ctx.content;
         let mut warnings = Vec::new();
 
@@ -293,6 +325,10 @@ impl Rule for MD072FrontmatterKeySort {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        if !self.config.enabled {
+            return Ok(ctx.content.to_string());
+        }
+
         let content = ctx.content;
 
         let fm_type = FrontMatterUtils::detect_front_matter_type(content);
@@ -313,11 +349,12 @@ impl Rule for MD072FrontmatterKeySort {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD072FrontmatterKeySort)
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD072Config>(config);
+        Box::new(Self::from_config_struct(rule_config))
     }
 }
 
@@ -501,11 +538,40 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
 
+    /// Create an enabled rule for testing
+    fn create_enabled_rule() -> MD072FrontmatterKeySort {
+        MD072FrontmatterKeySort::from_config_struct(MD072Config { enabled: true })
+    }
+
+    // ==================== Config Tests ====================
+
+    #[test]
+    fn test_disabled_by_default() {
+        let rule = MD072FrontmatterKeySort::new();
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Disabled by default, should return no warnings
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_enabled_via_config() {
+        let rule = create_enabled_rule();
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Enabled, should detect unsorted keys
+        assert_eq!(result.len(), 1);
+    }
+
     // ==================== YAML Tests ====================
 
     #[test]
     fn test_no_frontmatter() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "# Heading\n\nContent.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -515,7 +581,7 @@ mod tests {
 
     #[test]
     fn test_yaml_sorted_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "---\nauthor: John\ndate: 2024-01-01\ntitle: Test\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -525,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_yaml_unsorted_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "---\ntitle: Test\nauthor: John\ndate: 2024-01-01\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -538,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_yaml_case_insensitive_sort() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "---\nAuthor: John\ndate: 2024-01-01\nTitle: Test\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -549,7 +615,7 @@ mod tests {
 
     #[test]
     fn test_yaml_fix_sorts_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
@@ -562,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_yaml_no_fix_with_comments() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "---\ntitle: Test\n# This is a comment\nauthor: John\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -578,7 +644,7 @@ mod tests {
 
     #[test]
     fn test_yaml_single_key() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "---\ntitle: Test\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -589,7 +655,7 @@ mod tests {
 
     #[test]
     fn test_yaml_nested_keys_ignored() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         // Only top-level keys are checked, nested keys are ignored
         let content = "---\nauthor:\n  name: John\n  email: john@example.com\ntitle: Test\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -601,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_yaml_fix_idempotent() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed_once = rule.fix(&ctx).unwrap();
@@ -614,7 +680,7 @@ mod tests {
 
     #[test]
     fn test_yaml_complex_values() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         // Keys in sorted order: author, tags, title
         let content =
             "---\nauthor: John Doe\ntags:\n  - rust\n  - markdown\ntitle: \"Test: A Complex Title\"\n---\n\n# Heading";
@@ -629,7 +695,7 @@ mod tests {
 
     #[test]
     fn test_toml_sorted_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "+++\nauthor = \"John\"\ndate = \"2024-01-01\"\ntitle = \"Test\"\n+++\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -639,7 +705,7 @@ mod tests {
 
     #[test]
     fn test_toml_unsorted_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "+++\ntitle = \"Test\"\nauthor = \"John\"\n+++\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -651,7 +717,7 @@ mod tests {
 
     #[test]
     fn test_toml_fix_sorts_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "+++\ntitle = \"Test\"\nauthor = \"John\"\n+++\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
@@ -664,7 +730,7 @@ mod tests {
 
     #[test]
     fn test_toml_no_fix_with_comments() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "+++\ntitle = \"Test\"\n# This is a comment\nauthor = \"John\"\n+++\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -681,7 +747,7 @@ mod tests {
 
     #[test]
     fn test_json_sorted_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "{\n\"author\": \"John\",\n\"title\": \"Test\"\n}\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -691,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_json_unsorted_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "{\n\"title\": \"Test\",\n\"author\": \"John\"\n}\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -703,7 +769,7 @@ mod tests {
 
     #[test]
     fn test_json_fix_sorts_keys() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "{\n\"title\": \"Test\",\n\"author\": \"John\"\n}\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
@@ -716,7 +782,7 @@ mod tests {
 
     #[test]
     fn test_json_always_fixable() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         // JSON has no comments, so should always be fixable
         let content = "{\n\"title\": \"Test\",\n\"author\": \"John\"\n}\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -731,7 +797,7 @@ mod tests {
 
     #[test]
     fn test_empty_content() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -741,7 +807,7 @@ mod tests {
 
     #[test]
     fn test_empty_frontmatter() {
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "---\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -752,7 +818,7 @@ mod tests {
     #[test]
     fn test_toml_nested_tables_ignored() {
         // Keys inside [extra] or [taxonomies] should NOT be checked
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "+++\ntitle = \"Programming\"\nsort_by = \"weight\"\n\n[extra]\nwe_have_extra = \"variables\"\n+++\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -766,7 +832,7 @@ mod tests {
     #[test]
     fn test_toml_nested_taxonomies_ignored() {
         // Keys inside [taxonomies] should NOT be checked
-        let rule = MD072FrontmatterKeySort;
+        let rule = create_enabled_rule();
         let content = "+++\ntitle = \"Test\"\ndate = \"2024-01-01\"\n\n[taxonomies]\ncategories = [\"test\"]\ntags = [\"foo\"]\n+++\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();

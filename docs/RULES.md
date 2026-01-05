@@ -28,10 +28,11 @@ For information on global configuration settings (file selection, rule enablemen
 
 The following rules are **disabled by default** because they enforce opinionated style choices that may not suit all projects. Enable them explicitly if your project requires these checks.
 
-| Rule              | Description            | Why opt-in                                              |
-| ----------------- | ---------------------- | ------------------------------------------------------- |
-| [MD060](md060.md) | Table formatting       | Makes significant formatting changes to existing tables |
-| [MD063](md063.md) | Heading capitalization | Style varies by guide (AP, Chicago, APA)                |
+| Rule              | Description            | Why opt-in                                               |
+| ----------------- | ---------------------- | -------------------------------------------------------- |
+| [MD060](md060.md) | Table formatting       | Makes significant formatting changes to existing tables  |
+| [MD063](md063.md) | Heading capitalization | Style varies by guide (AP, Chicago, APA)                 |
+| [MD072](md072.md) | Frontmatter key sort   | Many projects prefer semantic ordering over alphabetical |
 
 ### Enabling Opt-in Rules
 
@@ -44,6 +45,9 @@ enabled = true
 [MD063]
 enabled = true
 style = "title_case"  # Optional: configure the style
+
+[MD072]
+enabled = true
 ```
 
 **pyproject.toml:**
@@ -55,6 +59,9 @@ enabled = true
 [tool.rumdl.MD063]
 enabled = true
 style = "title_case"
+
+[tool.rumdl.MD072]
+enabled = true
 ```
 
 See each rule's documentation for available configuration options.
