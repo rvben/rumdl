@@ -281,7 +281,7 @@ fn test_cli_options() {
     let temp_dir = tempdir().unwrap();
     let _config_path = create_dummy_config(&temp_dir); // Use dummy config
 
-    // Create a markdown file with specific issues for MD022 (heading spacing) and MD033 (HTML)
+    // Create a markdown file with specific issues for MD022, MD033, and MD030
     let markdown_path = temp_dir.path().join("format_test.md");
     let markdown_content = r#"# Test Document
 ## No blank line
@@ -299,30 +299,34 @@ fn test_cli_options() {
         .arg("check")
         .arg(&markdown_path)
         .arg("--no-config") // Use --no-config instead of dummy config
+        .arg("--no-cache") // Avoid cache issues with different rule configurations
         .assert();
     let default_output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
     // Accept exit code 0 or 1 if output is correct and only deprecation warning is in stderr
     let code = assert.get_output().status.code().unwrap_or(-1);
     assert!(code == 0 || code == 1, "Unexpected exit code: {code}");
-    // The test content triggers exactly two rules:
+    // The test content triggers exactly three rules:
     // - MD022: "## No blank line" lacks blank line above it
     // - MD033: "<div>Some HTML</div>" contains inline HTML
+    // - MD030: "*Bad item" has no space after list marker (user-intention detection)
     assert!(default_output.contains("MD022"));
     assert!(default_output.contains("MD033"));
+    assert!(default_output.contains("MD030"));
     // Allow deprecation warning in stderr
     if !stderr.is_empty() {
         assert!(stderr.contains("Deprecation warning"));
     }
 
-    // Test with disabled rules - only disable the rules that actually trigger
+    // Test with disabled rules - disable all three rules that trigger
     let mut disabled_cmd = cargo_bin_cmd!("rumdl");
     let disabled_assert = disabled_cmd
         .arg("check")
         .arg(&markdown_path)
         .arg("--disable")
-        .arg("MD022,MD033") // Only disable the two rules that trigger
+        .arg("MD022,MD033,MD030") // Disable the three rules that trigger
         .arg("--no-config") // Use --no-config instead of dummy config
+        .arg("--no-cache") // Avoid cache issues with different rule configurations
         .assert();
     let disabled_output = String::from_utf8(disabled_assert.get_output().stdout.clone()).unwrap();
     let disabled_code = disabled_assert.get_output().status.code().unwrap_or(-1);
@@ -333,24 +337,26 @@ fn test_cli_options() {
     );
     assert!(!disabled_output.contains("MD022"));
     assert!(!disabled_output.contains("MD033"));
+    assert!(!disabled_output.contains("MD030"));
 
     // Note: MD032 (blanks around lists) doesn't trigger because the list has blank lines around it
-    // Note: MD030 (list marker space) doesn't trigger on "*Bad item" because it's not a valid list item
+    // Note: MD030 (list marker space) NOW triggers on "*Bad item" due to user-intention detection
 
-    // Test enabling specific rules
+    // Test enabling only MD030 to verify it triggers on the intentional list item pattern
     let mut enabled_cmd = cargo_bin_cmd!("rumdl");
     let enabled_assert = enabled_cmd
         .arg("check")
         .arg(&markdown_path)
         .arg("--enable")
-        .arg("MD030") // Enable MD030 to verify it doesn't trigger on invalid list syntax
+        .arg("MD030") // Enable only MD030 to test user-intention detection
         .arg("--no-config") // Use --no-config instead of dummy config
+        .arg("--no-cache") // Avoid cache issues with different rule configurations
         .assert();
     let enabled_output = String::from_utf8(enabled_assert.get_output().stdout.clone()).unwrap();
-    enabled_assert.code(0); // Expect success if no MD030 issues
+    enabled_assert.code(1); // Expect failure since MD030 finds an issue
     assert!(!enabled_output.contains("MD022"));
     assert!(!enabled_output.contains("MD033"));
-    // assert!(enabled_output.contains("MD030")); // Should NOT be present for *Bad item
+    assert!(enabled_output.contains("MD030")); // MD030 now detects *Bad item as intentional list
 
     // Test default run on options_test.md (using --no-config)
     let options_test_path = temp_dir.path().join("options_test.md");
@@ -360,6 +366,7 @@ fn test_cli_options() {
         .arg("check")
         .arg(&options_test_path)
         .arg("--no-config") // Use --no-config instead of dummy config
+        .arg("--no-cache") // Avoid cache issues with different rule configurations
         .assert();
     let default_output_options = String::from_utf8(default_assert_options.get_output().stdout.clone()).unwrap();
     assert!(default_output_options.contains("MD033"));

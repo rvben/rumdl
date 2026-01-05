@@ -32,7 +32,9 @@ This allows you to set personal preferences."#;
 }
 
 #[test]
-fn test_md032_actual_non_1_start() {
+fn test_md032_paragraph_not_list() {
+    // CommonMark: A line starting with "2." after a paragraph (without blank line)
+    // is NOT parsed as a list - it's part of the paragraph
     let content = r#"Some text here.
 2. This list starts with 2
 3. Next item"#;
@@ -43,13 +45,17 @@ fn test_md032_actual_non_1_start() {
 
     let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
 
-    // Should have a warning - list starts with 2
+    // Should have NO warnings - CommonMark parses this as a single paragraph, not a list
+    // A list starting with non-1 requires a blank line before it to be recognized
     assert_eq!(
         warnings.len(),
-        1,
-        "MD032 should report when a list actually starts with non-1"
+        0,
+        "MD032 should not report because content is parsed as paragraph, not list. Warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(warnings[0].line, 2, "Warning should be on line 2");
 }
 
 #[test]

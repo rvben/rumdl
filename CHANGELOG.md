@@ -7,9 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.209] - 2026-01-04
+## [0.0.209] - 2026-01-05
+
+### Added
+
+- **MD070: Nested code fence collision detection** (new rule)
+  - Detects when inner code fences would prematurely close outer fences
+  - Example: outer ` ``` ` containing inner ` ``` ` causes collision
+  - Suggests using longer fences (` ```` `) for outer blocks
+  - Configurable `languages` option to limit checking to specific info strings (default: `["", "markdown", "md"]`)
+  - Auto-fix increases fence length to prevent collisions
 
 ### Fixed
+
+- **MD040: Fix false positives on list-indented code blocks** (fixes #257)
+  - Refactored to use pulldown-cmark for CommonMark-compliant code block detection
+  - List-indented closing fences no longer incorrectly flagged as missing language
+  - Eliminates manual fence state tracking that failed for consecutive code blocks
+
+- **CLI: Support `respect-gitignore` in config files** (fixes #258)
+  - Added `respect-gitignore` option to `[global]` section in `.rumdl.toml` and `pyproject.toml`
+  - CLI flag `--respect-gitignore=false` syntax now works (previously only `--no-respect-gitignore`)
 
 - **Release: Fix pre-built aarch64-linux binaries for 16K page systems** (fixes #256)
   - Pre-built binaries for `aarch64-unknown-linux-gnu` and `aarch64-unknown-linux-musl` now work on Asahi Linux and Raspberry Pi 5

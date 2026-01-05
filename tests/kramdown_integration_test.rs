@@ -164,6 +164,7 @@ This document should lint cleanly with no false positives from Kramdown syntax.
             "MD025", // Multiple top-level headings
             "MD013", // Line length
             "MD052", // Reference links (abbreviations look like broken references)
+            "MD030", // List marker space (user-intention detection on abbreviations)
         ];
 
         let has_unexpected = stdout
