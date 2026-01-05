@@ -43,6 +43,13 @@ pub fn apply_cli_overrides(sourced: &mut rumdl_config::SourcedConfig, args: &Che
     {
         sourced.global.flavor = rumdl_config::SourcedValue::new(flavor, rumdl_config::ConfigSource::Cli);
     }
+
+    // Apply --respect-gitignore override if provided
+    // This allows CLI to override config file setting
+    if let Some(respect_gitignore) = args.respect_gitignore {
+        sourced.global.respect_gitignore =
+            rumdl_config::SourcedValue::new(respect_gitignore, rumdl_config::ConfigSource::Cli);
+    }
 }
 
 /// Threshold for using memory-mapped I/O (1MB)
@@ -527,15 +534,15 @@ pub struct CheckArgs {
     include: Option<String>,
 
     /// Respect .gitignore files when scanning directories
+    /// When not specified, uses config file value (default: true)
     #[arg(
         long,
         num_args(0..=1),
         require_equals(true),
-        default_value = "true",
         default_missing_value = "true",
         help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)"
     )]
-    respect_gitignore: bool,
+    respect_gitignore: Option<bool>,
 
     /// Show detailed output
     #[arg(short, long)]

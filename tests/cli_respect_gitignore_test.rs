@@ -230,7 +230,7 @@ fn test_respect_gitignore_without_equals_followed_by_path() {
 #[test]
 fn test_respect_gitignore_default_value() {
     // When --respect-gitignore is omitted, default is true
-    // This test just verifies the command runs without error
+    // This means gitignored files should NOT be linted
     let temp_dir = setup_test_directory();
     let base_path = temp_dir.path();
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
@@ -241,10 +241,56 @@ fn test_respect_gitignore_default_value() {
         .output()
         .expect("Failed to execute command");
 
-    // Command should execute without arg parsing errors
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    // Command should execute without arg parsing errors
     assert!(
         !stderr.contains("error: unexpected") && !stderr.contains("error: invalid"),
         "Default behavior should work, got: {stderr}"
+    );
+
+    // With default (respect-gitignore = true), ignored.md should NOT be linted
+    assert!(
+        !combined.contains("ignored.md"),
+        "ignored.md should NOT be linted with default respect-gitignore=true, got:\n{combined}"
+    );
+
+    // included.md should still be linted
+    assert!(
+        combined.contains("included.md"),
+        "included.md should be linted, got:\n{combined}"
+    );
+}
+
+#[test]
+fn test_config_file_respect_gitignore_false() {
+    // Config file with respect-gitignore = false should lint gitignored files
+    let temp_dir = setup_test_directory();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Create config file with respect-gitignore = false
+    fs::write(base_path.join(".rumdl.toml"), "[global]\nrespect-gitignore = false\n").unwrap();
+
+    let output = Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["check", "."])
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    // Should lint BOTH files when config disables gitignore respect
+    assert!(
+        combined.contains("ignored.md"),
+        "ignored.md should be linted when config has respect-gitignore=false, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("included.md"),
+        "included.md should be linted, got:\n{combined}"
     );
 }

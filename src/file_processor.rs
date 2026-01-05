@@ -221,19 +221,10 @@ pub fn find_markdown_files(
         // 2. Config include is used ONLY in discovery mode if specified
         config.global.include.clone()
     } else if is_discovery_mode {
-        // 3. Default include (all markdown variants) ONLY in discovery mode if no CLI/Config include
-        vec![
-            "*.md".to_string(),
-            "*.markdown".to_string(),
-            "*.mdx".to_string(),
-            "*.mkd".to_string(),
-            "*.mkdn".to_string(),
-            "*.mdown".to_string(),
-            "*.mdwn".to_string(),
-            "*.qmd".to_string(),
-            "*.rmd".to_string(),
-            "*.Rmd".to_string(),
-        ]
+        // 3. Default: Don't add include patterns as overrides - the type filter already handles
+        // selecting markdown files (lines 183-199). Using overrides here would bypass gitignore
+        // because overrides take precedence over gitignore in the ignore crate.
+        Vec::new()
     } else {
         // 4. Explicit path mode: No includes applied by default. Walk starts from explicit paths.
         Vec::new()
@@ -308,11 +299,8 @@ pub fn find_markdown_files(
     }
 
     // Configure gitignore handling *SECOND*
-    let use_gitignore = if args.respect_gitignore {
-        true // If respect is true, always include gitignore
-    } else {
-        false // If respect is false, always exclude gitignore
-    };
+    // Use config value which merges CLI override with config file setting
+    let use_gitignore = config.global.respect_gitignore;
 
     walk_builder.ignore(use_gitignore); // Enable/disable .ignore
     walk_builder.git_ignore(use_gitignore); // Enable/disable .gitignore
