@@ -3,6 +3,7 @@
 /// See [docs/md022.md](../../docs/md022.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::range_utils::calculate_heading_range;
 use toml;
 
@@ -116,7 +117,7 @@ impl MD022BlanksAroundHeadings {
         let line_ending = "\n";
         let had_trailing_newline = ctx.content.ends_with('\n');
         let mut result = Vec::new();
-        let mut skip_next = false;
+        let mut skip_count: usize = 0;
 
         let heading_at_start_idx = {
             let mut found_non_transparent = false;
@@ -140,8 +141,8 @@ impl MD022BlanksAroundHeadings {
         };
 
         for (i, line_info) in ctx.lines.iter().enumerate() {
-            if skip_next {
-                skip_next = false;
+            if skip_count > 0 {
+                skip_count -= 1;
                 continue;
             }
             let line = line_info.content(ctx.content);
@@ -163,7 +164,7 @@ impl MD022BlanksAroundHeadings {
                 let is_first_heading = Some(i) == heading_at_start_idx;
                 let heading_level = heading.level as usize;
 
-                // Count existing blank lines above in the result, skipping HTML comments
+                // Count existing blank lines above in the result, skipping HTML comments and IAL
                 let mut blank_lines_above = 0;
                 let mut check_idx = result.len();
                 while check_idx > 0 {
@@ -174,6 +175,9 @@ impl MD022BlanksAroundHeadings {
                         check_idx -= 1;
                     } else if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
                         // Skip HTML comments - they are transparent for blank line counting
+                        check_idx -= 1;
+                    } else if is_kramdown_block_attribute(trimmed) {
+                        // Skip kramdown IAL - they are attached to headings and transparent
                         check_idx -= 1;
                     } else {
                         break;
@@ -197,6 +201,9 @@ impl MD022BlanksAroundHeadings {
                 // Add the heading line
                 result.push(line.to_string());
 
+                // Determine base index for checking lines below
+                let mut effective_end_idx = i;
+
                 // For Setext headings, also add the underline immediately
                 if matches!(
                     heading.style,
@@ -205,93 +212,70 @@ impl MD022BlanksAroundHeadings {
                     // Add the underline (next line)
                     if i + 1 < ctx.lines.len() {
                         result.push(ctx.lines[i + 1].content(ctx.content).to_string());
-                        skip_next = true; // Skip the underline in the main loop
-                    }
-
-                    // Now check blank lines below the underline
-                    let mut blank_lines_below = 0;
-                    let mut next_content_line_idx = None;
-                    for j in (i + 2)..ctx.lines.len() {
-                        if ctx.lines[j].is_blank {
-                            blank_lines_below += 1;
-                        } else {
-                            next_content_line_idx = Some(j);
-                            break;
-                        }
-                    }
-
-                    // Check if the next non-blank line is special
-                    let next_is_special = if let Some(idx) = next_content_line_idx {
-                        let next_line = &ctx.lines[idx];
-                        next_line.list_item.is_some() || {
-                            let trimmed = next_line.content(ctx.content).trim();
-                            (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
-                                && (trimmed.len() == 3
-                                    || (trimmed.len() > 3
-                                        && trimmed
-                                            .chars()
-                                            .nth(3)
-                                            .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())))
-                        }
-                    } else {
-                        false
-                    };
-
-                    // Add missing blank lines below if needed
-                    let requirement_below = self.config.lines_below.get_for_level(heading_level);
-                    let needed_blanks_below = if next_is_special {
-                        0
-                    } else {
-                        requirement_below.required_count().unwrap_or(0)
-                    };
-                    if blank_lines_below < needed_blanks_below {
-                        for _ in 0..(needed_blanks_below - blank_lines_below) {
-                            result.push(String::new());
-                        }
-                    }
-                } else {
-                    // For ATX headings, check blank lines below
-                    let mut blank_lines_below = 0;
-                    let mut next_content_line_idx = None;
-                    for j in (i + 1)..ctx.lines.len() {
-                        if ctx.lines[j].is_blank {
-                            blank_lines_below += 1;
-                        } else {
-                            next_content_line_idx = Some(j);
-                            break;
-                        }
-                    }
-
-                    // Check if the next non-blank line is special
-                    let next_is_special = if let Some(idx) = next_content_line_idx {
-                        let next_line = &ctx.lines[idx];
-                        next_line.list_item.is_some() || {
-                            let trimmed = next_line.content(ctx.content).trim();
-                            (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
-                                && (trimmed.len() == 3
-                                    || (trimmed.len() > 3
-                                        && trimmed
-                                            .chars()
-                                            .nth(3)
-                                            .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())))
-                        }
-                    } else {
-                        false
-                    };
-
-                    // Add missing blank lines below if needed
-                    let requirement_below = self.config.lines_below.get_for_level(heading_level);
-                    let needed_blanks_below = if next_is_special {
-                        0
-                    } else {
-                        requirement_below.required_count().unwrap_or(0)
-                    };
-                    if blank_lines_below < needed_blanks_below {
-                        for _ in 0..(needed_blanks_below - blank_lines_below) {
-                            result.push(String::new());
-                        }
+                        skip_count += 1; // Skip the underline in the main loop
+                        effective_end_idx = i + 1;
                     }
                 }
+
+                // Add any kramdown IAL lines that immediately follow the heading
+                // These are part of the heading element and should not be separated
+                let mut ial_count = 0;
+                while effective_end_idx + 1 < ctx.lines.len() {
+                    let next_line = &ctx.lines[effective_end_idx + 1];
+                    let next_trimmed = next_line.content(ctx.content).trim();
+                    if is_kramdown_block_attribute(next_trimmed) {
+                        result.push(next_trimmed.to_string());
+                        effective_end_idx += 1;
+                        ial_count += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Now check blank lines below the heading (including underline and IAL)
+                let mut blank_lines_below = 0;
+                let mut next_content_line_idx = None;
+                for j in (effective_end_idx + 1)..ctx.lines.len() {
+                    if ctx.lines[j].is_blank {
+                        blank_lines_below += 1;
+                    } else {
+                        next_content_line_idx = Some(j);
+                        break;
+                    }
+                }
+
+                // Check if the next non-blank line is special (code fence or list item)
+                let next_is_special = if let Some(idx) = next_content_line_idx {
+                    let next_line = &ctx.lines[idx];
+                    next_line.list_item.is_some() || {
+                        let trimmed = next_line.content(ctx.content).trim();
+                        (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+                            && (trimmed.len() == 3
+                                || (trimmed.len() > 3
+                                    && trimmed
+                                        .chars()
+                                        .nth(3)
+                                        .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())))
+                    }
+                } else {
+                    false
+                };
+
+                // Add missing blank lines below if needed
+                let requirement_below = self.config.lines_below.get_for_level(heading_level);
+                let needed_blanks_below = if next_is_special {
+                    0
+                } else {
+                    requirement_below.required_count().unwrap_or(0)
+                };
+                if blank_lines_below < needed_blanks_below {
+                    for _ in 0..(needed_blanks_below - blank_lines_below) {
+                        result.push(String::new());
+                    }
+                }
+
+                // Skip the IAL lines in the main loop since we already added them
+                skip_count += ial_count;
             } else {
                 // Regular line - just add it
                 result.push(line.to_string());
@@ -400,6 +384,9 @@ impl Rule for MD022BlanksAroundHeadings {
                     {
                         // Skip HTML comments - they are transparent for blank line counting
                         continue;
+                    } else if is_kramdown_block_attribute(trimmed) {
+                        // Skip kramdown IAL - they are attached to headings and transparent for blank line counting
+                        continue;
                     } else if ctx.lines[j].in_front_matter {
                         // Skip frontmatter - first heading after frontmatter doesn't need blank line above
                         // Note: We only check in_front_matter flag, NOT the string "---", because
@@ -419,7 +406,7 @@ impl Rule for MD022BlanksAroundHeadings {
             }
 
             // Determine the effective last line of the heading
-            let effective_last_line = if matches!(
+            let mut effective_last_line = if matches!(
                 heading.style,
                 crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
             ) {
@@ -427,6 +414,18 @@ impl Rule for MD022BlanksAroundHeadings {
             } else {
                 line_num
             };
+
+            // Extend effective_last_line to include any kramdown IAL lines immediately following
+            // IAL lines like `{: .class #id}` are part of the heading element
+            while effective_last_line + 1 < ctx.lines.len() {
+                let next_line = &ctx.lines[effective_last_line + 1];
+                let next_trimmed = next_line.content(ctx.content).trim();
+                if is_kramdown_block_attribute(next_trimmed) {
+                    effective_last_line += 1;
+                } else {
+                    break;
+                }
+            }
 
             // Check blank lines below
             if effective_last_line < ctx.lines.len() - 1 {
@@ -1320,5 +1319,219 @@ Final content.";
             warnings_ok.is_empty(),
             "HR with blank line before heading should not warn"
         );
+    }
+
+    // ==================== Kramdown IAL Tests ====================
+
+    #[test]
+    fn test_kramdown_ial_after_heading_no_warning() {
+        // Issue #259: IAL immediately after heading should not trigger MD022
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "## Table of Contents\n{: .hhc-toc-heading}\n\nSome content here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "IAL after heading should not require blank line between them: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_with_class() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.highlight}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(warnings.is_empty(), "IAL with class should be part of heading");
+    }
+
+    #[test]
+    fn test_kramdown_ial_with_id() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:#custom-id}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(warnings.is_empty(), "IAL with id should be part of heading");
+    }
+
+    #[test]
+    fn test_kramdown_ial_with_multiple_attributes() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{: .class #id style=\"color: red\"}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "IAL with multiple attributes should be part of heading"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_missing_blank_after() {
+        // IAL is part of heading, but blank line is still needed after IAL
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.class}\nContent without blank.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn about missing blank after IAL (part of heading)"
+        );
+        assert!(warnings[0].message.contains("below"));
+    }
+
+    #[test]
+    fn test_kramdown_ial_before_heading_transparent() {
+        // IAL before heading should be transparent for "blank lines above" check
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "Content.\n\n{:.preclass}\n## Heading\n\nMore content.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "IAL before heading should be transparent for blank line count"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_setext_heading() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "Heading\n=======\n{:.setext-class}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "IAL after Setext heading should be part of heading"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_fix_preserves_ial() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "Content.\n# Heading\n{:.class}\nMore content.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should add blank line above heading and after IAL, but keep IAL attached to heading
+        assert!(
+            fixed.contains("# Heading\n{:.class}"),
+            "IAL should stay attached to heading"
+        );
+        assert!(fixed.contains("{:.class}\n\nMore"), "Should add blank after IAL");
+    }
+
+    #[test]
+    fn test_kramdown_ial_fix_does_not_separate() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.class}\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Fix should NOT insert blank line between heading and IAL
+        assert!(
+            !fixed.contains("# Heading\n\n{:.class}"),
+            "Should not add blank between heading and IAL"
+        );
+        assert!(fixed.contains("# Heading\n{:.class}"), "IAL should remain attached");
+    }
+
+    #[test]
+    fn test_kramdown_multiple_ial_lines() {
+        // Edge case: multiple IAL lines (unusual but valid)
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.class1}\n{:#id}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Note: Kramdown only attaches one IAL, but we treat consecutive ones as all attached
+        // to avoid false positives
+        assert!(
+            warnings.is_empty(),
+            "Multiple consecutive IALs should be part of heading"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_with_blank_line_not_attached() {
+        // If there's a blank line between heading and IAL, they're not attached
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n\n{:.class}\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // The IAL here is NOT attached to the heading (blank line separates them)
+        // So this should NOT trigger a warning for missing blank below heading
+        // The IAL is just a standalone block-level element
+        assert!(warnings.is_empty(), "Blank line separates heading from IAL");
+    }
+
+    #[test]
+    fn test_not_kramdown_ial_regular_braces() {
+        // Regular braces that don't match IAL pattern
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{not an ial}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // {not an ial} is not IAL syntax, so it should be regular content
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Non-IAL braces should be regular content requiring blank"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_at_document_end() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.class}";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // No content after IAL, so no blank line needed
+        assert!(warnings.is_empty(), "IAL at document end needs no blank after");
+    }
+
+    #[test]
+    fn test_kramdown_ial_followed_by_code_fence() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.class}\n```\ncode\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Code fence is special - no blank required before it
+        assert!(warnings.is_empty(), "No blank needed between IAL and code fence");
+    }
+
+    #[test]
+    fn test_kramdown_ial_followed_by_list() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.class}\n- List item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // List is special - no blank required before it
+        assert!(warnings.is_empty(), "No blank needed between IAL and list");
+    }
+
+    #[test]
+    fn test_kramdown_ial_fix_idempotent() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n{:.class}\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed_once = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed_once, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_twice = rule.fix(&ctx2).unwrap();
+
+        assert_eq!(fixed_once, fixed_twice, "Fix should be idempotent");
     }
 }
