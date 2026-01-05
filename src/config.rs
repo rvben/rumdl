@@ -3133,6 +3133,9 @@ pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! 
     "MD067" => "MD067",
     "MD068" => "MD068",
     "MD069" => "MD069",
+    "MD070" => "MD070",
+    "MD071" => "MD071",
+    "MD072" => "MD072",
 
     // Aliases (hyphen format)
     "HEADING-INCREMENT" => "MD001",
@@ -3200,6 +3203,9 @@ pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! 
     "FOOTNOTE-DEFINITION-ORDER" => "MD067",
     "EMPTY-FOOTNOTE-DEFINITION" => "MD068",
     "NO-DUPLICATE-LIST-MARKERS" => "MD069",
+    "NESTED-CODE-FENCE" => "MD070",
+    "BLANK-LINE-AFTER-FRONTMATTER" => "MD071",
+    "FRONTMATTER-KEY-SORT" => "MD072",
 };
 
 /// Resolve a rule name alias to its canonical form with O(1) perfect hash lookup

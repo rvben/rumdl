@@ -757,6 +757,9 @@ ul-style:
             ("table-cell-alignment", "MD059"),
             ("table-format", "MD060"),
             ("forbidden-terms", "MD061"),
+            ("nested-code-fence", "MD070"),
+            ("blank-line-after-frontmatter", "MD071"),
+            ("frontmatter-key-sort", "MD072"),
         ];
 
         for (alias, expected) in aliases {
