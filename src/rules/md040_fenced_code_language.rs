@@ -1,38 +1,17 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_line_range;
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
 /// Rule MD040: Fenced code blocks should have a language
 ///
 /// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
-/// Helper struct to track and update disable/enable state for a rule
-struct DisableState {
-    is_disabled: bool,
-}
-
-impl DisableState {
-    fn new() -> Self {
-        Self { is_disabled: false }
-    }
-
-    /// Update the disable state based on a line's content
-    fn update(&mut self, line: &str, rule_name: &str) {
-        // Check for disable comment
-        if let Some(rules) = crate::rule::parse_disable_comment(line)
-            && (rules.is_empty() || rules.contains(&rule_name))
-        {
-            self.is_disabled = true;
-        }
-        // Check for enable comment
-        if let Some(rules) = crate::rule::parse_enable_comment(line)
-            && (rules.is_empty() || rules.contains(&rule_name))
-        {
-            self.is_disabled = false;
-        }
-    }
-
-    fn is_disabled(&self) -> bool {
-        self.is_disabled
-    }
+struct FencedCodeBlock {
+    /// 0-indexed line number where the code block starts
+    line_idx: usize,
+    /// The language/info string (empty if no language specified)
+    language: String,
+    /// The fence marker used (``` or ~~~)
+    fence_marker: String,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -49,124 +28,59 @@ impl Rule for MD040FencedCodeLanguage {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = &ctx.line_index;
-
         let mut warnings = Vec::new();
 
-        let mut in_code_block = false;
-        let mut current_fence_marker: Option<String> = None;
-        let mut opening_fence_indent: usize = 0;
+        // Use pulldown-cmark to detect fenced code blocks with language info
+        let fenced_blocks = detect_fenced_code_blocks(content, &ctx.line_offsets);
 
-        // Pre-compute disabled state to avoid O(n²) complexity
-        let mut is_disabled = false;
+        // Pre-compute disabled ranges for efficient lookup
+        let disabled_ranges = compute_disabled_ranges(content, self.name());
 
-        for (i, line) in content.lines().enumerate() {
-            let trimmed = line.trim();
-
-            // Update disabled state incrementally
-            if let Some(rules) = crate::rule::parse_disable_comment(trimmed)
-                && (rules.is_empty() || rules.contains(&self.name()))
-            {
-                is_disabled = true;
-            }
-            if let Some(rules) = crate::rule::parse_enable_comment(trimmed)
-                && (rules.is_empty() || rules.contains(&self.name()))
-            {
-                is_disabled = false;
-            }
-
-            // Skip processing if rule is disabled
-            if is_disabled {
+        for block in fenced_blocks {
+            // Skip if this line is in a disabled range
+            if is_line_disabled(&disabled_ranges, block.line_idx) {
                 continue;
             }
 
-            // Determine fence marker if this is a fence line
-            let fence_marker = if trimmed.starts_with("```") {
-                let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
-                if backtick_count >= 3 {
-                    Some("`".repeat(backtick_count))
-                } else {
-                    None
-                }
-            } else if trimmed.starts_with("~~~") {
-                let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
-                if tilde_count >= 3 {
-                    Some("~".repeat(tilde_count))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            // Get the actual line content for additional checks
+            let line = content.lines().nth(block.line_idx).unwrap_or("");
+            let trimmed = line.trim();
+            let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();
 
-            if let Some(fence_marker) = fence_marker {
-                if in_code_block {
-                    // We're inside a code block, check if this closes it
-                    if let Some(ref current_marker) = current_fence_marker {
-                        let current_indent = line.len() - line.trim_start().len();
-                        // Only close if the fence marker exactly matches the opening marker AND has no content after
-                        // AND the indentation is not greater than the opening fence
-                        if fence_marker == *current_marker
-                            && trimmed[current_marker.len()..].trim().is_empty()
-                            && current_indent <= opening_fence_indent
-                        {
-                            // This closes the current code block
-                            in_code_block = false;
-                            current_fence_marker = None;
-                            opening_fence_indent = 0;
-                        }
-                        // else: This is content inside a code block, ignore completely
-                    }
-                } else {
-                    // We're outside a code block, this opens one
-                    // Check if language is specified
-                    let after_fence = trimmed[fence_marker.len()..].trim();
+            // Check if it has MkDocs title attribute but no language
+            let has_title_only =
+                ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
 
-                    // Check if it has MkDocs title attribute but no language
-                    // Pattern: ``` title="Title" (missing language)
-                    // Valid: ```python title="Title" or ```py title="Title"
-                    let has_title_only =
-                        ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
+            // Check for Quarto/RMarkdown code chunk syntax: {language} or {language, options}
+            let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
+                && after_fence.starts_with('{')
+                && after_fence.contains('}');
 
-                    // Check for Quarto/RMarkdown code chunk syntax: {language} or {language, options}
-                    // Examples: ```{python}, ```{r}, ```{r, echo=FALSE}
-                    let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
-                        && after_fence.starts_with('{')
-                        && after_fence.contains('}');
+            // Warn if no language and not using special syntax
+            if (block.language.is_empty() || has_title_only) && !has_quarto_syntax {
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
 
-                    if (after_fence.is_empty() || has_title_only) && !has_quarto_syntax {
-                        // Calculate precise character range for the entire fence line that needs a language
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "Code block (```) missing language".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: {
-                                    // Replace just the fence marker with fence+language
-                                    let trimmed_start = line.len() - line.trim_start().len();
-                                    let fence_len = fence_marker.len();
-                                    let line_start_byte = ctx.line_offsets.get(i).copied().unwrap_or(0);
-                                    let fence_start_byte = line_start_byte + trimmed_start;
-                                    let fence_end_byte = fence_start_byte + fence_len;
-                                    fence_start_byte..fence_end_byte
-                                },
-                                replacement: format!("{fence_marker}text"),
-                            }),
-                        });
-                    }
-
-                    in_code_block = true;
-                    current_fence_marker = Some(fence_marker);
-                    opening_fence_indent = line.len() - line.trim_start().len();
-                }
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: "Code block (```) missing language".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: {
+                            let trimmed_start = line.len() - line.trim_start().len();
+                            let fence_len = block.fence_marker.len();
+                            let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
+                            let fence_start_byte = line_start_byte + trimmed_start;
+                            let fence_end_byte = fence_start_byte + fence_len;
+                            fence_start_byte..fence_end_byte
+                        },
+                        replacement: format!("{}text", block.fence_marker),
+                    }),
+                });
             }
-            // If we're inside a code block and this line is not a fence, ignore it
         }
 
         Ok(warnings)
@@ -174,129 +88,51 @@ impl Rule for MD040FencedCodeLanguage {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = &ctx.line_index;
 
-        let mut result = String::new();
-        let mut in_code_block = false;
-        let mut current_fence_marker: Option<String> = None;
-        let mut fence_needs_language = false;
-        let mut original_indent = String::new();
-        let mut opening_fence_indent: usize = 0;
+        // Use pulldown-cmark to detect fenced code blocks
+        let fenced_blocks = detect_fenced_code_blocks(content, &ctx.line_offsets);
 
-        let lines: Vec<&str> = content.lines().collect();
+        // Pre-compute disabled ranges
+        let disabled_ranges = compute_disabled_ranges(content, self.name());
 
-        // Pre-compute disabled state to avoid O(n²) complexity
-        let mut disable_state = DisableState::new();
+        // Build a set of line indices that need fixing
+        let mut lines_to_fix: std::collections::HashMap<usize, (&str, bool)> = std::collections::HashMap::new();
 
-        for line in lines.iter() {
-            let trimmed = line.trim();
-
-            // Update disabled state incrementally
-            disable_state.update(trimmed, self.name());
-
-            // Skip processing if rule is disabled, preserve the line as-is
-            if disable_state.is_disabled() {
-                result.push_str(line);
-                result.push('\n');
+        for block in &fenced_blocks {
+            if is_line_disabled(&disabled_ranges, block.line_idx) {
                 continue;
             }
 
-            // Determine fence marker if this is a fence line
-            let fence_marker = if trimmed.starts_with("```") {
-                let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
-                if backtick_count >= 3 {
-                    Some("`".repeat(backtick_count))
+            let line = content.lines().nth(block.line_idx).unwrap_or("");
+            let trimmed = line.trim();
+            let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();
+
+            let has_title_only =
+                ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
+
+            let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
+                && after_fence.starts_with('{')
+                && after_fence.contains('}');
+
+            if (block.language.is_empty() || has_title_only) && !has_quarto_syntax {
+                lines_to_fix.insert(block.line_idx, (&block.fence_marker, has_title_only));
+            }
+        }
+
+        // Build the result by iterating through lines
+        let mut result = String::new();
+        for (i, line) in content.lines().enumerate() {
+            if let Some(&(fence_marker, has_title_only)) = lines_to_fix.get(&i) {
+                let indent = &line[..line.len() - line.trim_start().len()];
+                let trimmed = line.trim();
+                let after_fence = trimmed.strip_prefix(fence_marker).unwrap_or("").trim();
+
+                if has_title_only {
+                    result.push_str(&format!("{indent}{fence_marker}text {after_fence}\n"));
                 } else {
-                    None
-                }
-            } else if trimmed.starts_with("~~~") {
-                let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
-                if tilde_count >= 3 {
-                    Some("~".repeat(tilde_count))
-                } else {
-                    None
+                    result.push_str(&format!("{indent}{fence_marker}text\n"));
                 }
             } else {
-                None
-            };
-
-            if let Some(fence_marker) = fence_marker {
-                if in_code_block {
-                    // We're inside a code block, check if this closes it
-                    if let Some(ref current_marker) = current_fence_marker {
-                        let current_indent = line.len() - line.trim_start().len();
-                        if fence_marker == *current_marker
-                            && trimmed[current_marker.len()..].trim().is_empty()
-                            && current_indent <= opening_fence_indent
-                        {
-                            // This closes the current code block
-                            if fence_needs_language {
-                                // Use the same indentation as the opening fence
-                                result.push_str(&format!("{original_indent}{trimmed}\n"));
-                            } else {
-                                // Preserve original line as-is
-                                result.push_str(line);
-                                result.push('\n');
-                            }
-                            in_code_block = false;
-                            current_fence_marker = None;
-                            fence_needs_language = false;
-                            original_indent.clear();
-                            opening_fence_indent = 0;
-                        } else {
-                            // This is content inside a code block (different fence marker) - preserve exactly as-is
-                            result.push_str(line);
-                            result.push('\n');
-                        }
-                    } else {
-                        // This shouldn't happen, but preserve as content
-                        result.push_str(line);
-                        result.push('\n');
-                    }
-                } else {
-                    // We're outside a code block, this opens one
-                    // Capture the original indentation
-                    let line_indent = line[..line.len() - line.trim_start().len()].to_string();
-
-                    // Add 'text' as default language for opening fence if no language specified
-                    let after_fence = trimmed[fence_marker.len()..].trim();
-
-                    // Check if it has MkDocs title attribute but no language
-                    let has_title_only =
-                        ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
-
-                    // Check for Quarto/RMarkdown code chunk syntax: {language} or {language, options}
-                    let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
-                        && after_fence.starts_with('{')
-                        && after_fence.contains('}');
-
-                    if (after_fence.is_empty() || has_title_only) && !has_quarto_syntax {
-                        // Always preserve the original indentation - adding a language tag should not change indentation
-                        original_indent = line_indent;
-                        if has_title_only {
-                            // Insert language before title attribute
-                            result.push_str(&format!("{original_indent}{fence_marker}text {after_fence}\n"));
-                        } else {
-                            result.push_str(&format!("{original_indent}{fence_marker}text\n"));
-                        }
-                        fence_needs_language = true;
-                    } else {
-                        // Keep original line as-is since it already has a language
-                        result.push_str(line);
-                        result.push('\n');
-                        fence_needs_language = false;
-                    }
-
-                    in_code_block = true;
-                    current_fence_marker = Some(fence_marker);
-                    opening_fence_indent = line.len() - line.trim_start().len();
-                }
-            } else if in_code_block {
-                // We're inside a code block and this is not a fence line - preserve exactly as-is
-                result.push_str(line);
-                result.push('\n');
-            } else {
-                // We're outside code blocks and this is not a fence line - preserve as-is
                 result.push_str(line);
                 result.push('\n');
             }
@@ -330,6 +166,86 @@ impl Rule for MD040FencedCodeLanguage {
     {
         Box::new(MD040FencedCodeLanguage)
     }
+}
+
+/// Detect fenced code blocks using pulldown-cmark, returning info about each block's opening fence
+fn detect_fenced_code_blocks(content: &str, line_offsets: &[usize]) -> Vec<FencedCodeBlock> {
+    let mut blocks = Vec::new();
+    let options = Options::all();
+    let parser = Parser::new_ext(content, options).into_offset_iter();
+
+    for (event, range) in parser {
+        if let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) = event {
+            // Find the line index for this byte offset
+            let line_idx = line_offsets
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|&(_, offset)| *offset <= range.start)
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+
+            // Determine fence marker from the actual line content
+            let line = content.lines().nth(line_idx).unwrap_or("");
+            let trimmed = line.trim();
+            let fence_marker = if trimmed.starts_with('`') {
+                let count = trimmed.chars().take_while(|&c| c == '`').count();
+                "`".repeat(count)
+            } else if trimmed.starts_with('~') {
+                let count = trimmed.chars().take_while(|&c| c == '~').count();
+                "~".repeat(count)
+            } else {
+                "```".to_string() // Fallback
+            };
+
+            // Extract just the language (first word of info string)
+            let language = info.split_whitespace().next().unwrap_or("").to_string();
+
+            blocks.push(FencedCodeBlock {
+                line_idx,
+                language,
+                fence_marker,
+            });
+        }
+    }
+
+    blocks
+}
+
+/// Compute disabled line ranges from disable/enable comments
+fn compute_disabled_ranges(content: &str, rule_name: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut disabled_start: Option<usize> = None;
+
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+
+        if let Some(rules) = crate::rule::parse_disable_comment(trimmed)
+            && (rules.is_empty() || rules.contains(&rule_name))
+            && disabled_start.is_none()
+        {
+            disabled_start = Some(i);
+        }
+
+        if let Some(rules) = crate::rule::parse_enable_comment(trimmed)
+            && (rules.is_empty() || rules.contains(&rule_name))
+            && let Some(start) = disabled_start.take()
+        {
+            ranges.push((start, i));
+        }
+    }
+
+    // Handle unclosed disable
+    if let Some(start) = disabled_start {
+        ranges.push((start, usize::MAX));
+    }
+
+    ranges
+}
+
+/// Check if a line index is within a disabled range
+fn is_line_disabled(ranges: &[(usize, usize)], line_idx: usize) -> bool {
+    ranges.iter().any(|&(start, end)| line_idx >= start && line_idx < end)
 }
 
 #[cfg(test)]
@@ -553,6 +469,71 @@ console.log("test");
     }
 
     #[test]
+    fn test_issue_257_list_indented_code_block_with_language() {
+        // Issue #257: MD040 incorrectly flagged closing fence as needing language
+        // when code block was inside a list item
+        let content = r#"- Sample code:
+- ```java
+      List<Map<String,String>> inputs = new List<Map<String,String>>();
+  ```
+"#;
+        // Should produce NO warnings - the code block has a language
+        let result = run_check(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "List-indented code block with language should not trigger MD040. Got: {result:?}",
+        );
+
+        // Fix should NOT modify the content at all
+        let fixed = run_fix(content).unwrap();
+        assert_eq!(
+            fixed, content,
+            "Fix should not modify code blocks that already have a language"
+        );
+        // Specifically verify no `text` was added to closing fence
+        assert!(
+            !fixed.contains("```text"),
+            "Fix should not add 'text' to closing fence of code block with language"
+        );
+    }
+
+    #[test]
+    fn test_issue_257_multiple_list_indented_blocks() {
+        // Extended test for issue #257 with multiple scenarios
+        let content = r#"# Document
+
+1. Step one
+   ```python
+   print("hello")
+   ```
+2. Step two
+
+- Item with nested code:
+  ```bash
+  echo "test"
+  ```
+
+- Another item:
+  ```javascript
+  console.log("test");
+  ```
+"#;
+        // All blocks have languages, so no warnings
+        let result = run_check(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "All list-indented code blocks have languages. Got: {result:?}",
+        );
+
+        // Fix should not modify anything
+        let fixed = run_fix(content).unwrap();
+        assert_eq!(
+            fixed, content,
+            "Fix should not modify content when all blocks have languages"
+        );
+    }
+
+    #[test]
     fn test_code_blocks_in_blockquotes() {
         let content = r#"# Test
 
@@ -567,9 +548,9 @@ console.log("test");
 > ```
 "#;
         let result = run_check(content).unwrap();
-        // The implementation doesn't detect code blocks inside blockquotes
-        // This is by design to avoid complexity with nested structures
-        assert_eq!(result.len(), 0);
+        // Code blocks inside blockquotes ARE detected (pulldown-cmark handles nested structures)
+        // The second code block has no language, so 1 warning expected
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
