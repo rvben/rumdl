@@ -112,9 +112,11 @@ impl MD070NestedCodeFence {
     }
 
     /// Check if a line is a valid closing fence for the given opening fence
-    fn is_closing_fence(line: &str, fence_char: char, min_length: usize, max_indent: usize) -> bool {
+    /// Per CommonMark, closing fences can have 0-3 spaces of indentation regardless of opening fence
+    fn is_closing_fence(line: &str, fence_char: char, min_length: usize) -> bool {
         let indent = line.len() - line.trim_start().len();
-        if indent > max_indent {
+        // Per CommonMark spec, closing fence can have 0-3 spaces of indentation
+        if indent > 3 {
             return false;
         }
 
@@ -149,10 +151,31 @@ impl Rule for MD070NestedCodeFence {
 
         let mut i = 0;
         while i < lines.len() {
+            // Skip lines in contexts that shouldn't be processed
+            if let Some(line_info) = ctx.lines.get(i)
+                && (line_info.in_front_matter || line_info.in_html_comment || line_info.in_html_block)
+            {
+                i += 1;
+                continue;
+            }
+
+            // Skip if we're already inside a code block (check previous line).
+            // This handles list-indented code blocks (4+ spaces) which our rule doesn't
+            // parse directly, but the context detects correctly. If the previous line
+            // is in a code block, this line is either content or a closing fence for
+            // that block - not a new opening fence.
+            if i > 0
+                && let Some(prev_line_info) = ctx.lines.get(i - 1)
+                && prev_line_info.in_code_block
+            {
+                i += 1;
+                continue;
+            }
+
             let line = lines[i];
 
             // Try to parse as opening fence
-            if let Some((indent, fence_char, fence_length, info_string)) = Self::parse_fence_line(line) {
+            if let Some((_indent, fence_char, fence_length, info_string)) = Self::parse_fence_line(line) {
                 let block_start = i;
 
                 // Extract the language (first word of info string)
@@ -161,7 +184,7 @@ impl Rule for MD070NestedCodeFence {
                 // Find the closing fence
                 let mut block_end = None;
                 for (j, line_j) in lines.iter().enumerate().skip(i + 1) {
-                    if Self::is_closing_fence(line_j, fence_char, fence_length, indent) {
+                    if Self::is_closing_fence(line_j, fence_char, fence_length) {
                         block_end = Some(j);
                         break;
                     }
@@ -224,6 +247,27 @@ impl Rule for MD070NestedCodeFence {
 
         let mut i = 0;
         while i < lines.len() {
+            // Skip lines in contexts that shouldn't be processed
+            if let Some(line_info) = ctx.lines.get(i)
+                && (line_info.in_front_matter || line_info.in_html_comment || line_info.in_html_block)
+            {
+                result.push_str(lines[i]);
+                result.push('\n');
+                i += 1;
+                continue;
+            }
+
+            // Skip if we're already inside a code block (check previous line)
+            if i > 0
+                && let Some(prev_line_info) = ctx.lines.get(i - 1)
+                && prev_line_info.in_code_block
+            {
+                result.push_str(lines[i]);
+                result.push('\n');
+                i += 1;
+                continue;
+            }
+
             let line = lines[i];
 
             // Try to parse as opening fence
@@ -236,7 +280,7 @@ impl Rule for MD070NestedCodeFence {
                 // Find the first closing fence (what CommonMark sees)
                 let mut first_close = None;
                 for (j, line_j) in lines.iter().enumerate().skip(i + 1) {
-                    if Self::is_closing_fence(line_j, fence_char, fence_length, indent) {
+                    if Self::is_closing_fence(line_j, fence_char, fence_length) {
                         first_close = Some(j);
                         break;
                     }
@@ -258,7 +302,7 @@ impl Rule for MD070NestedCodeFence {
                             // This is the last matching closing fence at similar indentation
                             let mut intended_close = end_line;
                             for (j, line_j) in lines.iter().enumerate().skip(end_line + 1) {
-                                if Self::is_closing_fence(line_j, fence_char, fence_length, indent) {
+                                if Self::is_closing_fence(line_j, fence_char, fence_length) {
                                     intended_close = j;
                                     // Don't break - we want the last one in a reasonable range
                                     // But stop if we hit another opening fence at same indent
@@ -492,9 +536,9 @@ mod tests {
 
     #[test]
     fn test_multiple_code_blocks() {
-        // This test demonstrates the cascading effect of nested fence collisions.
-        // The markdown block has a collision, so its closing ``` becomes the opening
-        // of a new empty-language block, which ALSO has a collision.
+        // The markdown block has a collision (inner ```python closes it prematurely).
+        // The orphan closing fence (line 9) is NOT treated as a new opening fence
+        // because the context correctly detects it as part of the markdown block.
         let content = r#"```python
 safe code
 ```
@@ -510,10 +554,10 @@ also safe
 ```
 "#;
         let result = run_check(content).unwrap();
-        // We get 2 warnings (one per collision block):
-        // - 1 for the markdown block
-        // - 1 for the orphan empty-language block that starts after premature close
-        assert_eq!(result.len(), 2, "Both collision blocks should trigger");
+        // Only 1 warning for the markdown block collision.
+        // The orphan fence is correctly ignored (not parsed as new opening fence).
+        assert_eq!(result.len(), 1, "Should emit single warning for collision");
+        assert!(result[0].message.contains("line 6")); // The nested ```python is on line 6
     }
 
     #[test]
@@ -549,5 +593,277 @@ also safe
         let result = run_check(content).unwrap();
         assert_eq!(result.len(), 1, "Should detect collision in indented block");
         assert!(result[0].message.contains("````"));
+    }
+
+    #[test]
+    fn test_no_false_positive_list_indented_block() {
+        // 4-space indented code blocks in list context (GFM extension) should not
+        // cause false positives. The closing fence with 3-space indent should not
+        // be parsed as a new opening fence.
+        let content = r#"1. List item with code:
+
+    ```json
+    {"key": "value"}
+    ```
+
+2. Another item
+
+   ```python
+   code()
+   ```
+"#;
+        let result = run_check(content).unwrap();
+        // No collision - these are separate, well-formed code blocks
+        assert!(
+            result.is_empty(),
+            "List-indented code blocks should not trigger false positives"
+        );
+    }
+
+    // ==================== Expert-Level Edge Case Tests ====================
+
+    #[test]
+    fn test_case_insensitive_language() {
+        // MARKDOWN, Markdown, MD should all be checked
+        for lang in ["MARKDOWN", "Markdown", "MD", "Md", "mD"] {
+            let content = format!("```{lang}\n```python\ncode()\n```\n```\n");
+            let result = run_check(&content).unwrap();
+            assert_eq!(result.len(), 1, "{lang} should be recognized as markdown");
+        }
+    }
+
+    #[test]
+    fn test_unclosed_outer_fence() {
+        // If outer fence is never closed, no collision can be detected
+        let content = "```markdown\n```python\ncode()\n```\n";
+        let result = run_check(content).unwrap();
+        // The outer fence finds ```python as its closing fence (premature close)
+        // Then ```\n at the end becomes orphan - but context would handle this
+        assert!(result.len() <= 1, "Unclosed fence should not cause issues");
+    }
+
+    #[test]
+    fn test_deeply_nested_fences() {
+        // Multiple levels of nesting require progressively longer fences
+        let content = r#"```markdown
+````markdown
+```python
+code()
+```
+````
+```
+"#;
+        let result = run_check(content).unwrap();
+        // The outer ``` sees ```` as collision (4 >= 3)
+        assert_eq!(result.len(), 1, "Deep nesting should trigger warning");
+        assert!(result[0].message.contains("`````")); // Needs 5 to be safe
+    }
+
+    #[test]
+    fn test_very_long_fences() {
+        // 10 backtick fences should work correctly
+        let content = "``````````markdown\n```python\ncode()\n```\n``````````\n";
+        let result = run_check(content).unwrap();
+        assert!(result.is_empty(), "Very long outer fence should not trigger warning");
+    }
+
+    #[test]
+    fn test_blockquote_with_fence() {
+        // Fences inside blockquotes (CommonMark allows this)
+        let content = "> ```markdown\n> ```python\n> code()\n> ```\n> ```\n";
+        let result = run_check(content).unwrap();
+        // Blockquote prefixes are part of the line, so parsing may differ
+        // This documents current behavior
+        assert!(result.is_empty() || result.len() == 1);
+    }
+
+    #[test]
+    fn test_fence_with_attributes() {
+        // Info string with attributes like {.class #id}
+        let content = "```markdown {.highlight #example}\n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Attributes in info string should not prevent detection"
+        );
+
+        let fixed = run_fix(content).unwrap();
+        assert!(
+            fixed.contains("````markdown {.highlight #example}"),
+            "Attributes should be preserved in fix"
+        );
+    }
+
+    #[test]
+    fn test_trailing_whitespace_in_info_string() {
+        let content = "```markdown   \n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "Trailing whitespace should not affect detection");
+    }
+
+    #[test]
+    fn test_only_closing_fence_pattern() {
+        // Content that has only closing fence patterns (no language)
+        let content = "```markdown\nsome text\n```\nmore text\n```\n";
+        let result = run_check(content).unwrap();
+        // The first ``` closes, second ``` is outside
+        assert!(result.is_empty(), "Properly closed block should not trigger");
+    }
+
+    #[test]
+    fn test_fence_at_end_of_file_no_newline() {
+        let content = "```markdown\n```python\ncode()\n```\n```";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "Should detect collision even without trailing newline");
+
+        let fixed = run_fix(content).unwrap();
+        assert!(!fixed.ends_with('\n'), "Should preserve lack of trailing newline");
+    }
+
+    #[test]
+    fn test_empty_lines_between_fences() {
+        let content = "```markdown\n\n\n```python\n\ncode()\n\n```\n\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "Empty lines should not affect collision detection");
+    }
+
+    #[test]
+    fn test_tab_indented_opening_fence() {
+        // Tab at start of line - CommonMark says tab = 4 spaces for indentation.
+        // A 4-space indented fence is NOT a valid fenced code block per CommonMark
+        // (only 0-3 spaces allowed). However, our implementation counts characters,
+        // treating tab as 1 character. This means tab-indented fences ARE parsed.
+        // This is intentional: consistent with other rules in rumdl and matches
+        // common editor behavior where tab = 1 indent level.
+        let content = "\t```markdown\n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        // With tab treated as 1 char (< 3), this IS parsed as a fence and triggers collision
+        assert_eq!(result.len(), 1, "Tab-indented fence is parsed (tab = 1 char)");
+    }
+
+    #[test]
+    fn test_mixed_fence_types_no_collision() {
+        // Backticks outer, tildes inner - should never collide
+        let content = "```markdown\n~~~python\ncode()\n~~~\n```\n";
+        let result = run_check(content).unwrap();
+        assert!(result.is_empty(), "Different fence chars should not collide");
+
+        // Tildes outer, backticks inner
+        let content2 = "~~~markdown\n```python\ncode()\n```\n~~~\n";
+        let result2 = run_check(content2).unwrap();
+        assert!(result2.is_empty(), "Different fence chars should not collide");
+    }
+
+    #[test]
+    fn test_frontmatter_not_confused_with_fence() {
+        // YAML frontmatter uses --- which shouldn't be confused with fences
+        let content = "---\ntitle: Test\n---\n\n```markdown\n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "Should detect collision after frontmatter");
+    }
+
+    #[test]
+    fn test_html_comment_with_fence_inside() {
+        // Fences inside HTML comments should be ignored
+        let content = "<!-- ```markdown\n```python\ncode()\n``` -->\n\n```markdown\nreal content\n```\n";
+        let result = run_check(content).unwrap();
+        // The fences inside HTML comment should be skipped
+        assert!(result.is_empty(), "Fences in HTML comments should be ignored");
+    }
+
+    #[test]
+    fn test_consecutive_code_blocks() {
+        // Multiple consecutive markdown blocks, each with collision
+        let content = r#"```markdown
+```python
+a()
+```
+```
+
+```markdown
+```ruby
+b()
+```
+```
+"#;
+        let result = run_check(content).unwrap();
+        // Each markdown block has its own collision
+        assert!(!result.is_empty(), "Should detect collision in first block");
+    }
+
+    #[test]
+    fn test_numeric_info_string() {
+        // Numbers after fence - some parsers treat this differently
+        let content = "```123\n```456\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        // "123" is not "markdown" or "md", so should not check
+        assert!(result.is_empty(), "Numeric info string is not markdown");
+    }
+
+    #[test]
+    fn test_collision_at_exact_length() {
+        // An empty ``` is the closing fence, not a collision.
+        // For a collision, the inner fence must have content that looks like an opening fence.
+        let content = "```markdown\n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Same-length fence with language should trigger collision"
+        );
+
+        // Inner fence one shorter than outer - not a collision
+        let content2 = "````markdown\n```python\ncode()\n```\n````\n";
+        let result2 = run_check(content2).unwrap();
+        assert!(result2.is_empty(), "Shorter inner fence should not collide");
+
+        // Empty markdown block followed by another fence - not a collision
+        let content3 = "```markdown\n```\n";
+        let result3 = run_check(content3).unwrap();
+        assert!(result3.is_empty(), "Empty closing fence is not a collision");
+    }
+
+    #[test]
+    fn test_fix_preserves_content_exactly() {
+        // Fix should not modify the content between fences
+        let content = "```markdown\n```python\n  indented\n\ttabbed\nspecial: !@#$%\n```\n```\n";
+        let fixed = run_fix(content).unwrap();
+        assert!(fixed.contains("  indented"), "Indentation should be preserved");
+        assert!(fixed.contains("\ttabbed"), "Tabs should be preserved");
+        assert!(fixed.contains("special: !@#$%"), "Special chars should be preserved");
+    }
+
+    #[test]
+    fn test_warning_line_numbers_accurate() {
+        let content = "# Title\n\nParagraph\n\n```markdown\n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 5, "Warning should be on opening fence line");
+        assert!(result[0].message.contains("line 6"), "Collision line should be line 6");
+    }
+
+    #[test]
+    fn test_should_skip_optimization() {
+        let rule = MD070NestedCodeFence::new();
+
+        // No code-like content
+        let ctx1 = LintContext::new("Just plain text", crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            rule.should_skip(&ctx1),
+            "Should skip content without backticks or tildes"
+        );
+
+        // Has backticks
+        let ctx2 = LintContext::new("Has `code`", crate::config::MarkdownFlavor::Standard, None);
+        assert!(!rule.should_skip(&ctx2), "Should not skip content with backticks");
+
+        // Has tildes
+        let ctx3 = LintContext::new("Has ~~~", crate::config::MarkdownFlavor::Standard, None);
+        assert!(!rule.should_skip(&ctx3), "Should not skip content with tildes");
+
+        // Empty
+        let ctx4 = LintContext::new("", crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.should_skip(&ctx4), "Should skip empty content");
     }
 }
