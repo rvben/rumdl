@@ -52,9 +52,9 @@ impl MD072FrontmatterKeySort {
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 continue;
             }
-            // Skip table headers like [section]
+            // Stop at table headers like [section] - everything after is nested
             if trimmed.starts_with('[') {
-                continue;
+                break;
             }
             // Top-level keys have no leading whitespace and contain =
             if !line.starts_with(' ')
@@ -747,5 +747,34 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_toml_nested_tables_ignored() {
+        // Keys inside [extra] or [taxonomies] should NOT be checked
+        let rule = MD072FrontmatterKeySort;
+        let content = "+++\ntitle = \"Programming\"\nsort_by = \"weight\"\n\n[extra]\nwe_have_extra = \"variables\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only top-level keys (title, sort_by) should be checked, not we_have_extra
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("sort_by, title"));
+        assert!(!result[0].message.contains("we_have_extra"));
+    }
+
+    #[test]
+    fn test_toml_nested_taxonomies_ignored() {
+        // Keys inside [taxonomies] should NOT be checked
+        let rule = MD072FrontmatterKeySort;
+        let content = "+++\ntitle = \"Test\"\ndate = \"2024-01-01\"\n\n[taxonomies]\ncategories = [\"test\"]\ntags = [\"foo\"]\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only top-level keys (title, date) should be checked
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("date, title"));
+        assert!(!result[0].message.contains("categories"));
+        assert!(!result[0].message.contains("tags"));
     }
 }
