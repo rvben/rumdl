@@ -1899,6 +1899,39 @@ lines_above = 2
         let warnings = validate_cli_rule_names(Some("  MD001  ,  MD013  "), None, None, None);
         assert!(warnings.is_empty(), "Whitespace should be trimmed");
     }
+
+    #[test]
+    fn test_all_implemented_rules_have_aliases() {
+        // This test ensures we don't forget to add aliases when adding new rules.
+        // If this test fails, add the missing rule to RULE_ALIAS_MAP in config.rs
+        // with both the canonical entry (e.g., "MD071" => "MD071") and an alias
+        // (e.g., "BLANK-LINE-AFTER-FRONTMATTER" => "MD071").
+
+        // Get all implemented rules from the rules module
+        let config = crate::config::Config::default();
+        let all_rules = crate::rules::all_rules(&config);
+
+        let mut missing_rules = Vec::new();
+        for rule in &all_rules {
+            let rule_name = rule.name();
+            // Check if the canonical entry exists in RULE_ALIAS_MAP
+            if resolve_rule_name_alias(rule_name).is_none() {
+                missing_rules.push(rule_name.to_string());
+            }
+        }
+
+        assert!(
+            missing_rules.is_empty(),
+            "The following rules are missing from RULE_ALIAS_MAP: {:?}\n\
+             Add entries like:\n\
+             - Canonical: \"{}\" => \"{}\"\n\
+             - Alias: \"RULE-NAME-HERE\" => \"{}\"",
+            missing_rules,
+            missing_rules.first().unwrap_or(&"MDxxx".to_string()),
+            missing_rules.first().unwrap_or(&"MDxxx".to_string()),
+            missing_rules.first().unwrap_or(&"MDxxx".to_string()),
+        );
+    }
 }
 
 /// Configuration source with clear precedence hierarchy.
