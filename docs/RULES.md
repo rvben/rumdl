@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements 58 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements 66 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -20,6 +20,7 @@ For information on global configuration settings (file selection, rule enablemen
 - [Link and Image Rules](#link-and-image-rules) - Rules for links, references, and images
 - [Table Rules](#table-rules) - Rules for table formatting and structure
 - [Footnote Rules](#footnote-rules) - Rules for footnote validation and formatting
+- [Frontmatter Rules](#frontmatter-rules) - Rules for YAML/TOML/JSON frontmatter
 - [Other Rules](#other-rules) - Miscellaneous rules that don't fit the other categories
 - [Opt-in Rules](#opt-in-rules) - Rules disabled by default
 
@@ -230,6 +231,13 @@ Severity affects:
 | [MD066](md066.md) | Footnote validation        | Footnote references should have definitions and vice versa |
 | [MD067](md067.md) | Footnote definition order  | Footnote definitions should appear in order of reference   |
 | [MD068](md068.md) | Empty footnote definitions | Footnote definitions should not be empty                   |
+
+## Frontmatter Rules
+
+| Rule ID           | Rule Name                    | Description                                        |
+| ----------------- | ---------------------------- | -------------------------------------------------- |
+| [MD071](md071.md) | Blank line after frontmatter | Frontmatter should be followed by a blank line     |
+| [MD072](md072.md) | Frontmatter key sort         | Frontmatter keys should be sorted (YAML/TOML/JSON) |
 
 ## Other Rules
 

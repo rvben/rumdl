@@ -7,14 +7,16 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 64 rules as defined in the RULES array (MD001-MD070)
-    assert_eq!(rules.len(), 64);
+    // Should return all 66 rules as defined in the RULES array (MD001-MD072)
+    assert_eq!(rules.len(), 66);
 
     // Verify some specific rules are present
     let rule_names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
     assert!(rule_names.contains("MD001"));
     assert!(rule_names.contains("MD058"));
     assert!(rule_names.contains("MD025"));
+    assert!(rule_names.contains("MD071"));
+    assert!(rule_names.contains("MD072"));
 }
 
 #[test]
