@@ -3,6 +3,7 @@ use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::element_cache::ElementCache;
 use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::calculate_line_range;
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use toml;
 
 mod md046_config;
@@ -401,275 +402,242 @@ impl MD046CodeBlockStyle {
     ) -> Result<Vec<LintWarning>, LintError> {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = ctx.content.lines().collect();
-        let mut fence_stack: Vec<(String, usize, usize, bool, bool)> = Vec::new(); // (fence_marker, fence_length, opening_line, flagged_for_nested, is_markdown_example)
 
-        // Track if we're inside a markdown code block (for documentation examples)
-        // This is used to allow nested code blocks in markdown documentation
-        let mut inside_markdown_documentation_block = false;
+        // Use pulldown-cmark to detect fenced code blocks - this handles list-indented fences correctly
+        let options = Options::all();
+        let parser = Parser::new_ext(ctx.content, options).into_offset_iter();
 
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
+        // Track code blocks: (start_byte, end_byte, fence_marker, line_idx, is_fenced, is_markdown_doc)
+        let mut code_blocks: Vec<(usize, usize, String, usize, bool, bool)> = Vec::new();
+        let mut current_block_start: Option<(usize, String, usize, bool)> = None;
 
-            // Skip lines inside HTML comments - code block examples in comments are not real code blocks
-            if let Some(line_info) = ctx.lines.get(i)
-                && line_info.in_html_comment
-            {
-                continue;
-            }
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+                    // Find the line index for this byte offset
+                    let line_idx = ctx
+                        .line_offsets
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find(|&(_, offset)| *offset <= range.start)
+                        .map(|(idx, _)| idx)
+                        .unwrap_or(0);
 
-            // Check for fence markers (``` or ~~~)
-            // Per CommonMark: fence must have 0-3 spaces of indentation
-            if Self::has_valid_fence_indent(line) && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
-                let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
+                    // Determine fence marker from the actual line content
+                    let line = lines.get(line_idx).unwrap_or(&"");
+                    let trimmed = line.trim();
 
-                // Count the fence length
-                let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
-
-                // Check what comes after the fence characters
-                let after_fence = &trimmed[fence_length..];
-
-                // CommonMark spec: "If the info string comes after a backtick fence,
-                // it may not contain any backtick characters."
-                // This means ```something``` is NOT a valid fence - the backticks are inline code.
-                if fence_char == '`' && after_fence.contains('`') {
-                    continue;
-                }
-
-                // Check if this is a valid fence pattern
-                // Valid markdown code fence syntax:
-                // - ``` or ~~~ (just fence)
-                // - ``` language or ~~~ language (fence with space then language)
-                // - ```language (without space) is accepted by many parsers but only for actual languages
-                let is_valid_fence_pattern = if after_fence.is_empty() {
-                    // Empty after fence is always valid (e.g., ``` or ~~~)
-                    true
-                } else if after_fence.starts_with(' ') || after_fence.starts_with('\t') {
-                    // Space after fence - anything following is valid as info string
-                    true
-                } else {
-                    // No space after fence - must be a valid language identifier
-                    // Be strict to avoid false positives on content that looks like fences
-                    let identifier = after_fence.trim().to_lowercase();
-
-                    // Reject obvious non-language patterns
-                    if identifier.contains("fence") || identifier.contains("still") {
-                        false
-                    } else if identifier.len() > 20 {
-                        // Most language identifiers are short
-                        false
-                    } else if let Some(first_char) = identifier.chars().next() {
-                        // Must start with letter or # (for C#, F#)
-                        if !first_char.is_alphabetic() && first_char != '#' {
-                            false
-                        } else {
-                            // Check all characters are valid for a language identifier
-                            // Also check it's not just random text
-                            let valid_chars = identifier.chars().all(|c| {
-                                c.is_alphanumeric() || c == '-' || c == '_' || c == '+' || c == '#' || c == '.'
-                            });
-
-                            // Additional check: at least 2 chars and not all consonants (helps filter random words)
-                            valid_chars && identifier.len() >= 2
-                        }
+                    // Find the fence marker - could be at start of line or after list marker
+                    let fence_marker = if let Some(pos) = trimmed.find("```") {
+                        let count = trimmed[pos..].chars().take_while(|&c| c == '`').count();
+                        "`".repeat(count)
+                    } else if let Some(pos) = trimmed.find("~~~") {
+                        let count = trimmed[pos..].chars().take_while(|&c| c == '~').count();
+                        "~".repeat(count)
                     } else {
-                        false
-                    }
-                };
+                        "```".to_string()
+                    };
 
-                // When inside a code block, be conservative about what we treat as a fence
-                if !fence_stack.is_empty() {
-                    // Skip if not a valid fence pattern to begin with
-                    if !is_valid_fence_pattern {
-                        continue;
-                    }
+                    // Check if this is a markdown documentation block
+                    let lang_info = info.to_string().to_lowercase();
+                    let is_markdown_doc = lang_info.starts_with("markdown") || lang_info.starts_with("md");
 
-                    // Check if this could be a closing fence for the current block
-                    if let Some((open_marker, open_length, _, _, _)) = fence_stack.last() {
-                        if fence_char == open_marker.chars().next().unwrap() && fence_length >= *open_length {
-                            // Potential closing fence - check if it has content after
-                            if !after_fence.trim().is_empty() {
-                                // Has content after - likely not a closing fence
-                                // Apply structural validation to determine if it's a nested fence
-
-                                // Skip patterns that are clearly decorative or content
-                                // 1. Contains special characters not typical in language identifiers
-                                let has_special_chars = after_fence.chars().any(|c| {
-                                    !c.is_alphanumeric()
-                                        && c != '-'
-                                        && c != '_'
-                                        && c != '+'
-                                        && c != '#'
-                                        && c != '.'
-                                        && c != ' '
-                                        && c != '\t'
-                                });
-
-                                if has_special_chars {
-                                    continue; // e.g., ~~~!@#$%, ~~~~~~~~^^^^
-                                }
-
-                                // 2. Check for repetitive non-alphanumeric patterns
-                                if fence_length > 4 && after_fence.chars().take(4).all(|c| !c.is_alphanumeric()) {
-                                    continue; // e.g., ~~~~~~~~~~ or ````````
-                                }
-
-                                // 3. If no space after fence, must look like a valid language identifier
-                                if !after_fence.starts_with(' ') && !after_fence.starts_with('\t') {
-                                    let identifier = after_fence.trim();
-
-                                    // Must start with letter or # (for C#, F#)
-                                    if let Some(first) = identifier.chars().next()
-                                        && !first.is_alphabetic()
-                                        && first != '#'
-                                    {
-                                        continue;
-                                    }
-
-                                    // Reasonable length for a language identifier
-                                    if identifier.len() > 30 {
-                                        continue;
-                                    }
-                                }
-                            }
-                            // Otherwise, could be a closing fence - let it through
-                        } else {
-                            // Different fence type or insufficient length
-                            // Only treat as nested if it looks like a real fence with language
-
-                            // Must have proper spacing or no content after fence
-                            if !after_fence.is_empty()
-                                && !after_fence.starts_with(' ')
-                                && !after_fence.starts_with('\t')
-                            {
-                                // No space after fence - be very strict
-                                let identifier = after_fence.trim();
-
-                                // Skip if contains any special characters beyond common ones
-                                if identifier.chars().any(|c| {
-                                    !c.is_alphanumeric() && c != '-' && c != '_' && c != '+' && c != '#' && c != '.'
-                                }) {
-                                    continue;
-                                }
-
-                                // Skip if doesn't start with letter or #
-                                if let Some(first) = identifier.chars().next()
-                                    && !first.is_alphabetic()
-                                    && first != '#'
-                                {
-                                    continue;
-                                }
-                            }
-                        }
+                    current_block_start = Some((range.start, fence_marker, line_idx, is_markdown_doc));
+                }
+                Event::End(TagEnd::CodeBlock) => {
+                    if let Some((start, fence_marker, line_idx, is_markdown_doc)) = current_block_start.take() {
+                        code_blocks.push((start, range.end, fence_marker, line_idx, true, is_markdown_doc));
                     }
                 }
-
-                // We'll check if this is a markdown block after determining if it's an opening fence
-
-                // Check if this is a closing fence for the current open fence
-                if let Some((open_marker, open_length, _open_line, _flagged, _is_md)) = fence_stack.last() {
-                    // Must match fence character and have at least as many characters
-                    if fence_char == open_marker.chars().next().unwrap() && fence_length >= *open_length {
-                        // Check if this line has only whitespace after the fence marker
-                        let after_fence = &trimmed[fence_length..];
-                        if after_fence.trim().is_empty() {
-                            // This is a valid closing fence
-                            let _popped = fence_stack.pop();
-
-                            // Check if we're exiting a markdown documentation block
-                            if let Some((_, _, _, _, is_md)) = _popped
-                                && is_md
-                            {
-                                inside_markdown_documentation_block = false;
-                            }
-                            continue;
-                        }
-                    }
-                }
-
-                // This is an opening fence (has content after marker or no matching open fence)
-                // Note: after_fence was already calculated above during validation
-                if !after_fence.trim().is_empty() || fence_stack.is_empty() {
-                    // Only flag as problematic if we're opening a new fence while another is still open
-                    // AND they use the same fence character (indicating potential confusion)
-                    // AND we're not inside a markdown documentation block
-                    let has_nested_issue =
-                        if let Some((open_marker, open_length, open_line, _, _)) = fence_stack.last_mut() {
-                            if fence_char == open_marker.chars().next().unwrap()
-                                && fence_length >= *open_length
-                                && !inside_markdown_documentation_block
-                            {
-                                // This is problematic - same fence character used with equal or greater length while another is open
-                                let (opening_start_line, opening_start_col, opening_end_line, opening_end_col) =
-                                    calculate_line_range(*open_line, lines[*open_line - 1]);
-
-                                // Calculate the byte position to insert closing fence before this line
-                                let line_start_byte = ctx.line_index.get_line_start_byte(i + 1).unwrap_or(0);
-
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name().to_string()),
-                                    line: opening_start_line,
-                                    column: opening_start_col,
-                                    end_line: opening_end_line,
-                                    end_column: opening_end_col,
-                                    message: format!(
-                                        "Code block '{}' should be closed before starting new one at line {}",
-                                        open_marker,
-                                        i + 1
-                                    ),
-                                    severity: Severity::Warning,
-                                    fix: Some(Fix {
-                                        range: (line_start_byte..line_start_byte),
-                                        replacement: format!("{open_marker}\n\n"),
-                                    }),
-                                });
-
-                                // Mark the current fence as flagged for nested issue
-                                fence_stack.last_mut().unwrap().3 = true;
-                                true // We flagged a nested issue for this fence
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
-
-                    // Check if this opening fence is a markdown code block
-                    let after_fence_for_lang = &trimmed[fence_length..];
-                    let lang_info = after_fence_for_lang.trim().to_lowercase();
-                    let is_markdown_fence = lang_info.starts_with("markdown") || lang_info.starts_with("md");
-
-                    // If we're opening a markdown documentation block, mark that we're inside one
-                    if is_markdown_fence && !inside_markdown_documentation_block {
-                        inside_markdown_documentation_block = true;
-                    }
-
-                    // Add this fence to the stack
-                    let fence_marker = fence_char.to_string().repeat(fence_length);
-                    fence_stack.push((fence_marker, fence_length, i + 1, has_nested_issue, is_markdown_fence));
-                }
+                _ => {}
             }
         }
 
-        // Check for unclosed fences at end of file
-        // Only flag unclosed if we haven't already flagged for nested issues
-        for (fence_marker, _, opening_line, flagged_for_nested, _) in fence_stack {
-            if !flagged_for_nested {
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_line_range(opening_line, lines[opening_line - 1]);
+        // Check if any block is a markdown documentation block - if so, skip all
+        // unclosed block detection since markdown docs often contain fence examples
+        // that pulldown-cmark misparses
+        let has_markdown_doc_block = code_blocks.iter().any(|(_, _, _, _, _, is_md)| *is_md);
 
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    message: format!("Code block opened with '{fence_marker}' but never closed"),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: (ctx.content.len()..ctx.content.len()),
-                        replacement: format!("\n{fence_marker}"),
-                    }),
-                });
+        // Handle unclosed code block - pulldown-cmark extends unclosed blocks to EOF
+        // and still emits End event, so we need to check if block ends at EOF without closing fence
+        // Skip if document contains markdown documentation blocks (they have nested fence examples)
+        if !has_markdown_doc_block {
+            for (block_start, block_end, fence_marker, opening_line_idx, is_fenced, _is_md) in &code_blocks {
+                if !is_fenced {
+                    continue;
+                }
+
+                // Only check blocks that extend to EOF
+                if *block_end != ctx.content.len() {
+                    continue;
+                }
+
+                // Check if the last NON-EMPTY line of content is a valid closing fence
+                // (skip trailing empty lines)
+                let last_non_empty_line = lines.iter().rev().find(|l| !l.trim().is_empty()).unwrap_or(&"");
+                let trimmed = last_non_empty_line.trim();
+                let fence_char = fence_marker.chars().next().unwrap_or('`');
+
+                // Check if it's a closing fence (just fence chars, no content after)
+                let has_closing_fence = if fence_char == '`' {
+                    trimmed.starts_with("```") && {
+                        let fence_len = trimmed.chars().take_while(|&c| c == '`').count();
+                        trimmed[fence_len..].trim().is_empty()
+                    }
+                } else {
+                    trimmed.starts_with("~~~") && {
+                        let fence_len = trimmed.chars().take_while(|&c| c == '~').count();
+                        trimmed[fence_len..].trim().is_empty()
+                    }
+                };
+
+                if !has_closing_fence {
+                    let line = lines.get(*opening_line_idx).unwrap_or(&"");
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(*opening_line_idx + 1, line);
+
+                    // Skip if inside HTML comment
+                    if let Some(line_info) = ctx.lines.get(*opening_line_idx)
+                        && line_info.in_html_comment
+                    {
+                        continue;
+                    }
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!("Code block opened with '{fence_marker}' but never closed"),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: (ctx.content.len()..ctx.content.len()),
+                            replacement: format!("\n{fence_marker}"),
+                        }),
+                    });
+                }
+
+                let _ = block_start; // Suppress unused warning
+            }
+        }
+
+        // Also check for truly unclosed blocks (pulldown-cmark saw Start but no End)
+        // Skip if document contains markdown documentation blocks
+        if !has_markdown_doc_block && let Some((_start, fence_marker, line_idx, _is_md)) = current_block_start {
+            let line = lines.get(line_idx).unwrap_or(&"");
+            let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
+
+            // Skip if inside HTML comment
+            if let Some(line_info) = ctx.lines.get(line_idx)
+                && line_info.in_html_comment
+            {
+                return Ok(warnings);
+            }
+
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: format!("Code block opened with '{fence_marker}' but never closed"),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: (ctx.content.len()..ctx.content.len()),
+                    replacement: format!("\n{fence_marker}"),
+                }),
+            });
+        }
+
+        // Check for nested fence issues (same fence char with >= length inside a block)
+        // This uses a separate pass with manual parsing, but only for fences that
+        // pulldown-cmark recognized as valid code blocks
+        // Skip entirely if document has markdown documentation blocks
+        if has_markdown_doc_block {
+            return Ok(warnings);
+        }
+
+        for (block_start, block_end, fence_marker, opening_line_idx, is_fenced, is_markdown_doc) in &code_blocks {
+            if !is_fenced {
+                continue;
+            }
+
+            // Skip nested fence detection for markdown documentation blocks
+            if *is_markdown_doc {
+                continue;
+            }
+
+            let opening_line = lines.get(*opening_line_idx).unwrap_or(&"");
+
+            let fence_char = fence_marker.chars().next().unwrap_or('`');
+            let fence_length = fence_marker.len();
+
+            // Check lines within this code block for potential nested fences
+            for (i, line) in lines.iter().enumerate() {
+                let line_start = ctx.line_offsets.get(i).copied().unwrap_or(0);
+                let line_end = ctx.line_offsets.get(i + 1).copied().unwrap_or(ctx.content.len());
+
+                // Skip if line is not inside this code block (excluding opening/closing lines)
+                if line_start <= *block_start || line_end >= *block_end {
+                    continue;
+                }
+
+                // Skip lines inside HTML comments
+                if let Some(line_info) = ctx.lines.get(i)
+                    && line_info.in_html_comment
+                {
+                    continue;
+                }
+
+                let trimmed = line.trim();
+
+                // Check if this looks like a fence with same char and >= length
+                if (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+                    && trimmed.starts_with(&fence_char.to_string())
+                {
+                    let inner_fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
+                    let after_fence = &trimmed[inner_fence_length..];
+
+                    // Only flag if same char, >= length, and has language (opening fence pattern)
+                    if inner_fence_length >= fence_length
+                        && !after_fence.trim().is_empty()
+                        && !after_fence.contains('`')
+                    {
+                        // Check if it looks like a valid language identifier
+                        let identifier = after_fence.trim();
+                        let looks_like_language =
+                            identifier.chars().next().is_some_and(|c| c.is_alphabetic() || c == '#')
+                                && identifier.len() <= 30
+                                && identifier.chars().all(|c| c.is_alphanumeric() || "-_+#. ".contains(c));
+
+                        if looks_like_language {
+                            let (start_line, start_col, end_line, end_col) =
+                                calculate_line_range(*opening_line_idx + 1, opening_line);
+
+                            let line_start_byte = ctx.line_index.get_line_start_byte(i + 1).unwrap_or(0);
+
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name().to_string()),
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
+                                message: format!(
+                                    "Code block '{fence_marker}' should be closed before starting new one at line {}",
+                                    i + 1
+                                ),
+                                severity: Severity::Warning,
+                                fix: Some(Fix {
+                                    range: (line_start_byte..line_start_byte),
+                                    replacement: format!("{fence_marker}\n\n"),
+                                }),
+                            });
+
+                            break; // Only report first nested issue per block
+                        }
+                    }
+                }
             }
         }
 

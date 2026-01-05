@@ -376,16 +376,21 @@ fn test_adjacent_code_blocks() {
 
 #[test]
 fn test_markdown_block_at_end() {
-    // Test markdown block that ends the document
+    // Test markdown block that ends the document with a proper closing fence.
+    // Per CommonMark spec, ```rust inside the markdown block is content (not a closing fence
+    // because it has "rust" after), and the final ``` closes the markdown block.
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
     let content = "# Doc\n\n```markdown\n## Example\n\n```rust\nfn test() {}\n```";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // The markdown block is unclosed but contains properly formatted examples
-    assert_eq!(result.len(), 1, "Should flag unclosed markdown block");
-    assert!(result[0].message.contains("never closed"));
+    // The markdown block is properly closed by the final ```
+    // The ```rust is content (not a closing fence because "rust" follows)
+    assert!(
+        result.is_empty(),
+        "Should not flag markdown block that is properly closed"
+    );
 }
 
 #[test]
@@ -407,6 +412,91 @@ fn test_fence_in_list_context() {
     let result = rule.check(&ctx).unwrap();
 
     assert!(result.is_empty(), "Code blocks in lists should not cause issues");
+}
+
+#[test]
+fn test_issue_257_fence_on_list_marker_line() {
+    // Issue 257: Fence marker immediately following list marker on same line
+    // The closing fence is indented to match list content, not the opening fence
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+    // Pattern 1: Fence immediately after list marker
+    let content = r#"- Sample code:
+- ```java
+      List<Map<String,String>> inputs = new List<Map<String,String>>();
+  ```"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should NOT report unclosed block - the indented ``` closes the block
+    let unclosed_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("never closed")).collect();
+    assert!(
+        unclosed_warnings.is_empty(),
+        "List-indented closing fence should be recognized: {unclosed_warnings:?}"
+    );
+
+    // Pattern 2: Multiple list items with inline fences
+    let content2 = r#"- ```python
+  print("hello")
+  ```
+- ```rust
+  fn main() {}
+  ```"#;
+
+    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result2 = rule.check(&ctx2).unwrap();
+
+    let unclosed2: Vec<_> = result2.iter().filter(|w| w.message.contains("never closed")).collect();
+    assert!(
+        unclosed2.is_empty(),
+        "Multiple inline fences should all be recognized as closed: {unclosed2:?}"
+    );
+
+    // Pattern 3: Nested list with inline fence
+    let content3 = r#"- Outer item
+  - ```bash
+    echo "nested"
+    ```"#;
+
+    let ctx3 = LintContext::new(content3, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result3 = rule.check(&ctx3).unwrap();
+
+    let unclosed3: Vec<_> = result3.iter().filter(|w| w.message.contains("never closed")).collect();
+    assert!(
+        unclosed3.is_empty(),
+        "Nested list inline fence should be recognized as closed: {unclosed3:?}"
+    );
+
+    // Pattern 4: Tilde fences in list context
+    let content4 = r#"- ~~~python
+  print("tilde fence")
+  ~~~"#;
+
+    let ctx4 = LintContext::new(content4, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result4 = rule.check(&ctx4).unwrap();
+
+    let unclosed4: Vec<_> = result4.iter().filter(|w| w.message.contains("never closed")).collect();
+    assert!(
+        unclosed4.is_empty(),
+        "Tilde fence in list should be recognized as closed: {unclosed4:?}"
+    );
+
+    // Pattern 5: Longer fence in list (4+ backticks)
+    let content5 = r#"- ````markdown
+  ```python
+  nested code
+  ```
+  ````"#;
+
+    let ctx5 = LintContext::new(content5, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result5 = rule.check(&ctx5).unwrap();
+
+    let unclosed5: Vec<_> = result5.iter().filter(|w| w.message.contains("never closed")).collect();
+    assert!(
+        unclosed5.is_empty(),
+        "Longer fence in list should be recognized as closed: {unclosed5:?}"
+    );
 }
 
 #[test]
