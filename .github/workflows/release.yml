@@ -89,8 +89,12 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: macos-latest
             target: x86_64-apple-darwin
+            # Set jemalloc page size explicitly
+            jemalloc_page_size: '12'
           - os: macos-latest
             target: aarch64-apple-darwin
+            # Apple Silicon uses 16K pages
+            jemalloc_page_size: '14'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
