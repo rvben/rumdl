@@ -1,7 +1,13 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::front_matter_utils::{FrontMatterType, FrontMatterUtils};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
+
+/// Pre-compiled regex for extracting JSON keys
+static JSON_KEY_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^\s*"([^"]+)"\s*:"#).expect("Invalid JSON key regex"));
 
 /// Configuration for MD072 (Frontmatter key sort)
 ///
@@ -103,12 +109,27 @@ impl MD072FrontmatterKeySort {
     fn extract_json_keys(frontmatter_lines: &[&str]) -> Vec<String> {
         // Extract keys from raw JSON text to preserve original order
         // serde_json::Map uses BTreeMap which sorts keys, so we parse manually
+        // Only extract keys at depth 0 relative to the content (top-level inside the outer object)
+        // Note: frontmatter_lines excludes the opening `{`, so we start at depth 0
         let mut keys = Vec::new();
-        // Match patterns like "key": at the start of a line (possibly with leading whitespace)
-        let key_pattern = regex::Regex::new(r#"^\s*"([^"]+)"\s*:"#).unwrap();
+        let mut depth: usize = 0;
 
         for line in frontmatter_lines {
-            if let Some(captures) = key_pattern.captures(line)
+            // Track depth before checking for keys on this line
+            let line_start_depth = depth;
+
+            // Count braces and brackets to track nesting
+            for ch in line.chars() {
+                match ch {
+                    '{' | '[' => depth += 1,
+                    '}' | ']' => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+
+            // Only extract keys at depth 0 (top-level, since opening brace is excluded)
+            if line_start_depth == 0
+                && let Some(captures) = JSON_KEY_PATTERN.captures(line)
                 && let Some(key_match) = captures.get(1)
             {
                 keys.push(key_match.as_str().to_string());
@@ -842,5 +863,330 @@ mod tests {
         assert!(result[0].message.contains("date, title"));
         assert!(!result[0].message.contains("categories"));
         assert!(!result[0].message.contains("tags"));
+    }
+
+    // ==================== Edge Case Tests ====================
+
+    #[test]
+    fn test_yaml_unicode_keys() {
+        let rule = create_enabled_rule();
+        // Japanese keys should sort correctly
+        let content = "---\nタイトル: Test\nあいう: Value\n日本語: Content\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should detect unsorted keys (あいう < タイトル < 日本語 in Unicode order)
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_yaml_keys_with_special_characters() {
+        let rule = create_enabled_rule();
+        // Keys with dashes and underscores
+        let content = "---\nmy-key: value1\nmy_key: value2\nmykey: value3\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // my-key, my_key, mykey - should be sorted
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_yaml_keys_with_numbers() {
+        let rule = create_enabled_rule();
+        let content = "---\nkey1: value\nkey10: value\nkey2: value\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // key1, key10, key2 - lexicographic order (1 < 10 < 2)
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_yaml_multiline_string_block_literal() {
+        let rule = create_enabled_rule();
+        let content =
+            "---\ndescription: |\n  This is a\n  multiline literal\ntitle: Test\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // author, description, title - not sorted
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("author, description, title"));
+    }
+
+    #[test]
+    fn test_yaml_multiline_string_folded() {
+        let rule = create_enabled_rule();
+        let content = "---\ndescription: >\n  This is a\n  folded string\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // author, description - not sorted
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_yaml_fix_preserves_multiline_values() {
+        let rule = create_enabled_rule();
+        let content = "---\ntitle: Test\ndescription: |\n  Line 1\n  Line 2\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // description should come before title
+        let desc_pos = fixed.find("description").unwrap();
+        let title_pos = fixed.find("title").unwrap();
+        assert!(desc_pos < title_pos);
+    }
+
+    #[test]
+    fn test_yaml_quoted_keys() {
+        let rule = create_enabled_rule();
+        let content = "---\n\"quoted-key\": value1\nunquoted: value2\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // quoted-key should sort before unquoted
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_yaml_duplicate_keys() {
+        // YAML allows duplicate keys (last one wins), but we should still sort
+        let rule = create_enabled_rule();
+        let content = "---\ntitle: First\nauthor: John\ntitle: Second\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should still check sorting (title, author, title is not sorted)
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_toml_inline_table() {
+        let rule = create_enabled_rule();
+        let content =
+            "+++\nauthor = { name = \"John\", email = \"john@example.com\" }\ntitle = \"Test\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // author, title - sorted
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_toml_array_of_tables() {
+        let rule = create_enabled_rule();
+        let content = "+++\ntitle = \"Test\"\ndate = \"2024-01-01\"\n\n[[authors]]\nname = \"John\"\n\n[[authors]]\nname = \"Jane\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only top-level keys (title, date) checked - date < title, so unsorted
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("date, title"));
+    }
+
+    #[test]
+    fn test_json_nested_objects() {
+        let rule = create_enabled_rule();
+        let content = "{\n\"author\": {\n  \"name\": \"John\",\n  \"email\": \"john@example.com\"\n},\n\"title\": \"Test\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only top-level keys (author, title) checked - sorted
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_json_arrays() {
+        let rule = create_enabled_rule();
+        let content = "{\n\"tags\": [\"rust\", \"markdown\"],\n\"author\": \"John\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // author, tags - not sorted (tags comes first)
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_fix_preserves_content_after_frontmatter() {
+        let rule = create_enabled_rule();
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading\n\nParagraph 1.\n\n- List item\n- Another item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Verify content after frontmatter is preserved
+        assert!(fixed.contains("# Heading"));
+        assert!(fixed.contains("Paragraph 1."));
+        assert!(fixed.contains("- List item"));
+        assert!(fixed.contains("- Another item"));
+    }
+
+    #[test]
+    fn test_fix_yaml_produces_valid_yaml() {
+        let rule = create_enabled_rule();
+        let content = "---\ntitle: \"Test: A Title\"\nauthor: John Doe\ndate: 2024-01-15\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The fixed output should be parseable as YAML
+        // Extract frontmatter lines
+        let lines: Vec<&str> = fixed.lines().collect();
+        let fm_end = lines.iter().skip(1).position(|l| *l == "---").unwrap() + 1;
+        let fm_content: String = lines[1..fm_end].join("\n");
+
+        // Should parse without error
+        let parsed: Result<serde_yml::Value, _> = serde_yml::from_str(&fm_content);
+        assert!(parsed.is_ok(), "Fixed YAML should be valid: {fm_content}");
+    }
+
+    #[test]
+    fn test_fix_toml_produces_valid_toml() {
+        let rule = create_enabled_rule();
+        let content = "+++\ntitle = \"Test\"\nauthor = \"John Doe\"\ndate = 2024-01-15\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Extract frontmatter
+        let lines: Vec<&str> = fixed.lines().collect();
+        let fm_end = lines.iter().skip(1).position(|l| *l == "+++").unwrap() + 1;
+        let fm_content: String = lines[1..fm_end].join("\n");
+
+        // Should parse without error
+        let parsed: Result<toml::Value, _> = toml::from_str(&fm_content);
+        assert!(parsed.is_ok(), "Fixed TOML should be valid: {fm_content}");
+    }
+
+    #[test]
+    fn test_fix_json_produces_valid_json() {
+        let rule = create_enabled_rule();
+        let content = "{\n\"title\": \"Test\",\n\"author\": \"John\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Extract JSON frontmatter (everything up to blank line)
+        let json_end = fixed.find("\n\n").unwrap();
+        let json_content = &fixed[..json_end];
+
+        // Should parse without error
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(json_content);
+        assert!(parsed.is_ok(), "Fixed JSON should be valid: {json_content}");
+    }
+
+    #[test]
+    fn test_many_keys_performance() {
+        let rule = create_enabled_rule();
+        // Generate frontmatter with 100 keys
+        let mut keys: Vec<String> = (0..100).map(|i| format!("key{i:03}: value{i}")).collect();
+        keys.reverse(); // Make them unsorted
+        let content = format!("---\n{}\n---\n\n# Heading", keys.join("\n"));
+
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should detect unsorted keys
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_yaml_empty_value() {
+        let rule = create_enabled_rule();
+        let content = "---\ntitle:\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // author, title - not sorted
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_yaml_null_value() {
+        let rule = create_enabled_rule();
+        let content = "---\ntitle: null\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_yaml_boolean_values() {
+        let rule = create_enabled_rule();
+        let content = "---\ndraft: true\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // author, draft - not sorted
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_toml_boolean_values() {
+        let rule = create_enabled_rule();
+        let content = "+++\ndraft = true\nauthor = \"John\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_yaml_list_at_top_level() {
+        let rule = create_enabled_rule();
+        let content = "---\ntags:\n  - rust\n  - markdown\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // author, tags - not sorted (tags comes first)
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_three_keys_all_orderings() {
+        let rule = create_enabled_rule();
+
+        // Test all 6 permutations of a, b, c
+        let orderings = [
+            ("a, b, c", "---\na: 1\nb: 2\nc: 3\n---\n\n# H", true),  // sorted
+            ("a, c, b", "---\na: 1\nc: 3\nb: 2\n---\n\n# H", false), // unsorted
+            ("b, a, c", "---\nb: 2\na: 1\nc: 3\n---\n\n# H", false), // unsorted
+            ("b, c, a", "---\nb: 2\nc: 3\na: 1\n---\n\n# H", false), // unsorted
+            ("c, a, b", "---\nc: 3\na: 1\nb: 2\n---\n\n# H", false), // unsorted
+            ("c, b, a", "---\nc: 3\nb: 2\na: 1\n---\n\n# H", false), // unsorted
+        ];
+
+        for (name, content, should_pass) in orderings {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(
+                result.is_empty(),
+                should_pass,
+                "Ordering {name} should {} pass",
+                if should_pass { "" } else { "not" }
+            );
+        }
+    }
+
+    #[test]
+    fn test_crlf_line_endings() {
+        let rule = create_enabled_rule();
+        let content = "---\r\ntitle: Test\r\nauthor: John\r\n---\r\n\r\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should detect unsorted keys with CRLF
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_json_escaped_quotes_in_keys() {
+        let rule = create_enabled_rule();
+        // This is technically invalid JSON but tests regex robustness
+        let content = "{\n\"normal\": \"value\",\n\"key\": \"with \\\"quotes\\\"\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // key, normal - not sorted
+        assert_eq!(result.len(), 1);
     }
 }
