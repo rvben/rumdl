@@ -3196,13 +3196,19 @@ impl<'a> LintContext<'a> {
                     // Check for table-like patterns
                     let looks_like_table = crate::utils::skip_context::is_table_line(line_content);
 
+                    // Check if blockquote level changed (not just if line starts with ">")
+                    // Lines within the same blockquote level are NOT structural separators
+                    let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
+                    let current_bq_level = blockquote_prefix.chars().filter(|&c| c == '>').count();
+                    let blockquote_level_changed = line_content.starts_with(">") && current_bq_level != block_bq_level;
+
                     let is_structural_separator = line_info.heading.is_some()
                         || line_content.starts_with("```")
                         || line_content.starts_with("~~~")
                         || line_content.starts_with("---")
                         || line_content.starts_with("***")
                         || line_content.starts_with("___")
-                        || line_content.starts_with(">")
+                        || blockquote_level_changed
                         || looks_like_table;
 
                     // Allow lazy continuation if we're still within the same list block

@@ -1820,4 +1820,158 @@ More text.
             "Should warn only for the lazy line, not the indented line"
         );
     }
+
+    // Issue #260: Lists inside blockquotes should not produce false positives
+    #[test]
+    fn test_blockquote_list_with_continuation_and_nested() {
+        // This is the exact case from issue #260
+        // markdownlint-cli reports NO warnings for this
+        let content = "> - item 1\n>   continuation\n>   - nested\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Blockquoted list with continuation and nested items should have no warnings. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_list_simple() {
+        // Simple blockquoted list
+        let content = "> - item 1\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 0, "Simple blockquoted list should have no warnings");
+    }
+
+    #[test]
+    fn test_blockquote_list_with_continuation_only() {
+        // Blockquoted list with continuation line (no nesting)
+        let content = "> - item 1\n>   continuation\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Blockquoted list with continuation should have no warnings"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_list_with_lazy_continuation() {
+        // Blockquoted list with lazy continuation (no extra indent after >)
+        let content = "> - item 1\n> lazy continuation\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Blockquoted list with lazy continuation should have no warnings"
+        );
+    }
+
+    #[test]
+    fn test_nested_blockquote_list() {
+        // List inside nested blockquote (>> prefix)
+        let content = ">> - item 1\n>>   continuation\n>>   - nested\n>> - item 2";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 0, "Nested blockquote list should have no warnings");
+    }
+
+    #[test]
+    fn test_blockquote_list_needs_preceding_blank() {
+        // Blockquote list preceded by non-blank content SHOULD warn
+        let content = "> Text before\n> - item 1\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn for missing blank before blockquoted list"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_list_properly_separated() {
+        // Blockquote list with proper blank lines - no warnings
+        let content = "> Text before\n>\n> - item 1\n> - item 2\n>\n> Text after";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Properly separated blockquoted list should have no warnings"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_ordered_list() {
+        // Ordered list in blockquote with continuation
+        let content = "> 1. item 1\n>    continuation\n> 2. item 2";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 0, "Ordered list in blockquote should have no warnings");
+    }
+
+    #[test]
+    fn test_blockquote_list_with_empty_blockquote_line() {
+        // Empty blockquote line (just ">") between items - still same list
+        let content = "> - item 1\n>\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 0, "Empty blockquote line should not break list");
+    }
+
+    #[test]
+    fn test_blockquote_list_varying_spaces_after_marker() {
+        // Different spacing after > (1 space vs 3 spaces) but same blockquote level
+        let content = "> - item 1\n>   continuation with more indent\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 0, "Varying spaces after > should not break list");
+    }
+
+    #[test]
+    fn test_deeply_nested_blockquote_list() {
+        // Triple-nested blockquote with list
+        let content = ">>> - item 1\n>>>   continuation\n>>> - item 2";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Deeply nested blockquote list should have no warnings"
+        );
+    }
+
+    #[test]
+    #[ignore = "rumdl doesn't yet detect blockquote level changes between list items as list-breaking"]
+    fn test_blockquote_level_change_in_list() {
+        // Blockquote level changes mid-list - this SHOULD break the list
+        // Verify we still detect when blockquote level actually changes
+        // TODO: This is a separate enhancement from issue #260
+        let content = "> - item 1\n>> - deeper item\n> - item 2";
+        // Each segment is a separate list context due to blockquote level change
+        // markdownlint-cli reports 4 warnings for this case
+        let warnings = lint(content);
+        assert!(
+            !warnings.is_empty(),
+            "Blockquote level change should break list and trigger warnings"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_list_with_code_span() {
+        // List item with inline code in blockquote
+        let content = "> - item with `code`\n>   continuation\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Blockquote list with code span should have no warnings"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_list_at_document_end() {
+        // List at end of document (no trailing content)
+        let content = "> Some text\n>\n> - item 1\n> - item 2";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Blockquote list at document end should have no warnings"
+        );
+    }
 }
