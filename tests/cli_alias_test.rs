@@ -472,6 +472,7 @@ fn test_silent_flag_suppresses_cli_warnings() {
 fn test_inline_config_unknown_rule_warning() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let test_file = temp_dir.path().join("test.md");
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
     // Create a file with an inline config comment using an unknown rule
     fs::write(
@@ -483,7 +484,7 @@ Some content
     )
     .expect("Failed to write test file");
 
-    let output = Command::new("./target/debug/rumdl")
+    let output = Command::new(rumdl_exe)
         .args(["check", "--no-cache", test_file.to_str().unwrap()])
         .output()
         .expect("Failed to execute command");
@@ -506,6 +507,7 @@ Some content
 fn test_inline_config_valid_rule_no_warning() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let test_file = temp_dir.path().join("test.md");
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
     // Create a file with an inline config comment using a valid rule
     fs::write(
@@ -517,7 +519,7 @@ Some content
     )
     .expect("Failed to write test file");
 
-    let output = Command::new("./target/debug/rumdl")
+    let output = Command::new(rumdl_exe)
         .args(["check", "--no-cache", test_file.to_str().unwrap()])
         .output()
         .expect("Failed to execute command");
@@ -535,6 +537,7 @@ Some content
 fn test_inline_config_warning_silent() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let test_file = temp_dir.path().join("test.md");
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
     // Create a file with an inline config comment using an unknown rule
     fs::write(
@@ -546,7 +549,7 @@ Some content
     )
     .expect("Failed to write test file");
 
-    let output = Command::new("./target/debug/rumdl")
+    let output = Command::new(rumdl_exe)
         .args(["check", "--no-cache", "--silent", test_file.to_str().unwrap()])
         .output()
         .expect("Failed to execute command");
@@ -564,6 +567,7 @@ Some content
 fn test_inline_config_warning_suggestion() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let test_file = temp_dir.path().join("test.md");
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
     // Create a file with an inline config comment using a typo of a valid rule
     fs::write(
@@ -575,7 +579,7 @@ Some content
     )
     .expect("Failed to write test file");
 
-    let output = Command::new("./target/debug/rumdl")
+    let output = Command::new(rumdl_exe)
         .args(["check", "--no-cache", test_file.to_str().unwrap()])
         .output()
         .expect("Failed to execute command");
@@ -596,12 +600,13 @@ fn test_inline_config_warning_stdin() {
     use std::io::Write;
     use std::process::Stdio;
 
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
     let content = r#"# Test
 <!-- rumdl-disable nonexistent-rule -->
 Some content
 "#;
 
-    let mut child = Command::new("./target/debug/rumdl")
+    let mut child = Command::new(rumdl_exe)
         .args(["check", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -633,6 +638,7 @@ Some content
 fn test_inline_config_configure_file_warning() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let test_file = temp_dir.path().join("test.md");
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
     // Create a file with a configure-file comment using an unknown rule
     fs::write(
@@ -644,7 +650,7 @@ Some content
     )
     .expect("Failed to write test file");
 
-    let output = Command::new("./target/debug/rumdl")
+    let output = Command::new(rumdl_exe)
         .args(["check", "--no-cache", test_file.to_str().unwrap()])
         .output()
         .expect("Failed to execute command");
@@ -671,6 +677,7 @@ Some content
 fn test_inline_config_markdownlint_variant_warning() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let test_file = temp_dir.path().join("test.md");
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
     // Create a file with a markdownlint-disable comment using an unknown rule
     fs::write(
@@ -682,7 +689,7 @@ Some content
     )
     .expect("Failed to write test file");
 
-    let output = Command::new("./target/debug/rumdl")
+    let output = Command::new(rumdl_exe)
         .args(["check", "--no-cache", test_file.to_str().unwrap()])
         .output()
         .expect("Failed to execute command");
