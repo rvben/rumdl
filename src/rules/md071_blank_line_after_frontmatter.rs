@@ -78,6 +78,9 @@ impl Rule for MD071BlankLineAfterFrontmatter {
             return Ok(content.to_string());
         }
 
+        // Check if original content ended with newline
+        let had_trailing_newline = content.ends_with('\n');
+
         let lines: Vec<&str> = content.lines().collect();
         let mut result = Vec::new();
 
@@ -93,7 +96,16 @@ impl Rule for MD071BlankLineAfterFrontmatter {
             }
         }
 
-        Ok(result.join("\n"))
+        let fixed = result.join("\n");
+
+        // Preserve original trailing newline if it existed
+        let final_result = if had_trailing_newline && !fixed.ends_with('\n') {
+            format!("{fixed}\n")
+        } else {
+            fixed
+        };
+
+        Ok(final_result)
     }
 
     fn category(&self) -> RuleCategory {
@@ -430,5 +442,55 @@ mod tests {
         // Should only have one blank line
         assert_eq!(current.matches("\n\n").count(), 1);
         assert!(current.contains("---\n\n#"));
+    }
+
+    #[test]
+    fn test_fix_preserves_trailing_newline() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        // Content WITH trailing newline
+        let content = "---\ndate: 2026-01-06\n---\n# Title\n\nSome text.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
+        assert_eq!(fixed, "---\ndate: 2026-01-06\n---\n\n# Title\n\nSome text.\n");
+    }
+
+    #[test]
+    fn test_fix_no_trailing_newline() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        // Content WITHOUT trailing newline
+        let content = "---\ntitle: Test\n---\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            !fixed.ends_with('\n'),
+            "Fix should not add trailing newline if original didn't have one"
+        );
+    }
+
+    #[test]
+    fn test_fix_does_not_cause_md047() {
+        // Regression test for issue #262
+        let rule = MD071BlankLineAfterFrontmatter;
+        let content = "---\ndate: 2026-01-06\n---\n# Title\n\nSome text.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        // First check MD071
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Should detect missing blank line");
+
+        // Fix it
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The fixed content should still end with a single newline
+        assert!(fixed.ends_with('\n'), "Should preserve trailing newline");
+        assert!(!fixed.ends_with("\n\n"), "Should not end with multiple newlines");
+
+        // Verify MD071 is now clean
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings2 = rule.check(&ctx2).unwrap();
+        assert!(warnings2.is_empty(), "MD071 should be satisfied after fix");
     }
 }
