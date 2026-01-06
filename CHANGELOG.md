@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.211] - 2026-01-06
+
+### Fixed
+
+- **MD032: Handle blockquote continuation lines correctly** (fixes #260)
+  - Blockquote continuation lines within the same blockquote level no longer incorrectly trigger "list should be surrounded by blank lines" warnings
+  - Changed detection from checking if line starts with `>` to comparing blockquote nesting levels
+  - Lists inside blockquotes like `> - item\n>   continuation` now lint correctly
+
+- **MD071: Preserve trailing newlines when fixing frontmatter spacing** (fixes #262)
+  - Auto-fix no longer removes the file's trailing newline
+  - Prevents MD047 (files should end with newline) from triggering after MD071 fix
+
+### Changed
+
+- **Rules: Add aliases for MD070, MD071, MD072**
+  - MD070: `nested-code-fence-collision`
+  - MD071: `blank-line-after-frontmatter`
+  - MD072: `frontmatter-key-sort`
+
 ## [0.0.210] - 2026-01-05
 
 ### Added
