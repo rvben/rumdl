@@ -213,12 +213,10 @@ impl Rule for MD012NoMultipleBlanks {
                 end_column: 1,
                 fix: Some(Fix {
                     range: fix_start..fix_end,
-                    // Keep exactly one newline if content had newlines
-                    replacement: if content.ends_with('\n') {
-                        "\n".to_string()
-                    } else {
-                        String::new()
-                    },
+                    // The fix_start already points to the first blank line, which is AFTER
+                    // the last content line's newline. So we just remove everything from
+                    // fix_start to end, and the last content line's newline is preserved.
+                    replacement: String::new(),
                 }),
             });
         }

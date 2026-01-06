@@ -139,48 +139,36 @@ impl MD072FrontmatterKeySort {
         keys
     }
 
-    /// Check if keys are sorted alphabetically (case-insensitive)
-    fn are_keys_sorted(keys: &[String]) -> bool {
-        if keys.len() <= 1 {
-            return true;
-        }
-
+    /// Find the first pair of keys that are out of order (case-insensitive)
+    /// Returns (out_of_place_key, should_come_after_key)
+    fn find_first_unsorted_pair(keys: &[String]) -> Option<(&str, &str)> {
         for i in 1..keys.len() {
             if keys[i].to_lowercase() < keys[i - 1].to_lowercase() {
-                return false;
+                return Some((&keys[i], &keys[i - 1]));
             }
         }
+        None
+    }
 
-        true
+    /// Find the first pair of indexed keys that are out of order (case-insensitive)
+    /// Returns (out_of_place_key, should_come_after_key)
+    fn find_first_unsorted_indexed_pair(keys: &[(usize, String)]) -> Option<(&str, &str)> {
+        for i in 1..keys.len() {
+            if keys[i].1.to_lowercase() < keys[i - 1].1.to_lowercase() {
+                return Some((&keys[i].1, &keys[i - 1].1));
+            }
+        }
+        None
+    }
+
+    /// Check if keys are sorted alphabetically (case-insensitive)
+    fn are_keys_sorted(keys: &[String]) -> bool {
+        Self::find_first_unsorted_pair(keys).is_none()
     }
 
     /// Check if indexed keys are sorted alphabetically (case-insensitive)
     fn are_indexed_keys_sorted(keys: &[(usize, String)]) -> bool {
-        if keys.len() <= 1 {
-            return true;
-        }
-
-        for i in 1..keys.len() {
-            if keys[i].1.to_lowercase() < keys[i - 1].1.to_lowercase() {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    /// Get the expected order of keys
-    fn get_sorted_keys(keys: &[String]) -> Vec<String> {
-        let mut sorted = keys.to_vec();
-        sorted.sort_by_key(|a| a.to_lowercase());
-        sorted
-    }
-
-    /// Get the expected order of indexed keys
-    fn get_sorted_indexed_keys(keys: &[(usize, String)]) -> Vec<String> {
-        let mut sorted: Vec<String> = keys.iter().map(|(_, k)| k.clone()).collect();
-        sorted.sort_by_key(|a| a.to_lowercase());
-        sorted
+        Self::find_first_unsorted_indexed_pair(keys).is_none()
     }
 }
 
@@ -215,31 +203,32 @@ impl Rule for MD072FrontmatterKeySort {
                 }
 
                 let keys = Self::extract_yaml_keys(&frontmatter_lines);
-                if Self::are_indexed_keys_sorted(&keys) {
+                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_indexed_pair(&keys) else {
                     return Ok(warnings);
-                }
+                };
 
                 let has_comments = Self::has_comments(&frontmatter_lines);
-                let sorted_keys = Self::get_sorted_indexed_keys(&keys);
-                let current_order = keys.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>().join(", ");
-                let expected_order = sorted_keys.join(", ");
 
                 let fix = if has_comments {
                     None
                 } else {
-                    Some(Fix {
-                        range: 0..0,
-                        replacement: String::new(),
-                    })
+                    // Compute the actual fix: full content replacement
+                    match self.fix_yaml(content) {
+                        Ok(fixed_content) if fixed_content != content => Some(Fix {
+                            range: 0..content.len(),
+                            replacement: fixed_content,
+                        }),
+                        _ => None,
+                    }
                 };
 
                 let message = if has_comments {
                     format!(
-                        "YAML frontmatter keys are not sorted alphabetically. Expected order: [{expected_order}]. Current order: [{current_order}]. Auto-fix unavailable: frontmatter contains comments."
+                        "YAML frontmatter keys are not sorted alphabetically: '{out_of_place}' should come before '{should_come_after}' (auto-fix unavailable: contains comments)"
                     )
                 } else {
                     format!(
-                        "YAML frontmatter keys are not sorted alphabetically. Expected order: [{expected_order}]. Current order: [{current_order}]"
+                        "YAML frontmatter keys are not sorted alphabetically: '{out_of_place}' should come before '{should_come_after}'"
                     )
                 };
 
@@ -261,31 +250,32 @@ impl Rule for MD072FrontmatterKeySort {
                 }
 
                 let keys = Self::extract_toml_keys(&frontmatter_lines);
-                if Self::are_indexed_keys_sorted(&keys) {
+                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_indexed_pair(&keys) else {
                     return Ok(warnings);
-                }
+                };
 
                 let has_comments = Self::has_comments(&frontmatter_lines);
-                let sorted_keys = Self::get_sorted_indexed_keys(&keys);
-                let current_order = keys.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>().join(", ");
-                let expected_order = sorted_keys.join(", ");
 
                 let fix = if has_comments {
                     None
                 } else {
-                    Some(Fix {
-                        range: 0..0,
-                        replacement: String::new(),
-                    })
+                    // Compute the actual fix: full content replacement
+                    match self.fix_toml(content) {
+                        Ok(fixed_content) if fixed_content != content => Some(Fix {
+                            range: 0..content.len(),
+                            replacement: fixed_content,
+                        }),
+                        _ => None,
+                    }
                 };
 
                 let message = if has_comments {
                     format!(
-                        "TOML frontmatter keys are not sorted alphabetically. Expected order: [{expected_order}]. Current order: [{current_order}]. Auto-fix unavailable: frontmatter contains comments."
+                        "TOML frontmatter keys are not sorted alphabetically: '{out_of_place}' should come before '{should_come_after}' (auto-fix unavailable: contains comments)"
                     )
                 } else {
                     format!(
-                        "TOML frontmatter keys are not sorted alphabetically. Expected order: [{expected_order}]. Current order: [{current_order}]"
+                        "TOML frontmatter keys are not sorted alphabetically: '{out_of_place}' should come before '{should_come_after}'"
                     )
                 };
 
@@ -307,23 +297,21 @@ impl Rule for MD072FrontmatterKeySort {
                 }
 
                 let keys = Self::extract_json_keys(&frontmatter_lines);
-
-                if keys.is_empty() || Self::are_keys_sorted(&keys) {
+                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_pair(&keys) else {
                     return Ok(warnings);
-                }
+                };
 
-                let sorted_keys = Self::get_sorted_keys(&keys);
-                let current_order = keys.join(", ");
-                let expected_order = sorted_keys.join(", ");
-
-                // JSON has no comments, always fixable
-                let fix = Some(Fix {
-                    range: 0..0,
-                    replacement: String::new(),
-                });
+                // Compute the actual fix: full content replacement
+                let fix = match self.fix_json(content) {
+                    Ok(fixed_content) if fixed_content != content => Some(Fix {
+                        range: 0..content.len(),
+                        replacement: fixed_content,
+                    }),
+                    _ => None,
+                };
 
                 let message = format!(
-                    "JSON frontmatter keys are not sorted alphabetically. Expected order: [{expected_order}]. Current order: [{current_order}]"
+                    "JSON frontmatter keys are not sorted alphabetically: '{out_of_place}' should come before '{should_come_after}'"
                 );
 
                 warnings.push(LintWarning {
@@ -370,6 +358,25 @@ impl Rule for MD072FrontmatterKeySort {
         self
     }
 
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let default_config = MD072Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD072Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                // For opt-in rules, we need to explicitly declare the 'enabled' key
+                let mut table = toml::map::Map::new();
+                table.insert("enabled".to_string(), toml::Value::Boolean(false));
+                Some((MD072Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            }
+        } else {
+            None
+        }
+    }
+
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
@@ -396,47 +403,45 @@ impl MD072FrontmatterKeySort {
             return Ok(content.to_string());
         }
 
-        // Parse and re-serialize with sorted keys
-        let fm_content = frontmatter_lines.join("\n");
+        // Line-based reordering to preserve original formatting (indentation, etc.)
+        // Each key owns all lines until the next top-level key
+        let mut key_blocks: Vec<(String, Vec<&str>)> = Vec::new();
 
-        match serde_yml::from_str::<serde_yml::Value>(&fm_content) {
-            Ok(value) => {
-                if let serde_yml::Value::Mapping(map) = value {
-                    let mut sorted_map = serde_yml::Mapping::new();
-                    let mut keys: Vec<_> = map.keys().cloned().collect();
-                    keys.sort_by_key(|a| a.as_str().unwrap_or("").to_lowercase());
+        for (i, (line_idx, key)) in keys.iter().enumerate() {
+            let start = *line_idx;
+            let end = if i + 1 < keys.len() {
+                keys[i + 1].0
+            } else {
+                frontmatter_lines.len()
+            };
 
-                    for key in keys {
-                        if let Some(value) = map.get(&key) {
-                            sorted_map.insert(key, value.clone());
-                        }
-                    }
-
-                    match serde_yml::to_string(&sorted_map) {
-                        Ok(sorted_yaml) => {
-                            let lines: Vec<&str> = content.lines().collect();
-                            let fm_end = FrontMatterUtils::get_front_matter_end_line(content);
-
-                            let mut result = String::new();
-                            result.push_str("---\n");
-                            result.push_str(sorted_yaml.trim_end());
-                            result.push_str("\n---");
-
-                            if fm_end < lines.len() {
-                                result.push('\n');
-                                result.push_str(&lines[fm_end..].join("\n"));
-                            }
-
-                            Ok(result)
-                        }
-                        Err(_) => Ok(content.to_string()),
-                    }
-                } else {
-                    Ok(content.to_string())
-                }
-            }
-            Err(_) => Ok(content.to_string()),
+            let block_lines: Vec<&str> = frontmatter_lines[start..end].to_vec();
+            key_blocks.push((key.to_lowercase(), block_lines));
         }
+
+        // Sort by key (case-insensitive)
+        key_blocks.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Reassemble frontmatter
+        let content_lines: Vec<&str> = content.lines().collect();
+        let fm_end = FrontMatterUtils::get_front_matter_end_line(content);
+
+        let mut result = String::new();
+        result.push_str("---\n");
+        for (_, lines) in &key_blocks {
+            for line in lines {
+                result.push_str(line);
+                result.push('\n');
+            }
+        }
+        result.push_str("---");
+
+        if fm_end < content_lines.len() {
+            result.push('\n');
+            result.push_str(&content_lines[fm_end..].join("\n"));
+        }
+
+        Ok(result)
     }
 
     fn fix_toml(&self, content: &str) -> Result<String, LintError> {
@@ -620,7 +625,8 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("YAML"));
         assert!(result[0].message.contains("not sorted"));
-        assert!(result[0].message.contains("author, date, title"));
+        // Message shows first out-of-order pair: 'author' should come before 'title'
+        assert!(result[0].message.contains("'author' should come before 'title'"));
     }
 
     #[test]
@@ -655,7 +661,7 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Auto-fix unavailable"));
+        assert!(result[0].message.contains("auto-fix unavailable"));
         assert!(result[0].fix.is_none());
 
         // Fix should not modify content
@@ -757,7 +763,7 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Auto-fix unavailable"));
+        assert!(result[0].message.contains("auto-fix unavailable"));
 
         // Fix should not modify content
         let fixed = rule.fix(&ctx).unwrap();
@@ -846,7 +852,8 @@ mod tests {
 
         // Only top-level keys (title, sort_by) should be checked, not we_have_extra
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("sort_by, title"));
+        // Message shows first out-of-order pair: 'sort_by' should come before 'title'
+        assert!(result[0].message.contains("'sort_by' should come before 'title'"));
         assert!(!result[0].message.contains("we_have_extra"));
     }
 
@@ -860,7 +867,8 @@ mod tests {
 
         // Only top-level keys (title, date) should be checked
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("date, title"));
+        // Message shows first out-of-order pair: 'date' should come before 'title'
+        assert!(result[0].message.contains("'date' should come before 'title'"));
         assert!(!result[0].message.contains("categories"));
         assert!(!result[0].message.contains("tags"));
     }
@@ -910,9 +918,9 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // author, description, title - not sorted
+        // description, title, author - first out-of-order: 'author' should come before 'title'
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("author, description, title"));
+        assert!(result[0].message.contains("'author' should come before 'title'"));
     }
 
     #[test]
@@ -983,7 +991,8 @@ mod tests {
 
         // Only top-level keys (title, date) checked - date < title, so unsorted
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("date, title"));
+        // Message shows first out-of-order pair: 'date' should come before 'title'
+        assert!(result[0].message.contains("'date' should come before 'title'"));
     }
 
     #[test]
