@@ -706,6 +706,52 @@ impl RumdlLanguageServer {
         Position { line, character }
     }
 
+    /// Apply LSP FormattingOptions to content
+    ///
+    /// This implements the standard LSP formatting options that editors send:
+    /// - `trim_trailing_whitespace`: Remove trailing whitespace from each line
+    /// - `insert_final_newline`: Ensure file ends with a newline
+    /// - `trim_final_newlines`: Remove extra blank lines at end of file
+    ///
+    /// This is applied AFTER lint fixes to ensure we respect editor preferences
+    /// even when the editor's buffer content differs from the file on disk
+    /// (e.g., nvim may strip trailing newlines from its buffer representation).
+    fn apply_formatting_options(content: String, options: &FormattingOptions) -> String {
+        let mut result = content.clone();
+        let original_ended_with_newline = content.ends_with('\n');
+
+        // 1. Trim trailing whitespace from each line (if requested)
+        if options.trim_trailing_whitespace.unwrap_or(false) {
+            result = result
+                .lines()
+                .map(|line| line.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n");
+            // Preserve final newline status for next steps
+            if original_ended_with_newline && !result.ends_with('\n') {
+                result.push('\n');
+            }
+        }
+
+        // 2. Trim final newlines (remove extra blank lines at EOF)
+        // This runs BEFORE insert_final_newline to handle the case where
+        // we have multiple trailing newlines and want exactly one
+        if options.trim_final_newlines.unwrap_or(false) {
+            // Remove all trailing newlines
+            while result.ends_with('\n') {
+                result.pop();
+            }
+            // We'll add back exactly one in the next step if insert_final_newline is true
+        }
+
+        // 3. Insert final newline (ensure file ends with exactly one newline)
+        if options.insert_final_newline.unwrap_or(false) && !result.ends_with('\n') {
+            result.push('\n');
+        }
+
+        result
+    }
+
     /// Get code actions for diagnostics at a position
     async fn get_code_actions(&self, uri: &Url, text: &str, range: Range) -> Result<Vec<CodeAction>> {
         let config_guard = self.config.read().await;
@@ -1667,8 +1713,15 @@ impl LanguageServer for RumdlLanguageServer {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> JsonRpcResult<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
+        let options = params.options;
 
         log::debug!("Formatting request for: {uri}");
+        log::debug!(
+            "FormattingOptions: insert_final_newline={:?}, trim_final_newlines={:?}, trim_trailing_whitespace={:?}",
+            options.insert_final_newline,
+            options.trim_final_newlines,
+            options.trim_trailing_whitespace
+        );
 
         if let Some(text) = self.get_document_content(&uri).await {
             // Get config with LSP overrides
@@ -1696,7 +1749,8 @@ impl LanguageServer for RumdlLanguageServer {
             // Apply LSP config overrides
             filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
-            // Use warning fixes for all rules
+            // Phase 1: Apply lint rule fixes
+            let mut result = text.clone();
             match crate::lint(&text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
                 Ok(warnings) => {
                     log::debug!(
@@ -1708,8 +1762,6 @@ impl LanguageServer for RumdlLanguageServer {
                     let has_fixes = warnings.iter().any(|w| w.fix.is_some());
                     if has_fixes {
                         // Only apply fixes from fixable rules during formatting
-                        // Unfixable rules provide warning-level fixes for Quick Fix actions,
-                        // but should not be applied during bulk format operations
                         let fixable_warnings: Vec<_> = warnings
                             .iter()
                             .filter(|w| {
@@ -1728,31 +1780,38 @@ impl LanguageServer for RumdlLanguageServer {
 
                         match crate::utils::fix_utils::apply_warning_fixes(&text, &fixable_warnings) {
                             Ok(fixed_content) => {
-                                if fixed_content != text {
-                                    log::debug!("Returning formatting edits");
-                                    let end_position = self.get_end_position(&text);
-                                    let edit = TextEdit {
-                                        range: Range {
-                                            start: Position { line: 0, character: 0 },
-                                            end: end_position,
-                                        },
-                                        new_text: fixed_content,
-                                    };
-                                    return Ok(Some(vec![edit]));
-                                }
+                                result = fixed_content;
                             }
                             Err(e) => {
                                 log::error!("Failed to apply fixes: {e}");
                             }
                         }
                     }
-                    Ok(Some(Vec::new()))
                 }
                 Err(e) => {
-                    log::error!("Failed to format document: {e}");
-                    Ok(Some(Vec::new()))
+                    log::error!("Failed to lint document: {e}");
                 }
             }
+
+            // Phase 2: Apply FormattingOptions (standard LSP behavior)
+            // This ensures we respect editor preferences even if lint rules don't catch everything
+            result = Self::apply_formatting_options(result, &options);
+
+            // Return edit if content changed
+            if result != text {
+                log::debug!("Returning formatting edits");
+                let end_position = self.get_end_position(&text);
+                let edit = TextEdit {
+                    range: Range {
+                        start: Position { line: 0, character: 0 },
+                        end: end_position,
+                    },
+                    new_text: result,
+                };
+                return Ok(Some(vec![edit]));
+            }
+
+            Ok(Some(Vec::new()))
         } else {
             log::warn!("Document not found: {uri}");
             Ok(None)
@@ -2167,11 +2226,13 @@ mod tests {
         let edits = result.unwrap();
         assert!(!edits.is_empty());
 
-        // The new text should have trailing spaces removed
+        // The new text should have trailing spaces removed from ALL lines
+        // because trim_trailing_whitespace: Some(true) is set
         let edit = &edits[0];
-        // The formatted text should have the trailing spaces removed from the middle line
-        // and a final newline added
-        let expected = "# Test\n\nThis is a test  \nWith trailing spaces\n";
+        // The formatted text should have:
+        // - Trailing spaces removed from ALL lines (trim_trailing_whitespace)
+        // - Exactly one final newline (trim_final_newlines + insert_final_newline)
+        let expected = "# Test\n\nThis is a test\nWith trailing spaces\n";
         assert_eq!(edit.new_text, expected);
     }
 
@@ -3146,5 +3207,172 @@ disable = ["MD022"]
             Some(&toml::Value::Integer(80)),
             "Existing values should not be overwritten"
         );
+    }
+
+    // Tests for apply_formatting_options (issue #265)
+
+    #[test]
+    fn test_apply_formatting_options_insert_final_newline() {
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            properties: HashMap::new(),
+            trim_trailing_whitespace: None,
+            insert_final_newline: Some(true),
+            trim_final_newlines: None,
+        };
+
+        // Content without final newline should get one added
+        let result = RumdlLanguageServer::apply_formatting_options("hello".to_string(), &options);
+        assert_eq!(result, "hello\n");
+
+        // Content with final newline should stay the same
+        let result = RumdlLanguageServer::apply_formatting_options("hello\n".to_string(), &options);
+        assert_eq!(result, "hello\n");
+    }
+
+    #[test]
+    fn test_apply_formatting_options_trim_final_newlines() {
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            properties: HashMap::new(),
+            trim_trailing_whitespace: None,
+            insert_final_newline: None,
+            trim_final_newlines: Some(true),
+        };
+
+        // Multiple trailing newlines should be removed
+        let result = RumdlLanguageServer::apply_formatting_options("hello\n\n\n".to_string(), &options);
+        assert_eq!(result, "hello");
+
+        // Single trailing newline should also be removed (trim_final_newlines removes ALL)
+        let result = RumdlLanguageServer::apply_formatting_options("hello\n".to_string(), &options);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_apply_formatting_options_trim_and_insert_combined() {
+        // This is the common case: trim extra newlines, then ensure exactly one
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            properties: HashMap::new(),
+            trim_trailing_whitespace: None,
+            insert_final_newline: Some(true),
+            trim_final_newlines: Some(true),
+        };
+
+        // Multiple trailing newlines → exactly one
+        let result = RumdlLanguageServer::apply_formatting_options("hello\n\n\n".to_string(), &options);
+        assert_eq!(result, "hello\n");
+
+        // No trailing newline → add one
+        let result = RumdlLanguageServer::apply_formatting_options("hello".to_string(), &options);
+        assert_eq!(result, "hello\n");
+
+        // Already has exactly one → unchanged
+        let result = RumdlLanguageServer::apply_formatting_options("hello\n".to_string(), &options);
+        assert_eq!(result, "hello\n");
+    }
+
+    #[test]
+    fn test_apply_formatting_options_trim_trailing_whitespace() {
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            properties: HashMap::new(),
+            trim_trailing_whitespace: Some(true),
+            insert_final_newline: Some(true),
+            trim_final_newlines: None,
+        };
+
+        // Trailing whitespace on lines should be removed
+        let result = RumdlLanguageServer::apply_formatting_options("hello  \nworld\t\n".to_string(), &options);
+        assert_eq!(result, "hello\nworld\n");
+    }
+
+    #[test]
+    fn test_apply_formatting_options_issue_265_scenario() {
+        // Issue #265: MD012 at end of file doesn't work with LSP formatting
+        // The editor (nvim) may strip trailing newlines from buffer before sending to LSP
+        // With proper FormattingOptions handling, we should still get the right result
+
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            properties: HashMap::new(),
+            trim_trailing_whitespace: None,
+            insert_final_newline: Some(true),
+            trim_final_newlines: Some(true),
+        };
+
+        // Scenario 1: Editor sends content with multiple trailing newlines
+        let result = RumdlLanguageServer::apply_formatting_options("hello foobar hello.\n\n\n".to_string(), &options);
+        assert_eq!(
+            result, "hello foobar hello.\n",
+            "Should have exactly one trailing newline"
+        );
+
+        // Scenario 2: Editor sends content with trailing newlines stripped
+        let result = RumdlLanguageServer::apply_formatting_options("hello foobar hello.".to_string(), &options);
+        assert_eq!(result, "hello foobar hello.\n", "Should add final newline");
+
+        // Scenario 3: Content is already correct
+        let result = RumdlLanguageServer::apply_formatting_options("hello foobar hello.\n".to_string(), &options);
+        assert_eq!(result, "hello foobar hello.\n", "Should remain unchanged");
+    }
+
+    #[test]
+    fn test_apply_formatting_options_no_options() {
+        // When all options are None/false, content should be unchanged
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            properties: HashMap::new(),
+            trim_trailing_whitespace: None,
+            insert_final_newline: None,
+            trim_final_newlines: None,
+        };
+
+        let content = "hello  \nworld\n\n\n";
+        let result = RumdlLanguageServer::apply_formatting_options(content.to_string(), &options);
+        assert_eq!(result, content, "Content should be unchanged when no options set");
+    }
+
+    #[test]
+    fn test_apply_formatting_options_empty_content() {
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            properties: HashMap::new(),
+            trim_trailing_whitespace: Some(true),
+            insert_final_newline: Some(true),
+            trim_final_newlines: Some(true),
+        };
+
+        // Empty content with insert_final_newline should get a newline
+        let result = RumdlLanguageServer::apply_formatting_options("".to_string(), &options);
+        assert_eq!(result, "\n");
+
+        // Just newlines should become single newline
+        let result = RumdlLanguageServer::apply_formatting_options("\n\n\n".to_string(), &options);
+        assert_eq!(result, "\n");
+    }
+
+    #[test]
+    fn test_apply_formatting_options_multiline_content() {
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            properties: HashMap::new(),
+            trim_trailing_whitespace: Some(true),
+            insert_final_newline: Some(true),
+            trim_final_newlines: Some(true),
+        };
+
+        let content = "# Heading  \n\nParagraph  \n- List item  \n\n\n";
+        let result = RumdlLanguageServer::apply_formatting_options(content.to_string(), &options);
+        assert_eq!(result, "# Heading\n\nParagraph\n- List item\n");
     }
 }
