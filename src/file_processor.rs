@@ -159,6 +159,57 @@ fn canonicalize_path_safe(path_str: &str) -> String {
         .unwrap_or_else(|_| path_str.to_string())
 }
 
+/// Convert an absolute file path to a relative path for display purposes.
+///
+/// Tries to make the path relative to project_root first, then falls back to CWD.
+/// If neither works, returns the original path unchanged.
+///
+/// This improves readability in CI logs and terminal output by showing
+/// `docs/guide.md:12:5` instead of `/home/runner/work/myproj/docs/guide.md:12:5`.
+pub fn to_display_path(file_path: &str, project_root: Option<&Path>) -> String {
+    let path = Path::new(file_path);
+
+    // Canonicalize the file path once (handles symlinks)
+    let canonical_file = path.canonicalize().ok();
+    let effective_path = canonical_file.as_deref().unwrap_or(path);
+
+    // Try project root first (preferred for consistent output across the project)
+    if let Some(root) = project_root
+        && let Some(relative) = strip_base_prefix(effective_path, root)
+    {
+        return relative;
+    }
+
+    // Fall back to CWD-relative
+    if let Ok(cwd) = std::env::current_dir()
+        && let Some(relative) = strip_base_prefix(effective_path, &cwd)
+    {
+        return relative;
+    }
+
+    // If all else fails, return as-is
+    file_path.to_string()
+}
+
+/// Try to strip a base path prefix from a file path.
+/// Handles canonicalization of the base path to resolve symlinks.
+fn strip_base_prefix(file_path: &Path, base: &Path) -> Option<String> {
+    // Canonicalize base to resolve symlinks (e.g., /tmp -> /private/tmp on macOS)
+    let canonical_base = base.canonicalize().ok()?;
+
+    // Try stripping the canonical base prefix
+    if let Ok(relative) = file_path.strip_prefix(&canonical_base) {
+        return Some(relative.to_string_lossy().to_string());
+    }
+
+    // Also try with non-canonical base (for cases where file_path wasn't canonicalized)
+    if let Ok(relative) = file_path.strip_prefix(base) {
+        return Some(relative.to_string_lossy().to_string());
+    }
+
+    None
+}
+
 pub fn find_markdown_files(
     paths: &[String],
     args: &crate::CheckArgs,
@@ -533,6 +584,8 @@ pub fn process_file_with_formatter(
     output_writer: &rumdl_lib::output::OutputWriter,
     config: &rumdl_config::Config,
     cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
+    project_root: Option<&Path>,
+    show_full_path: bool,
 ) -> (
     bool,
     usize,
@@ -542,6 +595,13 @@ pub fn process_file_with_formatter(
     rumdl_lib::workspace_index::FileIndex,
 ) {
     let formatter = output_format.create_formatter();
+
+    // Convert to display path (relative) unless --show-full-path is set
+    let display_path = if show_full_path {
+        file_path.to_string()
+    } else {
+        to_display_path(file_path, project_root)
+    };
 
     // Call the original process_file_inner to get warnings, original line ending, and FileIndex
     let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending, file_index) =
@@ -558,7 +618,7 @@ pub fn process_file_with_formatter(
             let unfixable_warnings: Vec<_> = all_warnings.iter().filter(|w| w.fix.is_none()).cloned().collect();
 
             if !unfixable_warnings.is_empty() {
-                let formatted = formatter.format_warnings(&unfixable_warnings, file_path);
+                let formatted = formatter.format_warnings(&unfixable_warnings, &display_path);
                 if !formatted.is_empty() {
                     output_writer.writeln(&formatted).unwrap_or_else(|e| {
                         eprintln!("Error writing output: {e}");
@@ -567,7 +627,7 @@ pub fn process_file_with_formatter(
             }
         } else {
             // In check mode, show all warnings with [*] for fixable issues
-            let formatted = formatter.format_warnings(&all_warnings, file_path);
+            let formatted = formatter.format_warnings(&all_warnings, &display_path);
             if !formatted.is_empty() {
                 output_writer.writeln(&formatted).unwrap_or_else(|e| {
                     eprintln!("Error writing output: {e}");
@@ -584,7 +644,7 @@ pub fn process_file_with_formatter(
         warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, true, true, config);
 
         if warnings_fixed > 0 {
-            let diff_output = formatter::generate_diff(&original_content, &content, file_path);
+            let diff_output = formatter::generate_diff(&original_content, &content, &display_path);
             output_writer.writeln(&diff_output).unwrap_or_else(|e| {
                 eprintln!("Error writing diff output: {e}");
             });
@@ -663,7 +723,7 @@ pub fn process_file_with_formatter(
                 // Use colors similar to TextFormatter
                 let line = format!(
                     "{}:{}:{}: {} {}{}",
-                    file_path.blue().underline(),
+                    display_path.blue().underline(),
                     warning.line.to_string().cyan(),
                     warning.column.to_string().cyan(),
                     format!("[{rule_name:5}]").yellow(),
@@ -993,5 +1053,213 @@ pub fn apply_fixes_coordinated(
             }
             0
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Create a temporary directory structure for testing path display
+    fn create_test_structure() -> TempDir {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let docs_dir = temp_dir.path().join("docs");
+        fs::create_dir_all(&docs_dir).expect("Failed to create docs dir");
+        fs::write(docs_dir.join("guide.md"), "# Test").expect("Failed to write test file");
+        temp_dir
+    }
+
+    #[test]
+    fn test_to_display_path_with_project_root() {
+        let temp_dir = create_test_structure();
+        let project_root = temp_dir.path();
+        let file_path = project_root.join("docs/guide.md");
+
+        let result = to_display_path(&file_path.to_string_lossy(), Some(project_root));
+
+        assert_eq!(result, "docs/guide.md");
+    }
+
+    #[test]
+    fn test_to_display_path_with_canonical_paths() {
+        let temp_dir = create_test_structure();
+        let project_root = temp_dir.path().canonicalize().unwrap();
+        let file_path = project_root.join("docs/guide.md").canonicalize().unwrap();
+
+        let result = to_display_path(&file_path.to_string_lossy(), Some(&project_root));
+
+        assert_eq!(result, "docs/guide.md");
+    }
+
+    #[test]
+    fn test_to_display_path_no_project_root_uses_cwd() {
+        // Test that when no project_root is given, files under CWD get relative paths
+        // We test this indirectly by checking files in CWD get stripped
+        let cwd = std::env::current_dir().unwrap();
+        let cwd_canonical = cwd.canonicalize().unwrap_or(cwd.clone());
+
+        // Create a path that would be under CWD
+        let test_path = cwd_canonical.join("test_file.md");
+
+        // Even if file doesn't exist, the path should be made relative to CWD
+        let result = to_display_path(&test_path.to_string_lossy(), None);
+
+        assert_eq!(result, "test_file.md");
+    }
+
+    #[test]
+    fn test_to_display_path_empty_string() {
+        let result = to_display_path("", None);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_to_display_path_with_parent_references() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let nested = temp_dir.path().join("a/b/c");
+        fs::create_dir_all(&nested).expect("Failed to create nested dirs");
+        let file = nested.join("file.md");
+        fs::write(&file, "# Test").expect("Failed to write");
+
+        // Path with .. that resolves to the same file
+        let path_with_parent = temp_dir.path().join("a/b/c/../c/file.md");
+        let result = to_display_path(&path_with_parent.to_string_lossy(), Some(temp_dir.path()));
+
+        // Should resolve to clean relative path
+        assert_eq!(result, "a/b/c/file.md");
+    }
+
+    #[test]
+    fn test_to_display_path_special_characters() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let special_dir = temp_dir.path().join("docs#1/test%20files");
+        fs::create_dir_all(&special_dir).expect("Failed to create dir with special chars");
+        let file_path = special_dir.join("file&name.md");
+        fs::write(&file_path, "# Test").expect("Failed to write");
+
+        let result = to_display_path(&file_path.to_string_lossy(), Some(temp_dir.path()));
+
+        assert_eq!(result, "docs#1/test%20files/file&name.md");
+    }
+
+    #[test]
+    fn test_to_display_path_root_as_project_root() {
+        // When project root is /, paths should still be relative to it
+        let result = to_display_path("/usr/local/test.md", Some(Path::new("/")));
+
+        assert_eq!(result, "usr/local/test.md");
+    }
+
+    #[test]
+    fn test_to_display_path_file_outside_project_root() {
+        let temp_dir1 = create_test_structure();
+        let temp_dir2 = TempDir::new().expect("Failed to create temp dir 2");
+        let outside_file = temp_dir2.path().join("outside.md");
+        fs::write(&outside_file, "# Outside").expect("Failed to write");
+
+        // File is in temp_dir2, but project root is temp_dir1
+        let result = to_display_path(&outside_file.to_string_lossy(), Some(temp_dir1.path()));
+
+        // Should fall back to CWD-relative or absolute
+        // Since outside_file is not under project_root, it might be CWD-relative or absolute
+        assert!(
+            result.ends_with("outside.md"),
+            "Expected path to end with 'outside.md', got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_to_display_path_already_relative() {
+        // When given a relative path that doesn't exist, should return as-is
+        let result = to_display_path("nonexistent/path.md", None);
+        assert_eq!(result, "nonexistent/path.md");
+    }
+
+    #[test]
+    fn test_to_display_path_nested_subdirectory() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let nested_dir = temp_dir.path().join("a/b/c/d");
+        fs::create_dir_all(&nested_dir).expect("Failed to create nested dirs");
+        let file_path = nested_dir.join("deep.md");
+        fs::write(&file_path, "# Deep").expect("Failed to write");
+
+        let result = to_display_path(&file_path.to_string_lossy(), Some(temp_dir.path()));
+
+        assert_eq!(result, "a/b/c/d/deep.md");
+    }
+
+    #[test]
+    fn test_to_display_path_with_spaces_in_path() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let dir_with_spaces = temp_dir.path().join("my docs/sub folder");
+        fs::create_dir_all(&dir_with_spaces).expect("Failed to create dir with spaces");
+        let file_path = dir_with_spaces.join("my file.md");
+        fs::write(&file_path, "# Spaces").expect("Failed to write");
+
+        let result = to_display_path(&file_path.to_string_lossy(), Some(temp_dir.path()));
+
+        assert_eq!(result, "my docs/sub folder/my file.md");
+    }
+
+    #[test]
+    fn test_to_display_path_with_unicode() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let unicode_dir = temp_dir.path().join("文档/ドキュメント");
+        fs::create_dir_all(&unicode_dir).expect("Failed to create unicode dir");
+        let file_path = unicode_dir.join("日本語.md");
+        fs::write(&file_path, "# 日本語").expect("Failed to write");
+
+        let result = to_display_path(&file_path.to_string_lossy(), Some(temp_dir.path()));
+
+        assert_eq!(result, "文档/ドキュメント/日本語.md");
+    }
+
+    #[test]
+    fn test_strip_base_prefix_basic() {
+        let temp_dir = create_test_structure();
+        let base = temp_dir.path();
+        let file = temp_dir.path().join("docs/guide.md");
+
+        let result = strip_base_prefix(&file, base);
+
+        assert_eq!(result, Some("docs/guide.md".to_string()));
+    }
+
+    #[test]
+    fn test_strip_base_prefix_not_under_base() {
+        let temp_dir1 = TempDir::new().expect("Failed to create temp dir 1");
+        let temp_dir2 = TempDir::new().expect("Failed to create temp dir 2");
+        let file = temp_dir2.path().join("file.md");
+        fs::write(&file, "# Test").expect("Failed to write");
+
+        let result = strip_base_prefix(&file, temp_dir1.path());
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_strip_base_prefix_with_symlink() {
+        // This test verifies that symlinks are resolved correctly
+        // On macOS, /tmp is a symlink to /private/tmp
+        let temp_dir = create_test_structure();
+        let canonical_base = temp_dir.path().canonicalize().unwrap();
+        let file = temp_dir.path().join("docs/guide.md").canonicalize().unwrap();
+
+        let result = strip_base_prefix(&file, &canonical_base);
+
+        assert_eq!(result, Some("docs/guide.md".to_string()));
+    }
+
+    #[test]
+    fn test_strip_base_prefix_nonexistent_base() {
+        let file = Path::new("/some/existing/path.md");
+        let nonexistent_base = Path::new("/this/path/does/not/exist");
+
+        let result = strip_base_prefix(file, nonexistent_base);
+
+        // Should return None because canonicalize fails on nonexistent path
+        assert_eq!(result, None);
     }
 }

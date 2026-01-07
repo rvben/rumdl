@@ -188,7 +188,13 @@ pub fn perform_check_run(
                 if result.warnings.iter().any(|w| w.severity == Severity::Error) {
                     has_errors = true;
                 }
-                all_file_warnings.push((file_path.clone(), result.warnings));
+                // Transform path for display (relative by default, absolute with --show-full-path)
+                let display_path = if args.show_full_path {
+                    file_path.clone()
+                } else {
+                    crate::file_processor::to_display_path(file_path, project_root)
+                };
+                all_file_warnings.push((display_path, result.warnings));
             }
 
             // Store FileIndex for cross-file analysis (extracted from single linting pass)
@@ -256,7 +262,12 @@ pub fn perform_check_run(
                     Some(config),
                 ) && !cross_file_warnings.is_empty()
                 {
-                    let file_path_str = file_path.to_string_lossy().to_string();
+                    // Transform path for display (must match format used in all_file_warnings)
+                    let display_path = if args.show_full_path {
+                        file_path.to_string_lossy().to_string()
+                    } else {
+                        crate::file_processor::to_display_path(&file_path.to_string_lossy(), project_root)
+                    };
                     if cross_file_warnings
                         .iter()
                         .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
@@ -267,13 +278,13 @@ pub fn perform_check_run(
                         has_errors = true;
                     }
                     // Find existing entry or create new one
-                    if let Some((_, warnings)) = all_file_warnings.iter_mut().find(|(p, _)| p == &file_path_str) {
+                    if let Some((_, warnings)) = all_file_warnings.iter_mut().find(|(p, _)| p == &display_path) {
                         warnings.extend(cross_file_warnings);
                     } else {
                         has_issues = true;
                         _files_with_issues += 1;
                         _total_issues += cross_file_warnings.len();
-                        all_file_warnings.push((file_path_str, cross_file_warnings));
+                        all_file_warnings.push((display_path, cross_file_warnings));
                     }
                 }
             }
@@ -357,6 +368,8 @@ pub fn perform_check_run(
                     &output_writer,
                     config,
                     cache.as_ref().map(Arc::clone),
+                    project_root,
+                    args.show_full_path,
                 );
                 (file_path.clone(), result)
             })
@@ -444,6 +457,8 @@ pub fn perform_check_run(
                     &output_writer,
                     config,
                     cache.as_ref().map(Arc::clone),
+                    project_root,
+                    args.show_full_path,
                 );
 
             // Store FileIndex for cross-file analysis (extracted from first pass)
@@ -566,7 +581,12 @@ pub fn perform_check_run(
 
                 // Output cross-file warnings
                 if !args.silent {
-                    let formatted = formatter.format_warnings(&cross_file_warnings, &file_path.to_string_lossy());
+                    let display_path = if args.show_full_path {
+                        file_path.to_string_lossy().to_string()
+                    } else {
+                        crate::file_processor::to_display_path(&file_path.to_string_lossy(), project_root)
+                    };
+                    let formatted = formatter.format_warnings(&cross_file_warnings, &display_path);
                     if !formatted.is_empty() {
                         output_writer.writeln(&formatted).unwrap_or_else(|e| {
                             eprintln!("Error writing output: {e}");

@@ -569,6 +569,10 @@ pub struct CheckArgs {
           help = "Output format for linting results (text, full, concise, grouped, json, json-lines, github, gitlab, pylint, azure, sarif, junit)")]
     output_format: Option<String>,
 
+    /// Show absolute file paths instead of project-relative paths
+    #[arg(long, help = "Show absolute file paths in output instead of relative paths")]
+    show_full_path: bool,
+
     /// Markdown flavor to use for linting
     #[arg(long, value_parser = ["standard", "mkdocs", "mdx", "quarto"],
           help = "Markdown flavor: standard (default), mkdocs, mdx, or quarto")]
