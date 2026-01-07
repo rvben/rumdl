@@ -620,7 +620,7 @@ also safe
         );
     }
 
-    // ==================== Expert-Level Edge Case Tests ====================
+    // ==================== Comprehensive Edge Case Tests ====================
 
     #[test]
     fn test_case_insensitive_language() {

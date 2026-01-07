@@ -647,4 +647,70 @@ mod tests {
         assert_eq!(result.len(), 1, "Should detect whitespace-only trailing blanks");
         assert!(result[0].message.contains("at end of file"));
     }
+
+    // Tests for warning-based fix (used by LSP formatting)
+
+    #[test]
+    fn test_warning_fix_removes_single_trailing_blank() {
+        // Regression test for issue #265: LSP formatting should work for EOF blanks
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "hello foobar hello.\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_some(), "Warning should have a fix attached");
+
+        let fix = warnings[0].fix.as_ref().unwrap();
+        // The fix should remove the trailing blank line
+        assert_eq!(fix.replacement, "", "Replacement should be empty");
+
+        // Apply the fix and verify result
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(fixed, "hello foobar hello.\n", "Should end with single newline");
+    }
+
+    #[test]
+    fn test_warning_fix_removes_multiple_trailing_blanks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "content\n\n\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_some());
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(fixed, "content\n", "Should end with single newline");
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_content_newline() {
+        // Ensure the fix doesn't remove the content line's trailing newline
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "line1\nline2\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(fixed, "line1\nline2\n", "Should preserve all content lines");
+    }
+
+    #[test]
+    fn test_warning_fix_mid_document_blanks() {
+        // Test that mid-document blank line fixes also work via warnings
+        let rule = MD012NoMultipleBlanks::default();
+        // Content with 2 extra blank lines (3 blank lines total, should reduce to 1)
+        let content = "# Heading\n\n\n\nParagraph\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // With maximum=1 (default), 3 consecutive blanks produces 2 warnings
+        assert_eq!(warnings.len(), 2, "Should have 2 warnings for 2 extra blank lines");
+        assert!(warnings[0].fix.is_some());
+        assert!(warnings[1].fix.is_some());
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(fixed, "# Heading\n\nParagraph\n", "Should reduce to single blank");
+    }
 }

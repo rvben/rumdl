@@ -1562,7 +1562,7 @@ More text.
         );
     }
 
-    // ==================== Expert-level edge case tests ====================
+    // ==================== Comprehensive edge case tests ====================
 
     #[test]
     fn test_lazy_continuation_ordered_list_parenthesis_marker() {

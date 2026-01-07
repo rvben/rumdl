@@ -647,7 +647,7 @@ mod tests {
         assert_eq!(result.len(), 0, "Should not trigger MD030 on continuation line");
     }
 
-    // Expert-level edge case tests for issue #253
+    // Comprehensive edge case tests for issue #253
 
     #[test]
     fn test_issue_253_blockquoted_citation_continuation() {

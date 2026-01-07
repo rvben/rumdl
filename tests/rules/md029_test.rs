@@ -1009,7 +1009,7 @@ fn test_md029_all_styles_with_nesting() {
         assert!(fixed.is_ok(), "Style {style:?} fix should not crash on nested lists");
     }
 }
-// ==================== COMPREHENSIVE EXPERT-LEVEL TEST SUITE ====================
+// ==================== COMPREHENSIVE TEST SUITE ====================
 
 /// Tests for lists starting at different numbers with various styles
 mod starting_numbers {

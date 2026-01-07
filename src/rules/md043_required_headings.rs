@@ -1036,7 +1036,7 @@ mod tests {
         );
     }
 
-    // Expert-level edge case tests
+    // Comprehensive edge case tests
 
     #[test]
     fn test_consecutive_wildcards() {

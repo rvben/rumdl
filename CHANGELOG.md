@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.212] - 2026-01-07
+
+### Added
+
+- **CLI: Show relative file paths in output by default** (fixes #266)
+  - Add `--show-full-path` flag to opt into absolute paths
+  - All output formats (text, JSON, SARIF, GitHub, GitLab, JUnit) now consistently use paths relative to project root or CWD
+
+### Fixed
+
+- **LSP: Respect FormattingOptions in formatting handler** (fixes #265)
+  - `insertFinalNewline`: Add trailing newline if missing
+  - `trimFinalNewlines`: Remove extra trailing newlines at EOF
+  - `trimTrailingWhitespace`: Remove trailing whitespace from all lines
+  - Applies FormattingOptions after lint fixes to match editor preferences
+
+- **Fix coordinator: Re-check all rules after each fix for idempotency** (fixes #271)
+  - `rumdl check --fix` now produces idempotent results
+  - After each fix, all rules are re-checked with fresh LintContext
+  - Handles cascading fixes (e.g., MD046 → MD040) in a single run
+
+- **MD046: Preserve code indentation and skip MkDocs admonitions** (fixes #269, #270)
+  - Converting fenced to indented code blocks now preserves internal indentation
+  - MkDocs admonitions (`!!! note`, `??? warning`, `???+ tip`) are properly skipped
+
+- **MD012: Fix EOF blank line removal in LSP formatting** (fixes #264)
+  - Warning's fix replacement now correctly removes blank lines at EOF
+
+- **MD072: Improved frontmatter key sorting** (fixes #265)
+  - Use line-based reordering to preserve original YAML formatting
+  - Fixed config warning about "unknown option: enabled"
+  - Compute fix in check() to enable LSP formatting
+
 ## [0.0.211] - 2026-01-06
 
 ### Fixed

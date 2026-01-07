@@ -34,6 +34,100 @@ impl MD038NoSpaceInCode {
         Self { enabled: true }
     }
 
+    /// Check if a code span is part of Hugo template syntax (e.g., {{raw `...`}})
+    ///
+    /// Hugo static site generator uses backticks as part of template delimiters,
+    /// not markdown code spans. This function detects common Hugo shortcode patterns:
+    /// - {{raw `...`}} - Raw HTML shortcode
+    /// - {{< `...` >}} - Partial shortcode
+    /// - {{% `...` %}} - Shortcode with percent delimiters
+    /// - {{ `...` }} - Generic shortcode
+    ///
+    /// The detection is conservative to avoid false positives:
+    /// - Requires opening {{ pattern before the backtick
+    /// - Requires closing }} after the code span
+    /// - Handles multi-line templates correctly
+    ///
+    /// Returns true if the code span is part of Hugo template syntax and should be skipped.
+    fn is_hugo_template_syntax(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        code_span: &crate::lint_context::CodeSpan,
+    ) -> bool {
+        let start_line_idx = code_span.line.saturating_sub(1);
+        if start_line_idx >= ctx.lines.len() {
+            return false;
+        }
+
+        let start_line_content = ctx.lines[start_line_idx].content(ctx.content);
+
+        // start_col is 0-indexed character position
+        let span_start_col = code_span.start_col;
+
+        // Check if there's Hugo template syntax before the code span on the same line
+        // Pattern: {{raw ` or {{< ` or similar Hugo template patterns
+        // The code span starts at the backtick, so we need to check what's before it
+        // span_start_col is the position of the backtick (0-indexed character position)
+        // Minimum pattern is "{{ `" which has 3 characters before the backtick
+        if span_start_col >= 3 {
+            // Look backwards for Hugo template patterns
+            // Get the content up to (but not including) the backtick
+            let before_span: String = start_line_content.chars().take(span_start_col).collect();
+
+            // Check for Hugo template patterns: {{raw `, {{< `, {{% `, etc.
+            // The backtick is at span_start_col, so we check if the content before it
+            // ends with the Hugo pattern (without the backtick), and verify the next char is a backtick
+            let char_at_span_start = start_line_content.chars().nth(span_start_col).unwrap_or(' ');
+
+            // Match Hugo shortcode patterns:
+            // - {{raw ` - Raw HTML shortcode
+            // - {{< ` - Partial shortcode (may have parameters before backtick)
+            // - {{% ` - Shortcode with percent delimiters
+            // - {{ ` - Generic shortcode
+            // Also handle cases with parameters: {{< highlight go ` or {{< code ` etc.
+            // We check if the pattern starts with {{ and contains the shortcode type before the backtick
+            let is_hugo_start =
+                // Exact match: {{raw `
+                (before_span.ends_with("{{raw ") && char_at_span_start == '`')
+                // Partial shortcode: {{< ` or {{< name ` or {{< name param ` etc.
+                || (before_span.starts_with("{{<") && before_span.ends_with(' ') && char_at_span_start == '`')
+                // Percent shortcode: {{% `
+                || (before_span.ends_with("{{% ") && char_at_span_start == '`')
+                // Generic shortcode: {{ `
+                || (before_span.ends_with("{{ ") && char_at_span_start == '`');
+
+            if is_hugo_start {
+                // Check if there's a closing }} after the code span
+                // First check the end line of the code span
+                let end_line_idx = code_span.end_line.saturating_sub(1);
+                if end_line_idx < ctx.lines.len() {
+                    let end_line_content = ctx.lines[end_line_idx].content(ctx.content);
+                    let end_line_char_count = end_line_content.chars().count();
+                    let span_end_col = code_span.end_col.min(end_line_char_count);
+
+                    // Check for closing }} on the same line as the end of the code span
+                    if span_end_col < end_line_char_count {
+                        let after_span: String = end_line_content.chars().skip(span_end_col).collect();
+                        if after_span.trim_start().starts_with("}}") {
+                            return true;
+                        }
+                    }
+
+                    // Also check the next line for closing }}
+                    let next_line_idx = code_span.end_line;
+                    if next_line_idx < ctx.lines.len() {
+                        let next_line = ctx.lines[next_line_idx].content(ctx.content);
+                        if next_line.trim_start().starts_with("}}") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// Check if a code span is likely part of a nested backtick structure
     fn is_likely_nested_backticks(&self, ctx: &crate::lint_context::LintContext, span_index: usize) -> bool {
         // If there are multiple code spans on the same line, and there's text
@@ -158,6 +252,12 @@ impl Rule for MD038NoSpaceInCode {
                     && trimmed.len() > 1
                     && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace())
                 {
+                    continue;
+                }
+
+                // Check if this is part of Hugo template syntax (e.g., {{raw `...`}})
+                // Hugo uses backticks as part of template delimiters, not markdown code spans
+                if self.is_hugo_template_syntax(ctx, code_span) {
                     continue;
                 }
 
@@ -450,6 +550,208 @@ mod tests {
             result_other.len(),
             1,
             "Quarto should still flag non-R code spans with improper spaces"
+        );
+    }
+
+    /// Comprehensive tests for Hugo template syntax detection
+    ///
+    /// These tests ensure MD038 correctly handles Hugo template syntax patterns
+    /// without false positives, while maintaining correct detection of actual
+    /// code span spacing issues.
+    #[test]
+    fn test_hugo_template_syntax_comprehensive() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // ===== VALID HUGO TEMPLATE SYNTAX (Should NOT trigger warnings) =====
+
+        // Basic Hugo shortcode patterns
+        let valid_hugo_cases = vec![
+            // Raw HTML shortcode
+            (
+                "{{raw `\n\tgo list -f '{{.DefaultGODEBUG}}' my/main/package\n`}}",
+                "Multi-line raw shortcode",
+            ),
+            (
+                "Some text {{raw ` code `}} more text",
+                "Inline raw shortcode with spaces",
+            ),
+            ("{{raw `code`}}", "Raw shortcode without spaces"),
+            // Partial shortcode
+            ("{{< ` code ` >}}", "Partial shortcode with spaces"),
+            ("{{< `code` >}}", "Partial shortcode without spaces"),
+            // Shortcode with percent
+            ("{{% ` code ` %}}", "Percent shortcode with spaces"),
+            ("{{% `code` %}}", "Percent shortcode without spaces"),
+            // Generic shortcode
+            ("{{ ` code ` }}", "Generic shortcode with spaces"),
+            ("{{ `code` }}", "Generic shortcode without spaces"),
+            // Shortcodes with parameters (common Hugo pattern)
+            ("{{< highlight go `code` >}}", "Shortcode with highlight parameter"),
+            ("{{< code `go list` >}}", "Shortcode with code parameter"),
+            // Multi-line Hugo templates
+            ("{{raw `\n\tcommand here\n\tmore code\n`}}", "Multi-line raw template"),
+            ("{{< highlight `\ncode here\n` >}}", "Multi-line highlight template"),
+            // Hugo templates with nested Go template syntax
+            (
+                "{{raw `\n\t{{.Variable}}\n\t{{range .Items}}\n`}}",
+                "Nested Go template syntax",
+            ),
+            // Edge case: Hugo template at start of line
+            ("{{raw `code`}}", "Hugo template at line start"),
+            // Edge case: Hugo template at end of line
+            ("Text {{raw `code`}}", "Hugo template at end of line"),
+            // Edge case: Multiple Hugo templates
+            ("{{raw `code1`}} and {{raw `code2`}}", "Multiple Hugo templates"),
+        ];
+
+        for (case, description) in valid_hugo_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Hugo template syntax should not trigger MD038 warnings: {description} - {case}"
+            );
+        }
+
+        // ===== FALSE POSITIVE PREVENTION (Non-Hugo asymmetric spaces should be flagged) =====
+
+        // These have asymmetric spaces (leading-only or trailing-only) and should be flagged
+        // Per CommonMark spec: symmetric single-space pairs are stripped and NOT flagged
+        let should_be_flagged = vec![
+            ("This is ` code` with leading space.", "Leading space only"),
+            ("This is `code ` with trailing space.", "Trailing space only"),
+            ("Text `  code ` here", "Extra leading space (asymmetric)"),
+            ("Text ` code  ` here", "Extra trailing space (asymmetric)"),
+            ("Text `  code` here", "Double leading, no trailing"),
+            ("Text `code  ` here", "No leading, double trailing"),
+        ];
+
+        for (case, description) in should_be_flagged {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                !result.is_empty(),
+                "Should flag asymmetric space code spans: {description} - {case}"
+            );
+        }
+
+        // ===== COMMONMARK SYMMETRIC SPACE BEHAVIOR (Should NOT be flagged) =====
+
+        // Per CommonMark 0.31.2: When a code span has exactly one space at start AND end,
+        // those spaces are stripped from the output. This is intentional, not an error.
+        // These cases should NOT trigger MD038.
+        let symmetric_single_space = vec![
+            ("Text ` code ` here", "Symmetric single space - CommonMark strips"),
+            ("{raw ` code `}", "Looks like Hugo but missing opening {{"),
+            ("raw ` code `}}", "Missing opening {{ - but symmetric spaces"),
+        ];
+
+        for (case, description) in symmetric_single_space {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "CommonMark symmetric spaces should NOT be flagged: {description} - {case}"
+            );
+        }
+
+        // ===== EDGE CASES: Unicode and Special Characters =====
+
+        let unicode_cases = vec![
+            ("{{raw `\n\t你好世界\n`}}", "Unicode in Hugo template"),
+            ("{{raw `\n\t🎉 emoji\n`}}", "Emoji in Hugo template"),
+            ("{{raw `\n\tcode with \"quotes\"\n`}}", "Quotes in Hugo template"),
+            (
+                "{{raw `\n\tcode with 'single quotes'\n`}}",
+                "Single quotes in Hugo template",
+            ),
+        ];
+
+        for (case, description) in unicode_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Hugo templates with special characters should not trigger warnings: {description} - {case}"
+            );
+        }
+
+        // ===== BOUNDARY CONDITIONS =====
+
+        // Minimum valid Hugo pattern
+        assert!(
+            rule.check(&crate::lint_context::LintContext::new(
+                "{{ ` ` }}",
+                crate::config::MarkdownFlavor::Standard,
+                None
+            ))
+            .unwrap()
+            .is_empty(),
+            "Minimum Hugo pattern should be valid"
+        );
+
+        // Hugo template with only whitespace
+        assert!(
+            rule.check(&crate::lint_context::LintContext::new(
+                "{{raw `\n\t\n`}}",
+                crate::config::MarkdownFlavor::Standard,
+                None
+            ))
+            .unwrap()
+            .is_empty(),
+            "Hugo template with only whitespace should be valid"
+        );
+    }
+
+    /// Test interaction with other markdown elements
+    #[test]
+    fn test_hugo_template_with_other_markdown() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Hugo template inside a list
+        let content = r#"1. First item
+2. Second item with {{raw `code`}} template
+3. Third item"#;
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Hugo template in list should not trigger warnings");
+
+        // Hugo template in blockquote
+        let content = r#"> Quote with {{raw `code`}} template"#;
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Hugo template in blockquote should not trigger warnings"
+        );
+
+        // Hugo template near regular code span (should flag the regular one)
+        let content = r#"{{raw `code`}} and ` bad code` here"#;
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag regular code span but not Hugo template");
+    }
+
+    /// Performance test: Many Hugo templates
+    #[test]
+    fn test_hugo_template_performance() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Create content with many Hugo templates
+        let mut content = String::new();
+        for i in 0..100 {
+            content.push_str(&format!("{{raw `code{i}\n`}}\n"));
+        }
+
+        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let start = std::time::Instant::now();
+        let result = rule.check(&ctx).unwrap();
+        let duration = start.elapsed();
+
+        assert!(result.is_empty(), "Many Hugo templates should not trigger warnings");
+        assert!(
+            duration.as_millis() < 1000,
+            "Performance test: Should process 100 Hugo templates in <1s, took {duration:?}"
         );
     }
 

@@ -1198,4 +1198,308 @@ mod tests {
         // key, normal - not sorted
         assert_eq!(result.len(), 1);
     }
+
+    // ==================== Warning-based Fix Tests (LSP Path) ====================
+
+    #[test]
+    fn test_warning_fix_yaml_sorts_keys() {
+        let rule = create_enabled_rule();
+        let content = "---\nbbb: 123\naaa:\n  - hello\n  - world\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_some(), "Warning should have a fix attached for LSP");
+
+        let fix = warnings[0].fix.as_ref().unwrap();
+        assert_eq!(fix.range, 0..content.len(), "Fix should replace entire content");
+
+        // Apply the fix using the warning-based fix utility (LSP path)
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify keys are sorted
+        let aaa_pos = fixed.find("aaa:").expect("aaa should exist");
+        let bbb_pos = fixed.find("bbb:").expect("bbb should exist");
+        assert!(aaa_pos < bbb_pos, "aaa should come before bbb after sorting");
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_yaml_list_indentation() {
+        let rule = create_enabled_rule();
+        let content = "---\nbbb: 123\naaa:\n  - hello\n  - world\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify list items retain their 2-space indentation
+        assert!(
+            fixed.contains("  - hello"),
+            "List indentation should be preserved: {fixed}"
+        );
+        assert!(
+            fixed.contains("  - world"),
+            "List indentation should be preserved: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_nested_object_indentation() {
+        let rule = create_enabled_rule();
+        let content = "---\nzzzz: value\naaaa:\n  nested_key: nested_value\n  another: 123\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify aaaa comes before zzzz
+        let aaaa_pos = fixed.find("aaaa:").expect("aaaa should exist");
+        let zzzz_pos = fixed.find("zzzz:").expect("zzzz should exist");
+        assert!(aaaa_pos < zzzz_pos, "aaaa should come before zzzz");
+
+        // Verify nested keys retain their 2-space indentation
+        assert!(
+            fixed.contains("  nested_key: nested_value"),
+            "Nested object indentation should be preserved: {fixed}"
+        );
+        assert!(
+            fixed.contains("  another: 123"),
+            "Nested object indentation should be preserved: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_deeply_nested_structure() {
+        let rule = create_enabled_rule();
+        let content = "---\nzzz: top\naaa:\n  level1:\n    level2:\n      - item1\n      - item2\n---\n\n# Content\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify sorting
+        let aaa_pos = fixed.find("aaa:").expect("aaa should exist");
+        let zzz_pos = fixed.find("zzz:").expect("zzz should exist");
+        assert!(aaa_pos < zzz_pos, "aaa should come before zzz");
+
+        // Verify all indentation levels are preserved
+        assert!(fixed.contains("  level1:"), "2-space indent should be preserved");
+        assert!(fixed.contains("    level2:"), "4-space indent should be preserved");
+        assert!(fixed.contains("      - item1"), "6-space indent should be preserved");
+        assert!(fixed.contains("      - item2"), "6-space indent should be preserved");
+    }
+
+    #[test]
+    fn test_warning_fix_toml_sorts_keys() {
+        let rule = create_enabled_rule();
+        let content = "+++\ntitle = \"Test\"\nauthor = \"John\"\n+++\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_some(), "TOML warning should have a fix");
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify keys are sorted
+        let author_pos = fixed.find("author").expect("author should exist");
+        let title_pos = fixed.find("title").expect("title should exist");
+        assert!(author_pos < title_pos, "author should come before title");
+    }
+
+    #[test]
+    fn test_warning_fix_json_sorts_keys() {
+        let rule = create_enabled_rule();
+        let content = "{\n\"title\": \"Test\",\n\"author\": \"John\"\n}\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_some(), "JSON warning should have a fix");
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify keys are sorted
+        let author_pos = fixed.find("author").expect("author should exist");
+        let title_pos = fixed.find("title").expect("title should exist");
+        assert!(author_pos < title_pos, "author should come before title");
+    }
+
+    #[test]
+    fn test_warning_fix_no_fix_when_comments_present() {
+        let rule = create_enabled_rule();
+        let content = "---\ntitle: Test\n# This is a comment\nauthor: John\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].fix.is_none(),
+            "Warning should NOT have a fix when comments are present"
+        );
+        assert!(
+            warnings[0].message.contains("auto-fix unavailable"),
+            "Message should indicate auto-fix is unavailable"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_content_after_frontmatter() {
+        let rule = create_enabled_rule();
+        let content = "---\nzzz: last\naaa: first\n---\n\n# Heading\n\nParagraph with content.\n\n- List item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify content after frontmatter is preserved
+        assert!(fixed.contains("# Heading"), "Heading should be preserved");
+        assert!(
+            fixed.contains("Paragraph with content."),
+            "Paragraph should be preserved"
+        );
+        assert!(fixed.contains("- List item"), "List item should be preserved");
+    }
+
+    #[test]
+    fn test_warning_fix_idempotent() {
+        let rule = create_enabled_rule();
+        let content = "---\nbbb: 2\naaa: 1\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed_once = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Apply again - should produce no warnings
+        let ctx2 = LintContext::new(&fixed_once, crate::config::MarkdownFlavor::Standard, None);
+        let warnings2 = rule.check(&ctx2).unwrap();
+
+        assert!(
+            warnings2.is_empty(),
+            "After fixing, no more warnings should be produced"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_multiline_block_literal() {
+        let rule = create_enabled_rule();
+        let content = "---\nzzz: simple\naaa: |\n  Line 1 of block\n  Line 2 of block\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify block literal is preserved with indentation
+        assert!(fixed.contains("aaa: |"), "Block literal marker should be preserved");
+        assert!(
+            fixed.contains("  Line 1 of block"),
+            "Block literal line 1 should be preserved with indent"
+        );
+        assert!(
+            fixed.contains("  Line 2 of block"),
+            "Block literal line 2 should be preserved with indent"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_folded_string() {
+        let rule = create_enabled_rule();
+        let content = "---\nzzz: simple\naaa: >\n  Folded line 1\n  Folded line 2\n---\n\n# Content\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify folded string is preserved
+        assert!(fixed.contains("aaa: >"), "Folded string marker should be preserved");
+        assert!(
+            fixed.contains("  Folded line 1"),
+            "Folded line 1 should be preserved with indent"
+        );
+        assert!(
+            fixed.contains("  Folded line 2"),
+            "Folded line 2 should be preserved with indent"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_4_space_indentation() {
+        let rule = create_enabled_rule();
+        // Some projects use 4-space indentation
+        let content = "---\nzzz: value\naaa:\n    nested: with_4_spaces\n    another: value\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify 4-space indentation is preserved exactly
+        assert!(
+            fixed.contains("    nested: with_4_spaces"),
+            "4-space indentation should be preserved: {fixed}"
+        );
+        assert!(
+            fixed.contains("    another: value"),
+            "4-space indentation should be preserved: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_tab_indentation() {
+        let rule = create_enabled_rule();
+        // Some projects use tabs
+        let content = "---\nzzz: value\naaa:\n\tnested: with_tab\n\tanother: value\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify tab indentation is preserved exactly
+        assert!(
+            fixed.contains("\tnested: with_tab"),
+            "Tab indentation should be preserved: {fixed}"
+        );
+        assert!(
+            fixed.contains("\tanother: value"),
+            "Tab indentation should be preserved: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_inline_list() {
+        let rule = create_enabled_rule();
+        // Inline YAML lists should be preserved
+        let content = "---\nzzz: value\naaa: [one, two, three]\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify inline list format is preserved
+        assert!(
+            fixed.contains("aaa: [one, two, three]"),
+            "Inline list should be preserved exactly: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_warning_fix_preserves_quoted_strings() {
+        let rule = create_enabled_rule();
+        // Quoted strings with special chars
+        let content = "---\nzzz: simple\naaa: \"value with: colon\"\nbbb: 'single quotes'\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).expect("Fix should apply");
+
+        // Verify quoted strings are preserved exactly
+        assert!(
+            fixed.contains("aaa: \"value with: colon\""),
+            "Double-quoted string should be preserved: {fixed}"
+        );
+        assert!(
+            fixed.contains("bbb: 'single quotes'"),
+            "Single-quoted string should be preserved: {fixed}"
+        );
+    }
 }

@@ -602,7 +602,7 @@ mod tests {
         assert_eq!(sarif["version"], "2.1.0");
     }
 
-    // ===== Expert-level tests for comprehensive coverage =====
+    // ===== Comprehensive tests for full coverage =====
 
     #[test]
     fn test_md032_integration_produces_warning_level() {
