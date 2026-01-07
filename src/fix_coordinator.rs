@@ -157,11 +157,14 @@ impl FixCoordinator {
         sorted
     }
 
-    /// Apply fixes iteratively until no more fixes are needed or max iterations reached
+    /// Apply fixes iteratively until no more fixes are needed or max iterations reached.
+    ///
+    /// This implements a Ruff-inspired fix loop that re-checks ALL rules after each fix
+    /// to detect cascading issues (e.g., MD046 creating code blocks that MD040 needs to fix).
     pub fn apply_fixes_iterative(
         &self,
         rules: &[Box<dyn Rule>],
-        all_warnings: &[LintWarning],
+        _all_warnings: &[LintWarning], // Kept for API compatibility, but we re-check all rules
         content: &mut String,
         config: &Config,
         max_iterations: usize,
@@ -169,102 +172,81 @@ impl FixCoordinator {
         // Use the minimum of max_iterations parameter and MAX_ITERATIONS constant
         let max_iterations = max_iterations.min(MAX_ITERATIONS);
 
-        // Get optimal rule order
+        // Get optimal rule order based on dependencies
         let ordered_rules = self.get_optimal_order(rules);
-
-        // Group warnings by rule for quick lookup
-        let mut warnings_by_rule: HashMap<&str, Vec<&LintWarning>> = HashMap::new();
-        for warning in all_warnings {
-            if let Some(ref rule_name) = warning.rule_name {
-                warnings_by_rule.entry(rule_name.as_str()).or_default().push(warning);
-            }
-        }
 
         let mut total_fixed = 0;
         let mut total_ctx_creations = 0;
         let mut iterations = 0;
         let mut previous_hash = hash_content(content);
 
-        // Keep track of which rules have been processed successfully
-        let mut processed_rules = HashSet::new();
-
         // Track which rules actually applied fixes
         let mut fixed_rule_names = HashSet::new();
 
-        // Keep applying fixes until content stabilizes
+        // Build set of unfixable rules for quick lookup
+        let unfixable_rules: HashSet<&str> = config.global.unfixable.iter().map(|s| s.as_str()).collect();
+
+        // Build set of fixable rules (if specified)
+        let fixable_rules: HashSet<&str> = config.global.fixable.iter().map(|s| s.as_str()).collect();
+        let has_fixable_allowlist = !fixable_rules.is_empty();
+
+        // Ruff-style fix loop: keep applying fixes until content stabilizes
         while iterations < max_iterations {
             iterations += 1;
 
-            let mut fixes_in_iteration = 0;
+            // Create fresh context for this iteration
+            let ctx = LintContext::new(content, config.markdown_flavor(), None);
+            total_ctx_creations += 1;
+
             let mut any_fix_applied = false;
 
-            // Process one rule at a time with its own context
+            // Check and fix each rule in dependency order
             for rule in &ordered_rules {
-                // Skip rules we've already successfully processed
-                if processed_rules.contains(rule.name()) {
+                // Skip disabled rules
+                if unfixable_rules.contains(rule.name()) {
+                    continue;
+                }
+                if has_fixable_allowlist && !fixable_rules.contains(rule.name()) {
                     continue;
                 }
 
-                // Only process rules that had warnings
-                if !warnings_by_rule.contains_key(rule.name()) {
-                    processed_rules.insert(rule.name());
+                // Check if this rule has any current warnings
+                let warnings = match rule.check(&ctx) {
+                    Ok(w) => w,
+                    Err(_) => continue,
+                };
+
+                if warnings.is_empty() {
                     continue;
                 }
 
-                // Check if rule is disabled
-                if config
-                    .global
-                    .unfixable
-                    .iter()
-                    .any(|r| r.eq_ignore_ascii_case(rule.name()))
-                {
-                    processed_rules.insert(rule.name());
+                // Check if any warnings are fixable
+                let has_fixable = warnings.iter().any(|w| w.fix.is_some());
+                if !has_fixable {
                     continue;
                 }
-
-                if !config.global.fixable.is_empty()
-                    && !config
-                        .global
-                        .fixable
-                        .iter()
-                        .any(|r| r.eq_ignore_ascii_case(rule.name()))
-                {
-                    processed_rules.insert(rule.name());
-                    continue;
-                }
-
-                // Create context for this specific rule
-                let ctx = LintContext::new(content, config.markdown_flavor(), None);
-                total_ctx_creations += 1;
 
                 // Apply fix
                 match rule.fix(&ctx) {
                     Ok(fixed_content) => {
                         if fixed_content != *content {
                             *content = fixed_content;
-                            fixes_in_iteration += 1;
+                            total_fixed += 1;
                             any_fix_applied = true;
-                            processed_rules.insert(rule.name());
                             fixed_rule_names.insert(rule.name().to_string());
 
-                            // If this rule has dependents, break to start fresh iteration
-                            if self.dependencies.contains_key(rule.name()) {
-                                break;
-                            }
-                            // Otherwise continue with the next rule
-                        } else {
-                            // No changes from this rule, mark as processed
-                            processed_rules.insert(rule.name());
+                            // Break to re-check all rules with the new content
+                            // This is the key difference from the old approach:
+                            // we always restart from the beginning after a fix
+                            break;
                         }
                     }
                     Err(_) => {
-                        // Error applying fix, mark as processed to avoid retrying
-                        processed_rules.insert(rule.name());
+                        // Error applying fix, continue to next rule
+                        continue;
                     }
                 }
             }
-
-            total_fixed += fixes_in_iteration;
 
             // Check if content has stabilized (hash-based convergence)
             let current_hash = hash_content(content);
@@ -280,25 +262,25 @@ impl FixCoordinator {
             }
             previous_hash = current_hash;
 
-            // If no fixes were made in this iteration, we're done
+            // If no fixes were applied this iteration, we've converged
             if !any_fix_applied {
-                break;
-            }
-
-            // If all rules have been processed, we're done
-            if processed_rules.len() >= ordered_rules.len() {
-                break;
+                return Ok(FixResult {
+                    rules_fixed: total_fixed,
+                    iterations,
+                    context_creations: total_ctx_creations,
+                    fixed_rule_names,
+                    converged: true,
+                });
             }
         }
 
-        // If we reached here, either we hit max iterations or all rules processed
-        let converged = iterations < max_iterations;
+        // Hit max iterations - did not converge
         Ok(FixResult {
             rules_fixed: total_fixed,
             iterations,
             context_creations: total_ctx_creations,
             fixed_rule_names,
-            converged,
+            converged: false,
         })
     }
 }
@@ -307,9 +289,62 @@ impl FixCoordinator {
 mod tests {
     use super::*;
     use crate::config::GlobalConfig;
-    use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory};
+    use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // Mock rule for testing
+    /// Mock rule that checks content and applies fixes based on a condition
+    #[derive(Clone)]
+    struct ConditionalFixRule {
+        name: &'static str,
+        /// Function to check if content has issues
+        check_fn: fn(&str) -> bool,
+        /// Function to fix content
+        fix_fn: fn(&str) -> String,
+    }
+
+    impl Rule for ConditionalFixRule {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn check(&self, ctx: &LintContext) -> LintResult {
+            if (self.check_fn)(ctx.content) {
+                Ok(vec![LintWarning {
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 1,
+                    message: format!("{} issue found", self.name),
+                    rule_name: Some(self.name.to_string()),
+                    severity: Severity::Error,
+                    fix: Some(Fix {
+                        range: 0..0,
+                        replacement: String::new(),
+                    }),
+                }])
+            } else {
+                Ok(vec![])
+            }
+        }
+
+        fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
+            Ok((self.fix_fn)(ctx.content))
+        }
+
+        fn description(&self) -> &'static str {
+            "Conditional fix rule for testing"
+        }
+
+        fn category(&self) -> RuleCategory {
+            RuleCategory::Whitespace
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    // Simple mock rule for basic tests
     #[derive(Clone)]
     struct MockRule {
         name: &'static str,
@@ -385,36 +420,17 @@ mod tests {
     }
 
     #[test]
-    fn test_single_iteration_fix() {
+    fn test_single_rule_fix() {
         let coordinator = FixCoordinator::new();
 
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MockRule {
-            name: "MD001",
-            warnings: vec![LintWarning {
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 10,
-                message: "Test warning".to_string(),
-                rule_name: Some("MD001".to_string()),
-                severity: crate::rule::Severity::Error,
-                fix: None,
-            }],
-            fix_content: "fixed content".to_string(),
+        // Rule that removes "BAD" from content
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(ConditionalFixRule {
+            name: "RemoveBad",
+            check_fn: |content| content.contains("BAD"),
+            fix_fn: |content| content.replace("BAD", "GOOD"),
         })];
 
-        let warnings = vec![LintWarning {
-            line: 1,
-            column: 1,
-            end_line: 1,
-            end_column: 10,
-            message: "Test warning".to_string(),
-            rule_name: Some("MD001".to_string()),
-            severity: crate::rule::Severity::Error,
-            fix: None,
-        }];
-
-        let mut content = "original content".to_string();
+        let mut content = "This is BAD content".to_string();
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
@@ -422,76 +438,36 @@ mod tests {
             project_root: None,
         };
 
-        let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .unwrap();
 
-        assert!(result.is_ok());
-        let result = result.unwrap();
+        assert_eq!(content, "This is GOOD content");
         assert_eq!(result.rules_fixed, 1);
-        assert_eq!(result.iterations, 1);
-        assert_eq!(result.context_creations, 1);
         assert!(result.converged);
-        assert_eq!(content, "fixed content");
     }
 
     #[test]
-    fn test_multiple_iteration_with_dependencies() {
+    fn test_cascading_fixes() {
+        // Simulates MD046 -> MD040 cascade:
+        // Rule1: converts "INDENT" to "FENCE" (like MD046 converting indented to fenced)
+        // Rule2: converts "FENCE" to "FENCE_LANG" (like MD040 adding language)
         let coordinator = FixCoordinator::new();
 
         let rules: Vec<Box<dyn Rule>> = vec![
-            Box::new(MockRule {
-                name: "MD010", // Has dependents
-                warnings: vec![LintWarning {
-                    line: 1,
-                    column: 1,
-                    end_line: 1,
-                    end_column: 10,
-                    message: "Tabs".to_string(),
-                    rule_name: Some("MD010".to_string()),
-                    severity: crate::rule::Severity::Error,
-                    fix: None,
-                }],
-                fix_content: "content with spaces".to_string(),
+            Box::new(ConditionalFixRule {
+                name: "Rule1_IndentToFence",
+                check_fn: |content| content.contains("INDENT"),
+                fix_fn: |content| content.replace("INDENT", "FENCE"),
             }),
-            Box::new(MockRule {
-                name: "MD007", // Depends on MD010
-                warnings: vec![LintWarning {
-                    line: 1,
-                    column: 1,
-                    end_line: 1,
-                    end_column: 10,
-                    message: "Indentation".to_string(),
-                    rule_name: Some("MD007".to_string()),
-                    severity: crate::rule::Severity::Error,
-                    fix: None,
-                }],
-                fix_content: "content with spaces and proper indent".to_string(),
+            Box::new(ConditionalFixRule {
+                name: "Rule2_FenceToLang",
+                check_fn: |content| content.contains("FENCE") && !content.contains("FENCE_LANG"),
+                fix_fn: |content| content.replace("FENCE", "FENCE_LANG"),
             }),
         ];
 
-        let warnings = vec![
-            LintWarning {
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 10,
-                message: "Tabs".to_string(),
-                rule_name: Some("MD010".to_string()),
-                severity: crate::rule::Severity::Error,
-                fix: None,
-            },
-            LintWarning {
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 10,
-                message: "Indentation".to_string(),
-                rule_name: Some("MD007".to_string()),
-                severity: crate::rule::Severity::Error,
-                fix: None,
-            },
-        ];
-
-        let mut content = "content with tabs".to_string();
+        let mut content = "Code: INDENT".to_string();
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
@@ -499,13 +475,59 @@ mod tests {
             project_root: None,
         };
 
-        let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 10)
+            .unwrap();
 
-        assert!(result.is_ok());
-        let result = result.unwrap();
+        // Should reach final state in one run (internally multiple iterations)
+        assert_eq!(content, "Code: FENCE_LANG");
         assert_eq!(result.rules_fixed, 2);
-        assert_eq!(result.iterations, 2); // Should take 2 iterations due to dependency
-        assert!(result.context_creations >= 2);
+        assert!(result.converged);
+        assert!(result.iterations >= 2, "Should take at least 2 iterations for cascade");
+    }
+
+    #[test]
+    fn test_indirect_cascade() {
+        // Simulates MD022 -> MD046 -> MD040 indirect cascade:
+        // Rule1: adds "BLANK" (like MD022 adding blank line)
+        // Rule2: only triggers if "BLANK" present, converts "CODE" to "FENCE"
+        // Rule3: converts "FENCE" to "FENCE_LANG"
+        let coordinator = FixCoordinator::new();
+
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(ConditionalFixRule {
+                name: "Rule1_AddBlank",
+                check_fn: |content| content.contains("HEADING") && !content.contains("BLANK"),
+                fix_fn: |content| content.replace("HEADING", "HEADING BLANK"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "Rule2_CodeToFence",
+                // Only detects CODE as issue if BLANK is present (simulates CommonMark rule)
+                check_fn: |content| content.contains("BLANK") && content.contains("CODE"),
+                fix_fn: |content| content.replace("CODE", "FENCE"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "Rule3_AddLang",
+                check_fn: |content| content.contains("FENCE") && !content.contains("LANG"),
+                fix_fn: |content| content.replace("FENCE", "FENCE_LANG"),
+            }),
+        ];
+
+        let mut content = "HEADING CODE".to_string();
+        let config = Config {
+            global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
+            rules: Default::default(),
+            project_root: None,
+        };
+
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 10)
+            .unwrap();
+
+        // Key assertion: all fixes applied in single run
+        assert_eq!(content, "HEADING BLANK FENCE_LANG");
+        assert_eq!(result.rules_fixed, 3);
         assert!(result.converged);
     }
 
@@ -513,33 +535,13 @@ mod tests {
     fn test_unfixable_rules_skipped() {
         let coordinator = FixCoordinator::new();
 
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MockRule {
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(ConditionalFixRule {
             name: "MD001",
-            warnings: vec![LintWarning {
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 10,
-                message: "Test".to_string(),
-                rule_name: Some("MD001".to_string()),
-                severity: crate::rule::Severity::Error,
-                fix: None,
-            }],
-            fix_content: "fixed".to_string(),
+            check_fn: |content| content.contains("BAD"),
+            fix_fn: |content| content.replace("BAD", "GOOD"),
         })];
 
-        let warnings = vec![LintWarning {
-            line: 1,
-            column: 1,
-            end_line: 1,
-            end_column: 10,
-            message: "Test".to_string(),
-            rule_name: Some("MD001".to_string()),
-            severity: crate::rule::Severity::Error,
-            fix: None,
-        }];
-
-        let mut content = "original".to_string();
+        let mut content = "BAD content".to_string();
         let mut config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
@@ -548,40 +550,79 @@ mod tests {
         };
         config.global.unfixable = vec!["MD001".to_string()];
 
-        let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .unwrap();
 
-        assert!(result.is_ok());
-        let result = result.unwrap();
+        assert_eq!(content, "BAD content"); // Should not be changed
         assert_eq!(result.rules_fixed, 0);
         assert!(result.converged);
-        assert_eq!(content, "original"); // Should not be changed
+    }
+
+    #[test]
+    fn test_fixable_allowlist() {
+        let coordinator = FixCoordinator::new();
+
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(ConditionalFixRule {
+                name: "AllowedRule",
+                check_fn: |content| content.contains("A"),
+                fix_fn: |content| content.replace("A", "X"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "NotAllowedRule",
+                check_fn: |content| content.contains("B"),
+                fix_fn: |content| content.replace("B", "Y"),
+            }),
+        ];
+
+        let mut content = "AB".to_string();
+        let mut config = Config {
+            global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
+            rules: Default::default(),
+            project_root: None,
+        };
+        config.global.fixable = vec!["AllowedRule".to_string()];
+
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .unwrap();
+
+        assert_eq!(content, "XB"); // Only A->X, B unchanged
+        assert_eq!(result.rules_fixed, 1);
     }
 
     #[test]
     fn test_max_iterations_limit() {
-        // This test ensures we don't loop infinitely
         let coordinator = FixCoordinator::new();
 
-        // Create a rule that always changes content
+        // Rule that always changes content (pathological case)
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
         #[derive(Clone)]
         struct AlwaysChangeRule;
         impl Rule for AlwaysChangeRule {
             fn name(&self) -> &'static str {
-                "MD999"
+                "AlwaysChange"
             }
             fn check(&self, _: &LintContext) -> LintResult {
                 Ok(vec![LintWarning {
                     line: 1,
                     column: 1,
                     end_line: 1,
-                    end_column: 10,
-                    message: "Always warns".to_string(),
-                    rule_name: Some("MD999".to_string()),
-                    severity: crate::rule::Severity::Error,
-                    fix: None,
+                    end_column: 1,
+                    message: "Always".to_string(),
+                    rule_name: Some("AlwaysChange".to_string()),
+                    severity: Severity::Error,
+                    fix: Some(Fix {
+                        range: 0..0,
+                        replacement: String::new(),
+                    }),
                 }])
             }
             fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
+                COUNTER.fetch_add(1, Ordering::SeqCst);
                 Ok(format!("{}x", ctx.content))
             }
             fn description(&self) -> &'static str {
@@ -595,17 +636,8 @@ mod tests {
             }
         }
 
+        COUNTER.store(0, Ordering::SeqCst);
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(AlwaysChangeRule)];
-        let warnings = vec![LintWarning {
-            line: 1,
-            column: 1,
-            end_line: 1,
-            end_column: 10,
-            message: "Always warns".to_string(),
-            rule_name: Some("MD999".to_string()),
-            severity: crate::rule::Severity::Error,
-            fix: None,
-        }];
 
         let mut content = "test".to_string();
         let config = Config {
@@ -615,19 +647,20 @@ mod tests {
             project_root: None,
         };
 
-        let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 3);
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .unwrap();
 
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        assert_eq!(result.iterations, 1); // Should stop after first successful fix
-        assert!(result.converged);
+        // Should stop at max iterations
+        assert_eq!(result.iterations, 5);
+        assert!(!result.converged);
+        assert_eq!(COUNTER.load(Ordering::SeqCst), 5);
     }
 
     #[test]
-    fn test_empty_rules_and_warnings() {
+    fn test_empty_rules() {
         let coordinator = FixCoordinator::new();
         let rules: Vec<Box<dyn Rule>> = vec![];
-        let warnings: Vec<LintWarning> = vec![];
 
         let mut content = "unchanged".to_string();
         let config = Config {
@@ -637,20 +670,46 @@ mod tests {
             project_root: None,
         };
 
-        let result = coordinator.apply_fixes_iterative(&rules, &warnings, &mut content, &config, 5);
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .unwrap();
 
-        assert!(result.is_ok());
-        let result = result.unwrap();
         assert_eq!(result.rules_fixed, 0);
         assert_eq!(result.iterations, 1);
-        assert_eq!(result.context_creations, 0);
         assert!(result.converged);
         assert_eq!(content, "unchanged");
     }
 
     #[test]
+    fn test_no_warnings_no_changes() {
+        let coordinator = FixCoordinator::new();
+
+        // Rule that finds no issues
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(ConditionalFixRule {
+            name: "NoIssues",
+            check_fn: |_| false, // Never finds issues
+            fix_fn: |content| content.to_string(),
+        })];
+
+        let mut content = "clean content".to_string();
+        let config = Config {
+            global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
+            rules: Default::default(),
+            project_root: None,
+        };
+
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .unwrap();
+
+        assert_eq!(content, "clean content");
+        assert_eq!(result.rules_fixed, 0);
+        assert!(result.converged);
+    }
+
+    #[test]
     fn test_cyclic_dependencies_handled() {
-        // Test that cyclic dependencies don't cause infinite loops
         let mut coordinator = FixCoordinator::new();
 
         // Create a cycle: A -> B -> C -> A
@@ -681,5 +740,49 @@ mod tests {
 
         // Should return all rules despite cycle
         assert_eq!(ordered.len(), 3);
+    }
+
+    #[test]
+    fn test_fix_is_idempotent() {
+        // This is the key test for issue #271
+        let coordinator = FixCoordinator::new();
+
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(ConditionalFixRule {
+                name: "Rule1",
+                check_fn: |content| content.contains("A"),
+                fix_fn: |content| content.replace("A", "B"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "Rule2",
+                check_fn: |content| content.contains("B") && !content.contains("C"),
+                fix_fn: |content| content.replace("B", "BC"),
+            }),
+        ];
+
+        let config = Config {
+            global: GlobalConfig::default(),
+            per_file_ignores: HashMap::new(),
+            rules: Default::default(),
+            project_root: None,
+        };
+
+        // First run
+        let mut content1 = "A".to_string();
+        let result1 = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content1, &config, 10)
+            .unwrap();
+
+        // Second run on same final content
+        let mut content2 = content1.clone();
+        let result2 = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content2, &config, 10)
+            .unwrap();
+
+        // Should be identical (idempotent)
+        assert_eq!(content1, content2);
+        assert_eq!(result2.rules_fixed, 0, "Second run should fix nothing");
+        assert!(result1.converged);
+        assert!(result2.converged);
     }
 }
