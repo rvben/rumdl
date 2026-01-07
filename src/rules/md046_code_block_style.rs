@@ -1,6 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::element_cache::ElementCache;
+use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::calculate_line_range;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
@@ -235,6 +236,7 @@ impl MD046CodeBlockStyle {
         is_mkdocs: bool,
         in_list_context: &[bool],
         in_tab_context: &[bool],
+        in_admonition_context: &[bool],
     ) -> bool {
         if i >= lines.len() {
             return false;
@@ -258,13 +260,20 @@ impl MD046CodeBlockStyle {
             return false;
         }
 
+        // Skip if this is MkDocs admonition content (pre-computed)
+        // Admonitions are supported in MkDocs and other extended Markdown processors
+        if is_mkdocs && in_admonition_context[i] {
+            return false;
+        }
+
         // Check if preceded by a blank line (typical for code blocks)
         // OR if the previous line is also an indented code block (continuation)
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
         let prev_is_indented_code = i > 0
             && ElementCache::calculate_indentation_width_default(lines[i - 1]) >= 4
             && !in_list_context[i - 1]
-            && !(is_mkdocs && in_tab_context[i - 1]);
+            && !(is_mkdocs && in_tab_context[i - 1])
+            && !(is_mkdocs && in_admonition_context[i - 1]);
 
         // If no blank line before and previous line is not indented code,
         // it's likely list continuation, not a code block
@@ -306,6 +315,72 @@ impl MD046CodeBlockStyle {
         in_tab_context
     }
 
+    /// Pre-compute which lines are in MkDocs admonition context with a single forward pass
+    ///
+    /// MkDocs admonitions use `!!!` or `???` markers followed by a type, and their content
+    /// is indented by 4 spaces. This function marks all admonition markers and their
+    /// indented content as being in an admonition context, preventing them from being
+    /// incorrectly flagged as indented code blocks.
+    ///
+    /// Supports nested admonitions by maintaining a stack of active admonition contexts.
+    fn precompute_mkdocs_admonition_context(&self, lines: &[&str]) -> Vec<bool> {
+        let mut in_admonition_context = vec![false; lines.len()];
+        // Stack of active admonition indentation levels (supports nesting)
+        let mut admonition_stack: Vec<usize> = Vec::new();
+
+        for (i, line) in lines.iter().enumerate() {
+            let line_indent = ElementCache::calculate_indentation_width_default(line);
+
+            // Check if this is an admonition marker
+            if mkdocs_admonitions::is_admonition_start(line) {
+                let adm_indent = mkdocs_admonitions::get_admonition_indent(line).unwrap_or(0);
+
+                // Pop any admonitions that this one is not nested within
+                while let Some(&top_indent) = admonition_stack.last() {
+                    // New admonition must be indented more than parent to be nested
+                    if adm_indent <= top_indent {
+                        admonition_stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Push this admonition onto the stack
+                admonition_stack.push(adm_indent);
+                in_admonition_context[i] = true;
+                continue;
+            }
+
+            // Handle empty lines - they're valid within admonitions
+            if line.trim().is_empty() {
+                if !admonition_stack.is_empty() {
+                    in_admonition_context[i] = true;
+                }
+                continue;
+            }
+
+            // For non-empty lines, check if we're still in any admonition context
+            // Pop admonitions where the content indent requirement is not met
+            while let Some(&top_indent) = admonition_stack.last() {
+                // Content must be indented at least 4 spaces from the admonition marker
+                if line_indent >= top_indent + 4 {
+                    // This line is valid content for the top admonition (or one below)
+                    break;
+                } else {
+                    // Not indented enough for this admonition - pop it
+                    admonition_stack.pop();
+                }
+            }
+
+            // If we're still in any admonition context, mark this line
+            if !admonition_stack.is_empty() {
+                in_admonition_context[i] = true;
+            }
+        }
+
+        in_admonition_context
+    }
+
     /// Categorize indented blocks for fix behavior
     ///
     /// Returns two vectors:
@@ -323,6 +398,7 @@ impl MD046CodeBlockStyle {
         is_mkdocs: bool,
         in_list_context: &[bool],
         in_tab_context: &[bool],
+        in_admonition_context: &[bool],
     ) -> (Vec<bool>, Vec<bool>) {
         let mut is_misplaced = vec![false; lines.len()];
         let mut contains_fences = vec![false; lines.len()];
@@ -331,7 +407,14 @@ impl MD046CodeBlockStyle {
         let mut i = 0;
         while i < lines.len() {
             // Find the start of an indented block
-            if !self.is_indented_code_block_with_context(lines, i, is_mkdocs, in_list_context, in_tab_context) {
+            if !self.is_indented_code_block_with_context(
+                lines,
+                i,
+                is_mkdocs,
+                in_list_context,
+                in_tab_context,
+                in_admonition_context,
+            ) {
                 i += 1;
                 continue;
             }
@@ -347,6 +430,7 @@ impl MD046CodeBlockStyle {
                     is_mkdocs,
                     in_list_context,
                     in_tab_context,
+                    in_admonition_context,
                 )
             {
                 block_end += 1;
@@ -654,10 +738,15 @@ impl MD046CodeBlockStyle {
         let mut fenced_count = 0;
         let mut indented_count = 0;
 
-        // Pre-compute list and tab contexts for efficiency
+        // Pre-compute list, tab, and admonition contexts for efficiency
         let in_list_context = self.precompute_block_continuation_context(&lines);
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(&lines)
+        } else {
+            vec![false; lines.len()]
+        };
+        let in_admonition_context = if is_mkdocs {
+            self.precompute_mkdocs_admonition_context(&lines)
         } else {
             vec![false; lines.len()]
         };
@@ -677,7 +766,14 @@ impl MD046CodeBlockStyle {
                     in_fenced = false;
                 }
             } else if !in_fenced
-                && self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &in_list_context, &in_tab_context)
+                && self.is_indented_code_block_with_context(
+                    &lines,
+                    i,
+                    is_mkdocs,
+                    &in_list_context,
+                    &in_tab_context,
+                    &in_admonition_context,
+                )
             {
                 // Count each continuous indented block once
                 if !prev_was_indented {
@@ -749,10 +845,15 @@ impl Rule for MD046CodeBlockStyle {
         // Check if we're in MkDocs mode
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        // Pre-compute list and tab contexts once for all checks
+        // Pre-compute list, tab, and admonition contexts once for all checks
         let in_list_context = self.precompute_block_continuation_context(&lines);
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(&lines)
+        } else {
+            vec![false; lines.len()]
+        };
+        let in_admonition_context = if is_mkdocs {
+            self.precompute_mkdocs_admonition_context(&lines)
         } else {
             vec![false; lines.len()]
         };
@@ -839,8 +940,14 @@ impl Rule for MD046CodeBlockStyle {
             }
 
             // Check for indented code blocks (when not inside a fenced block)
-            if self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &in_list_context, &in_tab_context)
-                && target_style == CodeBlockStyle::Fenced
+            if self.is_indented_code_block_with_context(
+                &lines,
+                i,
+                is_mkdocs,
+                &in_list_context,
+                &in_tab_context,
+                &in_admonition_context,
+            ) && target_style == CodeBlockStyle::Fenced
             {
                 // Check if this is the start of a new indented block
                 let prev_line_is_indented = i > 0
@@ -850,6 +957,7 @@ impl Rule for MD046CodeBlockStyle {
                         is_mkdocs,
                         &in_list_context,
                         &in_tab_context,
+                        &in_admonition_context,
                     );
 
                 if !prev_line_is_indented {
@@ -912,10 +1020,15 @@ impl Rule for MD046CodeBlockStyle {
             _ => self.config.style,
         };
 
-        // Pre-compute list and tab contexts for efficiency
+        // Pre-compute list, tab, and admonition contexts for efficiency
         let in_list_context = self.precompute_block_continuation_context(&lines);
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(&lines)
+        } else {
+            vec![false; lines.len()]
+        };
+        let in_admonition_context = if is_mkdocs {
+            self.precompute_mkdocs_admonition_context(&lines)
         } else {
             vec![false; lines.len()]
         };
@@ -923,8 +1036,13 @@ impl Rule for MD046CodeBlockStyle {
         // Categorize indented blocks:
         // - misplaced_fence_lines: complete fenced blocks that were over-indented (safe to dedent)
         // - unsafe_fence_lines: contain fence markers but aren't complete (skip fixing to avoid broken output)
-        let (misplaced_fence_lines, unsafe_fence_lines) =
-            self.categorize_indented_blocks(&lines, is_mkdocs, &in_list_context, &in_tab_context);
+        let (misplaced_fence_lines, unsafe_fence_lines) = self.categorize_indented_blocks(
+            &lines,
+            is_mkdocs,
+            &in_list_context,
+            &in_tab_context,
+            &in_admonition_context,
+        );
 
         let mut result = String::with_capacity(content.len());
         let mut in_fenced_block = false;
@@ -967,16 +1085,24 @@ impl Rule for MD046CodeBlockStyle {
                     }
                 } else if target_style == CodeBlockStyle::Indented {
                     // Convert content inside fenced block to indented
+                    // IMPORTANT: Preserve the original line content (including internal indentation)
+                    // Don't use trimmed, as that would strip internal code indentation
                     result.push_str("    ");
-                    result.push_str(trimmed);
+                    result.push_str(line);
                     result.push('\n');
                 } else {
                     // Keep fenced block content as is
                     result.push_str(line);
                     result.push('\n');
                 }
-            } else if self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &in_list_context, &in_tab_context)
-            {
+            } else if self.is_indented_code_block_with_context(
+                &lines,
+                i,
+                is_mkdocs,
+                &in_list_context,
+                &in_tab_context,
+                &in_admonition_context,
+            ) {
                 // This is an indented code block
 
                 // Check if we need to start a new fenced block
@@ -987,6 +1113,7 @@ impl Rule for MD046CodeBlockStyle {
                         is_mkdocs,
                         &in_list_context,
                         &in_tab_context,
+                        &in_admonition_context,
                     );
 
                 if target_style == CodeBlockStyle::Fenced {
@@ -1023,6 +1150,7 @@ impl Rule for MD046CodeBlockStyle {
                             is_mkdocs,
                             &in_list_context,
                             &in_tab_context,
+                            &in_admonition_context,
                         );
                     // Don't close if this is an unsafe block (kept as-is)
                     if !next_line_is_indented
@@ -1263,6 +1391,136 @@ mod tests {
     }
 
     #[test]
+    fn test_fix_fenced_to_indented_preserves_internal_indentation() {
+        // Issue #270: When converting fenced code to indented, internal indentation must be preserved
+        // HTML templates, Python, etc. rely on proper indentation
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = r#"# Test
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <title>Test</title>
+  </head>
+</html>
+```
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The internal indentation (2 spaces for <head>, 4 for <title>) must be preserved
+        // Each line gets 4 spaces prepended for the indented code block
+        assert!(
+            fixed.contains("      <head>"),
+            "Expected 6 spaces before <head> (4 for code block + 2 original), got:\n{fixed}"
+        );
+        assert!(
+            fixed.contains("        <title>"),
+            "Expected 8 spaces before <title> (4 for code block + 4 original), got:\n{fixed}"
+        );
+        assert!(!fixed.contains("```"), "Fenced markers should be removed");
+    }
+
+    #[test]
+    fn test_fix_fenced_to_indented_preserves_python_indentation() {
+        // Issue #270: Python is indentation-sensitive - must preserve internal structure
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = r#"# Python Example
+
+```python
+def greet(name):
+    if name:
+        print(f"Hello, {name}!")
+    else:
+        print("Hello, World!")
+```
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Python indentation must be preserved exactly
+        assert!(
+            fixed.contains("    def greet(name):"),
+            "Function def should have 4 spaces (code block indent)"
+        );
+        assert!(
+            fixed.contains("        if name:"),
+            "if statement should have 8 spaces (4 code + 4 Python)"
+        );
+        assert!(
+            fixed.contains("            print"),
+            "print should have 12 spaces (4 code + 8 Python)"
+        );
+    }
+
+    #[test]
+    fn test_fix_fenced_to_indented_preserves_yaml_indentation() {
+        // Issue #270: YAML is also indentation-sensitive
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = r#"# Config
+
+```yaml
+server:
+  host: localhost
+  port: 8080
+  ssl:
+    enabled: true
+    cert: /path/to/cert
+```
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("    server:"), "Root key should have 4 spaces");
+        assert!(fixed.contains("      host:"), "First level should have 6 spaces");
+        assert!(fixed.contains("      ssl:"), "ssl key should have 6 spaces");
+        assert!(fixed.contains("        enabled:"), "Nested ssl should have 8 spaces");
+    }
+
+    #[test]
+    fn test_fix_fenced_to_indented_preserves_empty_lines() {
+        // Empty lines within code blocks should also get the 4-space prefix
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "```\nline1\n\nline2\n```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The fixed content should have proper structure
+        assert!(fixed.contains("    line1"), "line1 should be indented");
+        assert!(fixed.contains("    line2"), "line2 should be indented");
+        // Empty line between them is preserved (may or may not have spaces)
+    }
+
+    #[test]
+    fn test_fix_fenced_to_indented_multiple_blocks() {
+        // Multiple fenced blocks should all preserve their indentation
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = r#"# Doc
+
+```python
+def foo():
+    pass
+```
+
+Text between.
+
+```yaml
+key:
+  value: 1
+```
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("    def foo():"), "Python def should be indented");
+        assert!(fixed.contains("        pass"), "Python body should have 8 spaces");
+        assert!(fixed.contains("    key:"), "YAML root should have 4 spaces");
+        assert!(fixed.contains("      value:"), "YAML nested should have 6 spaces");
+        assert!(!fixed.contains("```"), "No fence markers should remain");
+    }
+
+    #[test]
     fn test_fix_unclosed_block() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
         let content = "```\ncode without closing";
@@ -1459,6 +1717,192 @@ Regular text
 
         // Nested tabs should not be flagged
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_mkdocs_admonitions_not_flagged_as_indented_code() {
+        // Issue #269: MkDocs admonitions have indented bodies that should NOT be
+        // treated as indented code blocks when style = "fenced"
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+!!! note
+    This is normal admonition content, not a code block.
+    It spans multiple lines.
+
+??? warning "Collapsible Warning"
+    This is also admonition content.
+
+???+ tip "Expanded Tip"
+    And this one too.
+
+Regular text outside admonitions."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Admonition content should not be flagged
+        assert_eq!(
+            result.len(),
+            0,
+            "Admonition content in MkDocs mode should not trigger MD046"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_with_actual_indented_code() {
+        // After an admonition ends, regular indented code blocks SHOULD be flagged
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+!!! note
+    This is admonition content.
+
+Regular text ends the admonition.
+
+    This is actual indented code (should be flagged)"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag the actual indented code block
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_admonition_in_standard_mode_flagged() {
+        // In standard Markdown mode, admonitions are not recognized, so the
+        // indented content should be flagged as indented code
+        // Note: A blank line is required before indented code blocks per CommonMark
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+!!! note
+
+    This looks like code in standard mode.
+
+Regular text."#;
+
+        // In Standard mode, admonitions are not recognized
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // The indented content should be flagged in standard mode
+        assert_eq!(
+            result.len(),
+            1,
+            "Admonition content in Standard mode should be flagged as indented code"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_with_fenced_code_inside() {
+        // Issue #269: Admonitions can contain fenced code blocks - must handle correctly
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+!!! note "Code Example"
+    Here's some code:
+
+    ```python
+    def hello():
+        print("world")
+    ```
+
+    More text after code.
+
+Regular text."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag anything - the fenced block inside admonition is valid
+        assert_eq!(result.len(), 0, "Fenced code blocks inside admonitions should be valid");
+    }
+
+    #[test]
+    fn test_mkdocs_nested_admonitions() {
+        // Nested admonitions are valid MkDocs syntax
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"# Document
+
+!!! note "Outer"
+    Outer content.
+
+    !!! warning "Inner"
+        Inner content.
+        More inner content.
+
+    Back to outer.
+
+Regular text."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Nested admonitions should not trigger MD046
+        assert_eq!(result.len(), 0, "Nested admonitions should not be flagged");
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_fix_does_not_wrap() {
+        // The fix function should not wrap admonition content in fences
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"!!! note
+    Content that should stay as admonition content.
+    Not be wrapped in code fences.
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Fix should not add fence markers to admonition content
+        assert!(
+            !fixed.contains("```\n    Content"),
+            "Admonition content should not be wrapped in fences"
+        );
+        assert_eq!(fixed, content, "Content should remain unchanged");
+    }
+
+    #[test]
+    fn test_mkdocs_empty_admonition() {
+        // Empty admonitions (marker only) should not cause issues
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"!!! note
+
+Regular paragraph after empty admonition.
+
+    This IS an indented code block (after blank + non-indented line)."#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // The indented code block after the paragraph should be flagged
+        assert_eq!(result.len(), 1, "Indented code after admonition ends should be flagged");
+    }
+
+    #[test]
+    fn test_mkdocs_indented_admonition() {
+        // Admonitions can themselves be indented (e.g., inside list items)
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = r#"- List item
+
+    !!! note
+        Indented admonition content.
+        More content.
+
+- Next item"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Admonition inside list should not be flagged
+        assert_eq!(
+            result.len(),
+            0,
+            "Indented admonitions (e.g., in lists) should not be flagged"
+        );
     }
 
     #[test]
