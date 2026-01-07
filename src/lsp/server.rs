@@ -717,6 +717,12 @@ impl RumdlLanguageServer {
     /// even when the editor's buffer content differs from the file on disk
     /// (e.g., nvim may strip trailing newlines from its buffer representation).
     fn apply_formatting_options(content: String, options: &FormattingOptions) -> String {
+        // If the original content is empty, keep it empty regardless of options
+        // This prevents marking empty documents as needing formatting
+        if content.is_empty() {
+            return content;
+        }
+
         let mut result = content.clone();
         let original_ended_with_newline = content.ends_with('\n');
 
@@ -3351,11 +3357,11 @@ disable = ["MD022"]
             trim_final_newlines: Some(true),
         };
 
-        // Empty content with insert_final_newline should get a newline
+        // Empty content should stay empty (no newline added to truly empty documents)
         let result = RumdlLanguageServer::apply_formatting_options("".to_string(), &options);
-        assert_eq!(result, "\n");
+        assert_eq!(result, "");
 
-        // Just newlines should become single newline
+        // Just newlines should become single newline (content existed, so gets final newline)
         let result = RumdlLanguageServer::apply_formatting_options("\n\n\n".to_string(), &options);
         assert_eq!(result, "\n");
     }

@@ -52,6 +52,11 @@ impl FixCoordinator {
         // CRITICAL DEPENDENCIES:
         // These dependencies prevent cascading issues that require multiple passes
 
+        // MD064 (multiple consecutive spaces) MUST run before:
+        // - MD010 (tabs->spaces) - MD010 replaces tabs with multiple spaces (e.g., 4),
+        //   which MD064 would incorrectly collapse back to 1 space if it ran after
+        dependencies.insert("MD064", vec!["MD010"]);
+
         // MD010 (tabs->spaces) MUST run before:
         // - MD007 (list indentation) - because tabs affect indent calculation
         // - MD005 (list indent consistency) - same reason

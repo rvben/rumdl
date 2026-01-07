@@ -119,6 +119,13 @@ impl MD064NoMultipleConsecutiveSpaces {
         false
     }
 
+    /// Check if the space count looks like a tab replacement (multiple of 4)
+    /// Tab replacements (4, 8, 12, etc. spaces) are intentional and should not be collapsed.
+    /// This prevents MD064 from undoing MD010's tab-to-spaces conversion.
+    fn is_tab_replacement_pattern(&self, space_count: usize) -> bool {
+        space_count >= 4 && space_count.is_multiple_of(4)
+    }
+
     /// Check if the match is inside or after a reference link definition
     /// Pattern: [label]: URL or [label]:  URL
     fn is_reference_link_definition(&self, line: &str, match_start: usize) -> bool {
@@ -282,6 +289,12 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
 
                 // Skip trailing whitespace (handled by MD009)
                 if self.is_trailing_whitespace(line.content, match_end) {
+                    continue;
+                }
+
+                // Skip tab replacement patterns (4, 8, 12, etc. spaces)
+                // This prevents MD064 from undoing MD010's tab-to-spaces conversion
+                if self.is_tab_replacement_pattern(space_count) {
                     continue;
                 }
 
