@@ -106,6 +106,8 @@ pub struct LineInfo {
     /// Whether this line is a horizontal rule (---, ***, ___, etc.)
     /// Pre-computed for consistent detection across all rules
     pub is_horizontal_rule: bool,
+    /// Whether this line is inside a math block ($$ ... $$)
+    pub in_math_block: bool,
 }
 
 impl LineInfo {
@@ -2050,6 +2052,44 @@ impl<'a> LintContext<'a> {
         in_code_block
     }
 
+    /// Pre-compute which lines are inside math blocks ($$ ... $$) - O(n) single pass
+    /// Returns a Vec<bool> where index i indicates if line i is in a math block
+    fn compute_math_block_line_map(content: &str, code_block_map: &[bool]) -> Vec<bool> {
+        let content_lines: Vec<&str> = content.lines().collect();
+        let num_lines = content_lines.len();
+        let mut in_math_block = vec![false; num_lines];
+
+        let mut inside_math = false;
+
+        for (i, line) in content_lines.iter().enumerate() {
+            // Skip lines that are in code blocks - math delimiters inside code are literal
+            if code_block_map.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+
+            let trimmed = line.trim();
+
+            // Check for math block delimiter ($$)
+            // A line with just $$ toggles the math block state
+            if trimmed == "$$" {
+                if inside_math {
+                    // Closing delimiter - this line is still part of the math block
+                    in_math_block[i] = true;
+                    inside_math = false;
+                } else {
+                    // Opening delimiter - this line starts the math block
+                    in_math_block[i] = true;
+                    inside_math = true;
+                }
+            } else if inside_math {
+                // Content inside math block
+                in_math_block[i] = true;
+            }
+        }
+
+        in_math_block
+    }
+
     /// Pre-compute basic line information (without headings/blockquotes)
     fn compute_basic_line_info(
         content: &str,
@@ -2064,6 +2104,9 @@ impl<'a> LintContext<'a> {
 
         // Pre-compute which lines are in code blocks
         let code_block_map = Self::compute_code_block_line_map(content, line_offsets, code_blocks);
+
+        // Pre-compute which lines are in math blocks ($$ ... $$)
+        let math_block_map = Self::compute_math_block_line_map(content, &code_block_map);
 
         // Detect front matter boundaries FIRST, before any other parsing
         // Use FrontMatterUtils to detect all types of front matter (YAML, TOML, JSON, malformed)
@@ -2123,6 +2166,9 @@ impl<'a> LintContext<'a> {
             let in_front_matter = front_matter_end > 0 && i < front_matter_end;
             let is_hr = !in_code_block && !in_front_matter && is_horizontal_rule_line(line);
 
+            // Get math block status for this line
+            let in_math_block = math_block_map.get(i).copied().unwrap_or(false);
+
             lines.push(LineInfo {
                 byte_offset,
                 byte_len: line.len(),
@@ -2140,6 +2186,7 @@ impl<'a> LintContext<'a> {
                 in_esm_block: false, // Will be populated after line creation for MDX files
                 in_code_span_continuation: false, // Will be populated after code spans are parsed
                 is_horizontal_rule: is_hr,
+                in_math_block,
             });
         }
 

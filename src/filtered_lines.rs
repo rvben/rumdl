@@ -74,6 +74,8 @@ pub struct LineFilterConfig {
     pub skip_mkdocstrings: bool,
     /// Skip lines inside ESM (ECMAScript Module) blocks
     pub skip_esm_blocks: bool,
+    /// Skip lines inside math blocks ($$ ... $$)
+    pub skip_math_blocks: bool,
 }
 
 impl LineFilterConfig {
@@ -143,6 +145,16 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside math blocks ($$ ... $$)
+    ///
+    /// Math blocks contain LaTeX/mathematical notation and markdown rules
+    /// should not process them as regular markdown content.
+    #[must_use]
+    pub fn skip_math_blocks(mut self) -> Self {
+        self.skip_math_blocks = true;
+        self
+    }
+
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         (self.skip_front_matter && line_info.in_front_matter)
@@ -151,6 +163,7 @@ impl LineFilterConfig {
             || (self.skip_html_comments && line_info.in_html_comment)
             || (self.skip_mkdocstrings && line_info.in_mkdocstrings)
             || (self.skip_esm_blocks && line_info.in_esm_block)
+            || (self.skip_math_blocks && line_info.in_math_block)
     }
 }
 
@@ -307,6 +320,13 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_esm_blocks(mut self) -> Self {
         self.config = self.config.skip_esm_blocks();
+        self
+    }
+
+    /// Skip lines inside math blocks ($$ ... $$)
+    #[must_use]
+    pub fn skip_math_blocks(mut self) -> Self {
+        self.config = self.config.skip_math_blocks();
         self
     }
 }
@@ -688,6 +708,91 @@ Content"#;
         assert!(
             !lines.iter().any(|l| l.content.contains("HTML block")),
             "Should exclude HTML blocks"
+        );
+    }
+
+    #[test]
+    fn test_skip_math_blocks() {
+        let content = r#"# Heading
+
+Some regular text.
+
+$$
+A = \left[
+\begin{array}{c}
+1 \\
+-D
+\end{array}
+\right]
+$$
+
+More content after math."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_math_blocks().into_iter().collect();
+
+        // Verify lines OUTSIDE math blocks are INCLUDED
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include markdown headings"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Some regular text")),
+            "Should include regular text before math block"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("More content after math")),
+            "Should include content after math block"
+        );
+
+        // Verify lines INSIDE math blocks are EXCLUDED
+        assert!(
+            !lines.iter().any(|l| l.content == "$$"),
+            "Should exclude math block delimiters"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("\\left[")),
+            "Should exclude LaTeX content inside math block"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("-D")),
+            "Should exclude content that looks like list items inside math block"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("\\begin{array}")),
+            "Should exclude LaTeX array content"
+        );
+    }
+
+    #[test]
+    fn test_math_blocks_not_confused_with_code_blocks() {
+        let content = r#"# Title
+
+```python
+# This $$ is inside a code block
+x = 1
+```
+
+$$
+y = 2
+$$
+
+Regular text."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Check that the $$ inside code block doesn't start a math block
+        let lines: Vec<_> = ctx.filtered_lines().skip_math_blocks().into_iter().collect();
+
+        // The $$ inside the code block should NOT trigger math block detection
+        // So when we skip math blocks, the code block content is still there (until we also skip code blocks)
+        assert!(
+            lines.iter().any(|l| l.content.contains("# This $$")),
+            "Code block content with $$ should not be detected as math block"
+        );
+
+        // But the real math block content should be excluded
+        assert!(
+            !lines.iter().any(|l| l.content == "y = 2"),
+            "Actual math block content should be excluded"
         );
     }
 }

@@ -1321,4 +1321,70 @@ mod tests {
             "FAQ callout patterns should not be flagged. Got: {result:?}"
         );
     }
+
+    #[test]
+    fn test_math_block_content_not_flagged() {
+        // Issue #275: Lines starting with - inside math blocks should not be flagged
+        // The -D in the LaTeX array is not a list item
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"# Heading
+
+$$
+A = \left[
+\begin{array}{c}
+1 \\
+-D
+\end{array}
+\right]
+$$"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Lines inside math blocks should not be flagged as list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_math_block_with_multiple_dashes() {
+        // More complex math block with multiple lines that could look like list items
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"# Math Example
+
+$$
+-x + y = z
+-a - b = c
+* not a list
++ also not a list
+$$
+
+Regular text after."#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Math block content with -, *, + should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_list_after_math_block_still_checked() {
+        // Ensure lists AFTER math blocks are still properly checked
+        let rule = MD030ListMarkerSpace::default();
+        let content = r#"# Heading
+
+$$
+-x = y
+$$
+
+*  Too many spaces"#;
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "List after math block should still be checked. Got: {result:?}"
+        );
+        assert!(result[0].message.contains("Spaces after list markers"));
+    }
 }

@@ -73,7 +73,8 @@ impl Rule for MD030ListMarkerSpace {
 
         // First pass: Check parser-recognized list items
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if line_info.list_item.is_some() && !line_info.in_code_block {
+            // Skip code blocks and math blocks - content inside these is not markdown
+            if line_info.list_item.is_some() && !line_info.in_code_block && !line_info.in_math_block {
                 let line_num_1based = line_num + 1;
                 processed_lines.insert(line_num_1based);
 
@@ -139,12 +140,15 @@ impl Rule for MD030ListMarkerSpace {
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
-            // Skip if already processed or in code block/front matter
+            // Skip if already processed or in code block/front matter/math block
             if processed_lines.contains(&line_num) {
                 continue;
             }
             if let Some(line_info) = ctx.lines.get(line_idx)
-                && (line_info.in_code_block || line_info.in_front_matter || line_info.in_html_comment)
+                && (line_info.in_code_block
+                    || line_info.in_front_matter
+                    || line_info.in_html_comment
+                    || line_info.in_math_block)
             {
                 continue;
             }
