@@ -294,7 +294,8 @@ impl Rule for MD057ExistingRelativeLinks {
         }
 
         // Quick check for any potential links before expensive operations
-        if !content.contains("](") {
+        // Check for inline links "](", reference definitions "]:", or images "!["
+        if !content.contains("](") && !content.contains("]:") {
             return Ok(Vec::new());
         }
 
@@ -519,6 +520,73 @@ impl Rule for MD057ExistingRelativeLinks {
                 column: image.start_col + 1,
                 end_line: image.line,
                 end_column: image.start_col + 1 + url.len(),
+                message: format!("Relative link '{url}' does not exist"),
+                severity: Severity::Error,
+                fix: None,
+            });
+        }
+
+        // Also process reference definitions: [ref]: ./path.md
+        for ref_def in &ctx.reference_defs {
+            let url = &ref_def.url;
+
+            // Skip empty URLs
+            if url.is_empty() {
+                continue;
+            }
+
+            // Skip external URLs, absolute paths, and fragment-only links
+            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                continue;
+            }
+
+            // Strip query parameters and fragments before checking file existence
+            let file_path = Self::strip_query_and_fragment(url);
+
+            // URL-decode the path to handle percent-encoded characters
+            let decoded_path = Self::url_decode(file_path);
+
+            // Resolve the relative link against the base path
+            let resolved_path = Self::resolve_link_path_with_base(&decoded_path, &base_path);
+
+            // Check if the file exists, also trying markdown extensions for extensionless links
+            if file_exists_or_markdown_extension(&resolved_path) {
+                continue; // File exists, no warning needed
+            }
+
+            // For .html/.htm links, check if a corresponding markdown source exists
+            let has_md_source = if let Some(ext) = resolved_path.extension().and_then(|e| e.to_str())
+                && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+                && let (Some(stem), Some(parent)) = (
+                    resolved_path.file_stem().and_then(|s| s.to_str()),
+                    resolved_path.parent(),
+                ) {
+                MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
+                    let source_path = parent.join(format!("{stem}{md_ext}"));
+                    file_exists_with_cache(&source_path)
+                })
+            } else {
+                false
+            };
+
+            if has_md_source {
+                continue; // Markdown source exists, link is valid
+            }
+
+            // File doesn't exist and no source file found
+            // Calculate column position: find URL within the line
+            let line_idx = ref_def.line - 1;
+            let column = content.lines().nth(line_idx).map_or(1, |line_content| {
+                // Find URL position in line (after ]: )
+                line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+            });
+
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: ref_def.line,
+                column,
+                end_line: ref_def.line,
+                end_column: column + url.len(),
                 message: format!("Relative link '{url}' does not exist"),
                 severity: Severity::Error,
                 fix: None,
@@ -1927,5 +1995,244 @@ This is a [real missing link](missing.md) that should be flagged.
             "Only regular markdown links should be indexed, not wikilinks. Got: {cross_file_links:?}"
         );
         assert_eq!(file_index.cross_file_links[0].target_path, "other.md");
+    }
+
+    #[test]
+    fn test_reference_definition_missing_file() {
+        // Reference definitions [ref]: ./path.md should be checked
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"# Test Document
+
+[test]: ./missing.md
+[example]: ./nonexistent.html
+
+Use [test] and [example] here.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have warnings for both reference definitions
+        assert_eq!(
+            result.len(),
+            2,
+            "Should have warnings for missing reference definition targets. Got: {result:?}"
+        );
+        assert!(
+            result.iter().any(|w| w.message.contains("missing.md")),
+            "Should warn about missing.md"
+        );
+        assert!(
+            result.iter().any(|w| w.message.contains("nonexistent.html")),
+            "Should warn about nonexistent.html"
+        );
+    }
+
+    #[test]
+    fn test_reference_definition_existing_file() {
+        // Reference definitions to existing files should NOT trigger warnings
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create an existing file
+        let exists_path = base_path.join("exists.md");
+        File::create(&exists_path)
+            .unwrap()
+            .write_all(b"# Existing file")
+            .unwrap();
+
+        let content = r#"# Test Document
+
+[test]: ./exists.md
+
+Use [test] here.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have NO warnings since the file exists
+        assert!(
+            result.is_empty(),
+            "Should not warn about existing file. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_reference_definition_external_url_skipped() {
+        // Reference definitions with external URLs should be skipped
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"# Test Document
+
+[google]: https://google.com
+[example]: http://example.org
+[mail]: mailto:test@example.com
+[ftp]: ftp://files.example.com
+[local]: ./missing.md
+
+Use [google], [example], [mail], [ftp], [local] here.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only warn about the local missing file, not external URLs
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about local missing file. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("missing.md"),
+            "Warning should be for missing.md"
+        );
+    }
+
+    #[test]
+    fn test_reference_definition_fragment_only_skipped() {
+        // Reference definitions with fragment-only URLs should be skipped
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"# Test Document
+
+[section]: #my-section
+
+Use [section] here.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have NO warnings for fragment-only links
+        assert!(
+            result.is_empty(),
+            "Should not warn about fragment-only reference. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_reference_definition_column_position() {
+        // Test that column position points to the URL in the reference definition
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Position markers:     0         1         2
+        //                       0123456789012345678901
+        let content = "[ref]: ./missing.md";
+        //             The URL "./missing.md" starts at 0-indexed position 7
+        //             which is 1-indexed column 8
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should have exactly one warning");
+        assert_eq!(result[0].line, 1, "Should be on line 1");
+        assert_eq!(result[0].column, 8, "Should point to start of URL './missing.md'");
+    }
+
+    #[test]
+    fn test_reference_definition_html_with_md_source() {
+        // Reference definitions to .html files should pass if corresponding .md source exists
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create guide.md (source file)
+        let md_file = base_path.join("guide.md");
+        File::create(&md_file).unwrap().write_all(b"# Guide").unwrap();
+
+        let content = r#"# Test Document
+
+[guide]: ./guide.html
+[missing]: ./missing.html
+
+Use [guide] and [missing] here.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // guide.html passes (guide.md exists), missing.html fails
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about missing source. Got: {result:?}"
+        );
+        assert!(result[0].message.contains("missing.html"));
+    }
+
+    #[test]
+    fn test_reference_definition_url_encoded() {
+        // Reference definitions with URL-encoded paths should be decoded before checking
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create a file with spaces in the name
+        let file_with_spaces = base_path.join("file with spaces.md");
+        File::create(&file_with_spaces).unwrap().write_all(b"# Spaces").unwrap();
+
+        let content = r#"# Test Document
+
+[spaces]: ./file%20with%20spaces.md
+[missing]: ./missing%20file.md
+
+Use [spaces] and [missing] here.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only warn about the missing file
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about missing URL-encoded file. Got: {result:?}"
+        );
+        assert!(result[0].message.contains("missing%20file.md"));
+    }
+
+    #[test]
+    fn test_inline_and_reference_both_checked() {
+        // Both inline links and reference definitions should be checked
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"# Test Document
+
+[inline link](./inline-missing.md)
+[ref]: ./ref-missing.md
+
+Use [ref] here.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should warn about both the inline link and the reference definition
+        assert_eq!(
+            result.len(),
+            2,
+            "Should warn about both inline and reference links. Got: {result:?}"
+        );
+        assert!(
+            result.iter().any(|w| w.message.contains("inline-missing.md")),
+            "Should warn about inline-missing.md"
+        );
+        assert!(
+            result.iter().any(|w| w.message.contains("ref-missing.md")),
+            "Should warn about ref-missing.md"
+        );
     }
 }
