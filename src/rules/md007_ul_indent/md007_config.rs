@@ -41,6 +41,11 @@ pub struct MD007Config {
     /// - Mixed ordered/unordered → text-aligned (avoids oscillation)
     #[serde(skip)]
     pub style_explicit: bool,
+
+    /// Whether indent was explicitly set in config (used for "Do What I Mean" behavior)
+    /// When indent is explicitly set but style is not, automatically use fixed style
+    #[serde(skip)]
+    pub indent_explicit: bool,
 }
 
 fn default_indent() -> IndentSize {
@@ -59,6 +64,7 @@ impl Default for MD007Config {
             start_indent: default_start_indent(),
             style: IndentStyle::default(),
             style_explicit: false,
+            indent_explicit: false,
         }
     }
 }

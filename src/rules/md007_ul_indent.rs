@@ -20,7 +20,8 @@ impl MD007ULIndent {
                 start_indented: false,
                 start_indent: crate::types::IndentSize::from_const(2),
                 style: md007_config::IndentStyle::TextAligned,
-                style_explicit: false, // Allow auto-detection for programmatic construction
+                style_explicit: false,  // Allow auto-detection for programmatic construction
+                indent_explicit: false, // Programmatic construction uses default behavior
             },
         }
     }
@@ -54,6 +55,7 @@ impl MD007ULIndent {
     /// - When parent is **unordered**: use configured indent (fixed-width markers)
     ///
     /// If user explicitly sets `style`, that choice is respected uniformly.
+    /// "Do What I Mean" behavior: if user sets `indent` but not `style`, use fixed style.
     fn calculate_expected_indent(
         &self,
         nesting_level: usize,
@@ -71,6 +73,12 @@ impl MD007ULIndent {
                     parent_info.map_or(nesting_level * 2, |(_, content_col)| content_col)
                 }
             };
+        }
+
+        // "Do What I Mean": if indent is explicitly set (but style is not), use fixed style
+        // This is the expected behavior when users configure `indent = 4` - they want 4-space increments
+        if self.config.indent_explicit {
+            return nesting_level * self.config.indent.get() as usize;
         }
 
         // Smart default: per-parent type decision
@@ -386,12 +394,25 @@ impl Rule for MD007ULIndent {
     {
         let mut rule_config = crate::rule_config_serde::load_rule_config::<MD007Config>(config);
 
-        // Check if style was explicitly set in the config
-        // This is used for smart auto-detection: when style is not explicit and indent != 2,
-        // we select style based on document content to provide markdownlint compatibility
-        // for pure unordered lists while avoiding oscillation for mixed lists
+        // Check if style and/or indent were explicitly set in the config
         if let Some(rule_cfg) = config.rules.get("MD007") {
             rule_config.style_explicit = rule_cfg.values.contains_key("style");
+            rule_config.indent_explicit = rule_cfg.values.contains_key("indent");
+
+            // Warn if both indent and text-aligned style are explicitly set
+            // This combination is contradictory: indent implies fixed increments,
+            // but text-aligned ignores the indent value and aligns with parent text
+            if rule_config.indent_explicit
+                && rule_config.style_explicit
+                && rule_config.style == md007_config::IndentStyle::TextAligned
+            {
+                eprintln!(
+                    "\x1b[33m[config warning]\x1b[0m MD007: 'indent' has no effect when 'style = \"text-aligned\"'. \
+                     Text-aligned style ignores indent and aligns nested items with parent text. \
+                     To use fixed {} space increments, either remove 'style' or set 'style = \"fixed\"'.",
+                    rule_config.indent.get()
+                );
+            }
         }
 
         Box::new(Self::from_config_struct(rule_config))
@@ -798,6 +819,7 @@ tags:
             indent: crate::types::IndentSize::from_const(2),
             style: md007_config::IndentStyle::TextAligned,
             style_explicit: true, // Explicit style for this test
+            indent_explicit: false,
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
@@ -1082,6 +1104,7 @@ tags:
             start_indent: crate::types::IndentSize::from_const(2),
             style: md007_config::IndentStyle::Fixed,
             style_explicit: true, // Explicit setting
+            indent_explicit: false,
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
@@ -1105,6 +1128,7 @@ tags:
             start_indent: crate::types::IndentSize::from_const(2),
             style: md007_config::IndentStyle::TextAligned,
             style_explicit: true, // Explicit setting
+            indent_explicit: false,
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
@@ -1203,6 +1227,7 @@ tags:
             start_indent: crate::types::IndentSize::from_const(2),
             style: md007_config::IndentStyle::TextAligned, // Default
             style_explicit: false,                         // Not explicitly set - should auto-detect
+            indent_explicit: false,                        // Not explicitly set
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
@@ -1226,6 +1251,7 @@ tags:
             start_indent: crate::types::IndentSize::from_const(2),
             style: md007_config::IndentStyle::TextAligned,
             style_explicit: true, // Explicit style to test text-aligned behavior
+            indent_explicit: false,
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
@@ -1480,6 +1506,116 @@ items:
         assert!(
             ctx.has_mixed_list_nesting(),
             "Should detect mixed nesting in blockquotes"
+        );
+    }
+
+    // Tests for "Do What I Mean" behavior (issue #273)
+
+    #[test]
+    fn test_indent_explicit_uses_fixed_style() {
+        // When indent is explicitly set but style is not, use fixed style automatically
+        // This is the "Do What I Mean" behavior for issue #273
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned, // Default
+            style_explicit: false,                         // Style NOT explicitly set
+            indent_explicit: true,                         // Indent explicitly set
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // With indent_explicit=true and style_explicit=false, should use fixed style
+        // Fixed style with indent=4: level 0 = 0, level 1 = 4, level 2 = 8
+        let content = "* Level 0\n    * Level 1\n        * Level 2";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "With indent_explicit=true, should use fixed style (0, 4, 8), got: {result:?}"
+        );
+
+        // Text-aligned spacing (2 spaces per level) should now be wrong
+        let wrong_content = "* Level 0\n  * Level 1\n    * Level 2";
+        let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should flag text-aligned spacing when indent_explicit=true"
+        );
+    }
+
+    #[test]
+    fn test_explicit_style_overrides_indent_explicit() {
+        // When both indent and style are explicitly set, style wins
+        // This ensures backwards compatibility and respects explicit user choice
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: true,  // Style explicitly set
+            indent_explicit: true, // Indent also explicitly set (user will see warning)
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // With explicit text-aligned style, should use text-aligned even with indent_explicit
+        let content = "* Level 0\n  * Level 1\n    * Level 2";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Explicit text-aligned style should be respected, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_indent_explicit_uses_smart_detection() {
+        // When neither is explicitly set, use smart per-parent detection (original behavior)
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: false, // Neither explicitly set - use smart detection
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // Pure unordered with neither explicit: per-parent logic applies
+        // For pure unordered at expected positions, fixed style is used
+        let content = "* Level 0\n    * Level 1";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // This should work with smart detection for pure unordered lists
+        assert!(
+            result.is_empty(),
+            "Smart detection should accept 4-space indent, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_273_exact_reproduction() {
+        // Exact reproduction from issue #273:
+        // User sets `indent = 4` without setting style, expects 4-space increments
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned, // Default (would use text-aligned)
+            style_explicit: false,
+            indent_explicit: true, // User explicitly set indent
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        let content = r#"* Item 1
+    * Item 2
+        * Item 3"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Issue #273: indent=4 should use 4-space increments, got: {result:?}"
         );
     }
 }

@@ -2048,3 +2048,92 @@ severity = "error"
         "Severity set via alias should be stored under canonical name"
     );
 }
+
+#[test]
+fn test_md007_indent_explicit_do_what_i_mean() {
+    // Test issue #273: "Do What I Mean" behavior
+    // When indent is explicitly set but style is not, the rule should use fixed style
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Config with only indent setting (no style) - "Do What I Mean" case
+    let config_content = r#"
+[MD007]
+indent = 4
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Create MD007 rule using from_config (which sets indent_explicit)
+    let rule = MD007ULIndent::from_config(&config);
+
+    // Test 1: 4-space indentation should be valid (fixed style behavior)
+    let valid_content = "* Item 1\n    * Item 2\n        * Item 3";
+    let ctx = LintContext::new(valid_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).expect("Rule check should succeed");
+    assert!(
+        result.is_empty(),
+        "With indent=4 explicit, 4-space indentation should be valid. Got: {result:?}"
+    );
+
+    // Test 2: 2-space indentation should be invalid (expected 4)
+    let invalid_content = "* Item 1\n  * Item 2\n    * Item 3";
+    let ctx = LintContext::new(invalid_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).expect("Rule check should succeed");
+    assert!(
+        !result.is_empty(),
+        "With indent=4 explicit, 2-space indentation should be flagged"
+    );
+    assert!(
+        result[0].message.contains("Expected 4 spaces"),
+        "Warning should say expected 4 spaces, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_md007_explicit_text_aligned_overrides_indent() {
+    // When both indent and style are explicitly set, style wins
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    // Config with both indent AND explicit text-aligned style
+    let config_content = r#"
+[MD007]
+indent = 4
+style = "text-aligned"
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Create MD007 rule using from_config
+    let rule = MD007ULIndent::from_config(&config);
+
+    // With explicit text-aligned style, 2-space indentation should be valid
+    // (text-aligned ignores indent setting and aligns with parent text)
+    let content = "* Item 1\n  * Item 2\n    * Item 3";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).expect("Rule check should succeed");
+    assert!(
+        result.is_empty(),
+        "With explicit text-aligned style, 2-space indentation should be valid. Got: {result:?}"
+    );
+}
