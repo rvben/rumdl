@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.213] - 2026-01-08
+
+### Fixed
+
+- **MD057: Check reference-style link definitions for broken links** (fixes #274)
+  - Reference-style link definitions like `[ref]: ./path.md` are now checked
+  - Previously only inline links `[text](./path.md)` were validated
+  - All existing validations apply: external URLs skipped, .html→.md fallback, URL decoding
+
+- **MD007: "Do What I Mean" behavior for indent configuration** (fixes #273)
+  - When `indent` is explicitly set without `style`, automatically use fixed style
+  - Setting `indent = 4` now actually uses 4-space increments as expected
+  - Warning shown if both `indent` and `style = "text-aligned"` are set (contradictory)
+
+- **MD030: Prevent false positives in math blocks** (fixes #275)
+  - Math blocks (`$$...$$`) are now detected and excluded from list marker spacing checks
+  - Fixes incorrect warnings about list spacing inside LaTeX display math
+
 ## [0.0.212] - 2026-01-07
 
 ### Added
