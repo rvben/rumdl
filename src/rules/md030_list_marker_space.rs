@@ -717,4 +717,55 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_nested_emphasis_not_flagged_issue_278() {
+        // Issue #278: Nested emphasis like *text **bold** more* should not trigger MD030
+        let rule = MD030ListMarkerSpace::default();
+
+        // This is emphasis with nested bold - NOT a list item
+        let content = "*This text is **very** important*";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Nested emphasis should not trigger MD030, got: {result:?}"
+        );
+
+        // Simple emphasis - NOT a list item
+        let content2 = "*Hello World*";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "Simple emphasis should not trigger MD030, got: {result2:?}"
+        );
+
+        // Bold text - NOT a list item
+        let content3 = "**bold text**";
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard, None);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert!(
+            result3.is_empty(),
+            "Bold text should not trigger MD030, got: {result3:?}"
+        );
+
+        // Bold+italic - NOT a list item
+        let content4 = "***bold and italic***";
+        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::Standard, None);
+        let result4 = rule.check(&ctx4).unwrap();
+        assert!(
+            result4.is_empty(),
+            "Bold+italic should not trigger MD030, got: {result4:?}"
+        );
+
+        // Actual list item with proper spacing - should NOT trigger
+        let content5 = "* Item with space";
+        let ctx5 = LintContext::new(content5, crate::config::MarkdownFlavor::Standard, None);
+        let result5 = rule.check(&ctx5).unwrap();
+        assert!(
+            result5.is_empty(),
+            "Properly spaced list item should not trigger MD030, got: {result5:?}"
+        );
+    }
 }

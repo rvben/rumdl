@@ -384,6 +384,9 @@ pub struct ListBlock {
 
 use std::sync::{Arc, OnceLock};
 
+/// Map from line byte offset to list item data: (is_ordered, marker, marker_column, content_column, number)
+type ListItemMap = std::collections::HashMap<usize, (bool, String, usize, usize, Option<usize>)>;
+
 /// Character frequency data for fast content analysis
 #[derive(Debug, Clone, Default)]
 pub struct CharFrequency {
@@ -596,8 +599,9 @@ impl<'a> LintContext<'a> {
             }
         });
 
-        // Pre-compute line information (without headings/blockquotes yet)
-        let mut lines = profile_section!(
+        // Pre-compute line information AND emphasis spans (without headings/blockquotes yet)
+        // Emphasis spans are captured during the same pulldown-cmark parse as list detection
+        let (mut lines, emphasis_spans) = profile_section!(
             "Basic line info",
             profile,
             Self::compute_basic_line_info(
@@ -706,7 +710,7 @@ impl<'a> LintContext<'a> {
             list_blocks,
             char_frequency,
             html_tags_cache: OnceLock::new(),
-            emphasis_spans_cache: OnceLock::new(),
+            emphasis_spans_cache: OnceLock::from(Arc::new(emphasis_spans)),
             table_rows_cache: OnceLock::new(),
             bare_urls_cache: OnceLock::new(),
             has_mixed_list_nesting_cache: OnceLock::new(),
@@ -744,11 +748,12 @@ impl<'a> LintContext<'a> {
         }))
     }
 
-    /// Get emphasis spans - computed lazily on first access
+    /// Get emphasis spans - pre-computed during construction
     pub fn emphasis_spans(&self) -> Arc<Vec<EmphasisSpan>> {
         Arc::clone(
             self.emphasis_spans_cache
-                .get_or_init(|| Arc::new(Self::parse_emphasis_spans(self.content, &self.lines, &self.code_blocks))),
+                .get()
+                .expect("emphasis_spans_cache initialized during construction"),
         )
     }
 
@@ -1792,15 +1797,20 @@ impl<'a> LintContext<'a> {
     /// We use `entry().or_insert()` because pulldown-cmark may emit multiple events
     /// that resolve to the same line (after newline adjustment). The first event
     /// for each line is authoritative.
-    fn detect_list_items_with_pulldown(
+    /// Detect list items and emphasis spans in a single pulldown-cmark pass.
+    /// Returns both list items (for LineInfo) and emphasis spans (for MD030).
+    /// This avoids a separate parse for emphasis detection.
+    fn detect_list_items_and_emphasis_with_pulldown(
         content: &str,
         line_offsets: &[usize],
         flavor: MarkdownFlavor,
         front_matter_end: usize,
-    ) -> std::collections::HashMap<usize, (bool, String, usize, usize, Option<usize>)> {
+        code_blocks: &[(usize, usize)],
+    ) -> (ListItemMap, Vec<EmphasisSpan>) {
         use std::collections::HashMap;
 
         let mut list_items = HashMap::new();
+        let mut emphasis_spans = Vec::with_capacity(content.matches('*').count() + content.matches('_').count() / 4);
 
         let mut options = Options::empty();
         options.insert(Options::ENABLE_TABLES);
@@ -1819,6 +1829,57 @@ impl<'a> LintContext<'a> {
 
         for (event, range) in parser {
             match event {
+                // Capture emphasis spans (for MD030's emphasis detection)
+                Event::Start(Tag::Emphasis) | Event::Start(Tag::Strong) => {
+                    let marker_count = if matches!(event, Event::Start(Tag::Strong)) {
+                        2
+                    } else {
+                        1
+                    };
+                    let match_start = range.start;
+                    let match_end = range.end;
+
+                    // Skip if in code block
+                    if !CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+                        // Determine marker character by looking at the content at the start
+                        let marker = content[match_start..].chars().next().unwrap_or('*');
+                        if marker == '*' || marker == '_' {
+                            // Extract content between markers
+                            let content_start = match_start + marker_count;
+                            let content_end = if match_end >= marker_count {
+                                match_end - marker_count
+                            } else {
+                                match_end
+                            };
+                            let content_part = if content_start < content_end && content_end <= content.len() {
+                                &content[content_start..content_end]
+                            } else {
+                                ""
+                            };
+
+                            // Find which line this emphasis is on using line_offsets
+                            let line_idx = match line_offsets.binary_search(&match_start) {
+                                Ok(idx) => idx,
+                                Err(idx) => idx.saturating_sub(1),
+                            };
+                            let line_num = line_idx + 1;
+                            let line_start = line_offsets.get(line_idx).copied().unwrap_or(0);
+                            let col_start = match_start - line_start;
+                            let col_end = match_end - line_start;
+
+                            emphasis_spans.push(EmphasisSpan {
+                                line: line_num,
+                                start_col: col_start,
+                                end_col: col_end,
+                                byte_offset: match_start,
+                                byte_end: match_end,
+                                marker,
+                                marker_count,
+                                content: content_part.to_string(),
+                            });
+                        }
+                    }
+                }
                 Event::Start(Tag::List(start_number)) => {
                     list_depth += 1;
                     list_stack.push(start_number.is_some());
@@ -1908,7 +1969,7 @@ impl<'a> LintContext<'a> {
             }
         }
 
-        list_items
+        (list_items, emphasis_spans)
     }
 
     /// Fast unordered list parser - replaces regex for 5-10x speedup
@@ -2091,6 +2152,7 @@ impl<'a> LintContext<'a> {
     }
 
     /// Pre-compute basic line information (without headings/blockquotes)
+    /// Also returns emphasis spans detected during the pulldown-cmark parse
     fn compute_basic_line_info(
         content: &str,
         line_offsets: &[usize],
@@ -2098,7 +2160,7 @@ impl<'a> LintContext<'a> {
         flavor: MarkdownFlavor,
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
         autodoc_ranges: &[crate::utils::skip_context::ByteRange],
-    ) -> Vec<LineInfo> {
+    ) -> (Vec<LineInfo>, Vec<EmphasisSpan>) {
         let content_lines: Vec<&str> = content.lines().collect();
         let mut lines = Vec::with_capacity(content_lines.len());
 
@@ -2112,8 +2174,15 @@ impl<'a> LintContext<'a> {
         // Use FrontMatterUtils to detect all types of front matter (YAML, TOML, JSON, malformed)
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
-        // Use pulldown-cmark to detect list items (context-aware, eliminates false positives)
-        let list_item_map = Self::detect_list_items_with_pulldown(content, line_offsets, flavor, front_matter_end);
+        // Use pulldown-cmark to detect list items AND emphasis spans in a single pass
+        // (context-aware, eliminates false positives)
+        let (list_item_map, emphasis_spans) = Self::detect_list_items_and_emphasis_with_pulldown(
+            content,
+            line_offsets,
+            flavor,
+            front_matter_end,
+            code_blocks,
+        );
 
         for (i, line) in content_lines.iter().enumerate() {
             let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
@@ -2190,7 +2259,7 @@ impl<'a> LintContext<'a> {
             });
         }
 
-        lines
+        (lines, emphasis_spans)
     }
 
     /// Detect headings and blockquotes (called after HTML block detection)
@@ -3396,66 +3465,6 @@ impl<'a> LintContext<'a> {
         }
 
         html_tags
-    }
-
-    /// Parse emphasis spans in the content
-    fn parse_emphasis_spans(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<EmphasisSpan> {
-        static EMPHASIS_REGEX: LazyLock<regex::Regex> =
-            LazyLock::new(|| regex::Regex::new(r"(\*{1,3}|_{1,3})([^*_\s][^*_]*?)(\*{1,3}|_{1,3})").unwrap());
-
-        let mut emphasis_spans = Vec::with_capacity(content.matches('*').count() + content.matches('_').count() / 4);
-
-        for cap in EMPHASIS_REGEX.captures_iter(content) {
-            let full_match = cap.get(0).unwrap();
-            let match_start = full_match.start();
-            let match_end = full_match.end();
-
-            // Skip if in code block
-            if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
-                continue;
-            }
-
-            let opening_markers = cap.get(1).unwrap().as_str();
-            let content_part = cap.get(2).unwrap().as_str();
-            let closing_markers = cap.get(3).unwrap().as_str();
-
-            // Validate matching markers
-            if opening_markers.chars().next() != closing_markers.chars().next()
-                || opening_markers.len() != closing_markers.len()
-            {
-                continue;
-            }
-
-            let marker = opening_markers.chars().next().unwrap();
-            let marker_count = opening_markers.len();
-
-            // Find which line this emphasis is on
-            let mut line_num = 1;
-            let mut col_start = match_start;
-            let mut col_end = match_end;
-            for (idx, line_info) in lines.iter().enumerate() {
-                if match_start >= line_info.byte_offset {
-                    line_num = idx + 1;
-                    col_start = match_start - line_info.byte_offset;
-                    col_end = match_end - line_info.byte_offset;
-                } else {
-                    break;
-                }
-            }
-
-            emphasis_spans.push(EmphasisSpan {
-                line: line_num,
-                start_col: col_start,
-                end_col: col_end,
-                byte_offset: match_start,
-                byte_end: match_end,
-                marker,
-                marker_count,
-                content: content_part.to_string(),
-            });
-        }
-
-        emphasis_spans
     }
 
     /// Parse table rows in the content
