@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MD031/MD046: Detect code blocks inside lists** (fixes #276)
+  - MD031 with `list-items=true` now correctly flags fenced code blocks inside lists
+  - MD046 with `style=fenced` now correctly flags indented code blocks inside lists
+  - Uses pulldown-cmark for accurate CommonMark-compliant code block detection
+  - Properly distinguishes between code blocks and footnote/admonition/tab content
+
 - **MD057: Check reference-style link definitions for broken links** (fixes #274)
   - Reference-style link definitions like `[ref]: ./path.md` are now checked
   - Previously only inline links `[text](./path.md)` were validated

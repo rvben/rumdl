@@ -7,6 +7,7 @@ use crate::utils::element_cache::ElementCache;
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::range_utils::calculate_line_range;
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD031 rule
@@ -97,34 +98,6 @@ impl MD031BlanksAroundFences {
         false
     }
 
-    /// Calculate indentation (number of leading spaces)
-    fn get_indentation(line: &str) -> usize {
-        line.chars().take_while(|c| *c == ' ').count()
-    }
-
-    /// Check if a line has a valid fence marker (CommonMark: 0-3 spaces max indentation)
-    fn get_fence_marker(line: &str) -> Option<String> {
-        let indent = Self::get_indentation(line);
-        // CommonMark: fences must have at most 3 spaces of indentation
-        if indent > 3 {
-            return None;
-        }
-
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
-            let backtick_count = trimmed.chars().take_while(|&c| c == '`').count();
-            if backtick_count >= 3 {
-                return Some("`".repeat(backtick_count));
-            }
-        } else if trimmed.starts_with("~~~") {
-            let tilde_count = trimmed.chars().take_while(|&c| c == '~').count();
-            if tilde_count >= 3 {
-                return Some("~".repeat(tilde_count));
-            }
-        }
-        None
-    }
-
     /// Check if blank line should be required based on configuration
     fn should_require_blank_line(&self, line_index: usize, lines: &[&str]) -> bool {
         if self.config.list_items {
@@ -141,6 +114,77 @@ impl MD031BlanksAroundFences {
         line_index > 0
             && ctx.lines.get(line_index - 1).is_some_and(|info| info.in_front_matter)
             && ctx.lines.get(line_index).is_some_and(|info| !info.in_front_matter)
+    }
+
+    /// Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
+    ///
+    /// Returns a vector of (opening_line_idx, closing_line_idx) for each fenced code block.
+    /// The indices are 0-based line numbers.
+    fn detect_fenced_code_blocks_pulldown(
+        content: &str,
+        line_offsets: &[usize],
+        lines: &[&str],
+    ) -> Vec<(usize, usize)> {
+        let mut fenced_blocks = Vec::new();
+        let options = Options::all();
+        let parser = Parser::new_ext(content, options).into_offset_iter();
+
+        let mut current_block_start: Option<usize> = None;
+
+        // Helper to convert byte offset to line index
+        let byte_to_line = |byte_offset: usize| -> usize {
+            line_offsets
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|&(_, &offset)| offset <= byte_offset)
+                .map(|(idx, _)| idx)
+                .unwrap_or(0)
+        };
+
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))) => {
+                    let line_idx = byte_to_line(range.start);
+                    current_block_start = Some(line_idx);
+                }
+                Event::End(TagEnd::CodeBlock) => {
+                    if let Some(start_line) = current_block_start.take() {
+                        // Find the closing fence line
+                        // The range.end points just past the closing fence
+                        // We need to find the line that contains the actual closing fence
+                        let end_byte = if range.end > 0 { range.end - 1 } else { 0 };
+                        let end_line = byte_to_line(end_byte);
+
+                        // Verify this is actually a closing fence line (not just end of content)
+                        // For properly closed fences, the end line should contain a fence marker
+                        let end_line_content = lines.get(end_line).unwrap_or(&"");
+                        let trimmed = end_line_content.trim();
+                        let is_closing_fence = (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+                            && trimmed
+                                .chars()
+                                .skip_while(|&c| c == '`' || c == '~')
+                                .all(|c| c.is_whitespace());
+
+                        if is_closing_fence {
+                            fenced_blocks.push((start_line, end_line));
+                        } else {
+                            // Unclosed code block - extends to end of document
+                            // We still record it but the end_line will be the last line
+                            fenced_blocks.push((start_line, lines.len().saturating_sub(1)));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Handle any unclosed block
+        if let Some(start_line) = current_block_start {
+            fenced_blocks.push((start_line, lines.len().saturating_sub(1)));
+        }
+
+        fenced_blocks
     }
 }
 
@@ -159,57 +203,123 @@ impl Rule for MD031BlanksAroundFences {
 
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-
-        let mut in_code_block = false;
-        let mut current_fence_marker: Option<String> = None;
-        let mut in_admonition = false;
-        let mut admonition_indent = 0;
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
-        let mut i = 0;
 
-        while i < lines.len() {
-            let line = lines[i];
-            let trimmed = line.trim_start();
+        // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
+        let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, &lines);
 
-            // Check for MkDocs admonition start
-            if is_mkdocs && mkdocs_admonitions::is_admonition_start(line) {
-                // Check for blank line before admonition (similar to code blocks)
-                // Skip if right after frontmatter
-                if i > 0
-                    && !Self::is_empty_line(lines[i - 1])
-                    && !Self::is_right_after_frontmatter(i, ctx)
-                    && self.should_require_blank_line(i, &lines)
-                {
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
+        // Check blank lines around each fenced code block
+        for (opening_line, closing_line) in &fenced_blocks {
+            // Check for blank line before opening fence
+            // Skip if right after frontmatter
+            if *opening_line > 0
+                && !Self::is_empty_line(lines[*opening_line - 1])
+                && !Self::is_right_after_frontmatter(*opening_line, ctx)
+                && self.should_require_blank_line(*opening_line, &lines)
+            {
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_line_range(*opening_line + 1, lines[*opening_line]);
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: "No blank line before admonition block".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
-                            replacement: "\n".to_string(),
-                        }),
-                    });
-                }
-
-                in_admonition = true;
-                admonition_indent = mkdocs_admonitions::get_admonition_indent(line).unwrap_or(0);
-                i += 1;
-                continue;
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: "No blank line before fenced code block".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range_with_length(*opening_line + 1, 1, 0),
+                        replacement: "\n".to_string(),
+                    }),
+                });
             }
 
-            // Check if we're exiting an admonition
-            if in_admonition {
-                if !line.trim().is_empty() && !mkdocs_admonitions::is_admonition_content(line, admonition_indent) {
-                    // We've exited the admonition
+            // Check for blank line after closing fence
+            // Allow Kramdown block attributes if configured
+            if *closing_line + 1 < lines.len()
+                && !Self::is_empty_line(lines[*closing_line + 1])
+                && !is_kramdown_block_attribute(lines[*closing_line + 1])
+                && self.should_require_blank_line(*closing_line, &lines)
+            {
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_line_range(*closing_line + 1, lines[*closing_line]);
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: "No blank line after fenced code block".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: line_index.line_col_to_byte_range_with_length(
+                            *closing_line + 1,
+                            lines[*closing_line].len() + 1,
+                            0,
+                        ),
+                        replacement: "\n".to_string(),
+                    }),
+                });
+            }
+        }
+
+        // Handle MkDocs admonitions separately
+        if is_mkdocs {
+            let mut in_admonition = false;
+            let mut admonition_indent = 0;
+            let mut i = 0;
+
+            while i < lines.len() {
+                let line = lines[i];
+
+                // Skip if this line is inside a fenced code block
+                let in_fenced_block = fenced_blocks.iter().any(|(start, end)| i >= *start && i <= *end);
+                if in_fenced_block {
+                    i += 1;
+                    continue;
+                }
+
+                // Check for MkDocs admonition start
+                if mkdocs_admonitions::is_admonition_start(line) {
+                    // Check for blank line before admonition
+                    if i > 0
+                        && !Self::is_empty_line(lines[i - 1])
+                        && !Self::is_right_after_frontmatter(i, ctx)
+                        && self.should_require_blank_line(i, &lines)
+                    {
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: "No blank line before admonition block".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
+                                replacement: "\n".to_string(),
+                            }),
+                        });
+                    }
+
+                    in_admonition = true;
+                    admonition_indent = mkdocs_admonitions::get_admonition_indent(line).unwrap_or(0);
+                    i += 1;
+                    continue;
+                }
+
+                // Check if we're exiting an admonition
+                if in_admonition
+                    && !line.trim().is_empty()
+                    && !mkdocs_admonitions::is_admonition_content(line, admonition_indent)
+                {
                     in_admonition = false;
 
-                    // Check for blank line after admonition (current line should be blank)
+                    // Check for blank line after admonition
                     if !Self::is_empty_line(line) && self.should_require_blank_line(i - 1, &lines) {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
@@ -229,98 +339,10 @@ impl Rule for MD031BlanksAroundFences {
                     }
 
                     admonition_indent = 0;
-                    // Don't continue - process this line normally
-                } else {
-                    // Still in admonition
-                    i += 1;
-                    continue;
                 }
+
+                i += 1;
             }
-
-            // Determine fence marker if this is a fence line (respects CommonMark 0-3 space limit)
-            let fence_marker = Self::get_fence_marker(line);
-
-            if let Some(fence_marker) = fence_marker {
-                if in_code_block {
-                    // We're inside a code block, check if this closes it
-                    if let Some(ref current_marker) = current_fence_marker {
-                        // A fence can only close a code block if:
-                        // 1. It has the same type of marker (backticks or tildes)
-                        // 2. It has at least as many markers as the opening fence
-                        // 3. It has no content after the fence marker
-                        let same_type = (current_marker.starts_with('`') && fence_marker.starts_with('`'))
-                            || (current_marker.starts_with('~') && fence_marker.starts_with('~'));
-
-                        if same_type
-                            && fence_marker.len() >= current_marker.len()
-                            && trimmed[fence_marker.len()..].trim().is_empty()
-                        {
-                            // This closes the current code block
-                            in_code_block = false;
-                            current_fence_marker = None;
-
-                            // Check for blank line after closing fence
-                            // Allow Kramdown block attributes if configured
-                            if i + 1 < lines.len()
-                                && !Self::is_empty_line(lines[i + 1])
-                                && !is_kramdown_block_attribute(lines[i + 1])
-                                && self.should_require_blank_line(i, &lines)
-                            {
-                                let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
-
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name().to_string()),
-                                    line: start_line,
-                                    column: start_col,
-                                    end_line,
-                                    end_column: end_col,
-                                    message: "No blank line after fenced code block".to_string(),
-                                    severity: Severity::Warning,
-                                    fix: Some(Fix {
-                                        range: line_index.line_col_to_byte_range_with_length(
-                                            i + 1,
-                                            lines[i].len() + 1,
-                                            0,
-                                        ),
-                                        replacement: "\n".to_string(),
-                                    }),
-                                });
-                            }
-                        }
-                        // else: This is content inside a code block (shorter fence or different type), ignore
-                    }
-                } else {
-                    // We're outside a code block, this opens one
-                    in_code_block = true;
-                    current_fence_marker = Some(fence_marker);
-
-                    // Check for blank line before opening fence
-                    // Skip if right after frontmatter
-                    if i > 0
-                        && !Self::is_empty_line(lines[i - 1])
-                        && !Self::is_right_after_frontmatter(i, ctx)
-                        && self.should_require_blank_line(i, &lines)
-                    {
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "No blank line before fenced code block".to_string(),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
-                                replacement: "\n".to_string(),
-                            }),
-                        });
-                    }
-                }
-            }
-            // If we're inside a code block, ignore all content lines
-            i += 1;
         }
 
         Ok(warnings)
@@ -328,79 +350,53 @@ impl Rule for MD031BlanksAroundFences {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
-        let _line_index = &ctx.line_index;
 
         // Check if original content ended with newline
         let had_trailing_newline = content.ends_with('\n');
 
         let lines: Vec<&str> = content.lines().collect();
 
-        let mut result = Vec::new();
-        let mut in_code_block = false;
-        let mut current_fence_marker: Option<String> = None;
+        // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
+        let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, &lines);
 
-        let mut i = 0;
+        // Collect lines that need blank lines before/after
+        let mut needs_blank_before: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut needs_blank_after: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
-        while i < lines.len() {
-            let line = lines[i];
-            let trimmed = line.trim_start();
-
-            // Determine fence marker if this is a fence line (respects CommonMark 0-3 space limit)
-            let fence_marker = Self::get_fence_marker(line);
-
-            if let Some(fence_marker) = fence_marker {
-                if in_code_block {
-                    // We're inside a code block, check if this closes it
-                    if let Some(ref current_marker) = current_fence_marker {
-                        if trimmed.starts_with(current_marker) && trimmed[current_marker.len()..].trim().is_empty() {
-                            // This closes the current code block
-                            result.push(line.to_string());
-                            in_code_block = false;
-                            current_fence_marker = None;
-
-                            // Add blank line after closing fence if needed
-                            // Don't add if next line is a Kramdown block attribute
-                            if i + 1 < lines.len()
-                                && !Self::is_empty_line(lines[i + 1])
-                                && !is_kramdown_block_attribute(lines[i + 1])
-                                && self.should_require_blank_line(i, &lines)
-                            {
-                                result.push(String::new());
-                            }
-                        } else {
-                            // This is content inside a code block (different fence marker)
-                            result.push(line.to_string());
-                        }
-                    } else {
-                        // This shouldn't happen, but preserve as content
-                        result.push(line.to_string());
-                    }
-                } else {
-                    // We're outside a code block, this opens one
-                    in_code_block = true;
-                    current_fence_marker = Some(fence_marker);
-
-                    // Add blank line before fence if needed
-                    // Skip if right after frontmatter
-                    if i > 0
-                        && !Self::is_empty_line(lines[i - 1])
-                        && !Self::is_right_after_frontmatter(i, ctx)
-                        && self.should_require_blank_line(i, &lines)
-                    {
-                        result.push(String::new());
-                    }
-
-                    // Add opening fence
-                    result.push(line.to_string());
-                }
-            } else if in_code_block {
-                // We're inside a code block, preserve content as-is
-                result.push(line.to_string());
-            } else {
-                // We're outside code blocks, normal processing
-                result.push(line.to_string());
+        for (opening_line, closing_line) in &fenced_blocks {
+            // Check if needs blank line before opening fence
+            if *opening_line > 0
+                && !Self::is_empty_line(lines[*opening_line - 1])
+                && !Self::is_right_after_frontmatter(*opening_line, ctx)
+                && self.should_require_blank_line(*opening_line, &lines)
+            {
+                needs_blank_before.insert(*opening_line);
             }
-            i += 1;
+
+            // Check if needs blank line after closing fence
+            if *closing_line + 1 < lines.len()
+                && !Self::is_empty_line(lines[*closing_line + 1])
+                && !is_kramdown_block_attribute(lines[*closing_line + 1])
+                && self.should_require_blank_line(*closing_line, &lines)
+            {
+                needs_blank_after.insert(*closing_line);
+            }
+        }
+
+        // Build result with blank lines inserted as needed
+        let mut result = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            // Add blank line before this line if needed
+            if needs_blank_before.contains(&i) {
+                result.push(String::new());
+            }
+
+            result.push((*line).to_string());
+
+            // Add blank line after this line if needed
+            if needs_blank_after.contains(&i) {
+                result.push(String::new());
+            }
         }
 
         let fixed = result.join("\n");
@@ -756,6 +752,70 @@ echo "nested"
         assert!(
             warnings.is_empty(),
             "Expected no warnings for code block after TOML frontmatter, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_fenced_code_in_list_with_4_space_indent_issue_276() {
+        // Issue #276: Fenced code blocks inside lists with 4+ space indentation
+        // were not being detected because of the old 0-3 space CommonMark limit.
+        // Now we use pulldown-cmark which correctly handles list-indented fences.
+        let rule = MD031BlanksAroundFences::new(true);
+
+        // 4-space indented fenced code block in list (was not detected before fix)
+        let content =
+            "1. First item\n2. Second item with code:\n    ```python\n    print(\"Hello\")\n    ```\n3. Third item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should detect missing blank lines around the code block
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Should detect fenced code in list with 4-space indent, got: {warnings:?}"
+        );
+        assert!(warnings[0].message.contains("before"));
+        assert!(warnings[1].message.contains("after"));
+
+        // Test the fix adds blank lines
+        let fixed = rule.fix(&ctx).unwrap();
+        let expected =
+            "1. First item\n2. Second item with code:\n\n    ```python\n    print(\"Hello\")\n    ```\n\n3. Third item";
+        assert_eq!(
+            fixed, expected,
+            "Fix should add blank lines around list-indented fenced code"
+        );
+    }
+
+    #[test]
+    fn test_fenced_code_in_list_with_mixed_indentation() {
+        // Test both 3-space and 4-space indented fenced code blocks in same document
+        let rule = MD031BlanksAroundFences::new(true);
+
+        let content = r#"# Test
+
+3-space indent:
+1. First item
+   ```python
+   code
+   ```
+2. Second item
+
+4-space indent:
+1. First item
+    ```python
+    code
+    ```
+2. Second item"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Should detect all 4 missing blank lines (2 per code block)
+        assert_eq!(
+            warnings.len(),
+            4,
+            "Should detect all fenced code blocks regardless of indentation, got: {warnings:?}"
         );
     }
 }

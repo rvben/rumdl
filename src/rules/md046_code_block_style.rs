@@ -2,6 +2,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::element_cache::ElementCache;
 use crate::utils::mkdocs_admonitions;
+use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::calculate_line_range;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
@@ -845,8 +846,15 @@ impl Rule for MD046CodeBlockStyle {
         // Check if we're in MkDocs mode
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        // Pre-compute list, tab, and admonition contexts once for all checks
-        let in_list_context = self.precompute_block_continuation_context(&lines);
+        // Determine the target style from the detected style in the document
+        let target_style = match self.config.style {
+            CodeBlockStyle::Consistent => self
+                .detect_style(ctx.content, is_mkdocs)
+                .unwrap_or(CodeBlockStyle::Fenced),
+            _ => self.config.style,
+        };
+
+        // Pre-compute tab and admonition contexts for MkDocs filtering
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(&lines)
         } else {
@@ -858,126 +866,121 @@ impl Rule for MD046CodeBlockStyle {
             vec![false; lines.len()]
         };
 
-        // Determine the target style from the detected style in the document
-        let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => self
-                .detect_style(ctx.content, is_mkdocs)
-                .unwrap_or(CodeBlockStyle::Fenced),
-            _ => self.config.style,
-        };
-
-        // Process each line to find style inconsistencies
-        // Pre-compute which lines are inside FENCED code blocks (not indented)
-        // Use pre-computed code blocks from context
+        // Parse code blocks using pulldown-cmark to get the actual block kind
+        // (Fenced vs Indented) - this is crucial for correct detection
         let mut in_fenced_block = vec![false; lines.len()];
-        for &(start, end) in &ctx.code_blocks {
-            // Check if this block is fenced by examining its content
-            if start < ctx.content.len() && end <= ctx.content.len() {
-                let block_content = &ctx.content[start..end];
-                let is_fenced = block_content.starts_with("```") || block_content.starts_with("~~~");
+        let mut reported_indented_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
-                if is_fenced {
+        let options = Options::all();
+        let parser = Parser::new_ext(ctx.content, options).into_offset_iter();
+
+        for (event, range) in parser {
+            let start = range.start;
+            let end = range.end;
+
+            if start >= ctx.content.len() || end > ctx.content.len() {
+                continue;
+            }
+
+            // Find the line index for this block's start
+            let start_line_idx = ctx
+                .line_offsets
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|&(_, &offset)| offset <= start)
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+
+            match event {
+                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))) => {
                     // Mark all lines in this fenced block
                     for (line_idx, line_info) in ctx.lines.iter().enumerate() {
                         if line_info.byte_offset >= start && line_info.byte_offset < end {
                             in_fenced_block[line_idx] = true;
                         }
                     }
+
+                    // Flag fenced blocks when we want indented style
+                    if target_style == CodeBlockStyle::Indented {
+                        let line = lines.get(start_line_idx).unwrap_or(&"");
+
+                        // Skip if inside HTML comment
+                        if ctx.lines.get(start_line_idx).is_some_and(|info| info.in_html_comment) {
+                            continue;
+                        }
+
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(start_line_idx + 1, line);
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: "Use indented code blocks".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: ctx.line_index.line_col_to_byte_range(start_line_idx + 1, 1),
+                                replacement: String::new(),
+                            }),
+                        });
+                    }
                 }
+                Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => {
+                    // This is an indented code block (per pulldown-cmark's CommonMark parsing)
+                    // This includes 4-space indented fences which are invalid per CommonMark
+                    // Flag when we want fenced style
+                    if target_style == CodeBlockStyle::Fenced && !reported_indented_lines.contains(&start_line_idx) {
+                        let line = lines.get(start_line_idx).unwrap_or(&"");
+
+                        // Skip if inside HTML comment or mkdocstrings
+                        if ctx
+                            .lines
+                            .get(start_line_idx)
+                            .is_some_and(|info| info.in_html_comment || info.in_mkdocstrings)
+                        {
+                            continue;
+                        }
+
+                        // Skip if inside a footnote definition
+                        if mkdocs_footnotes::is_within_footnote_definition(ctx.content, start) {
+                            continue;
+                        }
+
+                        // Skip if inside MkDocs tab content
+                        if is_mkdocs && in_tab_context.get(start_line_idx).copied().unwrap_or(false) {
+                            continue;
+                        }
+
+                        // Skip if inside MkDocs admonition content
+                        if is_mkdocs && in_admonition_context.get(start_line_idx).copied().unwrap_or(false) {
+                            continue;
+                        }
+
+                        reported_indented_lines.insert(start_line_idx);
+
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(start_line_idx + 1, line);
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: "Use fenced code blocks".to_string(),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: ctx.line_index.line_col_to_byte_range(start_line_idx + 1, 1),
+                                replacement: format!("```\n{}", line.trim_start()),
+                            }),
+                        });
+                    }
+                }
+                _ => {}
             }
         }
 
-        let mut in_fence = false;
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-
-            // Skip lines that are in HTML blocks - they shouldn't be treated as indented code
-            if ctx.line_info(i + 1).is_some_and(|info| info.in_html_block) {
-                continue;
-            }
-
-            // Skip lines inside HTML comments - code block examples in comments are not real code blocks
-            if ctx.line_info(i + 1).is_some_and(|info| info.in_html_comment) {
-                continue;
-            }
-
-            // Skip if this line is in a mkdocstrings block (but not other skip contexts,
-            // since MD046 needs to detect regular code blocks)
-            if ctx.lines[i].in_mkdocstrings {
-                continue;
-            }
-
-            // Check for fenced code block markers (for style checking)
-            // Per CommonMark: fence must have 0-3 spaces of indentation
-            if Self::has_valid_fence_indent(line) && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
-                if target_style == CodeBlockStyle::Indented && !in_fence {
-                    // This is an opening fence marker but we want indented style
-                    // Only flag the opening marker, not the closing one
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: "Use indented code blocks".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: ctx.line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: String::new(),
-                        }),
-                    });
-                }
-                // Toggle fence state
-                in_fence = !in_fence;
-                continue;
-            }
-
-            // Skip content lines inside fenced blocks
-            // This prevents false positives like flagging ~~~~ inside bash output
-            if in_fenced_block[i] {
-                continue;
-            }
-
-            // Check for indented code blocks (when not inside a fenced block)
-            if self.is_indented_code_block_with_context(
-                &lines,
-                i,
-                is_mkdocs,
-                &in_list_context,
-                &in_tab_context,
-                &in_admonition_context,
-            ) && target_style == CodeBlockStyle::Fenced
-            {
-                // Check if this is the start of a new indented block
-                let prev_line_is_indented = i > 0
-                    && self.is_indented_code_block_with_context(
-                        &lines,
-                        i - 1,
-                        is_mkdocs,
-                        &in_list_context,
-                        &in_tab_context,
-                        &in_admonition_context,
-                    );
-
-                if !prev_line_is_indented {
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: "Use fenced code blocks".to_string(),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: ctx.line_index.line_col_to_byte_range(i + 1, 1),
-                            replacement: format!("```\n{}", line.trim_start()),
-                        }),
-                    });
-                }
-            }
-        }
+        // Sort warnings by line number for consistent output
+        warnings.sort_by_key(|w| (w.line, w.column));
 
         Ok(warnings)
     }
@@ -2400,6 +2403,34 @@ More text."#;
             result.len(),
             1,
             "4-space indented fence should be detected as indented code block"
+        );
+        assert!(
+            result[0].message.contains("Use fenced code blocks"),
+            "Expected 'Use fenced code blocks' message"
+        );
+    }
+
+    #[test]
+    fn test_issue_276_indented_code_in_list() {
+        // Issue #276: Indented code blocks inside lists should be detected
+        // Reference: https://github.com/rvben/rumdl/issues/276
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+
+        let content = r#"1. First item
+2. Second item with code:
+
+        # This is a code block in a list
+        print("Hello, world!")
+
+4. Third item"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag the indented code block inside the list
+        assert!(
+            !result.is_empty(),
+            "Indented code block inside list should be flagged when style=fenced"
         );
         assert!(
             result[0].message.contains("Use fenced code blocks"),

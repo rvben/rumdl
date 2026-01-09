@@ -494,4 +494,31 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         assert!(content[blocks[0].0..blocks[0].1].contains("mixed content"));
     }
+
+    #[test]
+    fn test_indented_code_in_list_issue_276() {
+        // Issue #276: Indented code block inside a list should be detected by pulldown-cmark
+        let content = r#"1. First item
+2. Second item with code:
+
+        # This is a code block in a list
+        print("Hello, world!")
+
+4. Third item"#;
+
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+        // pulldown-cmark SHOULD detect this indented code block inside the list
+        assert!(!blocks.is_empty(), "Should detect indented code block inside list");
+
+        // Verify the detected block contains our code
+        let all_content: String = blocks
+            .iter()
+            .map(|(s, e)| &content[*s..*e])
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            all_content.contains("code block in a list") || all_content.contains("print"),
+            "Detected block should contain the code content: {all_content:?}"
+        );
+    }
 }
