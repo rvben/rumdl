@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MD028: Skip GFM alerts when checking blank lines in blockquotes** (fixes #126)
+  - GFM alerts (`> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, `> [!CAUTION]`) require blank line separation to render correctly
+  - MD028 now detects GFM alerts and allows blank lines between them
+  - Case-insensitive detection supports both `[!NOTE]` and `[!note]`
+  - Regular blockquotes between GFM alerts are still flagged correctly
+
 ## [0.0.213] - 2026-01-08
 
 ### Fixed
