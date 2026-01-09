@@ -2952,7 +2952,7 @@ impl<'a> LintContext<'a> {
 
             // Track list-breaking content for non-list, non-blank lines (O(n) replacement for nested loop)
             // Skip lines that are continuations of multi-line code spans - they're part of the previous list item
-            if current_block.is_some()
+            if let Some(ref block) = current_block
                 && line_info.list_item.is_none()
                 && !line_info.is_blank
                 && !line_info.in_code_span_continuation
@@ -2964,12 +2964,17 @@ impl<'a> LintContext<'a> {
                 // Only lines with indent between 1 and min_continuation_for_tracking-1 break lists,
                 // as they indicate improper indentation rather than lazy continuation.
                 let is_lazy_continuation = line_info.indent == 0 && !line_info.is_blank;
+
+                // Check if blockquote context changes (different prefix than current block)
+                // Lines within the SAME blockquote context don't break lists
+                let blockquote_prefix_changes = blockquote_prefix.trim() != block.blockquote_prefix.trim();
+
                 let breaks_list = line_info.heading.is_some()
                     || line_content.starts_with("---")
                     || line_content.starts_with("***")
                     || line_content.starts_with("___")
                     || crate::utils::skip_context::is_table_line(line_content)
-                    || line_content.starts_with(">")
+                    || blockquote_prefix_changes
                     || (line_info.indent > 0
                         && line_info.indent < min_continuation_for_tracking
                         && !is_lazy_continuation);
@@ -2992,8 +2997,65 @@ impl<'a> LintContext<'a> {
             // properly indented lines within the list). This ensures the workaround at line 2448
             // works correctly when there are multiple continuation lines before a nested list item.
             // Also include lazy continuation lines (indent=0) per CommonMark spec.
-            let is_valid_continuation =
-                line_info.indent >= min_continuation_for_tracking || (line_info.indent == 0 && !line_info.is_blank); // Lazy continuation
+            // For blockquote lines, compute effective indent after stripping the prefix
+            let effective_continuation_indent = if let Some(ref block) = current_block {
+                let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
+                let line_content = line_info.content(content);
+                let line_bq_level = line_content
+                    .chars()
+                    .take_while(|c| *c == '>' || c.is_whitespace())
+                    .filter(|&c| c == '>')
+                    .count();
+                if line_bq_level > 0 && line_bq_level == block_bq_level {
+                    // Compute indent after blockquote markers
+                    let mut pos = 0;
+                    let mut found_markers = 0;
+                    for c in line_content.chars() {
+                        pos += c.len_utf8();
+                        if c == '>' {
+                            found_markers += 1;
+                            if found_markers == line_bq_level {
+                                if line_content.get(pos..pos + 1) == Some(" ") {
+                                    pos += 1;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    let after_bq = &line_content[pos..];
+                    after_bq.len() - after_bq.trim_start().len()
+                } else {
+                    line_info.indent
+                }
+            } else {
+                line_info.indent
+            };
+            let adjusted_min_continuation_for_tracking = if let Some(ref block) = current_block {
+                let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
+                if block_bq_level > 0 {
+                    if block.is_ordered { last_marker_width } else { 2 }
+                } else {
+                    min_continuation_for_tracking
+                }
+            } else {
+                min_continuation_for_tracking
+            };
+            let is_valid_continuation = effective_continuation_indent >= adjusted_min_continuation_for_tracking
+                || (line_info.indent == 0 && !line_info.is_blank); // Lazy continuation
+
+            if std::env::var("RUMDL_DEBUG_LIST").is_ok() && line_info.list_item.is_none() && !line_info.is_blank {
+                eprintln!(
+                    "[DEBUG] Line {}: checking continuation - indent={}, min_cont={}, is_valid={}, in_code_span={}, in_code_block={}, has_block={}",
+                    line_num,
+                    effective_continuation_indent,
+                    adjusted_min_continuation_for_tracking,
+                    is_valid_continuation,
+                    line_info.in_code_span_continuation,
+                    line_info.in_code_block,
+                    current_block.is_some()
+                );
+            }
+
             if !line_info.in_code_span_continuation
                 && line_info.list_item.is_none()
                 && !line_info.is_blank
@@ -3001,6 +3063,12 @@ impl<'a> LintContext<'a> {
                 && is_valid_continuation
                 && let Some(ref mut block) = current_block
             {
+                if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                    eprintln!(
+                        "[DEBUG] Line {}: extending block.end_line from {} to {}",
+                        line_num, block.end_line, line_num
+                    );
+                }
                 block.end_line = line_num;
             }
 
@@ -3009,6 +3077,13 @@ impl<'a> LintContext<'a> {
                 // Calculate nesting level based on indentation
                 let item_indent = list_item.marker_column;
                 let nesting = item_indent / 2; // Assume 2-space indentation for nesting
+
+                if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                    eprintln!(
+                        "[DEBUG] Line {}: list item found, marker={:?}, indent={}",
+                        line_num, list_item.marker, item_indent
+                    );
+                }
 
                 if let Some(ref mut block) = current_block {
                     // Check if this continues the current block
@@ -3039,6 +3114,22 @@ impl<'a> LintContext<'a> {
                         // Same-level items need to match type and markers
                         same_type && same_context && reasonable_distance && marker_compatible && !has_non_list_content
                     };
+
+                    if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                        eprintln!(
+                            "[DEBUG] Line {}: continues_list={}, is_nested={}, same_type={}, same_context={}, reasonable_distance={}, marker_compatible={}, has_non_list_content={}, last_item={}, block.end_line={}",
+                            line_num,
+                            continues_list,
+                            is_nested,
+                            same_type,
+                            same_context,
+                            reasonable_distance,
+                            marker_compatible,
+                            has_non_list_content,
+                            last_list_item_line,
+                            block.end_line
+                        );
+                    }
 
                     // WORKAROUND: If items are truly consecutive (no blank lines), they MUST be in the same list
                     // This handles edge cases where content patterns might otherwise split lists incorrectly
@@ -3148,6 +3239,12 @@ impl<'a> LintContext<'a> {
                 };
             } else if let Some(ref mut block) = current_block {
                 // Not a list item - check if it continues the current block
+                if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                    eprintln!(
+                        "[DEBUG] Line {}: non-list-item, is_blank={}, block exists",
+                        line_num, line_info.is_blank
+                    );
+                }
 
                 // For MD032 compatibility, we use a simple approach:
                 // - Indented lines continue the list
@@ -3173,10 +3270,19 @@ impl<'a> LintContext<'a> {
 
                 if prev_line_ends_with_backslash || line_info.indent >= min_continuation_indent {
                     // Indented line or backslash continuation continues the list
+                    if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                        eprintln!(
+                            "[DEBUG] Line {}: indented continuation (indent={}, min={})",
+                            line_num, line_info.indent, min_continuation_indent
+                        );
+                    }
                     block.end_line = line_num;
                 } else if line_info.is_blank {
                     // Blank line - check if it's internal to the list or ending it
                     // We only include blank lines that are followed by more list content
+                    if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                        eprintln!("[DEBUG] Line {line_num}: entering blank line handling");
+                    }
                     let mut check_idx = line_idx + 1;
                     let mut found_continuation = false;
 
@@ -3187,8 +3293,62 @@ impl<'a> LintContext<'a> {
 
                     if check_idx < lines.len() {
                         let next_line = &lines[check_idx];
+                        // For blockquote lines, compute indent AFTER stripping the blockquote prefix
+                        let next_content = next_line.content(content);
+                        // Use blockquote level (count of >) to compare, not the full prefix
+                        // This avoids issues where the regex captures extra whitespace
+                        let block_bq_level_for_indent = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
+                        let next_bq_level_for_indent = next_content
+                            .chars()
+                            .take_while(|c| *c == '>' || c.is_whitespace())
+                            .filter(|&c| c == '>')
+                            .count();
+                        let effective_indent =
+                            if next_bq_level_for_indent > 0 && next_bq_level_for_indent == block_bq_level_for_indent {
+                                // For lines in the same blockquote context, compute indent after the blockquote marker(s)
+                                // Find position after ">" and one space
+                                let mut pos = 0;
+                                let mut found_markers = 0;
+                                for c in next_content.chars() {
+                                    pos += c.len_utf8();
+                                    if c == '>' {
+                                        found_markers += 1;
+                                        if found_markers == next_bq_level_for_indent {
+                                            // Skip optional space after last >
+                                            if next_content.get(pos..pos + 1) == Some(" ") {
+                                                pos += 1;
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                                let after_blockquote_marker = &next_content[pos..];
+                                after_blockquote_marker.len() - after_blockquote_marker.trim_start().len()
+                            } else {
+                                next_line.indent
+                            };
+                        // Also adjust min_continuation_indent for blockquote lists
+                        // The marker_column includes blockquote prefix, so subtract it
+                        let adjusted_min_continuation = if block_bq_level_for_indent > 0 {
+                            // For blockquote lists, the continuation is relative to blockquote content
+                            // current_indent_level includes blockquote prefix (2 for "> "), so use just 2 for unordered
+                            if block.is_ordered { last_marker_width } else { 2 }
+                        } else {
+                            min_continuation_indent
+                        };
                         // Check if followed by indented content (list continuation)
-                        if !next_line.in_code_block && next_line.indent >= min_continuation_indent {
+                        if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                            eprintln!(
+                                "[DEBUG] Blank line {} checking next line {}: effective_indent={}, adjusted_min={}, next_is_list={}, in_code_block={}",
+                                line_num,
+                                check_idx + 1,
+                                effective_indent,
+                                adjusted_min_continuation,
+                                next_line.list_item.is_some(),
+                                next_line.in_code_block
+                            );
+                        }
+                        if !next_line.in_code_block && effective_indent >= adjusted_min_continuation {
                             found_continuation = true;
                         }
                         // Check if followed by another list item at the same level
@@ -3205,6 +3365,8 @@ impl<'a> LintContext<'a> {
                             {
                                 // Check if there was meaningful content between the list items (unused now)
                                 // This variable is kept for potential future use but is currently replaced by has_structural_separators
+                                // Pre-compute block's blockquote level for use in closures
+                                let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
                                 let _has_meaningful_content = (line_idx + 1..check_idx).any(|idx| {
                                     if let Some(between_line) = lines.get(idx) {
                                         let between_content = between_line.content(content);
@@ -3216,13 +3378,21 @@ impl<'a> LintContext<'a> {
                                         // Check for meaningful content
                                         let line_indent = between_content.len() - between_content.trim_start().len();
 
+                                        // Check if blockquote level changed (not just if line starts with ">")
+                                        let between_bq_prefix = BLOCKQUOTE_PREFIX_REGEX
+                                            .find(between_content)
+                                            .map_or(String::new(), |m| m.as_str().to_string());
+                                        let between_bq_level = between_bq_prefix.chars().filter(|&c| c == '>').count();
+                                        let blockquote_level_changed =
+                                            trimmed.starts_with(">") && between_bq_level != block_bq_level;
+
                                         // Structural separators (code fences, headings, etc.) are meaningful and should BREAK lists
                                         if trimmed.starts_with("```")
                                             || trimmed.starts_with("~~~")
                                             || trimmed.starts_with("---")
                                             || trimmed.starts_with("***")
                                             || trimmed.starts_with("___")
-                                            || trimmed.starts_with(">")
+                                            || blockquote_level_changed
                                             || crate::utils::skip_context::is_table_line(trimmed)
                                             || between_line.heading.is_some()
                                         {
@@ -3241,17 +3411,26 @@ impl<'a> LintContext<'a> {
                                     // Check if there are structural separators between the list items
                                     let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
                                         if let Some(between_line) = lines.get(idx) {
-                                            let trimmed = between_line.content(content).trim();
+                                            let between_content = between_line.content(content);
+                                            let trimmed = between_content.trim();
                                             if trimmed.is_empty() {
                                                 return false;
                                             }
+                                            // Check if blockquote level changed (not just if line starts with ">")
+                                            let between_bq_prefix = BLOCKQUOTE_PREFIX_REGEX
+                                                .find(between_content)
+                                                .map_or(String::new(), |m| m.as_str().to_string());
+                                            let between_bq_level =
+                                                between_bq_prefix.chars().filter(|&c| c == '>').count();
+                                            let blockquote_level_changed =
+                                                trimmed.starts_with(">") && between_bq_level != block_bq_level;
                                             // Check for structural separators that break lists
                                             trimmed.starts_with("```")
                                                 || trimmed.starts_with("~~~")
                                                 || trimmed.starts_with("---")
                                                 || trimmed.starts_with("***")
                                                 || trimmed.starts_with("___")
-                                                || trimmed.starts_with(">")
+                                                || blockquote_level_changed
                                                 || crate::utils::skip_context::is_table_line(trimmed)
                                                 || between_line.heading.is_some()
                                         } else {
@@ -3263,17 +3442,26 @@ impl<'a> LintContext<'a> {
                                     // For unordered lists: also check for structural separators
                                     let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
                                         if let Some(between_line) = lines.get(idx) {
-                                            let trimmed = between_line.content(content).trim();
+                                            let between_content = between_line.content(content);
+                                            let trimmed = between_content.trim();
                                             if trimmed.is_empty() {
                                                 return false;
                                             }
+                                            // Check if blockquote level changed (not just if line starts with ">")
+                                            let between_bq_prefix = BLOCKQUOTE_PREFIX_REGEX
+                                                .find(between_content)
+                                                .map_or(String::new(), |m| m.as_str().to_string());
+                                            let between_bq_level =
+                                                between_bq_prefix.chars().filter(|&c| c == '>').count();
+                                            let blockquote_level_changed =
+                                                trimmed.starts_with(">") && between_bq_level != block_bq_level;
                                             // Check for structural separators that break lists
                                             trimmed.starts_with("```")
                                                 || trimmed.starts_with("~~~")
                                                 || trimmed.starts_with("---")
                                                 || trimmed.starts_with("***")
                                                 || trimmed.starts_with("___")
-                                                || trimmed.starts_with(">")
+                                                || blockquote_level_changed
                                                 || crate::utils::skip_context::is_table_line(trimmed)
                                                 || between_line.heading.is_some()
                                         } else {
@@ -3286,6 +3474,9 @@ impl<'a> LintContext<'a> {
                         }
                     }
 
+                    if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                        eprintln!("[DEBUG] Blank line {line_num} final: found_continuation={found_continuation}");
+                    }
                     if found_continuation {
                         // Include the blank line in the block
                         block.end_line = line_num;
@@ -3336,28 +3527,67 @@ impl<'a> LintContext<'a> {
                     if is_lazy_continuation {
                         // Additional check: if the line starts with uppercase and looks like a new sentence,
                         // it's probably not a continuation
-                        let content_to_check = if !blockquote_prefix.is_empty() {
-                            // Strip blockquote prefix to check the actual content
-                            line_info
-                                .content(content)
-                                .strip_prefix(&blockquote_prefix)
-                                .unwrap_or(line_info.content(content))
-                                .trim()
-                        } else {
-                            line_info.content(content).trim()
-                        };
+                        // BUT: for blockquote lines with sufficient effective indent, always treat as continuation
+                        let line_content_raw = line_info.content(content);
+                        let block_bq_level_lazy = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
+                        let line_bq_level_lazy = line_content_raw
+                            .chars()
+                            .take_while(|c| *c == '>' || c.is_whitespace())
+                            .filter(|&c| c == '>')
+                            .count();
+                        let has_proper_blockquote_indent =
+                            if line_bq_level_lazy > 0 && line_bq_level_lazy == block_bq_level_lazy {
+                                // Compute effective indent after blockquote markers
+                                let mut pos = 0;
+                                let mut found_markers = 0;
+                                for c in line_content_raw.chars() {
+                                    pos += c.len_utf8();
+                                    if c == '>' {
+                                        found_markers += 1;
+                                        if found_markers == line_bq_level_lazy {
+                                            if line_content_raw.get(pos..pos + 1) == Some(" ") {
+                                                pos += 1;
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                                let after_bq = &line_content_raw[pos..];
+                                let effective_indent_lazy = after_bq.len() - after_bq.trim_start().len();
+                                let min_required_for_bq = if block.is_ordered { last_marker_width } else { 2 };
+                                effective_indent_lazy >= min_required_for_bq
+                            } else {
+                                false
+                            };
 
-                        let starts_with_uppercase = content_to_check.chars().next().is_some_and(|c| c.is_uppercase());
-
-                        // If it starts with uppercase and the previous line ended with punctuation,
-                        // it's likely a new paragraph, not a continuation
-                        if starts_with_uppercase && last_list_item_line > 0 {
-                            // This looks like a new paragraph
-                            list_blocks.push(block.clone());
-                            current_block = None;
-                        } else {
-                            // This is a lazy continuation line
+                        // If it has proper blockquote indent, it's a continuation regardless of uppercase
+                        if has_proper_blockquote_indent {
                             block.end_line = line_num;
+                        } else {
+                            let content_to_check = if !blockquote_prefix.is_empty() {
+                                // Strip blockquote prefix to check the actual content
+                                line_info
+                                    .content(content)
+                                    .strip_prefix(&blockquote_prefix)
+                                    .unwrap_or(line_info.content(content))
+                                    .trim()
+                            } else {
+                                line_info.content(content).trim()
+                            };
+
+                            let starts_with_uppercase =
+                                content_to_check.chars().next().is_some_and(|c| c.is_uppercase());
+
+                            // If it starts with uppercase and the previous line ended with punctuation,
+                            // it's likely a new paragraph, not a continuation
+                            if starts_with_uppercase && last_list_item_line > 0 {
+                                // This looks like a new paragraph
+                                list_blocks.push(block.clone());
+                                current_block = None;
+                            } else {
+                                // This is a lazy continuation line
+                                block.end_line = line_num;
+                            }
                         }
                     } else {
                         // Non-indented, non-blank line that's not a lazy continuation - end the block
