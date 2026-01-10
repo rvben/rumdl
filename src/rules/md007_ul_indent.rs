@@ -1629,4 +1629,137 @@ items:
             "Issue #273: indent=4 should use 4-space increments, got: {result:?}"
         );
     }
+
+    #[test]
+    fn test_indent_explicit_with_ordered_parent() {
+        // When indent is explicitly set BUT the parent is ordered,
+        // bullets must still use text-aligned because ordered markers have variable width.
+        // This is the critical edge case that caused the regression.
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: true, // User set indent=4
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // Ordered list with bullet child - bullet MUST align with ordered text (3 spaces)
+        // NOT use fixed indent (4 spaces) even though indent=4 is set
+        let content = "1. Ordered\n   * Bullet aligned with ordered text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Bullet under ordered must use text-aligned (3 spaces) even with indent=4: {result:?}"
+        );
+
+        // Fixed indent (4 spaces) under ordered list should be WRONG
+        let wrong_content = "1. Ordered\n    * Bullet with 4-space fixed indent";
+        let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "4-space indent under ordered list should be flagged"
+        );
+    }
+
+    #[test]
+    fn test_indent_explicit_mixed_list_deep_nesting() {
+        // Deep nesting with alternating list types tests the edge case thoroughly:
+        // - Bullets under bullets: use configured indent (4)
+        // - Bullets under ordered: use text-aligned
+        // - Ordered under bullets: N/A (MD007 only checks bullets)
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: true,
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // Level 0: bullet (col 0)
+        // Level 1: bullet (col 4 - fixed, parent is bullet)
+        // Level 2: ordered (col 8 - not checked by MD007)
+        // Level 3: bullet (col 11 - text-aligned with "1. " = 3 chars from col 8)
+        let content = r#"* Level 0
+    * Level 1 (4-space indent from bullet parent)
+        1. Level 2 ordered
+           * Level 3 bullet (text-aligned under ordered)"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Mixed nesting should handle each parent type correctly: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_ordered_list_double_digit_markers() {
+        // Ordered lists with 10+ items have wider markers ("10." vs "9.")
+        // Bullets nested under these must text-align correctly
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: true,
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // "10. " = 4 chars, so bullet should be at column 4
+        let content = "10. Double digit\n    * Bullet at col 4";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Bullet under '10.' should align at column 4: {result:?}"
+        );
+
+        // Single digit "1. " = 3 chars, bullet at column 3
+        let content_single = "1. Single digit\n   * Bullet at col 3";
+        let ctx = LintContext::new(content_single, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Bullet under '1.' should align at column 3: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_indent_explicit_pure_unordered_uses_fixed() {
+        // Regression test: pure unordered lists should use fixed indent
+        // when indent is explicitly configured
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: true,
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // Pure unordered with 4-space indent should pass
+        let content = "* Level 0\n    * Level 1\n        * Level 2";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Pure unordered with indent=4 should use 4-space increments: {result:?}"
+        );
+
+        // Text-aligned (2-space) should fail with indent=4
+        let wrong_content = "* Level 0\n  * Level 1\n    * Level 2";
+        let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "2-space indent should be flagged when indent=4 is configured"
+        );
+    }
 }
