@@ -29,8 +29,9 @@ use regex::Regex;
 use std::sync::LazyLock;
 use unicode_normalization::UnicodeNormalization;
 
-// Security limits for input validation
-const MAX_INPUT_LENGTH: usize = 10240; // 10KB maximum input
+use super::common::{
+    DANGEROUS_UNICODE_PATTERN, MAX_INPUT_LENGTH, UnicodeLetterMode, ZERO_WIDTH_PATTERN, is_safe_unicode_letter,
+};
 
 // ReDoS-resistant patterns with atomic grouping and possessive quantifiers where possible
 // Limited repetition depth to prevent catastrophic backtracking
@@ -45,13 +46,6 @@ static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]{0,50
 static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap());
 static LINK_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap());
-
-// Zero-width character patterns - remove these entirely for security
-static ZERO_WIDTH_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\u200B-\u200D\u2060\uFEFF]").unwrap());
-
-// RTL override and dangerous Unicode control patterns
-static DANGEROUS_UNICODE_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]").unwrap());
 
 // Ampersand and copyright with whitespace patterns
 static AMPERSAND_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+&\s+").unwrap());
@@ -249,7 +243,7 @@ fn heading_to_fragment_internal(heading: &str) -> String {
                 result.push(c);
             }
             // Otherwise filter it out
-        } else if c.is_alphabetic() && is_safe_unicode_letter(c) {
+        } else if c.is_alphabetic() && is_safe_unicode_letter(c, UnicodeLetterMode::GitHub) {
             // Preserve Unicode letters (like é, ñ, etc.) but only safe ones
             result.push(c);
         } else if c.is_numeric() {
@@ -516,48 +510,6 @@ fn sanitize_unicode(input: &str) -> String {
     }
 
     sanitized
-}
-
-/// Check if a Unicode letter is safe to include in anchors
-/// Excludes potentially dangerous or confusing character ranges
-fn is_safe_unicode_letter(c: char) -> bool {
-    let code = c as u32;
-
-    // Exclude potentially dangerous ranges:
-    // - Private Use Areas (could contain malicious content)
-    // - Variation Selectors (can change appearance)
-    // - Format characters (invisible formatting)
-    if (0xE000..=0xF8FF).contains(&code) ||    // Private Use Area
-       (0xF0000..=0xFFFFD).contains(&code) ||  // Supplementary Private Use Area-A
-       (0x100000..=0x10FFFD).contains(&code) || // Supplementary Private Use Area-B
-       (0xFE00..=0xFE0F).contains(&code) ||    // Variation Selectors
-       (0xE0100..=0xE01EF).contains(&code)
-    {
-        // Variation Selectors Supplement
-        return false;
-    }
-
-    // Allow common safe Unicode letter ranges
-    // Basic Latin (already covered by is_alphabetic())
-    (0x0000..=0x007F).contains(&code) ||       // Basic Latin
-    (0x0080..=0x00FF).contains(&code) ||       // Latin-1 Supplement
-    (0x0100..=0x017F).contains(&code) ||       // Latin Extended-A
-    (0x0180..=0x024F).contains(&code) ||       // Latin Extended-B
-    (0x0370..=0x03FF).contains(&code) ||       // Greek and Coptic
-    (0x0400..=0x04FF).contains(&code) ||       // Cyrillic
-    (0x0500..=0x052F).contains(&code) ||       // Cyrillic Supplement
-    (0x0590..=0x05FF).contains(&code) ||       // Hebrew
-    (0x0600..=0x06FF).contains(&code) ||       // Arabic
-    (0x0700..=0x074F).contains(&code) ||       // Syriac
-    (0x0750..=0x077F).contains(&code) ||       // Arabic Supplement
-    (0x1100..=0x11FF).contains(&code) ||       // Hangul Jamo
-    (0x3040..=0x309F).contains(&code) ||       // Hiragana
-    (0x30A0..=0x30FF).contains(&code) ||       // Katakana
-    (0x3130..=0x318F).contains(&code) ||       // Hangul Compatibility Jamo
-    (0x4E00..=0x9FFF).contains(&code) ||       // CJK Unified Ideographs
-    (0xAC00..=0xD7AF).contains(&code) ||       // Hangul Syllables (Korean)
-    (0xA000..=0xA48F).contains(&code) ||       // Yi Syllables
-    (0xA490..=0xA4CF).contains(&code) // Yi Radicals
 }
 
 /// Comprehensive emoji and symbol detection

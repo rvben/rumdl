@@ -9,7 +9,10 @@
 //!
 //! Each style is implemented in a separate module with comprehensive tests
 //! verified against the official tools/platforms.
+//!
+//! Common utilities are shared via the `common` module to avoid duplication.
 
+pub mod common;
 pub mod github;
 pub mod kramdown;
 pub mod kramdown_gfm; // Renamed from jekyll for clarity
