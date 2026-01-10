@@ -1382,4 +1382,103 @@ $$
         );
         assert!(result[0].message.contains("Spaces after list markers"));
     }
+
+    // ===== ORDERED LIST MARKER EDGE CASES =====
+    // Tests for patterns that could be confused with ordered list markers
+
+    #[test]
+    fn test_double_digit_marker_without_space() {
+        // Double-digit ordered markers without space should be flagged
+        let rule = MD030ListMarkerSpace::default();
+        let content = "10.First item\n11.Second item\n99.Last item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            3,
+            "Double-digit markers without space should be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_version_numbers_not_flagged() {
+        // Version numbers like 1.0.0 should NOT be flagged as list items
+        // because they have multiple dots, not the single-dot list marker pattern
+        let rule = MD030ListMarkerSpace::default();
+        let content = "1.0.0 is a version\nv2.1.3 is another version\n10.20.30 is also a version";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Version numbers should not be flagged as list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_ip_addresses_not_flagged() {
+        // IP addresses like 192.168.1.1 should NOT be flagged
+        let rule = MD030ListMarkerSpace::default();
+        let content = "192.168.1.1 is localhost\n10.0.0.1 is gateway\n127.0.0.1 is loopback";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "IP addresses should not be flagged as list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_zero_based_marker_without_space() {
+        // 0. is a valid ordered list marker in CommonMark
+        // so 0.text should be flagged as missing space
+        let rule = MD030ListMarkerSpace::default();
+        let content = "0.Zero based item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Zero-based marker without space should be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_zero_padded_marker_without_space() {
+        // Zero-padded markers like 00., 01. should be flagged
+        let rule = MD030ListMarkerSpace::default();
+        let content = "00.Zero padded\n01.Also padded\n007.James Bond";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            3,
+            "Zero-padded markers without space should be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_date_format_not_flagged() {
+        // Date-like patterns should NOT be flagged
+        let rule = MD030ListMarkerSpace::default();
+        let content = "2024.01.15 is a date\n2023.12.25 is Christmas";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Date-like patterns should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_file_extensions_not_flagged() {
+        // Patterns that look like file extensions should not be flagged
+        let rule = MD030ListMarkerSpace::default();
+        let content = ".md files are markdown\n.rs files are Rust\n.py files are Python";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "File extension patterns should not be flagged. Got: {result:?}"
+        );
+    }
 }
