@@ -66,13 +66,16 @@ mod tests {
 
     #[test]
     fn test_missing_space_after_list_marker_unordered() {
-        // User intention: these look like list items missing spaces, so flag them
+        // Unordered markers (*, -, +) without spaces are NOT flagged because:
+        // 1. They have too many non-list uses (emphasis, globs, diffs, etc.)
+        // 2. CommonMark requires space after marker for valid list items
+        // 3. The parser correctly doesn't recognize these as list items
         let rule = MD030ListMarkerSpace::default();
         let content = "*Item 1\n-Item 2\n+Item 3";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // User-intention-based detection: flag all lines that look like list items
-        assert_eq!(result.len(), 3, "Should detect 3 unordered list items missing spaces");
+        // Not flagged - parser doesn't recognize as lists, no heuristic detection for unordered
+        assert_eq!(result.len(), 0, "Unordered markers without space are not flagged");
     }
 
     #[test]
@@ -88,30 +91,29 @@ mod tests {
 
     #[test]
     fn test_mixed_list_types_missing_space() {
-        // User intention: these look like list items missing spaces, so flag them
+        // Only ordered markers (1., 2.) are flagged via heuristics
+        // Unordered markers (*, -) are not flagged
         let rule = MD030ListMarkerSpace::default();
         let content = "*Item 1\n1.First\n-Item 2\n2.Second";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // User-intention-based detection: flag all lines that look like list items
-        assert_eq!(result.len(), 4, "Should detect 4 list items missing spaces");
+        // Only 2 warnings for ordered markers (1.First and 2.Second)
+        assert_eq!(result.len(), 2, "Should detect 2 ordered list items missing spaces");
     }
 
     #[test]
     fn test_nested_lists_missing_space() {
-        // User intention: nested items that look like list items should be flagged
-        // Note: markdownlint-cli flags 0 warnings on this content, so our implementation
-        // is more strict with user-intention detection
+        // Unordered markers without spaces are not flagged
+        // This matches markdownlint-cli behavior (0 warnings)
         let rule = MD030ListMarkerSpace::default();
         let content = "* Item 1\n  *Nested 1\n  *Nested 2\n* Item 2";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Current implementation detects 1 warning (the second nested item)
-        // First nested item could be interpreted as continuation text
+        // No warnings - unordered markers without space are not flagged
         assert_eq!(
             result.len(),
-            1,
-            "Should detect 1 nested list item missing space. Got: {result:?}"
+            0,
+            "Unordered markers without space are not flagged. Got: {result:?}"
         );
     }
 
@@ -136,18 +138,16 @@ mod tests {
 
     #[test]
     fn test_preserve_indentation() {
-        // User intention: indented items that look like list items should be flagged
-        // First line could be paragraph text, lines 2-3 look like nested list items
+        // Unordered markers without spaces are not flagged
         let rule = MD030ListMarkerSpace::default();
         let content = "  *Item 1\n    *Item 2\n      *Item 3";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Current implementation detects 2 warnings (lines 2 and 3)
-        // Line 1 could be interpreted as paragraph text (not preceded by list item)
+        // No warnings - unordered markers without space are not flagged
         assert_eq!(
             result.len(),
-            2,
-            "Should detect 2 indented list items missing spaces. Got: {result:?}"
+            0,
+            "Unordered markers without space are not flagged. Got: {result:?}"
         );
     }
 
@@ -936,12 +936,13 @@ mod tests {
 
     #[test]
     fn test_fix_missing_space_unordered() {
-        // Verify fix adds missing space for unordered list items
+        // Unordered markers without spaces are NOT fixed
+        // They are not recognized as list items, too many non-list uses
         let rule = MD030ListMarkerSpace::default();
         let content = "*Item without space";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "* Item without space", "Fix should add space after marker");
+        assert_eq!(fixed, content, "Unordered markers without space are not modified");
     }
 
     #[test]
@@ -969,24 +970,19 @@ mod tests {
 
     #[test]
     fn test_mixed_valid_and_invalid_spacing() {
-        // Mix of valid and invalid list items
+        // Unordered markers without spaces are not flagged or fixed
         let rule = MD030ListMarkerSpace::default();
         let content = "* Valid\n*Invalid\n- Also valid\n-Also invalid";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            2,
-            "Should detect 2 invalid items (lines 2 and 4). Got: {result:?}"
+            0,
+            "Unordered markers without space are not flagged. Got: {result:?}"
         );
-        assert_eq!(result[0].line, 2);
-        assert_eq!(result[1].line, 4);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(
-            fixed, "* Valid\n* Invalid\n- Also valid\n- Also invalid",
-            "Fix should correct invalid items while preserving valid ones"
-        );
+        assert_eq!(fixed, content, "Unordered markers without space are not modified");
     }
 
     #[test]
@@ -1005,43 +1001,45 @@ mod tests {
 
     #[test]
     fn test_bracket_content_flagged() {
-        // Content starting with [ looks like a link in a list item
+        // Unordered markers without spaces are not flagged, even if content looks like links
         let rule = MD030ListMarkerSpace::default();
         let content = "*[link](url)\n-[another](url2)";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            2,
-            "Links without space after marker should be flagged. Got: {result:?}"
+            0,
+            "Unordered markers without space are not flagged. Got: {result:?}"
         );
     }
 
     #[test]
     fn test_parentheses_content_flagged() {
-        // Content starting with ( looks like intentional list content
+        // Unordered markers without spaces are not flagged
+        // Only ordered markers (1.) are flagged via heuristics
         let rule = MD030ListMarkerSpace::default();
         let content = "*(parenthetical)\n1.(also parenthetical)";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            2,
-            "Parenthetical content without space should be flagged. Got: {result:?}"
+            1,
+            "Only ordered markers without space are flagged. Got: {result:?}"
         );
     }
 
     #[test]
     fn test_blockquote_list_missing_space() {
-        // List items inside blockquotes with missing space
+        // Only ordered markers are flagged via heuristics
+        // Unordered markers without spaces are not flagged
         let rule = MD030ListMarkerSpace::default();
         let content = "> *Item in blockquote\n> 1.Ordered in blockquote";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            2,
-            "List items in blockquotes missing spaces should be flagged. Got: {result:?}"
+            1,
+            "Only ordered markers in blockquotes are flagged. Got: {result:?}"
         );
     }
 
@@ -1249,21 +1247,18 @@ mod tests {
 
     #[test]
     fn test_actual_list_in_blockquote_still_flagged() {
-        // Actual list items in blockquotes with missing space SHOULD be flagged
-        // This ensures we didn't over-correct and miss real issues
+        // Unordered markers without spaces are NOT flagged
+        // They have too many non-list uses (emphasis, globs, diffs)
         let rule = MD030ListMarkerSpace::default();
-        // Note: "*Item" starts with uppercase, so it triggers "clear user intent"
         let content = "> *Item without space";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // This should be flagged because:
-        // 1. "*Item" has no closing *, so it's not emphasis
-        // 2. "Item" starts with uppercase (clear user intent)
+        // Not flagged - unordered markers without space are not flagged
         assert_eq!(
             result.len(),
-            1,
-            "Actual list items (not emphasis) should still be flagged. Got: {result:?}"
+            0,
+            "Unordered markers without space are not flagged. Got: {result:?}"
         );
     }
 

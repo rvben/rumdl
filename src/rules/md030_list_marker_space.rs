@@ -362,7 +362,8 @@ impl MD030ListMarkerSpace {
         let trimmed = content.trim_start();
         let indent = &content[..content.len() - trimmed.len()];
 
-        // Check for unordered list markers
+        // Check for unordered list markers - only fix multiple-space issues, not missing-space
+        // Unordered markers (*, -, +) have too many non-list uses to apply heuristic fixing
         for marker in &["*", "-", "+"] {
             if let Some(after_marker) = trimmed.strip_prefix(marker) {
                 // Skip emphasis patterns (**, --, ++)
@@ -371,37 +372,15 @@ impl MD030ListMarkerSpace {
                 }
 
                 // Skip if this looks like emphasis: *text* or _text_
-                // Use simple heuristic here (fix function has no ctx access)
-                // Being conservative is fine for autofix
                 if *marker == "*" && after_marker.contains('*') {
                     break;
                 }
 
-                // Skip patterns that don't CLEARLY look like list items
-                if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t') {
-                    let first_char = after_marker.chars().next().unwrap_or(' ');
-
-                    // Skip signed numbers: -1, +1, -123, etc.
-                    if (*marker == "-" || *marker == "+") && first_char.is_ascii_digit() {
-                        break;
-                    }
-
-                    // Skip glob/filename patterns: *.txt, *.md, etc.
-                    if *marker == "*" && first_char == '.' {
-                        break;
-                    }
-
-                    // For CLEAR user intent, only fix if:
-                    // 1. Starts with uppercase letter (strong list indicator), OR
-                    // 2. Starts with [ or ( (link/paren content)
-                    let is_clear_intent = first_char.is_ascii_uppercase() || first_char == '[' || first_char == '(';
-
-                    if !is_clear_intent {
-                        break;
-                    }
-                }
-
-                if let Some(fixed) = self.fix_marker_spacing(marker, after_marker, indent, is_multi_line, false) {
+                // Only fix if there's already a space (fixing multiple spaces to single space)
+                // Don't add spaces where there are none - too ambiguous for unordered markers
+                if after_marker.starts_with("  ")
+                    && let Some(fixed) = self.fix_marker_spacing(marker, after_marker, indent, is_multi_line, false)
+                {
                     return Some(format!("{blockquote_prefix}{fixed}"));
                 }
                 break; // Found a marker, don't check others
@@ -485,91 +464,15 @@ impl MD030ListMarkerSpace {
         lines: &[&str],
     ) -> Option<LintWarning> {
         // Strip blockquote prefix to analyze the content
-        let (blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
-        let prefix_len = blockquote_prefix.len();
+        let (_blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
 
         let trimmed = content.trim_start();
         let indent_len = content.len() - trimmed.len();
 
-        // Note: We intentionally do NOT skip continuation lines here.
-        // Even if a line is indented after a list item, if it looks like a new list item
-        // (starts with *, -, +, or number.), we want to flag the missing space.
-        // The user's intention matters more than strict CommonMark parsing.
-
-        // Check for unordered list markers (*, -, +) without proper spacing
-        for marker in &["*", "-", "+"] {
-            if let Some(after_marker) = trimmed.strip_prefix(marker) {
-                // Skip if this is emphasis (**, __, ++) or other non-list patterns
-                // A list marker followed immediately by the same character is likely emphasis
-                if after_marker.starts_with(*marker) {
-                    break;
-                }
-
-                // Skip if this line starts with emphasis (use parsed emphasis spans)
-                // Account for blockquote prefix when comparing column positions
-                let emphasis_spans = ctx.emphasis_spans_on_line(line_num);
-                if emphasis_spans
-                    .iter()
-                    .any(|span| span.start_col == prefix_len + indent_len)
-                {
-                    break;
-                }
-
-                // Only flag if there's content directly after the marker (no space, no tab)
-                // AND the content CLEARLY looks like list item content
-                if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t') {
-                    let first_char = after_marker.chars().next().unwrap_or(' ');
-
-                    // Skip signed numbers: -1, +1, -123, etc.
-                    if (*marker == "-" || *marker == "+") && first_char.is_ascii_digit() {
-                        break;
-                    }
-
-                    // Skip glob/filename patterns: *.txt, *.md, *.[ext], etc.
-                    if *marker == "*" && first_char == '.' {
-                        break;
-                    }
-
-                    // For CLEAR user intent, only flag if:
-                    // 1. Starts with uppercase letter (strong list indicator), OR
-                    // 2. Starts with [ or ( (link/paren content)
-                    // Lowercase content is ambiguous (could be flag, glob, etc.)
-                    let is_clear_intent = first_char.is_ascii_uppercase() || first_char == '[' || first_char == '(';
-
-                    if !is_clear_intent {
-                        break;
-                    }
-
-                    let is_multi_line = self.is_multi_line_for_unrecognized(line_num, lines);
-                    let expected_spaces = self.get_expected_spaces(ListType::Unordered, is_multi_line);
-
-                    let marker_pos = indent_len;
-                    let marker_end = marker_pos + marker.len();
-
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_match_range(line_num, line, marker_end, 0);
-
-                    let correct_spaces = " ".repeat(expected_spaces);
-                    let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                    let fix_position = line_start_byte + marker_end;
-
-                    return Some(LintWarning {
-                        rule_name: Some("MD030".to_string()),
-                        severity: Severity::Warning,
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: format!("Spaces after list markers (Expected: {expected_spaces}; Actual: 0)"),
-                        fix: Some(crate::rule::Fix {
-                            range: fix_position..fix_position,
-                            replacement: correct_spaces,
-                        }),
-                    });
-                }
-                break; // Found a marker, don't check others
-            }
-        }
+        // Note: We intentionally do NOT apply heuristic detection to unordered list markers
+        // (*, -, +) because they have too many non-list uses: emphasis, globs, diffs, etc.
+        // The parser handles valid unordered list items; we only do heuristic detection
+        // for ordered lists where "1.Text" is almost always a list item with missing space.
 
         // Check for ordered list markers (digits followed by .) without proper spacing
         if let Some(dot_pos) = trimmed.find('.') {

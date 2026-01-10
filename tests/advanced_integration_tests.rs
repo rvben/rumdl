@@ -289,7 +289,7 @@ fn test_cli_options() {
 <div>Some HTML</div>
 
 * List item
-*Bad item
+1.Ordered item without space
 "#;
     fs::write(&markdown_path, markdown_content).unwrap();
 
@@ -309,7 +309,7 @@ fn test_cli_options() {
     // The test content triggers exactly three rules:
     // - MD022: "## No blank line" lacks blank line above it
     // - MD033: "<div>Some HTML</div>" contains inline HTML
-    // - MD030: "*Bad item" has no space after list marker (user-intention detection)
+    // - MD030: "1.Ordered item" has no space after list marker (heuristic detection)
     assert!(default_output.contains("MD022"));
     assert!(default_output.contains("MD033"));
     assert!(default_output.contains("MD030"));
@@ -340,9 +340,9 @@ fn test_cli_options() {
     assert!(!disabled_output.contains("MD030"));
 
     // Note: MD032 (blanks around lists) doesn't trigger because the list has blank lines around it
-    // Note: MD030 (list marker space) NOW triggers on "*Bad item" due to user-intention detection
+    // Note: MD030 (list marker space) triggers on "1.Ordered item" via heuristic detection
 
-    // Test enabling only MD030 to verify it triggers on the intentional list item pattern
+    // Test enabling only MD030 to verify it triggers on the ordered list pattern
     let mut enabled_cmd = cargo_bin_cmd!("rumdl");
     let enabled_assert = enabled_cmd
         .arg("check")
@@ -356,7 +356,7 @@ fn test_cli_options() {
     enabled_assert.code(1); // Expect failure since MD030 finds an issue
     assert!(!enabled_output.contains("MD022"));
     assert!(!enabled_output.contains("MD033"));
-    assert!(enabled_output.contains("MD030")); // MD030 now detects *Bad item as intentional list
+    assert!(enabled_output.contains("MD030")); // MD030 detects ordered markers without space
 
     // Test default run on options_test.md (using --no-config)
     let options_test_path = temp_dir.path().join("options_test.md");
@@ -470,6 +470,7 @@ This is text with *emphasis* not a list.
         .arg("check")
         .arg(&invalid_list_path)
         .arg("--no-config")
+        .arg("--no-cache")
         .arg("--enable")
         .arg("MD030") // Only enable MD030
         .assert();

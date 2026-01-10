@@ -187,6 +187,8 @@ fn test_kramdown_does_not_affect_standard_markdown() {
 This has * spaces in emphasis * that should be flagged.
 
 <div>Regular HTML should be flagged</div>
+
+Some text before code block
 ```
 Code block without blank line above
 ```
@@ -200,7 +202,7 @@ List with wrong marker:
 
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .current_dir(temp_dir.path())
-        .args(["check", "standard.md"])
+        .args(["check", "standard.md", "--no-cache"])
         .output()
         .unwrap();
 
