@@ -77,8 +77,19 @@ impl MD007ULIndent {
 
         // "Do What I Mean": if indent is explicitly set (but style is not), use fixed style
         // This is the expected behavior when users configure `indent = 4` - they want 4-space increments
+        // BUT: bullets under ordered lists still need text-aligned because ordered markers have variable width
         if self.config.indent_explicit {
-            return nesting_level * self.config.indent.get() as usize;
+            match parent_info {
+                Some((true, parent_content_col)) => {
+                    // Parent is ordered: even with explicit indent, use text-aligned
+                    // Ordered markers have variable width ("1." vs "10." vs "100.")
+                    return parent_content_col;
+                }
+                _ => {
+                    // Parent is unordered or no parent: use fixed indent
+                    return nesting_level * self.config.indent.get() as usize;
+                }
+            }
         }
 
         // Smart default: per-parent type decision
