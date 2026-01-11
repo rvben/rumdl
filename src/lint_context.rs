@@ -2283,39 +2283,20 @@ impl<'a> LintContext<'a> {
 
         // Detect headings (including Setext which needs look-ahead) and blockquotes
         for i in 0..lines.len() {
-            if lines[i].in_code_block {
-                continue;
-            }
-
-            // Skip lines in front matter
-            if front_matter_end > 0 && i < front_matter_end {
-                continue;
-            }
-
-            // Skip lines in HTML blocks - HTML content should not be parsed as markdown
-            if lines[i].in_html_block {
-                continue;
-            }
-
             let line = content_lines[i];
 
-            // Check for blockquotes (even on blank lines within blockquotes)
-            if let Some(bq) = parse_blockquote_detailed(line) {
-                let nesting_level = bq.markers.len(); // Each '>' is one level
+            // Detect blockquotes FIRST, before any skip conditions.
+            // A line can be both a blockquote AND contain a code block inside it.
+            // We need to know about the blockquote marker regardless of code block status.
+            // Skip only frontmatter lines - those are never blockquotes.
+            if !(front_matter_end > 0 && i < front_matter_end)
+                && let Some(bq) = parse_blockquote_detailed(line)
+            {
+                let nesting_level = bq.markers.len();
                 let marker_column = bq.indent.len();
-
-                // Build the prefix (indentation + markers + space)
                 let prefix = format!("{}{}{}", bq.indent, bq.markers, bq.spaces_after);
-
-                // Check for various blockquote issues
                 let has_no_space = bq.spaces_after.is_empty() && !bq.content.is_empty();
-                // Only flag multiple literal spaces, not tabs
-                // Tabs are handled by MD010 (no-hard-tabs), matching markdownlint behavior
                 let has_multiple_spaces = bq.spaces_after.chars().filter(|&c| c == ' ').count() > 1;
-
-                // Check if needs MD028 fix (empty blockquote line without proper spacing)
-                // MD028 flags empty blockquote lines that don't have a single space after the marker
-                // Lines like "> " or ">> " are already correct and don't need fixing
                 let needs_md028_fix = bq.content.is_empty() && bq.spaces_after.is_empty();
 
                 lines[i].blockquote = Some(BlockquoteInfo {
@@ -2328,6 +2309,21 @@ impl<'a> LintContext<'a> {
                     has_multiple_spaces_after_marker: has_multiple_spaces,
                     needs_md028_fix,
                 });
+            }
+
+            // Now apply skip conditions for heading detection
+            if lines[i].in_code_block {
+                continue;
+            }
+
+            // Skip lines in front matter
+            if front_matter_end > 0 && i < front_matter_end {
+                continue;
+            }
+
+            // Skip lines in HTML blocks - HTML content should not be parsed as markdown
+            if lines[i].in_html_block {
+                continue;
             }
 
             // Skip heading detection for blank lines
@@ -4344,5 +4340,41 @@ export const year = 2023
             !ctx.lines[1].in_esm_block,
             "Line 2 should NOT be in_esm_block in Standard flavor"
         );
+    }
+
+    #[test]
+    fn test_blockquote_with_indented_content() {
+        // Lines with `>` followed by heavily-indented content should be detected as blockquotes.
+        // The content inside the blockquote may also be detected as a code block (which is correct),
+        // but for MD046 purposes, we need to know the line is inside a blockquote.
+        let content = r#"# Heading
+
+>      -S socket-path
+>                    More text
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Line 3 (index 2) should be detected as blockquote
+        assert!(
+            ctx.lines.get(2).is_some_and(|l| l.blockquote.is_some()),
+            "Line 3 should be a blockquote"
+        );
+        // Line 4 (index 3) should also be blockquote
+        assert!(
+            ctx.lines.get(3).is_some_and(|l| l.blockquote.is_some()),
+            "Line 4 should be a blockquote"
+        );
+
+        // Verify blockquote content is correctly parsed
+        // Note: spaces_after includes the spaces between `>` and content
+        let bq3 = ctx.lines.get(2).unwrap().blockquote.as_ref().unwrap();
+        assert_eq!(bq3.content, "-S socket-path");
+        assert_eq!(bq3.nesting_level, 1);
+        // 6 spaces after the `>` marker
+        assert!(bq3.has_multiple_spaces_after_marker);
+
+        let bq4 = ctx.lines.get(3).unwrap().blockquote.as_ref().unwrap();
+        assert_eq!(bq4.content, "More text");
+        assert_eq!(bq4.nesting_level, 1);
     }
 }

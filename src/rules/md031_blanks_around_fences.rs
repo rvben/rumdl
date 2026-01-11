@@ -52,8 +52,25 @@ impl MD031BlanksAroundFences {
         Self { config }
     }
 
-    fn is_empty_line(line: &str) -> bool {
-        line.trim().is_empty()
+    /// Check if a line is effectively empty (blank or an empty blockquote line like ">")
+    /// Uses the pre-computed blockquote info from LintContext for accurate detection
+    fn is_effectively_empty_line(line_idx: usize, lines: &[&str], ctx: &crate::lint_context::LintContext) -> bool {
+        let line = lines.get(line_idx).unwrap_or(&"");
+
+        // First check if it's a regular blank line
+        if line.trim().is_empty() {
+            return true;
+        }
+
+        // Check if this is an empty blockquote line (like ">", "> ", ">>", etc.)
+        if let Some(line_info) = ctx.lines.get(line_idx)
+            && let Some(ref bq) = line_info.blockquote
+        {
+            // If the blockquote content is empty, this is effectively a blank line
+            return bq.content.trim().is_empty();
+        }
+
+        false
     }
 
     /// Check if a line is inside a list item
@@ -212,8 +229,9 @@ impl Rule for MD031BlanksAroundFences {
         for (opening_line, closing_line) in &fenced_blocks {
             // Check for blank line before opening fence
             // Skip if right after frontmatter
+            // Use is_effectively_empty_line to handle blockquote blank lines (issue #284)
             if *opening_line > 0
-                && !Self::is_empty_line(lines[*opening_line - 1])
+                && !Self::is_effectively_empty_line(*opening_line - 1, &lines, ctx)
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
                 && self.should_require_blank_line(*opening_line, &lines)
             {
@@ -237,8 +255,9 @@ impl Rule for MD031BlanksAroundFences {
 
             // Check for blank line after closing fence
             // Allow Kramdown block attributes if configured
+            // Use is_effectively_empty_line to handle blockquote blank lines (issue #284)
             if *closing_line + 1 < lines.len()
-                && !Self::is_empty_line(lines[*closing_line + 1])
+                && !Self::is_effectively_empty_line(*closing_line + 1, &lines, ctx)
                 && !is_kramdown_block_attribute(lines[*closing_line + 1])
                 && self.should_require_blank_line(*closing_line, &lines)
             {
@@ -285,7 +304,7 @@ impl Rule for MD031BlanksAroundFences {
                 if mkdocs_admonitions::is_admonition_start(line) {
                     // Check for blank line before admonition
                     if i > 0
-                        && !Self::is_empty_line(lines[i - 1])
+                        && !Self::is_effectively_empty_line(i - 1, &lines, ctx)
                         && !Self::is_right_after_frontmatter(i, ctx)
                         && self.should_require_blank_line(i, &lines)
                     {
@@ -320,7 +339,8 @@ impl Rule for MD031BlanksAroundFences {
                     in_admonition = false;
 
                     // Check for blank line after admonition
-                    if !Self::is_empty_line(line) && self.should_require_blank_line(i - 1, &lines) {
+                    if !Self::is_effectively_empty_line(i, &lines, ctx) && self.should_require_blank_line(i - 1, &lines)
+                    {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
                         warnings.push(LintWarning {
@@ -365,8 +385,9 @@ impl Rule for MD031BlanksAroundFences {
 
         for (opening_line, closing_line) in &fenced_blocks {
             // Check if needs blank line before opening fence
+            // Use is_effectively_empty_line to handle blockquote blank lines
             if *opening_line > 0
-                && !Self::is_empty_line(lines[*opening_line - 1])
+                && !Self::is_effectively_empty_line(*opening_line - 1, &lines, ctx)
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
                 && self.should_require_blank_line(*opening_line, &lines)
             {
@@ -374,8 +395,9 @@ impl Rule for MD031BlanksAroundFences {
             }
 
             // Check if needs blank line after closing fence
+            // Use is_effectively_empty_line to handle blockquote blank lines
             if *closing_line + 1 < lines.len()
-                && !Self::is_empty_line(lines[*closing_line + 1])
+                && !Self::is_effectively_empty_line(*closing_line + 1, &lines, ctx)
                 && !is_kramdown_block_attribute(lines[*closing_line + 1])
                 && self.should_require_blank_line(*closing_line, &lines)
             {

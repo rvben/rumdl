@@ -933,12 +933,11 @@ impl Rule for MD046CodeBlockStyle {
                     if target_style == CodeBlockStyle::Fenced && !reported_indented_lines.contains(&start_line_idx) {
                         let line = lines.get(start_line_idx).unwrap_or(&"");
 
-                        // Skip if inside HTML comment or mkdocstrings
-                        if ctx
-                            .lines
-                            .get(start_line_idx)
-                            .is_some_and(|info| info.in_html_comment || info.in_mkdocstrings)
-                        {
+                        // Skip if inside HTML comment, mkdocstrings, or blockquote
+                        // Indented content inside blockquotes is NOT an indented code block
+                        if ctx.lines.get(start_line_idx).is_some_and(|info| {
+                            info.in_html_comment || info.in_mkdocstrings || info.blockquote.is_some()
+                        }) {
                             continue;
                         }
 

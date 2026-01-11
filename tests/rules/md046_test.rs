@@ -676,3 +676,144 @@ TypeError: can only concatenate str (not "int") to str
         "MD046 should not flag content inside fenced code blocks (issue #118)"
     );
 }
+
+#[test]
+fn test_issue_285_blockquote_indented_content() {
+    // Issue #285: Indented content inside blockquotes should not be flagged as indented code blocks
+    // When content after `>` has 4+ spaces, it's blockquote content, not a document-level code block
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"# Issue 285 - MD046 false positive
+
+But as we see in the history file, the `-L` and `-S` flags are used:
+>      -S socket-path
+>                    Specify a full alternative path to the server socket.
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Indented content inside blockquotes should not be flagged as indented code blocks (issue #285)"
+    );
+}
+
+#[test]
+fn test_blockquote_with_heavily_indented_content() {
+    // Test various levels of indentation inside blockquotes
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"# Blockquote Indentation Tests
+
+> Normal blockquote content
+>     Four spaces (would be code block outside blockquote)
+>         Eight spaces
+>              Twelve spaces
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Heavily indented blockquote content should not trigger MD046"
+    );
+}
+
+#[test]
+fn test_blockquote_code_block_inside() {
+    // Actual fenced code blocks INSIDE blockquotes should still be detected properly
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"# Fenced Code Inside Blockquote
+
+> Here's some code:
+>
+> ```python
+> def hello():
+>     print("Hello from blockquote")
+> ```
+>
+> That was the code.
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Fenced code blocks inside blockquotes should work correctly"
+    );
+}
+
+#[test]
+fn test_nested_blockquote_with_indentation() {
+    // Test nested blockquotes with indented content
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"# Nested Blockquotes
+
+> Outer blockquote
+>> Inner blockquote
+>>     Indented content in inner blockquote
+>>          More indentation
+> Back to outer
+>     Indented in outer
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Nested blockquotes with indentation should not trigger MD046"
+    );
+}
+
+#[test]
+fn test_blockquote_then_indented_code() {
+    // Test that actual indented code blocks AFTER blockquotes are still detected
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"# Blockquote Then Code
+
+> This is a blockquote
+> with multiple lines
+
+    This is actual indented code (after the blockquote)
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should detect the indented code block after the blockquote
+    assert_eq!(
+        result.len(),
+        1,
+        "Indented code block after blockquote should still be detected"
+    );
+}
+
+#[test]
+fn test_mixed_blockquote_and_code() {
+    // Test mix of blockquotes and code blocks
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = r#"# Mixed Content
+
+> Blockquote with indented content:
+>     -L flag description
+>     -S socket-path description
+
+```python
+# This is actual fenced code
+print("hello")
+```
+
+> Another blockquote
+>     More indented content
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Mixed blockquotes and fenced code blocks should work correctly"
+    );
+}
