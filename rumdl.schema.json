@@ -178,6 +178,14 @@
       },
       "description": "Global configuration options"
     },
+    "per-file-flavor": {
+      "additionalProperties": {
+        "$ref": "#/$defs/MarkdownFlavor"
+      },
+      "default": {},
+      "description": "Per-file flavor overrides: maps file patterns to Markdown flavors\nExample: { \"docs/**/*.md\": MkDocs, \"**/*.mdx\": MDX }\nUses IndexMap to preserve config file order for \"first match wins\" semantics",
+      "type": "object"
+    },
     "per-file-ignores": {
       "additionalProperties": {
         "items": {
