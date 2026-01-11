@@ -555,12 +555,16 @@ impl MD032BlanksAroundLists {
                     .map_or(String::new(), |m| m.as_str().to_string());
 
                 let should_require = Self::should_require_blank_line_before(ctx, prev_line_actual_idx_1, start_line);
+                // Compare trimmed prefixes to handle varying whitespace after > markers
+                // (e.g., "> " vs ">   " should both match blockquote level 1)
                 if !is_prev_excluded
                     && !is_blank_in_context(lines[prev_line_actual_idx_0])
-                    && prev_prefix == *prefix
+                    && prev_prefix.trim() == prefix.trim()
                     && should_require
                 {
-                    insertions.insert(start_line, prefix.clone());
+                    // Use normalized prefix (just > markers + single space) for the blank line
+                    let normalized_prefix = normalize_blockquote_prefix(prefix);
+                    insertions.insert(start_line, normalized_prefix);
                 }
             }
 
@@ -589,11 +593,14 @@ impl MD032BlanksAroundLists {
                     .find(line_after_block_content_str)
                     .map_or(String::new(), |m| m.as_str().to_string());
 
+                // Compare trimmed prefixes to handle varying whitespace after > markers
                 if !is_line_after_excluded
                     && !is_blank_in_context(line_after_block_content_str)
-                    && after_prefix == *prefix
+                    && after_prefix.trim() == prefix.trim()
                 {
-                    insertions.insert(after_block_line_idx_1, prefix.clone());
+                    // Use normalized prefix (just > markers + single space) for the blank line
+                    let normalized_prefix = normalize_blockquote_prefix(prefix);
+                    insertions.insert(after_block_line_idx_1, normalized_prefix);
                 }
             }
         }
@@ -630,6 +637,30 @@ fn is_blank_in_context(line: &str) -> bool {
         // No blockquote prefix, check the whole line for blankness.
         line.trim().is_empty()
     }
+}
+
+/// Normalize a blockquote prefix to preserve marker structure but with single trailing space.
+/// For example: ">   " becomes "> ", and "> >   " becomes "> > "
+/// This preserves spacing between markers (for nested blockquotes like "> > ")
+/// while ensuring consistent trailing whitespace.
+fn normalize_blockquote_prefix(prefix: &str) -> String {
+    if prefix.is_empty() {
+        return String::new();
+    }
+
+    // Find the position of the last > marker
+    let last_marker_pos = prefix.rfind('>');
+
+    if last_marker_pos.is_none() {
+        // No blockquote markers, return empty
+        return String::new();
+    }
+
+    // Keep everything up to and including the last >, then add single space
+    let last_pos = last_marker_pos.unwrap();
+    let markers_portion = &prefix[..=last_pos];
+
+    format!("{markers_portion} ")
 }
 
 #[cfg(test)]
@@ -2214,5 +2245,46 @@ More text.
             0,
             "Blockquote list at document end should have no warnings"
         );
+    }
+
+    // Tests for normalize_blockquote_prefix helper function
+    #[test]
+    fn test_normalize_blockquote_prefix_basic() {
+        assert_eq!(normalize_blockquote_prefix("> "), "> ");
+        assert_eq!(normalize_blockquote_prefix(">"), "> ");
+        assert_eq!(normalize_blockquote_prefix(">  "), "> ");
+        assert_eq!(normalize_blockquote_prefix(">   "), "> ");
+    }
+
+    #[test]
+    fn test_normalize_blockquote_prefix_nested_adjacent() {
+        // Adjacent markers (no space between) should stay adjacent
+        assert_eq!(normalize_blockquote_prefix(">> "), ">> ");
+        assert_eq!(normalize_blockquote_prefix(">>"), ">> ");
+        assert_eq!(normalize_blockquote_prefix(">>  "), ">> ");
+        assert_eq!(normalize_blockquote_prefix(">>>   "), ">>> ");
+    }
+
+    #[test]
+    fn test_normalize_blockquote_prefix_nested_with_spaces() {
+        // Spaces between markers should be preserved (common in nested blockquotes)
+        assert_eq!(normalize_blockquote_prefix("> > "), "> > ");
+        assert_eq!(normalize_blockquote_prefix("> >"), "> > ");
+        assert_eq!(normalize_blockquote_prefix("> >  "), "> > ");
+        assert_eq!(normalize_blockquote_prefix("> > >   "), "> > > ");
+    }
+
+    #[test]
+    fn test_normalize_blockquote_prefix_with_leading_space() {
+        assert_eq!(normalize_blockquote_prefix("  > "), "  > ");
+        assert_eq!(normalize_blockquote_prefix(" >> "), " >> ");
+        assert_eq!(normalize_blockquote_prefix("   >   "), "   > ");
+    }
+
+    #[test]
+    fn test_normalize_blockquote_prefix_empty() {
+        assert_eq!(normalize_blockquote_prefix(""), "");
+        assert_eq!(normalize_blockquote_prefix("   "), "");
+        assert_eq!(normalize_blockquote_prefix("text"), "");
     }
 }

@@ -422,3 +422,277 @@ fn test_still_flags_inappropriate_cases() {
         assert!(!result.is_empty(), "Should still flag inappropriate cases: {case}");
     }
 }
+
+// =============================================================================
+// Issue #268: Auto-fix fails when blockquote prefix whitespace varies
+// =============================================================================
+// The bug: MD032 fix() compares blockquote prefixes with exact string equality,
+// but the regex captures varying amounts of trailing whitespace:
+//   "> #### Heading" captures "> " (2 chars)
+//   ">   - List item" captures ">   " (4 chars)
+// Since "> " != ">   ", the fix is not applied.
+
+#[test]
+fn test_issue_268_blockquote_heading_then_indented_list() {
+    // This is the minimal reproduction case for issue #268
+    // The heading has prefix "> " but the indented list has prefix ">   "
+    let rule = MD032BlanksAroundLists::default();
+    let content = "# Test\n\n> #### Heading\n>   - List item\n";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should detect missing blank line before list
+    assert_eq!(warnings.len(), 1, "Should detect missing blank line: {warnings:?}");
+    assert!(
+        warnings[0].message.contains("preceded by blank line"),
+        "Should be 'preceded by' warning"
+    );
+
+    // The fix should actually work - this is what was broken in #268
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected = "# Test\n\n> #### Heading\n> \n>   - List item\n";
+    assert_eq!(
+        fixed, expected,
+        "Fix should insert blank blockquote line.\nGot: {fixed:?}\nExpected: {expected:?}"
+    );
+
+    // Verify no warnings after fix
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings_after = rule.check(&ctx_fixed).unwrap();
+    assert!(
+        warnings_after.is_empty(),
+        "Should have no warnings after fix: {warnings_after:?}"
+    );
+}
+
+#[test]
+fn test_issue_268_multiple_fixes_in_same_blockquote() {
+    // Multiple lists in same blockquote, each needing a blank line
+    let rule = MD032BlanksAroundLists::default();
+    let content = r#"# Test
+
+> Text before
+> * Item A
+> * Item B
+>
+> #### Section
+>   - Item 1
+>   - Item 2
+>
+> End
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should detect both missing blank lines
+    assert_eq!(warnings.len(), 2, "Should detect 2 missing blank lines: {warnings:?}");
+
+    // Fix should work for ALL issues in one pass
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings_after = rule.check(&ctx_fixed).unwrap();
+
+    assert!(
+        warnings_after.is_empty(),
+        "All issues should be fixed in one pass.\nFixed content:\n{fixed}\nRemaining warnings: {warnings_after:?}"
+    );
+}
+
+#[test]
+fn test_issue_268_nested_blockquote_with_varying_whitespace() {
+    // Nested blockquotes where inner content has different indentation
+    let rule = MD032BlanksAroundLists::default();
+    let content = ">> Nested heading\n>>   - Nested list item\n";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    if !warnings.is_empty() {
+        // If check detects an issue, fix must resolve it
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings_after = rule.check(&ctx_fixed).unwrap();
+
+        assert!(
+            warnings_after.is_empty(),
+            "Fix should resolve nested blockquote issues.\nOriginal: {content:?}\nFixed: {fixed:?}\nWarnings: {warnings_after:?}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_268_blockquote_prefix_comparison_should_ignore_trailing_whitespace() {
+    // Test various whitespace patterns that should all be treated as same blockquote level
+    let rule = MD032BlanksAroundLists::default();
+
+    // All these have blockquote level 1, but different trailing whitespace
+    let cases = [
+        // (content, description)
+        ("> Text\n>- List", "no space after >"),
+        ("> Text\n> - List", "one space after >"),
+        ("> Text\n>  - List", "two spaces after >"),
+        ("> Text\n>   - List", "three spaces (indented list marker)"),
+        (">Text\n>- List", "no space anywhere"),
+    ];
+
+    for (content, desc) in cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        if !warnings.is_empty() {
+            let fixed = rule.fix(&ctx).unwrap();
+            let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+            let warnings_after = rule.check(&ctx_fixed).unwrap();
+
+            assert!(
+                warnings_after.is_empty(),
+                "Fix should work for {desc}.\nOriginal: {content:?}\nFixed: {fixed:?}\nWarnings: {warnings_after:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_issue_268_real_world_matrix_org_pattern() {
+    // Pattern from matrix.org that triggered the bug
+    let rule = MD032BlanksAroundLists::default();
+    let content = r#"# TWIM
+
+> Some intro text
+> * **Item 1**
+>   Description of item 1.
+> * **Item 2**
+>   Description of item 2.
+>
+> #### *Section Title:*
+>   - The first point
+>     - Nested point under first
+>   - The second point
+>   - The third point
+
+Regular text after blockquote.
+"#;
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Fix must resolve ALL detected issues
+    if !warnings.is_empty() {
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings_after = rule.check(&ctx_fixed).unwrap();
+
+        assert!(
+            warnings_after.is_empty(),
+            "Real-world pattern should be fully fixed.\nOriginal warnings: {warnings:?}\nFixed content:\n{fixed}\nRemaining: {warnings_after:?}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_268_fix_preserves_content_integrity() {
+    // Ensure fix only adds blank lines, doesn't corrupt content
+    let rule = MD032BlanksAroundLists::default();
+    let content = "> #### Heading with **bold** and *italic*\n>   - List with `code` and [link](url)\n";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // All original content should be preserved
+    assert!(
+        fixed.contains("#### Heading with **bold** and *italic*"),
+        "Heading content should be preserved"
+    );
+    assert!(
+        fixed.contains("- List with `code` and [link](url)"),
+        "List content should be preserved"
+    );
+
+    // Only blank lines should be added
+    let original_non_blank: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+    let fixed_non_blank: Vec<&str> = fixed
+        .lines()
+        .filter(|l| !l.trim().is_empty() && l.trim() != ">")
+        .collect();
+
+    assert_eq!(
+        original_non_blank.len(),
+        fixed_non_blank.len(),
+        "Should only add blank lines, not modify content.\nOriginal non-blank: {original_non_blank:?}\nFixed non-blank: {fixed_non_blank:?}"
+    );
+}
+
+#[test]
+fn test_issue_268_followed_by_blank_line_also_affected() {
+    // The "followed by" case may also be affected by the same bug
+    let rule = MD032BlanksAroundLists::default();
+    let content = "# Test\n\n>   - List item 1\n>   - List item 2\n> #### After list\n";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    if !warnings.is_empty() {
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings_after = rule.check(&ctx_fixed).unwrap();
+
+        assert!(
+            warnings_after.is_empty(),
+            "'Followed by' case should also be fixed.\nFixed: {fixed:?}\nWarnings: {warnings_after:?}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_268_idempotent_fix() {
+    // Running fix multiple times should produce same result
+    let rule = MD032BlanksAroundLists::default();
+    let content = "> #### Heading\n>   - List item\n";
+
+    let ctx1 = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed1 = rule.fix(&ctx1).unwrap();
+
+    let ctx2 = LintContext::new(&fixed1, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+
+    let ctx3 = LintContext::new(&fixed2, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed3 = rule.fix(&ctx3).unwrap();
+
+    assert_eq!(fixed1, fixed2, "Second fix should be idempotent");
+    assert_eq!(fixed2, fixed3, "Third fix should be idempotent");
+}
+
+#[test]
+fn test_issue_268_nested_blockquote_with_space_between_markers() {
+    // Edge case: nested blockquotes written as "> > " (space between markers)
+    // The fix should preserve this format, not collapse to ">>"
+    let rule = MD032BlanksAroundLists::default();
+    let content = "> > Nested text\n> >   - List item\n";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    if !warnings.is_empty() {
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The blank line should preserve the "> > " format
+        assert!(
+            fixed.contains("> >"),
+            "Should preserve space between markers.\nFixed: {fixed:?}"
+        );
+        assert!(
+            !fixed.contains(">>") || fixed.contains("> >"),
+            "Should not collapse markers.\nFixed: {fixed:?}"
+        );
+
+        // Verify no warnings after fix
+        let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings_after = rule.check(&ctx_fixed).unwrap();
+        assert!(
+            warnings_after.is_empty(),
+            "Should have no warnings after fix: {warnings_after:?}"
+        );
+    }
+}
