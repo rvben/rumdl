@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.214] - 2026-01-11
+
+### Added
+
+- **Per-file flavor configuration** (fixes #283)
+  - Configure different markdown flavors for specific file patterns using glob patterns
+  - Example: `"docs/**/*.md" = "gfm"` in `[global.file-flavors]` section
+  - Supports all flavor values: `commonmark`, `gfm`, `mkdocs`, `obsidian`, `mdbook`
+  - File patterns are matched against relative paths from project root
+
 ### Fixed
 
 - **MD028: Skip GFM alerts when checking blank lines in blockquotes** (fixes #126)
@@ -14,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - MD028 now detects GFM alerts and allows blank lines between them
   - Case-insensitive detection supports both `[!NOTE]` and `[!note]`
   - Regular blockquotes between GFM alerts are still flagged correctly
+
+- **MD032: Auto-fix handles varying blockquote whitespace** (fixes #268)
+  - Auto-fix no longer breaks blockquote structure when lines have different spacing
+  - Properly handles mixed `>` and `> ` prefixes within the same blockquote
+
+- **MD032: Detect blockquotes before skip conditions** (fixes #284, #285)
+  - Blockquote detection now runs first, preventing false positives inside blockquotes
+  - Fixes cases where multi-paragraph list items in blockquotes triggered warnings
 
 ## [0.0.213] - 2026-01-08
 
