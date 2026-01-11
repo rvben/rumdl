@@ -1160,6 +1160,8 @@ checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.0",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -2065,6 +2067,7 @@ dependencies = [
  "futures",
  "globset",
  "ignore",
+ "indexmap",
  "itertools 0.14.0",
  "js-sys",
  "jsonschema",

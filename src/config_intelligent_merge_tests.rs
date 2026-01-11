@@ -178,6 +178,7 @@ mod tests {
         let mut project_fragment = SourcedConfigFragment {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
+            per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
             unknown_keys: vec![],
         };
@@ -207,6 +208,7 @@ mod tests {
         let mut project_fragment = SourcedConfigFragment {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
+            per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
             unknown_keys: vec![],
         };
@@ -271,6 +273,7 @@ mod tests {
         let project_fragment = SourcedConfigFragment {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
+            per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
             unknown_keys: vec![],
         };

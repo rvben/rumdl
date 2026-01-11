@@ -2137,3 +2137,158 @@ style = "text-aligned"
         "With explicit text-aligned style, 2-space indentation should be valid. Got: {result:?}"
     );
 }
+
+/// Comprehensive test that verifies ALL GlobalConfig fields are properly wired
+/// through the config parsing and merging system.
+///
+/// This test catches the "silent failure" problem where adding a new config key
+/// compiles fine but fails at runtime because one of the 7 required steps was missed.
+///
+/// If this test fails, check ARCHITECTURE-IMPROVEMENTS.md for the 7-step checklist.
+#[test]
+#[allow(deprecated)]
+fn test_global_config_all_fields_roundtrip() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("complete_config.toml");
+
+    // Set ALL GlobalConfig fields to non-default values
+    let config_content = r#"
+[global]
+# Vec fields - non-empty
+enable = ["MD001", "MD003"]
+disable = ["MD013", "MD041"]
+include = ["docs/**/*.md", "README.md"]
+exclude = ["node_modules/**", "vendor/**"]
+fixable = ["MD009", "MD010"]
+unfixable = ["MD033"]
+
+# Boolean fields - opposite of default
+respect-gitignore = false
+cache = false
+force-exclude = true
+
+# Option/scalar fields - set to non-default values
+line-length = 120
+output-format = "json"
+cache-dir = "/custom/cache/path"
+flavor = "mkdocs"
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
+    let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+        .expect("Should load config successfully");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify ALL Vec<String> fields
+    assert_eq!(
+        config.global.enable,
+        vec!["MD001", "MD003"],
+        "enable field should be populated"
+    );
+    assert_eq!(
+        config.global.disable,
+        vec!["MD013", "MD041"],
+        "disable field should be populated"
+    );
+    assert_eq!(
+        config.global.include,
+        vec!["docs/**/*.md", "README.md"],
+        "include field should be populated"
+    );
+    assert_eq!(
+        config.global.exclude,
+        vec!["node_modules/**", "vendor/**"],
+        "exclude field should be populated"
+    );
+    assert_eq!(
+        config.global.fixable,
+        vec!["MD009", "MD010"],
+        "fixable field should be populated"
+    );
+    assert_eq!(
+        config.global.unfixable,
+        vec!["MD033"],
+        "unfixable field should be populated"
+    );
+
+    // Verify boolean fields (checking they have non-default values)
+    assert!(
+        !config.global.respect_gitignore,
+        "respect_gitignore should be false (non-default)"
+    );
+    assert!(!config.global.cache, "cache should be false (non-default)");
+    assert!(
+        config.global.force_exclude,
+        "force_exclude should be true (non-default)"
+    );
+
+    // Verify Option/scalar fields
+    assert_eq!(config.global.line_length.get(), 120, "line_length should be 120");
+    assert_eq!(
+        config.global.output_format.as_deref(),
+        Some("json"),
+        "output_format should be 'json'"
+    );
+    assert_eq!(
+        config.global.cache_dir.as_deref(),
+        Some("/custom/cache/path"),
+        "cache_dir should be '/custom/cache/path'"
+    );
+    assert_eq!(
+        config.global.flavor,
+        rumdl_lib::config::MarkdownFlavor::MkDocs,
+        "flavor should be MkDocs"
+    );
+}
+
+/// Test that pyproject.toml also properly handles all GlobalConfig fields
+#[test]
+#[allow(deprecated)]
+fn test_global_config_all_fields_pyproject_toml() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("pyproject.toml");
+
+    // Set ALL GlobalConfig fields via pyproject.toml
+    let config_content = r#"
+[tool.rumdl]
+enable = ["MD002", "MD004"]
+disable = ["MD014", "MD042"]
+include = ["src/**/*.md"]
+exclude = [".git/**"]
+fixable = ["MD011"]
+unfixable = ["MD034"]
+respect-gitignore = false
+cache = false
+force-exclude = true
+line-length = 100
+output-format = "pylint"
+cache-dir = "/pyproject/cache"
+flavor = "quarto"
+"#;
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let config_path_str = config_path.to_str().expect("Path should be valid UTF-8");
+    let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path_str), None, true)
+        .expect("Should load pyproject.toml successfully");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Verify key fields round-trip through pyproject.toml
+    assert_eq!(config.global.enable, vec!["MD002", "MD004"]);
+    assert_eq!(config.global.disable, vec!["MD014", "MD042"]);
+    assert_eq!(config.global.include, vec!["src/**/*.md"]);
+    assert_eq!(config.global.exclude, vec![".git/**"]);
+    assert_eq!(config.global.fixable, vec!["MD011"]);
+    assert_eq!(config.global.unfixable, vec!["MD034"]);
+    assert!(!config.global.respect_gitignore);
+    assert!(!config.global.cache);
+    assert!(config.global.force_exclude);
+    assert_eq!(config.global.line_length.get(), 100);
+    assert_eq!(config.global.output_format.as_deref(), Some("pylint"));
+    assert_eq!(config.global.cache_dir.as_deref(), Some("/pyproject/cache"));
+    assert_eq!(config.global.flavor, rumdl_lib::config::MarkdownFlavor::Quarto);
+}

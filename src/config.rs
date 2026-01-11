@@ -5,6 +5,7 @@
 use crate::rule::Rule;
 use crate::rules;
 use crate::types::LineLength;
+use indexmap::IndexMap;
 use log;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -173,6 +174,13 @@ pub struct Config {
     #[serde(default, rename = "per-file-ignores")]
     pub per_file_ignores: HashMap<String, Vec<String>>,
 
+    /// Per-file flavor overrides: maps file patterns to Markdown flavors
+    /// Example: { "docs/**/*.md": MkDocs, "**/*.mdx": MDX }
+    /// Uses IndexMap to preserve config file order for "first match wins" semantics
+    #[serde(default, rename = "per-file-flavor")]
+    #[schemars(with = "HashMap<String, MarkdownFlavor>")]
+    pub per_file_flavor: IndexMap<String, MarkdownFlavor>,
+
     /// Rule-specific configurations (e.g., MD013, MD007, MD044)
     /// Each rule section can contain options specific to that rule.
     ///
@@ -279,6 +287,64 @@ impl Config {
         }
 
         ignored_rules
+    }
+
+    /// Get the MarkdownFlavor for a specific file based on per-file-flavor configuration.
+    /// Returns the first matching pattern's flavor, or falls back to global flavor,
+    /// or auto-detects from extension, or defaults to Standard.
+    pub fn get_flavor_for_file(&self, file_path: &Path) -> MarkdownFlavor {
+        use globset::GlobBuilder;
+
+        // If no per-file patterns, use fallback logic
+        if self.per_file_flavor.is_empty() {
+            return self.resolve_flavor_fallback(file_path);
+        }
+
+        // Normalize path for matching (same logic as get_ignored_rules_for_file)
+        let path_for_matching: std::borrow::Cow<'_, Path> = if let Some(ref root) = self.project_root {
+            if let Ok(canonical_path) = file_path.canonicalize() {
+                if let Ok(canonical_root) = root.canonicalize() {
+                    if let Ok(relative) = canonical_path.strip_prefix(&canonical_root) {
+                        std::borrow::Cow::Owned(relative.to_path_buf())
+                    } else {
+                        std::borrow::Cow::Borrowed(file_path)
+                    }
+                } else {
+                    std::borrow::Cow::Borrowed(file_path)
+                }
+            } else {
+                std::borrow::Cow::Borrowed(file_path)
+            }
+        } else {
+            std::borrow::Cow::Borrowed(file_path)
+        };
+
+        // Iterate in config order and return first match (IndexMap preserves order)
+        for (pattern, flavor) in &self.per_file_flavor {
+            // Use GlobBuilder with literal_separator(true) for standard glob semantics
+            // where * does NOT match path separators (only ** does)
+            if let Ok(glob) = GlobBuilder::new(pattern).literal_separator(true).build() {
+                let matcher = glob.compile_matcher();
+                if matcher.is_match(path_for_matching.as_ref()) {
+                    return *flavor;
+                }
+            } else {
+                log::warn!("Invalid glob pattern in per-file-flavor: {pattern}");
+            }
+        }
+
+        // No pattern matched, use fallback
+        self.resolve_flavor_fallback(file_path)
+    }
+
+    /// Fallback flavor resolution: global flavor → auto-detect → Standard
+    fn resolve_flavor_fallback(&self, file_path: &Path) -> MarkdownFlavor {
+        // If global flavor is explicitly set to non-Standard, use it
+        if self.global.flavor != MarkdownFlavor::Standard {
+            return self.global.flavor;
+        }
+        // Auto-detect from extension
+        MarkdownFlavor::from_path(file_path)
     }
 }
 
@@ -1445,6 +1511,550 @@ disable = ["MD001"]
         assert!(ignored.contains("MD041"), "Should match relative path");
     }
 
+    // ==========================================
+    // Per-File-Flavor Tests
+    // ==========================================
+
+    #[test]
+    fn test_per_file_flavor_config_parsing() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+"**/*.mdx" = "mdx"
+"**/*.qmd" = "quarto"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Verify per-file-flavor was loaded
+        assert_eq!(config.per_file_flavor.len(), 3);
+        assert_eq!(
+            config.per_file_flavor.get("docs/**/*.md"),
+            Some(&MarkdownFlavor::MkDocs)
+        );
+        assert_eq!(config.per_file_flavor.get("**/*.mdx"), Some(&MarkdownFlavor::MDX));
+        assert_eq!(config.per_file_flavor.get("**/*.qmd"), Some(&MarkdownFlavor::Quarto));
+    }
+
+    #[test]
+    fn test_per_file_flavor_glob_matching() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+"**/*.mdx" = "mdx"
+"components/**/*.md" = "mdx"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Test mkdocs flavor for docs directory
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/api/overview.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // Test mdx flavor for .mdx extension
+        let flavor = config.get_flavor_for_file(&PathBuf::from("src/components/Button.mdx"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+
+        // Test mdx flavor for components directory
+        let flavor = config.get_flavor_for_file(&PathBuf::from("components/Button/README.md"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+
+        // Test non-matching path falls back to standard
+        let flavor = config.get_flavor_for_file(&PathBuf::from("README.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_per_file_flavor_pyproject_toml() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("pyproject.toml");
+        let config_content = r#"
+[tool.rumdl]
+[tool.rumdl.per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+"**/*.mdx" = "mdx"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Verify per-file-flavor was loaded from pyproject.toml
+        assert_eq!(config.per_file_flavor.len(), 2);
+        assert_eq!(
+            config.per_file_flavor.get("docs/**/*.md"),
+            Some(&MarkdownFlavor::MkDocs)
+        );
+        assert_eq!(config.per_file_flavor.get("**/*.mdx"), Some(&MarkdownFlavor::MDX));
+    }
+
+    #[test]
+    fn test_per_file_flavor_first_match_wins() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Order matters - first match wins (IndexMap preserves order)
+        let config_content = r#"
+[per-file-flavor]
+"docs/internal/**/*.md" = "quarto"
+"docs/**/*.md" = "mkdocs"
+"**/*.md" = "standard"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // More specific pattern should match first
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/internal/secret.md"));
+        assert_eq!(flavor, MarkdownFlavor::Quarto);
+
+        // Less specific pattern for other docs
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/public/readme.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // Fallback to least specific pattern
+        let flavor = config.get_flavor_for_file(&PathBuf::from("other/file.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_per_file_flavor_overrides_global_flavor() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[global]
+flavor = "mkdocs"
+
+[per-file-flavor]
+"**/*.mdx" = "mdx"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Per-file-flavor should override global flavor
+        let flavor = config.get_flavor_for_file(&PathBuf::from("components/Button.mdx"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+
+        // Non-matching files should use global flavor
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/readme.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+    }
+
+    #[test]
+    fn test_per_file_flavor_empty_map() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[global]
+disable = ["MD001"]
+
+[per-file-flavor]
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Empty per-file-flavor should fall back to auto-detection
+        let flavor = config.get_flavor_for_file(&PathBuf::from("README.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+
+        // MDX files should auto-detect
+        let flavor = config.get_flavor_for_file(&PathBuf::from("test.mdx"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+    }
+
+    #[test]
+    fn test_per_file_flavor_with_underscores() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("pyproject.toml");
+        let config_content = r#"
+[tool.rumdl]
+[tool.rumdl.per_file_flavor]
+"docs/**/*.md" = "mkdocs"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Should support both per-file-flavor and per_file_flavor
+        assert_eq!(config.per_file_flavor.len(), 1);
+        assert_eq!(
+            config.per_file_flavor.get("docs/**/*.md"),
+            Some(&MarkdownFlavor::MkDocs)
+        );
+    }
+
+    #[test]
+    fn test_per_file_flavor_absolute_path_matching() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+
+        // Create a subdirectory and file to match against
+        let docs_dir = temp_dir.path().join("docs");
+        fs::create_dir_all(&docs_dir).unwrap();
+        let test_file = docs_dir.join("guide.md");
+        fs::write(&test_file, "Test content").unwrap();
+
+        let config_content = r#"
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Test with absolute path
+        let absolute_path = test_file.canonicalize().unwrap();
+        let flavor = config.get_flavor_for_file(&absolute_path);
+        assert_eq!(
+            flavor,
+            MarkdownFlavor::MkDocs,
+            "Should match absolute path {absolute_path:?} against relative pattern"
+        );
+
+        // Also verify relative path still works
+        let relative_path = PathBuf::from("docs/guide.md");
+        let flavor = config.get_flavor_for_file(&relative_path);
+        assert_eq!(flavor, MarkdownFlavor::MkDocs, "Should match relative path");
+    }
+
+    #[test]
+    fn test_per_file_flavor_all_flavors() {
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-flavor]
+"standard/**/*.md" = "standard"
+"mkdocs/**/*.md" = "mkdocs"
+"mdx/**/*.md" = "mdx"
+"quarto/**/*.md" = "quarto"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // All four flavors should be loadable
+        assert_eq!(config.per_file_flavor.len(), 4);
+        assert_eq!(
+            config.per_file_flavor.get("standard/**/*.md"),
+            Some(&MarkdownFlavor::Standard)
+        );
+        assert_eq!(
+            config.per_file_flavor.get("mkdocs/**/*.md"),
+            Some(&MarkdownFlavor::MkDocs)
+        );
+        assert_eq!(config.per_file_flavor.get("mdx/**/*.md"), Some(&MarkdownFlavor::MDX));
+        assert_eq!(
+            config.per_file_flavor.get("quarto/**/*.md"),
+            Some(&MarkdownFlavor::Quarto)
+        );
+    }
+
+    #[test]
+    fn test_per_file_flavor_invalid_glob_pattern() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Include an invalid glob pattern with unclosed bracket
+        let config_content = r#"
+[per-file-flavor]
+"[invalid" = "mkdocs"
+"valid/**/*.md" = "mdx"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Invalid pattern should be skipped, valid pattern should still work
+        let flavor = config.get_flavor_for_file(&PathBuf::from("valid/test.md"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+
+        // Non-matching should fall back to Standard
+        let flavor = config.get_flavor_for_file(&PathBuf::from("other/test.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_per_file_flavor_paths_with_spaces() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-flavor]
+"my docs/**/*.md" = "mkdocs"
+"src/**/*.md" = "mdx"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Paths with spaces should match
+        let flavor = config.get_flavor_for_file(&PathBuf::from("my docs/guide.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // Regular path
+        let flavor = config.get_flavor_for_file(&PathBuf::from("src/README.md"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+    }
+
+    #[test]
+    fn test_per_file_flavor_deeply_nested_paths() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        let config_content = r#"
+[per-file-flavor]
+"a/b/c/d/e/**/*.md" = "quarto"
+"a/b/**/*.md" = "mkdocs"
+"**/*.md" = "standard"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // 5-level deep path should match most specific pattern first
+        let flavor = config.get_flavor_for_file(&PathBuf::from("a/b/c/d/e/f/deep.md"));
+        assert_eq!(flavor, MarkdownFlavor::Quarto);
+
+        // 3-level deep path
+        let flavor = config.get_flavor_for_file(&PathBuf::from("a/b/c/test.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // Root level
+        let flavor = config.get_flavor_for_file(&PathBuf::from("root.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_per_file_flavor_complex_overlapping_patterns() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Complex pattern order testing - tests that IndexMap preserves TOML order
+        let config_content = r#"
+[per-file-flavor]
+"docs/api/*.md" = "mkdocs"
+"docs/**/*.mdx" = "mdx"
+"docs/**/*.md" = "quarto"
+"**/*.md" = "standard"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // docs/api/*.md should match first
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/api/reference.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // docs/api/nested/file.md should NOT match docs/api/*.md (no **), but match docs/**/*.md
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/api/nested/file.md"));
+        assert_eq!(flavor, MarkdownFlavor::Quarto);
+
+        // .mdx in docs should match docs/**/*.mdx
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/components/Button.mdx"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+
+        // .md outside docs should match **/*.md
+        let flavor = config.get_flavor_for_file(&PathBuf::from("src/README.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_per_file_flavor_extension_detection_interaction() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Test that per-file-flavor pattern can override extension-based auto-detection
+        let config_content = r#"
+[per-file-flavor]
+"legacy/**/*.mdx" = "standard"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // .mdx file in legacy dir should use pattern override (standard), not auto-detect (mdx)
+        let flavor = config.get_flavor_for_file(&PathBuf::from("legacy/old.mdx"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+
+        // .mdx file elsewhere should auto-detect as MDX
+        let flavor = config.get_flavor_for_file(&PathBuf::from("src/component.mdx"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+    }
+
+    #[test]
+    fn test_per_file_flavor_standard_alias_none() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Test that "none" works as alias for "standard"
+        let config_content = r#"
+[per-file-flavor]
+"plain/**/*.md" = "none"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // "none" should resolve to Standard
+        let flavor = config.get_flavor_for_file(&PathBuf::from("plain/test.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_per_file_flavor_brace_expansion() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Test brace expansion in glob patterns
+        let config_content = r#"
+[per-file-flavor]
+"docs/**/*.{md,mdx}" = "mkdocs"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Should match .md files
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/guide.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // Should match .mdx files
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/component.mdx"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+    }
+
+    #[test]
+    fn test_per_file_flavor_single_star_vs_double_star() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Test difference between * (single level) and ** (recursive)
+        let config_content = r#"
+[per-file-flavor]
+"docs/*.md" = "mkdocs"
+"src/**/*.md" = "mdx"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Single * matches only direct children
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/README.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // Single * does NOT match nested files
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/api/index.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard); // fallback
+
+        // Double ** matches recursively
+        let flavor = config.get_flavor_for_file(&PathBuf::from("src/components/Button.md"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+
+        let flavor = config.get_flavor_for_file(&PathBuf::from("src/README.md"));
+        assert_eq!(flavor, MarkdownFlavor::MDX);
+    }
+
+    #[test]
+    fn test_per_file_flavor_question_mark_wildcard() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Test ? wildcard (matches single character)
+        let config_content = r#"
+[per-file-flavor]
+"docs/v?.md" = "mkdocs"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // ? matches single character
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/v1.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/v2.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // ? does NOT match multiple characters
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/v10.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+
+        // ? does NOT match zero characters
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/v.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_per_file_flavor_character_class() {
+        use std::path::PathBuf;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+        // Test character class [abc]
+        let config_content = r#"
+[per-file-flavor]
+"docs/[abc].md" = "mkdocs"
+"#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+        let config: Config = sourced.into_validated_unchecked().into();
+
+        // Should match a, b, or c
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/a.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/b.md"));
+        assert_eq!(flavor, MarkdownFlavor::MkDocs);
+
+        // Should NOT match d
+        let flavor = config.get_flavor_for_file(&PathBuf::from("docs/d.md"));
+        assert_eq!(flavor, MarkdownFlavor::Standard);
+    }
+
     #[test]
     fn test_generate_json_schema() {
         use schemars::schema_for;
@@ -2122,6 +2732,7 @@ pub struct SourcedRuleConfig {
 pub struct SourcedConfigFragment {
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
+    pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
                                                              // Note: loaded_files is tracked globally in SourcedConfig.
@@ -2132,6 +2743,7 @@ impl Default for SourcedConfigFragment {
         Self {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
+            per_file_flavor: SourcedValue::new(IndexMap::new(), ConfigSource::Default),
             rules: BTreeMap::new(),
             unknown_keys: Vec::new(),
         }
@@ -2159,6 +2771,7 @@ impl Default for SourcedConfigFragment {
 pub struct SourcedConfig<State = ConfigLoaded> {
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
+    pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     pub loaded_files: Vec<String>,
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
@@ -2175,6 +2788,7 @@ impl Default for SourcedConfig<ConfigLoaded> {
         Self {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
+            per_file_flavor: SourcedValue::new(IndexMap::new(), ConfigSource::Default),
             rules: BTreeMap::new(),
             loaded_files: Vec::new(),
             unknown_keys: Vec::new(),
@@ -2324,6 +2938,14 @@ impl SourcedConfig<ConfigLoaded> {
             fragment.per_file_ignores.source,
             fragment.per_file_ignores.overrides.first().and_then(|o| o.file.clone()),
             fragment.per_file_ignores.overrides.first().and_then(|o| o.line),
+        );
+
+        // Merge per_file_flavor
+        self.per_file_flavor.merge_override(
+            fragment.per_file_flavor.value,
+            fragment.per_file_flavor.source,
+            fragment.per_file_flavor.overrides.first().and_then(|o| o.file.clone()),
+            fragment.per_file_flavor.overrides.first().and_then(|o| o.line),
         );
 
         // Merge rule configs
@@ -2882,6 +3504,7 @@ impl SourcedConfig<ConfigLoaded> {
         Ok(SourcedConfig {
             global: self.global,
             per_file_ignores: self.per_file_ignores,
+            per_file_flavor: self.per_file_flavor,
             rules: self.rules,
             loaded_files: self.loaded_files,
             unknown_keys: self.unknown_keys,
@@ -2915,6 +3538,7 @@ impl SourcedConfig<ConfigLoaded> {
         SourcedConfig {
             global: self.global,
             per_file_ignores: self.per_file_ignores,
+            per_file_flavor: self.per_file_flavor,
             rules: self.rules,
             loaded_files: self.loaded_files,
             unknown_keys: self.unknown_keys,
@@ -2961,6 +3585,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
         Config {
             global,
             per_file_ignores: sourced.per_file_ignores.value,
+            per_file_flavor: sourced.per_file_flavor.value,
             rules,
             project_root: sourced.project_root,
         }
@@ -3861,6 +4486,30 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 .push_override(per_file_map, source, file.clone(), None);
         }
 
+        // --- Extract per-file-flavor configurations ---
+        // Check both hyphenated and underscored versions for compatibility
+        let per_file_flavor_key = rumdl_table
+            .get("per-file-flavor")
+            .or_else(|| rumdl_table.get("per_file_flavor"));
+
+        if let Some(per_file_flavor_value) = per_file_flavor_key
+            && let Some(per_file_table) = per_file_flavor_value.as_table()
+        {
+            let mut per_file_map = IndexMap::new();
+            for (pattern, flavor_value) in per_file_table {
+                if let Ok(flavor) = MarkdownFlavor::deserialize(flavor_value.clone()) {
+                    per_file_map.insert(pattern.clone(), flavor);
+                } else {
+                    log::warn!(
+                        "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, quarto"
+                    );
+                }
+            }
+            fragment
+                .per_file_flavor
+                .push_override(per_file_map, source, file.clone(), None);
+        }
+
         // --- Extract rule-specific configurations ---
         for (key, value) in rumdl_table {
             let norm_rule_key = normalize_key(key);
@@ -3882,6 +4531,8 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                 "unfixable",
                 "per-file-ignores",
                 "per_file_ignores",
+                "per-file-flavor",
+                "per_file_flavor",
                 "global",
                 "flavor",
                 "cache_dir",
@@ -4053,6 +4704,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         || fragment.global.cache_dir.is_some()
         || !fragment.global.cache.value
         || !fragment.per_file_ignores.value.is_empty()
+        || !fragment.per_file_flavor.value.is_empty()
         || !fragment.rules.is_empty();
     if has_any { Ok(Some(fragment)) } else { Ok(None) }
 }
@@ -4333,10 +4985,40 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
             .push_override(per_file_map, source, file.clone(), None);
     }
 
+    // Handle [per-file-flavor] section
+    if let Some(per_file_item) = doc.get("per-file-flavor")
+        && let Some(per_file_table) = per_file_item.as_table()
+    {
+        let mut per_file_map = IndexMap::new();
+        for (pattern, value_item) in per_file_table.iter() {
+            if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
+                let flavor_str = formatted_string.value();
+                match MarkdownFlavor::deserialize(toml::Value::String(flavor_str.to_string())) {
+                    Ok(flavor) => {
+                        per_file_map.insert(pattern.to_string(), flavor);
+                    }
+                    Err(_) => {
+                        log::warn!(
+                            "[WARN] Invalid flavor '{flavor_str}' for pattern '{pattern}' in {path}. Valid values: standard, mkdocs, mdx, quarto"
+                        );
+                    }
+                }
+            } else {
+                let type_name = value_item.type_name();
+                log::warn!(
+                    "[WARN] Expected string for per-file-flavor pattern '{pattern}' in {path}, found {type_name}"
+                );
+            }
+        }
+        fragment
+            .per_file_flavor
+            .push_override(per_file_map, source, file.clone(), None);
+    }
+
     // Rule-specific: all other top-level tables
     for (key, item) in doc.iter() {
         // Skip known special sections
-        if key == "global" || key == "per-file-ignores" {
+        if key == "global" || key == "per-file-ignores" || key == "per-file-flavor" {
             continue;
         }
 

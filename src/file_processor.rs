@@ -897,11 +897,7 @@ pub fn process_file_with_index(
                 .count();
 
             // Build FileIndex for cross-file analysis on cache hit (lightweight, no rule checking)
-            let flavor = if config.markdown_flavor() == rumdl_lib::config::MarkdownFlavor::Standard {
-                rumdl_lib::config::MarkdownFlavor::from_path(Path::new(file_path))
-            } else {
-                config.markdown_flavor()
-            };
+            let flavor = config.get_flavor_for_file(Path::new(file_path));
             let file_index = rumdl_lib::build_file_index_only(&content, rules, flavor);
 
             let total_warnings = cached_warnings.len();
@@ -930,14 +926,8 @@ pub fn process_file_with_index(
         rules.to_vec()
     };
 
-    // Determine flavor: use file extension if config uses Standard, otherwise use config flavor
-    let flavor = if config.markdown_flavor() == rumdl_lib::config::MarkdownFlavor::Standard {
-        // Auto-detect from file extension for .mdx, .qmd, .Rmd files
-        rumdl_lib::config::MarkdownFlavor::from_path(Path::new(file_path))
-    } else {
-        // Use explicitly configured flavor
-        config.markdown_flavor()
-    };
+    // Determine flavor based on per-file-flavor overrides, global config, or file extension
+    let flavor = config.get_flavor_for_file(Path::new(file_path));
 
     // Use lint_and_index for single-file linting + index contribution
     let source_file = Some(std::path::PathBuf::from(file_path));

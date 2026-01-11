@@ -295,6 +295,7 @@ mod tests {
     use super::*;
     use crate::config::GlobalConfig;
     use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+    use indexmap::IndexMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Mock rule that checks content and applies fixes based on a condition
@@ -439,6 +440,7 @@ mod tests {
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };
@@ -476,6 +478,7 @@ mod tests {
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };
@@ -522,6 +525,7 @@ mod tests {
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };
@@ -550,6 +554,7 @@ mod tests {
         let mut config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };
@@ -585,6 +590,7 @@ mod tests {
         let mut config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };
@@ -648,6 +654,7 @@ mod tests {
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };
@@ -671,6 +678,7 @@ mod tests {
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };
@@ -700,6 +708,7 @@ mod tests {
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };
@@ -768,6 +777,7 @@ mod tests {
         let config = Config {
             global: GlobalConfig::default(),
             per_file_ignores: HashMap::new(),
+            per_file_flavor: IndexMap::new(),
             rules: Default::default(),
             project_root: None,
         };

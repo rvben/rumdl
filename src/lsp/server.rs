@@ -531,7 +531,11 @@ impl RumdlLanguageServer {
         let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
-        let flavor = rumdl_config.markdown_flavor();
+        let flavor = if let Some(ref path) = file_path {
+            rumdl_config.get_flavor_for_file(path)
+        } else {
+            rumdl_config.markdown_flavor()
+        };
 
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
@@ -616,8 +620,9 @@ impl RumdlLanguageServer {
         drop(config_guard);
 
         // Resolve configuration for this specific file
-        let file_config = if let Ok(file_path) = uri.to_file_path() {
-            self.resolve_config_for_file(&file_path).await
+        let file_path = uri.to_file_path().ok();
+        let file_config = if let Some(ref path) = file_path {
+            self.resolve_config_for_file(path).await
         } else {
             // Fallback to global config for non-file URIs
             (*self.rumdl_config.read().await).clone()
@@ -627,7 +632,11 @@ impl RumdlLanguageServer {
         let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
-        let flavor = rumdl_config.markdown_flavor();
+        let flavor = if let Some(ref path) = file_path {
+            rumdl_config.get_flavor_for_file(path)
+        } else {
+            rumdl_config.markdown_flavor()
+        };
 
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
@@ -765,8 +774,9 @@ impl RumdlLanguageServer {
         drop(config_guard);
 
         // Resolve configuration for this specific file
-        let file_config = if let Ok(file_path) = uri.to_file_path() {
-            self.resolve_config_for_file(&file_path).await
+        let file_path = uri.to_file_path().ok();
+        let file_config = if let Some(ref path) = file_path {
+            self.resolve_config_for_file(path).await
         } else {
             // Fallback to global config for non-file URIs
             (*self.rumdl_config.read().await).clone()
@@ -776,7 +786,11 @@ impl RumdlLanguageServer {
         let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
-        let flavor = rumdl_config.markdown_flavor();
+        let flavor = if let Some(ref path) = file_path {
+            rumdl_config.get_flavor_for_file(path)
+        } else {
+            rumdl_config.markdown_flavor()
+        };
 
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
@@ -1736,8 +1750,9 @@ impl LanguageServer for RumdlLanguageServer {
             drop(config_guard);
 
             // Resolve configuration for this specific file
-            let file_config = if let Ok(file_path) = uri.to_file_path() {
-                self.resolve_config_for_file(&file_path).await
+            let file_path = uri.to_file_path().ok();
+            let file_config = if let Some(ref path) = file_path {
+                self.resolve_config_for_file(path).await
             } else {
                 // Fallback to global config for non-file URIs
                 self.rumdl_config.read().await.clone()
@@ -1747,7 +1762,11 @@ impl LanguageServer for RumdlLanguageServer {
             let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
             let all_rules = rules::all_rules(&rumdl_config);
-            let flavor = rumdl_config.markdown_flavor();
+            let flavor = if let Some(ref path) = file_path {
+                rumdl_config.get_flavor_for_file(path)
+            } else {
+                rumdl_config.markdown_flavor()
+            };
 
             // Use the standard filter_rules function which respects config's disabled rules
             let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);

@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use rumdl_lib::config::{Config, GlobalConfig, RuleConfig, normalize_key};
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::*;
@@ -30,6 +31,7 @@ fn create_test_config() -> Config {
     Config {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
+        per_file_flavor: IndexMap::new(),
         rules,
         project_root: None,
     }
@@ -239,6 +241,7 @@ fn test_partial_rule_config() {
     let config = Config {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
+        per_file_flavor: IndexMap::new(),
         rules: rules_map,
         project_root: None,
     };
@@ -281,6 +284,7 @@ fn test_partial_rule_config() {
     let config = Config {
         global: GlobalConfig::default(),
         per_file_ignores: HashMap::new(),
+        per_file_flavor: IndexMap::new(),
         rules: rules_map,
         project_root: None,
     };
