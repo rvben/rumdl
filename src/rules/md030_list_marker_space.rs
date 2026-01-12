@@ -94,6 +94,13 @@ impl Rule for MD030ListMarkerSpace {
 
                     // Calculate actual spacing after marker
                     let marker_end = list_info.marker_column + list_info.marker.len();
+
+                    // Skip if there's no content on this line after the marker
+                    // MD030 only applies when there IS content after the marker
+                    if !Self::has_content_after_marker(line, marker_end) {
+                        continue;
+                    }
+
                     let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
                     // Determine if this is a multi-line list item
@@ -260,6 +267,17 @@ impl Rule for MD030ListMarkerSpace {
 }
 
 impl MD030ListMarkerSpace {
+    /// Check if a list item line has content after the marker
+    /// Returns false if the line ends after the marker (with optional whitespace)
+    /// MD030 only applies when there IS content on the same line as the marker
+    #[inline]
+    fn has_content_after_marker(line: &str, marker_end: usize) -> bool {
+        if marker_end >= line.len() {
+            return false;
+        }
+        !line[marker_end..].trim().is_empty()
+    }
+
     /// Check if a list item is multi-line (spans multiple lines or contains nested content)
     fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize, lines: &[&str]) -> bool {
         // Get the current list item info
@@ -670,5 +688,105 @@ mod tests {
             result5.is_empty(),
             "Properly spaced list item should not trigger MD030, got: {result5:?}"
         );
+    }
+
+    #[test]
+    fn test_empty_marker_line_not_flagged_issue_288() {
+        // Issue #288: List items with no content on the marker line should not trigger MD030
+        // The space requirement only applies when there IS content after the marker
+        let rule = MD030ListMarkerSpace::default();
+
+        // Case 1: Unordered list with empty marker line followed by code block
+        let content = "-\n    ```python\n    print(\"code\")\n    ```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Empty unordered marker line with code continuation should not trigger MD030, got: {result:?}"
+        );
+
+        // Case 2: Ordered list with empty marker line followed by code block
+        let content = "1.\n    ```python\n    print(\"code\")\n    ```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Empty ordered marker line with code continuation should not trigger MD030, got: {result:?}"
+        );
+
+        // Case 3: Empty marker line followed by paragraph continuation
+        let content = "-\n    This is a paragraph continuation\n    of the list item.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Empty marker line with paragraph continuation should not trigger MD030, got: {result:?}"
+        );
+
+        // Case 4: Nested list with empty marker line
+        let content = "- Parent item\n  -\n      Nested content\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Nested empty marker line should not trigger MD030, got: {result:?}"
+        );
+
+        // Case 5: Multiple list items, some with empty markers
+        let content = "- Item with content\n-\n    Code block\n- Another item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Mixed empty/non-empty marker lines should not trigger MD030 for empty ones, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_marker_with_content_still_flagged_issue_288() {
+        // Ensure we still flag markers with content but wrong spacing
+        let rule = MD030ListMarkerSpace::default();
+
+        // Two spaces before content - should flag
+        let content = "-  Two spaces before content\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Two spaces after unordered marker should still trigger MD030"
+        );
+
+        // Ordered list with two spaces - should flag
+        let content = "1.  Two spaces\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Two spaces after ordered marker should still trigger MD030"
+        );
+
+        // Normal list item - should NOT flag
+        let content = "- Normal item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Normal list item should not trigger MD030, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_has_content_after_marker() {
+        // Direct unit tests for the helper function
+        assert!(!MD030ListMarkerSpace::has_content_after_marker("-", 1));
+        assert!(!MD030ListMarkerSpace::has_content_after_marker("- ", 1));
+        assert!(!MD030ListMarkerSpace::has_content_after_marker("-   ", 1));
+        assert!(MD030ListMarkerSpace::has_content_after_marker("- item", 1));
+        assert!(MD030ListMarkerSpace::has_content_after_marker("-  item", 1));
+        assert!(MD030ListMarkerSpace::has_content_after_marker("1. item", 2));
+        assert!(!MD030ListMarkerSpace::has_content_after_marker("1.", 2));
+        assert!(!MD030ListMarkerSpace::has_content_after_marker("1. ", 2));
     }
 }
