@@ -79,13 +79,13 @@ where
 {
     let s = String::deserialize(deserializer)?;
 
-    let valid_styles = ["aligned", "compact", "tight", "any"];
+    let valid_styles = ["aligned", "aligned-no-space", "compact", "tight", "any"];
 
     if valid_styles.contains(&s.as_str()) {
         Ok(s)
     } else {
         Err(serde::de::Error::custom(format!(
-            "Invalid table format style: {s}. Valid options: aligned, compact, tight, any"
+            "Invalid table format style: {s}. Valid options: aligned, aligned-no-space, compact, tight, any"
         )))
     }
 }

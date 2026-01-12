@@ -319,6 +319,7 @@ impl MD060TableFormat {
         column_widths: &[usize],
         column_alignments: &[ColumnAlignment],
         is_delimiter: bool,
+        compact_delimiter: bool,
     ) -> String {
         let formatted_cells: Vec<String> = cells
             .iter()
@@ -332,12 +333,14 @@ impl MD060TableFormat {
 
                     // Delimiter rows use the same cell format as content rows: | content |
                     // The "content" is dashes, possibly with colons for alignment
+                    // For compact_delimiter mode, we don't add spaces, so we need 2 extra dashes
+                    let extra_width = if compact_delimiter { 2 } else { 0 };
                     let dash_count = if has_left_colon && has_right_colon {
-                        target_width.saturating_sub(2)
+                        (target_width + extra_width).saturating_sub(2)
                     } else if has_left_colon || has_right_colon {
-                        target_width.saturating_sub(1)
+                        (target_width + extra_width).saturating_sub(1)
                     } else {
-                        target_width
+                        target_width + extra_width
                     };
 
                     let dashes = "-".repeat(dash_count.max(3)); // Minimum 3 dashes
@@ -351,8 +354,12 @@ impl MD060TableFormat {
                         dashes
                     };
 
-                    // Add spaces around delimiter content, just like content cells
-                    format!(" {delimiter_content} ")
+                    // Add spaces around delimiter content unless compact_delimiter mode
+                    if compact_delimiter {
+                        delimiter_content
+                    } else {
+                        format!(" {delimiter_content} ")
+                    }
                 } else {
                     let trimmed = cell.trim();
                     let current_width = Self::calculate_cell_display_width(cell);
@@ -574,6 +581,7 @@ impl MD060TableFormat {
                                 &column_widths,
                                 &column_alignments,
                                 is_delimiter,
+                                false,
                             ));
                         }
                     }
@@ -591,7 +599,9 @@ impl MD060TableFormat {
                     result.push(Self::format_table_tight(&cells));
                 }
             }
-            "aligned" => {
+            "aligned" | "aligned-no-space" => {
+                let compact_delimiter = style == "aligned-no-space";
+
                 // If the table is already aligned with consistent column widths,
                 // preserve it as-is rather than forcing our preferred minimum widths
                 if Self::is_table_already_aligned(&table_lines, flavor) {
@@ -629,6 +639,7 @@ impl MD060TableFormat {
                             &column_widths,
                             &column_alignments,
                             is_delimiter,
+                            compact_delimiter,
                         ));
                     }
                 }
@@ -924,6 +935,145 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "|Name|Age|\n|---|---|\n|Alice|30|";
         assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_md060_aligned_no_space_style() {
+        // Issue #277: aligned-no-space style has no spaces in delimiter row
+        let rule = MD060TableFormat::new(true, "aligned-no-space".to_string());
+
+        let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Content rows have spaces, delimiter row does not
+        let lines: Vec<&str> = fixed.lines().collect();
+        assert_eq!(lines[0], "| Name  | Age |", "Header should have spaces around content");
+        assert_eq!(
+            lines[1], "|-------|-----|",
+            "Delimiter should have NO spaces around dashes"
+        );
+        assert_eq!(lines[2], "| Alice | 30  |", "Content should have spaces around content");
+
+        // All rows should have equal length
+        assert_eq!(lines[0].len(), lines[1].len());
+        assert_eq!(lines[1].len(), lines[2].len());
+    }
+
+    #[test]
+    fn test_md060_aligned_no_space_preserves_alignment_indicators() {
+        // Alignment indicators (:) should be preserved
+        let rule = MD060TableFormat::new(true, "aligned-no-space".to_string());
+
+        let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | B | C |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Verify alignment indicators are preserved without spaces around them
+        assert!(
+            fixed.contains("|:"),
+            "Should have left alignment indicator adjacent to pipe"
+        );
+        assert!(
+            fixed.contains(":|"),
+            "Should have right alignment indicator adjacent to pipe"
+        );
+        // Check for center alignment - the exact dash count depends on column width
+        assert!(
+            lines[1].contains(":---") && lines[1].contains("---:"),
+            "Should have center alignment colons"
+        );
+    }
+
+    #[test]
+    fn test_md060_aligned_no_space_three_column_table() {
+        // Test the exact format from issue #277
+        let rule = MD060TableFormat::new(true, "aligned-no-space".to_string());
+
+        let content = "| Header 1 | Header 2 | Header 3 |\n|---|---|---|\n| Row 1, Col 1 | Row 1, Col 2 | Row 1, Col 3 |\n| Row 2, Col 1 | Row 2, Col 2 | Row 2, Col 3 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Verify delimiter row format: |--------------|--------------|--------------|
+        assert!(lines[1].starts_with("|---"), "Delimiter should start with |---");
+        assert!(lines[1].ends_with("---|"), "Delimiter should end with ---|");
+        assert!(!lines[1].contains("| -"), "Delimiter should NOT have space after pipe");
+        assert!(!lines[1].contains("- |"), "Delimiter should NOT have space before pipe");
+    }
+
+    #[test]
+    fn test_md060_aligned_no_space_auto_compacts_wide_tables() {
+        // Auto-compact should work with aligned-no-space when table exceeds max-width
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned-no-space".to_string(),
+            max_width: LineLength::from_const(50),
+        };
+        let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
+
+        // Wide table that exceeds 50 chars when aligned
+        let content = "| Very Long Column Header A | Very Long Column Header B | Very Long Column Header C |\n|---|---|---|\n| x | y | z |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should auto-compact to compact style (not aligned-no-space)
+        assert!(
+            fixed.contains("| --- |"),
+            "Should be compact format when exceeding max-width"
+        );
+    }
+
+    #[test]
+    fn test_md060_aligned_no_space_cjk_characters() {
+        // CJK characters should be handled correctly
+        let rule = MD060TableFormat::new(true, "aligned-no-space".to_string());
+
+        let content = "| Name | City |\n|---|---|\n| 中文 | 東京 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // All rows should have equal DISPLAY width (not byte length)
+        // CJK characters are double-width, so byte length differs from display width
+        use unicode_width::UnicodeWidthStr;
+        assert_eq!(
+            lines[0].width(),
+            lines[1].width(),
+            "Header and delimiter should have same display width"
+        );
+        assert_eq!(
+            lines[1].width(),
+            lines[2].width(),
+            "Delimiter and content should have same display width"
+        );
+
+        // Delimiter should have no spaces
+        assert!(!lines[1].contains("| -"), "Delimiter should NOT have space after pipe");
+    }
+
+    #[test]
+    fn test_md060_aligned_no_space_minimum_width() {
+        // Minimum column width (3 dashes) should be respected
+        let rule = MD060TableFormat::new(true, "aligned-no-space".to_string());
+
+        let content = "| A | B |\n|-|-|\n| 1 | 2 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Should have at least 3 dashes per column (GFM requirement)
+        assert!(lines[1].contains("---"), "Should have minimum 3 dashes");
+        // All rows should have equal length
+        assert_eq!(lines[0].len(), lines[1].len());
+        assert_eq!(lines[1].len(), lines[2].len());
     }
 
     #[test]
