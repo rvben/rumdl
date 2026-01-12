@@ -740,7 +740,7 @@ mod tests {
         // Create content with many Hugo templates
         let mut content = String::new();
         for i in 0..100 {
-            content.push_str(&format!("{{raw `code{i}\n`}}\n"));
+            content.push_str(&format!("{{{{raw `code{i}\n`}}}}\n"));
         }
 
         let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
