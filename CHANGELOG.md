@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.215] - 2026-01-12
+
+### Fixed
+
+- **MD057: Exclude footnote definitions from relative link checking** (fixes #286)
+  - Footnote definitions (`[^id]: content`) were incorrectly parsed as reference link definitions
+  - This caused MD057 to treat footnote content as URLs (e.g., `[^1]: [link](https://example.com)` was flagged as broken link)
+  - Footnotes are now correctly identified and excluded from reference definition parsing
+  - Also benefits MD053 (unused reference definitions) which uses the same parsing
+
+- **MD005: Auto-fix preserves blockquote prefix** (fixes #268)
+  - When fixing list indentation inside blockquotes, the `>` prefix is now preserved
+  - Previously, auto-fix could break blockquote structure
+
 ## [0.0.214] - 2026-01-11
 
 ### Added
