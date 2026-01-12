@@ -19,6 +19,7 @@ Global settings are configured in the `[global]` section of your configuration f
 | [`respect_gitignore`](#respect_gitignore) | `boolean`  | `true`         | Respect .gitignore files                  |
 | [`line_length`](#line_length)             | `integer`  | `80`           | Default line length for rules             |
 | [`flavor`](#flavor)                       | `string`   | `"standard"`   | Markdown flavor to use                    |
+| [`per-file-flavor`](#per-file-flavor)     | `table`    | `{}`           | Per-file flavor overrides                 |
 | [`cache`](#cache)                         | `boolean`  | `true`         | Enable result caching                     |
 | [`cache_dir`](#cache_dir)                 | `string`   | `.rumdl_cache` | Directory for cache files                 |
 
@@ -58,6 +59,11 @@ line_length = 120
 
 # Set markdown flavor (standard, mkdocs)
 flavor = "mkdocs"
+
+# Per-file flavor overrides (pattern → flavor)
+[per-file-flavor]
+"**/*.mdx" = "mdx"
+"notebooks/**/*.qmd" = "quarto"
 
 # Disable specific rules for specific files
 [per-file-ignores]
@@ -439,6 +445,81 @@ flavor = "mkdocs"  # Use MkDocs flavor
 ```bash
 # Use MkDocs flavor for linting
 rumdl check --flavor mkdocs docs/
+```
+
+### `per-file-flavor`
+
+**Type**: `table` (file patterns mapped to flavors)
+**Default**: `{}` (no per-file overrides)
+**CLI Equivalent**: None (configuration file only)
+
+Specifies Markdown flavors for specific files or file patterns. This allows different parts of your project to use different Markdown dialects.
+
+```toml
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+"**/*.mdx" = "mdx"
+"**/*.qmd" = "quarto"
+"examples/**/*.md" = "standard"
+```
+
+**Available Flavors**:
+
+- `"standard"` (default): Standard Markdown with GFM extensions (tables, task lists, strikethrough)
+- `"gfm"` or `"github"`: Alias for standard (pulldown-cmark already supports GFM)
+- `"commonmark"`: Alias for standard
+- `"mkdocs"`: MkDocs-specific extensions (auto-references, admonitions)
+- `"mdx"`: MDX flavor with JSX and ESM support
+- `"quarto"`: Quarto/RMarkdown for scientific publishing
+
+**Behavior**:
+
+- Uses "first match wins" semantics - order matters in the configuration
+- Patterns are matched against relative paths from the project root
+- Falls back to global `flavor` setting if no pattern matches
+- Falls back to auto-detection by file extension if no global flavor is set
+
+**Pattern Syntax**:
+
+- `*` matches any characters except path separators
+- `**` matches any characters including path separators
+- `?` matches a single character
+- Patterns are relative to the project root
+
+**Usage Notes**:
+
+- Useful for projects with mixed documentation (e.g., MkDocs site + MDX components)
+- Order patterns from most specific to least specific
+- Auto-detection works for common extensions: `.mdx` → MDX, `.qmd`/`.Rmd` → Quarto
+
+**Example: Mixed Documentation Project**:
+
+```toml
+[global]
+flavor = "standard"  # Default for files not matching any pattern
+
+[per-file-flavor]
+# MkDocs documentation
+"docs/**/*.md" = "mkdocs"
+
+# React components with MDX
+"src/components/**/*.mdx" = "mdx"
+
+# Jupyter/Quarto notebooks
+"notebooks/**/*.qmd" = "quarto"
+
+# Keep README and CHANGELOG as standard
+"README.md" = "standard"
+"CHANGELOG.md" = "standard"
+```
+
+**Example: Monorepo with Multiple Doc Systems**:
+
+```toml
+[per-file-flavor]
+"packages/website/docs/**/*.md" = "mkdocs"
+"packages/storybook/**/*.mdx" = "mdx"
+"packages/api/docs/**/*.md" = "standard"
 ```
 
 ### `cache`
