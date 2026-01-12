@@ -4462,4 +4462,420 @@ A footnote[^1].
         assert!(ids.contains(&"ref2"));
         assert!(!ids.iter().any(|id| id.starts_with('^')));
     }
+
+    // =========================================================================
+    // Tests for has_char and char_count methods
+    // =========================================================================
+
+    #[test]
+    fn test_has_char_tracked_characters() {
+        // Test all 12 tracked characters
+        let content = "# Heading\n* list item\n_emphasis_ and -hyphen-\n+ plus\n> quote\n| table |\n[link]\n`code`\n<html>\n!image";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // All tracked characters should be detected
+        assert!(ctx.has_char('#'), "Should detect hash");
+        assert!(ctx.has_char('*'), "Should detect asterisk");
+        assert!(ctx.has_char('_'), "Should detect underscore");
+        assert!(ctx.has_char('-'), "Should detect hyphen");
+        assert!(ctx.has_char('+'), "Should detect plus");
+        assert!(ctx.has_char('>'), "Should detect gt");
+        assert!(ctx.has_char('|'), "Should detect pipe");
+        assert!(ctx.has_char('['), "Should detect bracket");
+        assert!(ctx.has_char('`'), "Should detect backtick");
+        assert!(ctx.has_char('<'), "Should detect lt");
+        assert!(ctx.has_char('!'), "Should detect exclamation");
+        assert!(ctx.has_char('\n'), "Should detect newline");
+    }
+
+    #[test]
+    fn test_has_char_absent_characters() {
+        let content = "Simple text without special chars";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // None of the tracked characters should be present
+        assert!(!ctx.has_char('#'), "Should not detect hash");
+        assert!(!ctx.has_char('*'), "Should not detect asterisk");
+        assert!(!ctx.has_char('_'), "Should not detect underscore");
+        assert!(!ctx.has_char('-'), "Should not detect hyphen");
+        assert!(!ctx.has_char('+'), "Should not detect plus");
+        assert!(!ctx.has_char('>'), "Should not detect gt");
+        assert!(!ctx.has_char('|'), "Should not detect pipe");
+        assert!(!ctx.has_char('['), "Should not detect bracket");
+        assert!(!ctx.has_char('`'), "Should not detect backtick");
+        assert!(!ctx.has_char('<'), "Should not detect lt");
+        assert!(!ctx.has_char('!'), "Should not detect exclamation");
+        // Note: single line content has no newlines
+        assert!(!ctx.has_char('\n'), "Should not detect newline in single line");
+    }
+
+    #[test]
+    fn test_has_char_fallback_for_untracked() {
+        let content = "Text with @mention and $dollar and %percent";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Untracked characters should fall back to content.contains()
+        assert!(ctx.has_char('@'), "Should detect @ via fallback");
+        assert!(ctx.has_char('$'), "Should detect $ via fallback");
+        assert!(ctx.has_char('%'), "Should detect % via fallback");
+        assert!(!ctx.has_char('^'), "Should not detect absent ^ via fallback");
+    }
+
+    #[test]
+    fn test_char_count_tracked_characters() {
+        let content = "## Heading ##\n***bold***\n__emphasis__\n---\n+++\n>> nested\n|| table ||\n[[link]]\n``code``\n<<html>>\n!!";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Count each tracked character
+        assert_eq!(ctx.char_count('#'), 4, "Should count 4 hashes");
+        assert_eq!(ctx.char_count('*'), 6, "Should count 6 asterisks");
+        assert_eq!(ctx.char_count('_'), 4, "Should count 4 underscores");
+        assert_eq!(ctx.char_count('-'), 3, "Should count 3 hyphens");
+        assert_eq!(ctx.char_count('+'), 3, "Should count 3 pluses");
+        assert_eq!(ctx.char_count('>'), 4, "Should count 4 gt (2 nested + 2 in <<html>>)");
+        assert_eq!(ctx.char_count('|'), 4, "Should count 4 pipes");
+        assert_eq!(ctx.char_count('['), 2, "Should count 2 brackets");
+        assert_eq!(ctx.char_count('`'), 4, "Should count 4 backticks");
+        assert_eq!(ctx.char_count('<'), 2, "Should count 2 lt");
+        assert_eq!(ctx.char_count('!'), 2, "Should count 2 exclamations");
+        assert_eq!(ctx.char_count('\n'), 10, "Should count 10 newlines");
+    }
+
+    #[test]
+    fn test_char_count_zero_for_absent() {
+        let content = "Plain text";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert_eq!(ctx.char_count('#'), 0);
+        assert_eq!(ctx.char_count('*'), 0);
+        assert_eq!(ctx.char_count('_'), 0);
+        assert_eq!(ctx.char_count('\n'), 0);
+    }
+
+    #[test]
+    fn test_char_count_fallback_for_untracked() {
+        let content = "@@@ $$ %%%";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert_eq!(ctx.char_count('@'), 3, "Should count 3 @ via fallback");
+        assert_eq!(ctx.char_count('$'), 2, "Should count 2 $ via fallback");
+        assert_eq!(ctx.char_count('%'), 3, "Should count 3 % via fallback");
+        assert_eq!(ctx.char_count('^'), 0, "Should count 0 for absent char");
+    }
+
+    #[test]
+    fn test_char_count_empty_content() {
+        let ctx = LintContext::new("", MarkdownFlavor::Standard, None);
+
+        assert_eq!(ctx.char_count('#'), 0);
+        assert_eq!(ctx.char_count('*'), 0);
+        assert_eq!(ctx.char_count('@'), 0);
+        assert!(!ctx.has_char('#'));
+        assert!(!ctx.has_char('@'));
+    }
+
+    // =========================================================================
+    // Tests for is_in_html_tag method
+    // =========================================================================
+
+    #[test]
+    fn test_is_in_html_tag_simple() {
+        let content = "<div>content</div>";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Inside opening tag
+        assert!(ctx.is_in_html_tag(0), "Position 0 (<) should be in tag");
+        assert!(ctx.is_in_html_tag(1), "Position 1 (d) should be in tag");
+        assert!(ctx.is_in_html_tag(4), "Position 4 (>) should be in tag");
+
+        // Outside tag (in content)
+        assert!(!ctx.is_in_html_tag(5), "Position 5 (c) should not be in tag");
+        assert!(!ctx.is_in_html_tag(10), "Position 10 (t) should not be in tag");
+
+        // Inside closing tag
+        assert!(ctx.is_in_html_tag(12), "Position 12 (<) should be in tag");
+        assert!(ctx.is_in_html_tag(17), "Position 17 (>) should be in tag");
+    }
+
+    #[test]
+    fn test_is_in_html_tag_self_closing() {
+        let content = "Text <br/> more text";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Before tag
+        assert!(!ctx.is_in_html_tag(0), "Position 0 should not be in tag");
+        assert!(!ctx.is_in_html_tag(4), "Position 4 (space) should not be in tag");
+
+        // Inside self-closing tag
+        assert!(ctx.is_in_html_tag(5), "Position 5 (<) should be in tag");
+        assert!(ctx.is_in_html_tag(8), "Position 8 (/) should be in tag");
+        assert!(ctx.is_in_html_tag(9), "Position 9 (>) should be in tag");
+
+        // After tag
+        assert!(!ctx.is_in_html_tag(10), "Position 10 (space) should not be in tag");
+    }
+
+    #[test]
+    fn test_is_in_html_tag_with_attributes() {
+        let content = r#"<a href="url" class="link">text</a>"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // All positions inside opening tag with attributes
+        assert!(ctx.is_in_html_tag(0), "Start of tag");
+        assert!(ctx.is_in_html_tag(10), "Inside href attribute");
+        assert!(ctx.is_in_html_tag(20), "Inside class attribute");
+        assert!(ctx.is_in_html_tag(26), "End of opening tag");
+
+        // Content between tags
+        assert!(!ctx.is_in_html_tag(27), "Start of content");
+        assert!(!ctx.is_in_html_tag(30), "End of content");
+
+        // Closing tag
+        assert!(ctx.is_in_html_tag(31), "Start of closing tag");
+    }
+
+    #[test]
+    fn test_is_in_html_tag_multiline() {
+        let content = "<div\n  class=\"test\"\n>\ncontent\n</div>";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Opening tag spans multiple lines
+        assert!(ctx.is_in_html_tag(0), "Start of multiline tag");
+        assert!(ctx.is_in_html_tag(5), "After first newline in tag");
+        assert!(ctx.is_in_html_tag(15), "Inside attribute");
+
+        // After closing > of opening tag
+        let closing_bracket_pos = content.find(">\n").unwrap();
+        assert!(!ctx.is_in_html_tag(closing_bracket_pos + 2), "Content after tag");
+    }
+
+    #[test]
+    fn test_is_in_html_tag_no_tags() {
+        let content = "Plain text without any HTML";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // No position should be in an HTML tag
+        for i in 0..content.len() {
+            assert!(!ctx.is_in_html_tag(i), "Position {i} should not be in tag");
+        }
+    }
+
+    // =========================================================================
+    // Tests for is_in_jinja_range method
+    // =========================================================================
+
+    #[test]
+    fn test_is_in_jinja_range_expression() {
+        let content = "Hello {{ name }}!";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Before Jinja
+        assert!(!ctx.is_in_jinja_range(0), "H should not be in Jinja");
+        assert!(!ctx.is_in_jinja_range(5), "Space before Jinja should not be in Jinja");
+
+        // Inside Jinja expression (positions 6-15 for "{{ name }}")
+        assert!(ctx.is_in_jinja_range(6), "First brace should be in Jinja");
+        assert!(ctx.is_in_jinja_range(7), "Second brace should be in Jinja");
+        assert!(ctx.is_in_jinja_range(10), "name should be in Jinja");
+        assert!(ctx.is_in_jinja_range(14), "Closing brace should be in Jinja");
+        assert!(ctx.is_in_jinja_range(15), "Second closing brace should be in Jinja");
+
+        // After Jinja
+        assert!(!ctx.is_in_jinja_range(16), "! should not be in Jinja");
+    }
+
+    #[test]
+    fn test_is_in_jinja_range_statement() {
+        let content = "{% if condition %}content{% endif %}";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Inside opening statement
+        assert!(ctx.is_in_jinja_range(0), "Start of Jinja statement");
+        assert!(ctx.is_in_jinja_range(5), "condition should be in Jinja");
+        assert!(ctx.is_in_jinja_range(17), "End of opening statement");
+
+        // Content between
+        assert!(!ctx.is_in_jinja_range(18), "content should not be in Jinja");
+
+        // Inside closing statement
+        assert!(ctx.is_in_jinja_range(25), "Start of endif");
+        assert!(ctx.is_in_jinja_range(32), "endif should be in Jinja");
+    }
+
+    #[test]
+    fn test_is_in_jinja_range_multiple() {
+        let content = "{{ a }} and {{ b }}";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // First Jinja expression
+        assert!(ctx.is_in_jinja_range(0));
+        assert!(ctx.is_in_jinja_range(3));
+        assert!(ctx.is_in_jinja_range(6));
+
+        // Between expressions
+        assert!(!ctx.is_in_jinja_range(8));
+        assert!(!ctx.is_in_jinja_range(11));
+
+        // Second Jinja expression
+        assert!(ctx.is_in_jinja_range(12));
+        assert!(ctx.is_in_jinja_range(15));
+        assert!(ctx.is_in_jinja_range(18));
+    }
+
+    #[test]
+    fn test_is_in_jinja_range_no_jinja() {
+        let content = "Plain text with single braces but not Jinja";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // No position should be in Jinja
+        for i in 0..content.len() {
+            assert!(!ctx.is_in_jinja_range(i), "Position {i} should not be in Jinja");
+        }
+    }
+
+    // =========================================================================
+    // Tests for is_in_link_title method
+    // =========================================================================
+
+    #[test]
+    fn test_is_in_link_title_with_title() {
+        let content = r#"[ref]: https://example.com "Title text"
+
+Some content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Verify we have a reference def with title
+        assert_eq!(ctx.reference_defs.len(), 1);
+        let def = &ctx.reference_defs[0];
+        assert!(def.title_byte_start.is_some());
+        assert!(def.title_byte_end.is_some());
+
+        let title_start = def.title_byte_start.unwrap();
+        let title_end = def.title_byte_end.unwrap();
+
+        // Before title (in URL)
+        assert!(!ctx.is_in_link_title(10), "URL should not be in title");
+
+        // Inside title
+        assert!(ctx.is_in_link_title(title_start), "Title start should be in title");
+        assert!(
+            ctx.is_in_link_title(title_start + 5),
+            "Middle of title should be in title"
+        );
+        assert!(ctx.is_in_link_title(title_end - 1), "End of title should be in title");
+
+        // After title
+        assert!(
+            !ctx.is_in_link_title(title_end),
+            "After title end should not be in title"
+        );
+    }
+
+    #[test]
+    fn test_is_in_link_title_without_title() {
+        let content = "[ref]: https://example.com\n\nSome content.";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Reference def without title
+        assert_eq!(ctx.reference_defs.len(), 1);
+        let def = &ctx.reference_defs[0];
+        assert!(def.title_byte_start.is_none());
+        assert!(def.title_byte_end.is_none());
+
+        // No position should be in a title
+        for i in 0..content.len() {
+            assert!(!ctx.is_in_link_title(i), "Position {i} should not be in title");
+        }
+    }
+
+    #[test]
+    fn test_is_in_link_title_multiple_refs() {
+        let content = r#"[ref1]: /url1 "Title One"
+[ref2]: /url2
+[ref3]: /url3 "Title Three"
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Should have 3 reference defs
+        assert_eq!(ctx.reference_defs.len(), 3);
+
+        // ref1 has title
+        let ref1 = ctx.reference_defs.iter().find(|r| r.id == "ref1").unwrap();
+        assert!(ref1.title_byte_start.is_some());
+
+        // ref2 has no title
+        let ref2 = ctx.reference_defs.iter().find(|r| r.id == "ref2").unwrap();
+        assert!(ref2.title_byte_start.is_none());
+
+        // ref3 has title
+        let ref3 = ctx.reference_defs.iter().find(|r| r.id == "ref3").unwrap();
+        assert!(ref3.title_byte_start.is_some());
+
+        // Check positions in ref1's title
+        if let (Some(start), Some(end)) = (ref1.title_byte_start, ref1.title_byte_end) {
+            assert!(ctx.is_in_link_title(start + 1));
+            assert!(!ctx.is_in_link_title(end + 5));
+        }
+
+        // Check positions in ref3's title
+        if let (Some(start), Some(_end)) = (ref3.title_byte_start, ref3.title_byte_end) {
+            assert!(ctx.is_in_link_title(start + 1));
+        }
+    }
+
+    #[test]
+    fn test_is_in_link_title_single_quotes() {
+        let content = "[ref]: /url 'Single quoted title'\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert_eq!(ctx.reference_defs.len(), 1);
+        let def = &ctx.reference_defs[0];
+
+        if let (Some(start), Some(end)) = (def.title_byte_start, def.title_byte_end) {
+            assert!(ctx.is_in_link_title(start));
+            assert!(ctx.is_in_link_title(start + 5));
+            assert!(!ctx.is_in_link_title(end));
+        }
+    }
+
+    #[test]
+    fn test_is_in_link_title_parentheses() {
+        // Note: The reference def parser may not support parenthesized titles
+        // This test verifies the is_in_link_title method works when titles exist
+        let content = "[ref]: /url (Parenthesized title)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Parser behavior: may or may not parse parenthesized titles
+        // We test that is_in_link_title correctly reflects whatever was parsed
+        if ctx.reference_defs.is_empty() {
+            // Parser didn't recognize this as a reference def
+            for i in 0..content.len() {
+                assert!(!ctx.is_in_link_title(i));
+            }
+        } else {
+            let def = &ctx.reference_defs[0];
+            if let (Some(start), Some(end)) = (def.title_byte_start, def.title_byte_end) {
+                assert!(ctx.is_in_link_title(start));
+                assert!(ctx.is_in_link_title(start + 5));
+                assert!(!ctx.is_in_link_title(end));
+            } else {
+                // Title wasn't parsed, so no position should be in title
+                for i in 0..content.len() {
+                    assert!(!ctx.is_in_link_title(i));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_is_in_link_title_no_refs() {
+        let content = "Just plain text without any reference definitions.";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert!(ctx.reference_defs.is_empty());
+
+        for i in 0..content.len() {
+            assert!(!ctx.is_in_link_title(i));
+        }
+    }
 }
