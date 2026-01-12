@@ -2235,4 +2235,91 @@ Use [ref] here.
             "Should warn about ref-missing.md"
         );
     }
+
+    #[test]
+    fn test_footnote_definitions_not_flagged() {
+        // Regression test for issue #286: footnote definitions should not be
+        // treated as reference definitions and flagged as broken links
+        let rule = MD057ExistingRelativeLinks::default();
+
+        let content = r#"# Title
+
+A footnote[^1].
+
+[^1]: [link](https://www.google.com).
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Footnote definitions should not trigger MD057 warnings. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_footnote_with_relative_link_inside() {
+        // Footnotes containing relative links should not be checked
+        // (the footnote content is not a URL, it's content that may contain links)
+        let rule = MD057ExistingRelativeLinks::default();
+
+        let content = r#"# Title
+
+See the footnote[^1].
+
+[^1]: Check out [this file](./existing.md) for more info.
+[^2]: Also see [missing](./does-not-exist.md).
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // The inline links INSIDE footnotes should be checked (./existing.md, ./does-not-exist.md)
+        // but the footnote definition itself should not be treated as a reference definition
+        // Note: This test verifies that [^1]: and [^2]: are not parsed as ref defs with
+        // URLs like "[this file](./existing.md)" or "[missing](./does-not-exist.md)"
+        for warning in &result {
+            assert!(
+                !warning.message.contains("[this file]"),
+                "Footnote content should not be treated as URL: {warning:?}"
+            );
+            assert!(
+                !warning.message.contains("[missing]"),
+                "Footnote content should not be treated as URL: {warning:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mixed_footnotes_and_reference_definitions() {
+        // Ensure regular reference definitions are still checked while footnotes are skipped
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let content = r#"# Title
+
+A footnote[^1] and a [ref link][myref].
+
+[^1]: This is a footnote with [link](https://example.com).
+
+[myref]: ./missing-file.md "This should be checked"
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only warn about the regular reference definition, not the footnote
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only warn about the regular reference definition. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("missing-file.md"),
+            "Should warn about missing-file.md in reference definition"
+        );
+    }
 }

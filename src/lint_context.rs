@@ -1699,7 +1699,15 @@ impl<'a> LintContext<'a> {
             let line_num = line_idx + 1;
 
             if let Some(cap) = REF_DEF_PATTERN.captures(line) {
-                let id = cap.get(1).unwrap().as_str().to_lowercase();
+                let id_raw = cap.get(1).unwrap().as_str();
+
+                // Skip footnote definitions - they use [^id]: syntax and are semantically
+                // different from reference link definitions
+                if id_raw.starts_with('^') {
+                    continue;
+                }
+
+                let id = id_raw.to_lowercase();
                 let url = cap.get(2).unwrap().as_str().to_string();
                 let title_match = cap.get(3).or_else(|| cap.get(4));
                 let title = title_match.map(|m| m.as_str().to_string());
@@ -4376,5 +4384,82 @@ export const year = 2023
         let bq4 = ctx.lines.get(3).unwrap().blockquote.as_ref().unwrap();
         assert_eq!(bq4.content, "More text");
         assert_eq!(bq4.nesting_level, 1);
+    }
+
+    #[test]
+    fn test_footnote_definitions_not_parsed_as_reference_defs() {
+        // Footnote definitions use [^id]: syntax and should NOT be parsed as reference definitions
+        let content = r#"# Title
+
+A footnote[^1].
+
+[^1]: This is the footnote content.
+
+[^note]: Another footnote with [link](https://example.com).
+
+[regular]: ./path.md "A real reference definition"
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Should only have one reference definition (the regular one)
+        assert_eq!(
+            ctx.reference_defs.len(),
+            1,
+            "Footnotes should not be parsed as reference definitions"
+        );
+
+        // The only reference def should be the regular one
+        assert_eq!(ctx.reference_defs[0].id, "regular");
+        assert_eq!(ctx.reference_defs[0].url, "./path.md");
+        assert_eq!(
+            ctx.reference_defs[0].title,
+            Some("A real reference definition".to_string())
+        );
+    }
+
+    #[test]
+    fn test_footnote_with_inline_link_not_misidentified() {
+        // Regression test for issue #286: footnote containing an inline link
+        // was incorrectly parsed as a reference definition with URL "[link](url)"
+        let content = r#"# Title
+
+A footnote[^1].
+
+[^1]: [link](https://www.google.com).
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Should have no reference definitions
+        assert!(
+            ctx.reference_defs.is_empty(),
+            "Footnote with inline link should not create a reference definition"
+        );
+    }
+
+    #[test]
+    fn test_various_footnote_formats_excluded() {
+        // Test various footnote ID formats are all excluded
+        let content = r#"[^1]: Numeric footnote
+[^note]: Named footnote
+[^a]: Single char footnote
+[^long-footnote-name]: Long named footnote
+[^123abc]: Mixed alphanumeric
+
+[ref1]: ./file1.md
+[ref2]: ./file2.md
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Should only have the two regular reference definitions
+        assert_eq!(
+            ctx.reference_defs.len(),
+            2,
+            "Only regular reference definitions should be parsed"
+        );
+
+        let ids: Vec<&str> = ctx.reference_defs.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"ref1"));
+        assert!(ids.contains(&"ref2"));
+        assert!(!ids.iter().any(|id| id.starts_with('^')));
     }
 }
