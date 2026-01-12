@@ -212,19 +212,72 @@ impl MD005ListIndent {
             calculate_match_range(line_num, line_info.content(ctx.content), 0, 1)
         };
 
-        let fix_range = if actual_indent > 0 {
-            let start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-            let end_byte = start_byte + actual_indent;
-            start_byte..end_byte
-        } else {
-            let byte_pos = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-            byte_pos..byte_pos
-        };
+        // For blockquote-nested lists, we need to preserve the blockquote prefix
+        // Similar to how MD007 handles this case
+        let (fix_range, replacement) = if line_info.blockquote.is_some() {
+            // Calculate the range from start of line to the list marker position
+            let start_byte = line_info.byte_offset;
+            let mut end_byte = line_info.byte_offset;
 
-        let replacement = if expected_indent > 0 {
-            " ".repeat(expected_indent)
+            // Get the list marker position from list_item
+            let marker_column = line_info
+                .list_item
+                .as_ref()
+                .map(|li| li.marker_column)
+                .unwrap_or(actual_indent);
+
+            // Calculate where the marker starts
+            for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
+                if i >= marker_column {
+                    break;
+                }
+                end_byte += ch.len_utf8();
+            }
+
+            // Build the blockquote prefix
+            let mut blockquote_count = 0;
+            for ch in line_info.content(ctx.content).chars() {
+                if ch == '>' {
+                    blockquote_count += 1;
+                } else if ch != ' ' && ch != '\t' {
+                    break;
+                }
+            }
+
+            // Build the blockquote prefix (one '>' per level, with spaces between for nested)
+            let blockquote_prefix = if blockquote_count > 1 {
+                (0..blockquote_count)
+                    .map(|_| "> ")
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            } else {
+                ">".to_string()
+            };
+
+            // Build replacement with blockquote prefix + correct indentation
+            let correct_indent = " ".repeat(expected_indent);
+            let replacement = format!("{blockquote_prefix} {correct_indent}");
+
+            (start_byte..end_byte, replacement)
         } else {
-            String::new()
+            // Non-blockquote case: original logic
+            let fix_range = if actual_indent > 0 {
+                let start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                let end_byte = start_byte + actual_indent;
+                start_byte..end_byte
+            } else {
+                let byte_pos = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
+                byte_pos..byte_pos
+            };
+
+            let replacement = if expected_indent > 0 {
+                " ".repeat(expected_indent)
+            } else {
+                String::new()
+            };
+
+            (fix_range, replacement)
         };
 
         LintWarning {
@@ -1664,5 +1717,59 @@ Even more text";
         );
         assert!(result[0].line == 3);
         assert!(result[0].message.contains("Expected indentation of 4"));
+    }
+
+    #[test]
+    fn test_blockquote_nested_list_fix_preserves_blockquote_prefix() {
+        // Test that MD005 fix preserves blockquote prefix instead of removing it
+        // This was a bug where ">  * item" would be fixed to "* item" (blockquote removed)
+        // instead of "> * item" (blockquote preserved)
+        use crate::rule::Rule;
+
+        let rule = MD005ListIndent::default();
+        let content = ">  * Federation sender blacklists are now persisted.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Expected 1 warning for extra indent");
+
+        // The fix should preserve the blockquote prefix
+        assert!(result[0].fix.is_some(), "Should have a fix");
+        let fixed = rule.fix(&ctx).expect("Fix should succeed");
+
+        // Verify blockquote prefix is preserved
+        assert!(
+            fixed.starts_with("> "),
+            "Fixed content should start with blockquote prefix '> ', got: {fixed:?}"
+        );
+        assert!(
+            !fixed.starts_with("* "),
+            "Fixed content should NOT start with just '* ' (blockquote removed), got: {fixed:?}"
+        );
+        assert_eq!(
+            fixed.trim(),
+            "> * Federation sender blacklists are now persisted.",
+            "Fixed content should be '> * Federation sender...' with single space after >"
+        );
+    }
+
+    #[test]
+    fn test_nested_blockquote_list_fix_preserves_prefix() {
+        // Test nested blockquotes (>> syntax)
+        use crate::rule::Rule;
+
+        let rule = MD005ListIndent::default();
+        let content = ">>   * Nested blockquote list item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        if !result.is_empty() {
+            let fixed = rule.fix(&ctx).expect("Fix should succeed");
+            // Should preserve the nested blockquote prefix
+            assert!(
+                fixed.contains(">>") || fixed.contains("> >"),
+                "Fixed content should preserve nested blockquote prefix, got: {fixed:?}"
+            );
+        }
     }
 }
