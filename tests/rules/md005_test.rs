@@ -178,13 +178,19 @@ fn test_invalid_complex_nesting() {
 * Back to 1";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    // With dynamic detection, the rule is more lenient
-    // It detects 3-space indentation pattern and only flags line 5 which has 6 spaces
-    assert_eq!(result.len(), 1, "Should only flag line 5 with incorrect indentation");
+    // MD005 groups items by (parent_content_column, is_ordered) to prevent oscillation with MD007.
+    // Level 3 ordered items (lines 5-6) are checked separately from level 3 unordered (line 3).
+    // First-established for ordered group = 6 spaces (from line 5), so line 6 (5 spaces) is flagged.
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag line 6 which is inconsistent with other ordered items"
+    );
     let fixed = rule.fix(&ctx).unwrap();
+    // Line 6 is fixed to match line 5's indentation (6 spaces)
     assert_eq!(
         fixed,
-        "* Level 1\n   * Level 2\n     * Level 3\n   * Back to 2\n     1. Ordered 3\n     2. Still 3\n* Back to 1"
+        "* Level 1\n   * Level 2\n     * Level 3\n   * Back to 2\n      1. Ordered 3\n      2. Still 3\n* Back to 1"
     );
 }
 
@@ -321,5 +327,113 @@ fn test_deeply_indented_content_not_list() {
     assert_eq!(
         list_item_count, 1,
         "8+ space indentation should be treated as code block, not list"
+    );
+}
+
+// ============================================================================
+// MD005/MD007 oscillation prevention tests
+//
+// MD005 groups items by (parent_content_column, is_ordered), treating ordered and
+// unordered lists as separate concerns for indentation consistency. This prevents
+// oscillation where MD007 fixes bullet indent and MD005 reverts it as "inconsistent"
+// with ordered items at the same level.
+// ============================================================================
+
+/// MD005 should NOT flag bullets as inconsistent with ordered items at the same
+/// level - they're separate semantic constructs.
+#[test]
+fn test_ordered_and_unordered_in_separate_groups() {
+    use rumdl_lib::rules::MD007ULIndent;
+
+    let md005 = MD005ListIndent::default();
+    let md007 = MD007ULIndent::default();
+
+    // Minimal reproduction: ordered item at one indent, bullet at different indent
+    // Under same parent - MD005 should not consider them "inconsistent"
+    let content = "* Parent\n  1. ordered at 2 spaces\n   - bullet at 3 spaces";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // MD005 should NOT flag bullet because ordered/unordered are separate groups
+    let md005_warnings = md005.check(&ctx).unwrap();
+    assert!(
+        md005_warnings.is_empty(),
+        "MD005 should not flag bullet as inconsistent with ordered item - separate groups. Got: {:?}",
+        md005_warnings
+    );
+
+    // MD007 may or may not flag the bullet (depends on expected indent)
+    // The key test is that after any fix, we don't oscillate
+    let md007_warnings = md007.check(&ctx).unwrap();
+
+    if !md007_warnings.is_empty() {
+        // Apply MD007 fix
+        let fixed = md007.fix(&ctx).unwrap();
+        let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+        // After MD007 fix, MD005 should still be happy (no oscillation)
+        let md005_after = md005.check(&ctx_fixed).unwrap();
+        assert!(
+            md005_after.is_empty(),
+            "MD005 should not try to revert MD007's fix - no oscillation. Got: {:?}",
+            md005_after
+        );
+    }
+}
+
+/// Bullets stay separate from ordered items regardless of which comes first.
+#[test]
+fn test_bullet_before_ordered_in_separate_groups() {
+    let md005 = MD005ListIndent::default();
+
+    // Bullet first, then ordered - also separate groups
+    let content = "* Parent\n  - bullet at 2 spaces\n   1. ordered at 3 spaces";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // MD005 should NOT flag ordered item as inconsistent with bullet
+    let md005_warnings = md005.check(&ctx).unwrap();
+    assert!(
+        md005_warnings.is_empty(),
+        "MD005 should not flag ordered as inconsistent with bullet - separate groups. Got: {:?}",
+        md005_warnings
+    );
+}
+
+/// Multiple ordered/unordered siblings at same level stay in separate groups.
+#[test]
+fn test_multiple_mixed_siblings_in_separate_groups() {
+    let md005 = MD005ListIndent::default();
+
+    // Multiple ordered items, then multiple bullets at different indent
+    let content = "* Parent\n  1. First ordered\n  2. Second ordered\n   - First bullet\n   - Second bullet";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // MD005 should not flag anything - ordered items are consistent (2 spaces),
+    // bullets are consistent (3 spaces), and they're in separate groups
+    let md005_warnings = md005.check(&ctx).unwrap();
+    assert!(
+        md005_warnings.is_empty(),
+        "MD005 should not flag - each type is internally consistent. Got: {:?}",
+        md005_warnings
+    );
+}
+
+/// MD005 still flags inconsistency within same list type.
+#[test]
+fn test_inconsistency_within_same_type_detected() {
+    let md005 = MD005ListIndent::default();
+
+    // Two bullets at different indents under same parent - SHOULD be flagged
+    let content = "* Parent\n  - First bullet at 2 spaces\n   - Second bullet at 3 spaces";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let md005_warnings = md005.check(&ctx).unwrap();
+    assert!(
+        !md005_warnings.is_empty(),
+        "MD005 should flag inconsistent bullets (same type, different indents). Got: {:?}",
+        md005_warnings
     );
 }

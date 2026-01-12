@@ -97,13 +97,16 @@ fn test_complex_nested_mixed_lists() {
     let md007 = MD007ULIndent::default();
     let md029 = MD029OrderedListPrefix::default();
 
+    // Note: MD005 groups items by (parent_content_column, is_ordered) to prevent
+    // oscillation with MD007. To trigger MD005, we need inconsistent same-type siblings.
     let content = "\
 * Unordered list item
   1. Ordered nested item
   2. Another ordered nested item
   4. Wrong number in same list (MD029 violation)
 + Mixed marker style (MD004 violation)
-   * Wrong indent 3 spaces (MD005, MD007 violations)
+  * Bullet at 2 spaces
+   * Wrong indent 3 spaces (MD005 - inconsistent with sibling, MD007 violation)
 * Back to proper unordered";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -115,7 +118,10 @@ fn test_complex_nested_mixed_lists() {
     let md029_result = md029.check(&ctx).unwrap();
 
     assert!(!md004_result.is_empty(), "MD004 should detect mixed markers");
-    assert!(!md005_result.is_empty(), "MD005 should detect wrong indentation");
+    assert!(
+        !md005_result.is_empty(),
+        "MD005 should detect inconsistent bullet indentation"
+    );
     assert!(!md007_result.is_empty(), "MD007 should detect wrong nested indentation");
     assert!(!md029_result.is_empty(), "MD029 should detect wrong numbering");
 

@@ -10,6 +10,10 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use std::collections::HashMap;
 use toml;
 
+/// Type alias for parent content column groups, keyed by (parent_col, is_ordered).
+/// Used by `group_by_parent_content_column` to separate ordered and unordered items.
+type ParentContentGroups<'a> = HashMap<(usize, bool), Vec<(usize, usize, &'a crate::lint_context::LineInfo)>>;
+
 /// Rule MD005: Inconsistent indentation for list items at the same level
 #[derive(Clone, Default)]
 pub struct MD005ListIndent {
@@ -326,8 +330,12 @@ impl MD005ListIndent {
         }
     }
 
-    /// Groups items by their semantic parent's content column.
-    /// This correctly handles ordered lists where marker widths vary (e.g., "1. " vs "10. ").
+    /// Groups items by their semantic parent's content column AND list type.
+    ///
+    /// By grouping by (parent_content_column, is_ordered), we enforce consistency
+    /// within each list type separately. This prevents oscillation with MD007, which
+    /// only adjusts unordered list indentation and may expect different values than
+    /// what ordered lists use. (fixes #287)
     fn group_by_parent_content_column<'a>(
         &self,
         level: usize,
@@ -339,12 +347,20 @@ impl MD005ListIndent {
             &crate::lint_context::ListItemInfo,
         )],
         level_map: &HashMap<usize, usize>,
-    ) -> HashMap<usize, Vec<(usize, usize, &'a crate::lint_context::LineInfo)>> {
+    ) -> ParentContentGroups<'a> {
         let parent_level = level - 1;
-        let mut parent_content_groups: HashMap<usize, Vec<(usize, usize, &'a crate::lint_context::LineInfo)>> =
-            HashMap::new();
+
+        // Build line->is_ordered map for O(1) lookup
+        let is_ordered_map: HashMap<usize, bool> = all_list_items
+            .iter()
+            .map(|(ln, _, _, item)| (*ln, item.is_ordered))
+            .collect();
+
+        let mut parent_content_groups: ParentContentGroups<'a> = HashMap::new();
 
         for (line_num, indent, line_info) in group {
+            let item_is_ordered = is_ordered_map.get(line_num).copied().unwrap_or(false);
+
             // Find the most recent item at parent_level before this line
             let mut parent_content_col: Option<usize> = None;
 
@@ -362,7 +378,7 @@ impl MD005ListIndent {
 
             if let Some(parent_col) = parent_content_col {
                 parent_content_groups
-                    .entry(parent_col)
+                    .entry((parent_col, item_is_ordered))
                     .or_default()
                     .push((*line_num, *indent, *line_info));
             }
