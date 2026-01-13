@@ -851,3 +851,454 @@ fn test_complex_document_no_duplicates() {
         "Too many warnings for missing.md ({missing_count}), possible duplicates"
     );
 }
+
+// =============================================================================
+// LaTeX math span tests (Issue #289)
+// =============================================================================
+
+/// Test that link-like patterns inside single-line display math are not flagged
+/// Issue #289: MD057 incorrectly triggers on LaTeX math formulas like $[x](\zeta)$
+#[test]
+fn test_latex_single_line_display_math_not_flagged() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Z-transform formula that looks like a markdown link
+    let content = r#"
+# Z-Transform
+
+$$X(\zeta) = \mathcal Z [x](\zeta) = \sum_k x(k) \zeta^{-k}$$
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "LaTeX display math should not trigger MD057. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test that link-like patterns inside inline math are not flagged
+#[test]
+fn test_latex_inline_math_not_flagged() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Inline Math
+
+The function $[x](\zeta)$ represents the evaluation.
+
+Also check $f[n](x)$ and $g[k](t)$ for more examples.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "LaTeX inline math should not trigger MD057. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test that link-like patterns inside multi-line math blocks are not flagged
+#[test]
+fn test_latex_multiline_math_block_not_flagged() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Multi-line Math
+
+$$
+X(\zeta) = \mathcal Z [x](\zeta) = \sum_k x(k) \zeta^{-k}
+$$
+
+And another:
+
+$$
+[f](x) = \int_0^1 f(t) dt
+$$
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "LaTeX multi-line math blocks should not trigger MD057. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test that real broken links outside math are still flagged
+#[test]
+fn test_latex_math_mixed_with_real_links() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create an existing file
+    File::create(base_path.join("exists.md"))
+        .unwrap()
+        .write_all(b"# Test")
+        .unwrap();
+
+    let content = r#"
+# Mixed Content
+
+The formula $$[x](\zeta)$$ is LaTeX math.
+
+[Valid link](exists.md)
+[Broken link](missing.md)
+
+Inline math $[f](x)$ in text.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the real broken link
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected 1 warning for missing.md, got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(
+        result[0].message.contains("missing.md"),
+        "Expected warning about missing.md"
+    );
+}
+
+/// Test various LaTeX patterns that look like markdown links
+#[test]
+fn test_latex_link_like_patterns() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# LaTeX Patterns
+
+- Evaluation: $[f](x)$
+- Z-transform: $$\mathcal{Z}[x](z)$$
+- Laplace: $\mathcal{L}[f](s)$
+- Fourier: $$\mathcal{F}[g](\omega)$$
+- Interval notation: $[a, b](c)$
+- Set notation: $$[0, 1](x)$$
+- Bracket function: $[n](k)$
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Various LaTeX patterns should not trigger MD057. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test that adjacent math and real links are handled correctly
+#[test]
+fn test_latex_adjacent_to_real_links() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    File::create(base_path.join("doc.md"))
+        .unwrap()
+        .write_all(b"# Doc")
+        .unwrap();
+
+    let content = r#"
+# Adjacent Content
+
+See $[f](x)$ and [doc](doc.md) for details.
+
+The formula $$[g](y)$$ appears before [missing](missing.md).
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should only flag the real broken link, not math
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected 1 warning for missing.md, got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(
+        result[0].message.contains("missing.md"),
+        "Expected warning about missing.md"
+    );
+}
+
+/// Test math in code blocks is handled correctly (double protection)
+#[test]
+fn test_latex_math_in_code_block() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Code Example
+
+```latex
+$$[x](\zeta) = \sum_k x(k)$$
+```
+
+Regular text here.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Math in code blocks should not trigger MD057. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test complex document from issue #289
+#[test]
+fn test_issue_289_exact_example() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Exact content from issue #289
+    let content = r#"$$X(\zeta) = \mathcal Z [x](\zeta) = \sum_k x(k) \zeta^{-k}$$"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Issue #289 example should not trigger MD057. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test that currency patterns are not treated as math (pulldown-cmark behavior)
+#[test]
+fn test_latex_currency_not_confused_with_math() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Currency patterns - pulldown-cmark requires balanced $ for math
+    // $100 alone is not math, but $100$ would be
+    let content = r#"
+# Prices
+
+The item costs $100 and [link](missing.md) is broken.
+
+A range of $50-$100 is typical.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // The broken link should still be flagged (currency $ doesn't hide it)
+    assert_eq!(
+        result.len(),
+        1,
+        "Currency patterns shouldn't affect link detection. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(result[0].message.contains("missing.md"));
+}
+
+/// Test escaped dollar signs
+#[test]
+fn test_latex_escaped_dollar_signs() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Escaped Dollars
+
+Use \$100 for escaped currency and [link](missing.md) is broken.
+
+Real math: $[f](x)$ should be skipped.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the broken link should be flagged
+    assert_eq!(
+        result.len(),
+        1,
+        "Only missing.md should be flagged. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(result[0].message.contains("missing.md"));
+}
+
+/// Test math inside HTML comments (should be ignored - HTML comment takes precedence)
+#[test]
+fn test_latex_math_in_html_comment() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# HTML Comment
+
+<!-- This has math $[x](y)$ and link [z](missing.md) inside comment -->
+
+Real broken [link](missing.md) here.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the link outside the comment should be flagged
+    assert_eq!(
+        result.len(),
+        1,
+        "Only link outside HTML comment should be flagged. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test unbalanced/malformed math delimiters
+#[test]
+fn test_latex_unbalanced_delimiters() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Unbalanced $ should not be treated as math
+    let content = r#"
+# Unbalanced
+
+Text with single $ sign and [link](missing.md) broken.
+
+Also $$unclosed and [another](also-missing.md) broken.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Both broken links should be flagged since math is unbalanced
+    assert_eq!(
+        result.len(),
+        2,
+        "Unbalanced math shouldn't hide broken links. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// Test environment variable patterns ($PATH, $HOME)
+#[test]
+fn test_latex_env_var_patterns() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Environment Variables
+
+Set $PATH and $HOME correctly. See [link](missing.md).
+
+Real math $[f](x)$ is different.
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the broken link should be flagged
+    assert_eq!(
+        result.len(),
+        1,
+        "Env vars shouldn't affect link detection. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(result[0].message.contains("missing.md"));
+}
+
+/// Test math spans at document boundaries
+#[test]
+fn test_latex_math_at_boundaries() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Math at very start and end of document
+    let content = r#"$[start](x)$ middle [link](missing.md) end $[end](y)$"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the broken link in the middle should be flagged
+    assert_eq!(
+        result.len(),
+        1,
+        "Math at boundaries should work correctly. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(result[0].message.contains("missing.md"));
+}
+
+/// Test nested-looking math patterns
+#[test]
+fn test_latex_nested_brackets() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"
+# Nested Brackets in Math
+
+Matrix: $$[[a](b)](c)$$
+
+Function composition: $[f \circ g](x)$
+
+Real broken: [link](missing.md)
+"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Nested brackets in math should be handled. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(result[0].message.contains("missing.md"));
+}
+
+/// Test consecutive math spans
+#[test]
+fn test_latex_consecutive_math_spans() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = r#"$[a](x)$$[b](y)$$[c](z)$ and [broken](missing.md)"#;
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Consecutive math spans should all be detected. Got: {:?}",
+        result.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(result[0].message.contains("missing.md"));
+}

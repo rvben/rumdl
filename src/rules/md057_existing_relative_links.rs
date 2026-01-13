@@ -379,6 +379,11 @@ impl Rule for MD057ExistingRelativeLinks {
                         continue;
                     }
 
+                    // Skip if this link is in a math span (LaTeX $...$ or $$...$$)
+                    if ctx.is_in_math_span(absolute_start_pos) {
+                        continue;
+                    }
+
                     // Find the URL part after the link text
                     // Try angle-bracket regex first (handles URLs with parens like `<path/(with)/parens.md>`)
                     // Then fall back to normal URL regex

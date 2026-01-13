@@ -257,6 +257,27 @@ pub struct CodeSpan {
     pub content: String,
 }
 
+/// Parsed math span information (inline $...$ or display $$...$$)
+#[derive(Debug, Clone)]
+pub struct MathSpan {
+    /// Line number where the math span starts (1-indexed)
+    pub line: usize,
+    /// Line number where the math span ends (1-indexed)
+    pub end_line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// Whether this is display math ($$...$$) vs inline ($...$)
+    pub is_display: bool,
+    /// Content inside the math delimiters
+    pub content: String,
+}
+
 /// Information about a heading
 #[derive(Debug, Clone)]
 pub struct HeadingInfo {
@@ -503,6 +524,7 @@ pub struct LintContext<'a> {
     pub footnote_refs: Vec<FootnoteRef>,  // Pre-parsed footnote references
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
     code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>, // Lazy-loaded inline code spans
+    math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>, // Lazy-loaded math spans ($...$ and $$...$$)
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
     pub char_frequency: CharFrequency,    // Character frequency analysis
     html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded HTML tags
@@ -707,6 +729,7 @@ impl<'a> LintContext<'a> {
             footnote_refs,
             reference_defs,
             code_spans_cache: OnceLock::from(Arc::new(code_spans)),
+            math_spans_cache: OnceLock::new(), // Lazy-loaded on first access
             list_blocks,
             char_frequency,
             html_tags_cache: OnceLock::new(),
@@ -729,6 +752,22 @@ impl<'a> LintContext<'a> {
             self.code_spans_cache
                 .get_or_init(|| Arc::new(Self::parse_code_spans(self.content, &self.lines))),
         )
+    }
+
+    /// Get math spans - computed lazily on first access
+    pub fn math_spans(&self) -> Arc<Vec<MathSpan>> {
+        Arc::clone(
+            self.math_spans_cache
+                .get_or_init(|| Arc::new(Self::parse_math_spans(self.content, &self.lines))),
+        )
+    }
+
+    /// Check if a byte position is within a math span (inline $...$ or display $$...$$)
+    pub fn is_in_math_span(&self, byte_pos: usize) -> bool {
+        let math_spans = self.math_spans();
+        math_spans
+            .iter()
+            .any(|span| byte_pos >= span.byte_offset && byte_pos < span.byte_end)
     }
 
     /// Get HTML comment ranges - pre-computed during LintContext construction
@@ -1101,6 +1140,20 @@ impl<'a> LintContext<'a> {
     /// Check if content likely contains HTML (fast)
     pub fn likely_has_html(&self) -> bool {
         self.char_frequency.lt_count > 0
+    }
+
+    /// Get the blockquote prefix for inserting a blank line at the given line index.
+    /// Returns the prefix without trailing content (e.g., ">" or ">>").
+    /// This is needed because blank lines inside blockquotes must preserve the blockquote structure.
+    /// Returns an empty string if the line is not inside a blockquote.
+    pub fn blockquote_prefix_for_blank_line(&self, line_idx: usize) -> String {
+        if let Some(line_info) = self.lines.get(line_idx)
+            && let Some(ref bq) = line_info.blockquote
+        {
+            bq.prefix.trim_end().to_string()
+        } else {
+            String::new()
+        }
     }
 
     /// Get HTML tags on a specific line
@@ -2317,6 +2370,12 @@ impl<'a> LintContext<'a> {
                     has_multiple_spaces_after_marker: has_multiple_spaces,
                     needs_md028_fix,
                 });
+
+                // Update is_horizontal_rule for blockquote content
+                // The original detection doesn't strip blockquote prefix, so we need to check here
+                if !lines[i].in_code_block && is_horizontal_rule_content(bq.content.trim()) {
+                    lines[i].is_horizontal_rule = true;
+                }
             }
 
             // Now apply skip conditions for heading detection
@@ -2862,6 +2921,76 @@ impl<'a> LintContext<'a> {
         code_spans.sort_by_key(|span| span.byte_offset);
 
         code_spans
+    }
+
+    /// Parse all math spans (inline $...$ and display $$...$$) using pulldown-cmark
+    fn parse_math_spans(content: &str, lines: &[LineInfo]) -> Vec<MathSpan> {
+        let mut math_spans = Vec::new();
+
+        // Quick check - if no $ signs, no math spans
+        if !content.contains('$') {
+            return math_spans;
+        }
+
+        // Use pulldown-cmark with ENABLE_MATH option
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_MATH);
+        let parser = Parser::new_ext(content, options).into_offset_iter();
+
+        for (event, range) in parser {
+            let (is_display, math_content) = match &event {
+                Event::InlineMath(text) => (false, text.as_ref()),
+                Event::DisplayMath(text) => (true, text.as_ref()),
+                _ => continue,
+            };
+
+            let start_pos = range.start;
+            let end_pos = range.end;
+
+            // Use binary search to find line number - O(log n) instead of O(n)
+            let line_idx = lines
+                .partition_point(|line| line.byte_offset <= start_pos)
+                .saturating_sub(1);
+            let line_num = line_idx + 1;
+            let byte_col_start = start_pos - lines[line_idx].byte_offset;
+
+            // Find end column using binary search
+            let end_line_idx = lines
+                .partition_point(|line| line.byte_offset <= end_pos)
+                .saturating_sub(1);
+            let byte_col_end = end_pos - lines[end_line_idx].byte_offset;
+
+            // Convert byte offsets to character positions for correct Unicode handling
+            let line_content = lines[line_idx].content(content);
+            let col_start = if byte_col_start <= line_content.len() {
+                line_content[..byte_col_start].chars().count()
+            } else {
+                line_content.chars().count()
+            };
+
+            let end_line_content = lines[end_line_idx].content(content);
+            let col_end = if byte_col_end <= end_line_content.len() {
+                end_line_content[..byte_col_end].chars().count()
+            } else {
+                end_line_content.chars().count()
+            };
+
+            math_spans.push(MathSpan {
+                line: line_num,
+                end_line: end_line_idx + 1,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: start_pos,
+                byte_end: end_pos,
+                is_display,
+                content: math_content.to_string(),
+            });
+        }
+
+        // Sort by position to ensure consistent ordering
+        math_spans.sort_by_key(|span| span.byte_offset);
+
+        math_spans
     }
 
     /// Parse all list blocks in the content (legacy line-by-line approach)
@@ -4877,5 +5006,227 @@ Some content."#;
         for i in 0..content.len() {
             assert!(!ctx.is_in_link_title(i));
         }
+    }
+
+    // =========================================================================
+    // Math span tests (Issue #289)
+    // =========================================================================
+
+    #[test]
+    fn test_math_spans_inline() {
+        let content = "Text with inline math $[f](x)$ in it.";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        assert_eq!(math_spans.len(), 1, "Should detect one inline math span");
+
+        let span = &math_spans[0];
+        assert!(!span.is_display, "Should be inline math, not display");
+        assert_eq!(span.content, "[f](x)", "Content should be extracted correctly");
+    }
+
+    #[test]
+    fn test_math_spans_display_single_line() {
+        let content = "$$X(\\zeta) = \\mathcal Z [x](\\zeta)$$";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        assert_eq!(
+            math_spans.len(),
+            1,
+            "Should detect one display math span"
+        );
+
+        let span = &math_spans[0];
+        assert!(span.is_display, "Should be display math");
+        assert!(
+            span.content.contains("[x](\\zeta)"),
+            "Content should contain the link-like pattern"
+        );
+    }
+
+    #[test]
+    fn test_math_spans_display_multiline() {
+        let content = "Before\n\n$$\n[x](\\zeta) = \\sum_k x(k)\n$$\n\nAfter";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        assert_eq!(
+            math_spans.len(),
+            1,
+            "Should detect one display math span"
+        );
+
+        let span = &math_spans[0];
+        assert!(span.is_display, "Should be display math");
+    }
+
+    #[test]
+    fn test_is_in_math_span() {
+        let content = "Text $[f](x)$ more text";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Position inside the math span
+        let math_start = content.find('$').unwrap();
+        let math_end = content.rfind('$').unwrap() + 1;
+
+        assert!(
+            ctx.is_in_math_span(math_start + 1),
+            "Position inside math span should return true"
+        );
+        assert!(
+            ctx.is_in_math_span(math_start + 3),
+            "Position inside math span should return true"
+        );
+
+        // Position outside the math span
+        assert!(
+            !ctx.is_in_math_span(0),
+            "Position before math span should return false"
+        );
+        assert!(
+            !ctx.is_in_math_span(math_end + 1),
+            "Position after math span should return false"
+        );
+    }
+
+    #[test]
+    fn test_math_spans_mixed_with_code() {
+        let content = "Math $[f](x)$ and code `[g](y)` mixed";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        let code_spans = ctx.code_spans();
+
+        assert_eq!(math_spans.len(), 1, "Should have one math span");
+        assert_eq!(code_spans.len(), 1, "Should have one code span");
+
+        // Verify math span content
+        assert_eq!(math_spans[0].content, "[f](x)");
+        // Verify code span content
+        assert_eq!(code_spans[0].content, "[g](y)");
+    }
+
+    #[test]
+    fn test_math_spans_no_math() {
+        let content = "Regular text without any math at all.";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        assert!(math_spans.is_empty(), "Should have no math spans");
+    }
+
+    #[test]
+    fn test_math_spans_multiple() {
+        let content = "First $a$ and second $b$ and display $$c$$";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        assert_eq!(math_spans.len(), 3, "Should detect three math spans");
+
+        // Two inline, one display
+        let inline_count = math_spans.iter().filter(|s| !s.is_display).count();
+        let display_count = math_spans.iter().filter(|s| s.is_display).count();
+
+        assert_eq!(inline_count, 2, "Should have two inline math spans");
+        assert_eq!(display_count, 1, "Should have one display math span");
+    }
+
+    #[test]
+    fn test_is_in_math_span_boundary_positions() {
+        // Test exact boundary positions: $[f](x)$
+        // Byte positions:                0123456789
+        let content = "$[f](x)$";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        assert_eq!(math_spans.len(), 1, "Should have one math span");
+
+        let span = &math_spans[0];
+
+        // Position at opening $ should be in span (byte 0)
+        assert!(
+            ctx.is_in_math_span(span.byte_offset),
+            "Start position should be in span"
+        );
+
+        // Position just inside should be in span
+        assert!(
+            ctx.is_in_math_span(span.byte_offset + 1),
+            "Position after start should be in span"
+        );
+
+        // Position at closing $ should be in span (exclusive end means we check byte_end - 1)
+        assert!(
+            ctx.is_in_math_span(span.byte_end - 1),
+            "Position at end-1 should be in span"
+        );
+
+        // Position at byte_end should NOT be in span (exclusive end)
+        assert!(
+            !ctx.is_in_math_span(span.byte_end),
+            "Position at byte_end should NOT be in span (exclusive)"
+        );
+    }
+
+    #[test]
+    fn test_math_spans_at_document_start() {
+        let content = "$x$ text";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        assert_eq!(math_spans.len(), 1);
+        assert_eq!(math_spans[0].byte_offset, 0, "Math should start at byte 0");
+    }
+
+    #[test]
+    fn test_math_spans_at_document_end() {
+        let content = "text $x$";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        assert_eq!(math_spans.len(), 1);
+        assert_eq!(
+            math_spans[0].byte_end,
+            content.len(),
+            "Math should end at document end"
+        );
+    }
+
+    #[test]
+    fn test_math_spans_consecutive() {
+        let content = "$a$$b$";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        // pulldown-cmark should parse these as separate spans
+        assert!(
+            math_spans.len() >= 1,
+            "Should detect at least one math span"
+        );
+
+        // All positions should be in some math span
+        for i in 0..content.len() {
+            assert!(
+                ctx.is_in_math_span(i),
+                "Position {} should be in a math span",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_math_spans_currency_not_math() {
+        // Unbalanced $ should not create math spans
+        let content = "Price is $100";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let math_spans = ctx.math_spans();
+        // pulldown-cmark requires balanced delimiters for math
+        // $100 alone is not math
+        assert!(
+            math_spans.is_empty() || !math_spans.iter().any(|s| s.content.contains("100")),
+            "Unbalanced $ should not create math span containing 100"
+        );
     }
 }
