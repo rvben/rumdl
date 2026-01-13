@@ -9,6 +9,8 @@ Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
 
+For flavor-specific behavior (MkDocs, MDX, Quarto), see the [Markdown Flavors Reference](flavors.md).
+
 ## Rule Categories
 
 - [Severity Levels](#severity-levels) - Understanding Error vs Warning severities
