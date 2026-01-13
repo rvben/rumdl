@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.216] - 2026-01-13
+
+### Added
+
+- **MD072: Custom key order for frontmatter sorting** (fixes #290)
+  - New `key-order` config option to define preferred key ordering
+  - Keys in the order list appear first, unlisted keys sort alphabetically after
+  - Example: `key-order = ["title", "date", "author"]` puts title first
+
+### Fixed
+
+- **MD060: Preserve blockquote prefix when formatting tables**
+  - Tables inside blockquotes (e.g., `> | A | B |`) now correctly preserve the prefix
+  - Supports nested blockquotes (`>>`, `>>>`) with proper prefix preservation
+  - Works with all formatting styles (aligned, compact, tight)
+
+- **MD057: Skip link patterns inside LaTeX math spans** (fixes #289)
+  - Link-like patterns inside `$...$` or `$$...$$` are no longer flagged as broken links
+  - Prevents false positives from LaTeX commands that resemble markdown links
+
+- **MD030: Skip empty marker lines without content** (fixes #288)
+  - Lines with only a list marker (no content) are now skipped
+  - Prevents incorrect warnings about spacing on empty list items
+
+- **MD031/MD032/MD058/MD065: Auto-fix preserves nested blockquote prefix** (fixes #268)
+  - When inserting blank lines in blockquotes, the blockquote prefix is now preserved
+  - Works correctly with nested blockquotes (`>>`, `>>>`)
+  - Blank blockquote lines use `>` without trailing space (per markdownlint-cli)
+
+- **MD005/MD007: Prevent oscillation between rules**
+  - Ordered and unordered list items are now tracked in separate groups
+  - Fixes cases where MD005 and MD007 would fight over indentation
+
 ## [0.0.215] - 2026-01-12
 
 ### Fixed
