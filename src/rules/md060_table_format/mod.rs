@@ -1,5 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_line_range;
+use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use crate::utils::table_utils::TableUtils;
 use unicode_width::UnicodeWidthStr;
 
@@ -248,6 +249,16 @@ impl MD060TableFormat {
                 && trimmed.contains('-')
                 && trimmed.chars().all(|c| c == '-' || c == ':' || c.is_whitespace())
         })
+    }
+
+    /// Extract blockquote prefix from a line (e.g., "> " or ">> ").
+    /// Returns (prefix, content_without_prefix).
+    fn extract_blockquote_prefix(line: &str) -> (&str, &str) {
+        if let Some(m) = BLOCKQUOTE_PREFIX_RE.find(line) {
+            (&line[..m.end()], &line[m.end()..])
+        } else {
+            ("", line)
+        }
     }
 
     fn parse_column_alignments(delimiter_row: &[String]) -> Vec<ColumnAlignment> {
@@ -549,11 +560,21 @@ impl MD060TableFormat {
             };
         }
 
+        // Extract blockquote prefix from the header line (first line of table)
+        // All lines in the same table should have the same blockquote level
+        let (blockquote_prefix, _) = Self::extract_blockquote_prefix(table_lines[0]);
+
+        // Strip blockquote prefix from all lines for processing
+        let stripped_lines: Vec<&str> = table_lines
+            .iter()
+            .map(|line| Self::extract_blockquote_prefix(line).1)
+            .collect();
+
         let style = self.config.style.as_str();
 
         match style {
             "any" => {
-                let detected_style = Self::detect_table_style(&table_lines, flavor);
+                let detected_style = Self::detect_table_style(&stripped_lines, flavor);
                 if detected_style.is_none() {
                     return TableFormatResult {
                         lines: table_lines.iter().map(|s| s.to_string()).collect(),
@@ -565,16 +586,16 @@ impl MD060TableFormat {
                 let target_style = detected_style.unwrap();
 
                 // Parse column alignments from delimiter row (always at index 1)
-                let delimiter_cells = Self::parse_table_row_with_flavor(table_lines[1], flavor);
+                let delimiter_cells = Self::parse_table_row_with_flavor(stripped_lines[1], flavor);
                 let column_alignments = Self::parse_column_alignments(&delimiter_cells);
 
-                for line in &table_lines {
+                for line in &stripped_lines {
                     let cells = Self::parse_table_row_with_flavor(line, flavor);
                     match target_style.as_str() {
                         "tight" => result.push(Self::format_table_tight(&cells)),
                         "compact" => result.push(Self::format_table_compact(&cells)),
                         _ => {
-                            let column_widths = Self::calculate_column_widths(&table_lines, flavor);
+                            let column_widths = Self::calculate_column_widths(&stripped_lines, flavor);
                             let is_delimiter = Self::is_delimiter_row(&cells);
                             result.push(Self::format_table_row(
                                 &cells,
@@ -588,13 +609,13 @@ impl MD060TableFormat {
                 }
             }
             "compact" => {
-                for line in table_lines {
+                for line in &stripped_lines {
                     let cells = Self::parse_table_row_with_flavor(line, flavor);
                     result.push(Self::format_table_compact(&cells));
                 }
             }
             "tight" => {
-                for line in table_lines {
+                for line in &stripped_lines {
                     let cells = Self::parse_table_row_with_flavor(line, flavor);
                     result.push(Self::format_table_tight(&cells));
                 }
@@ -604,7 +625,7 @@ impl MD060TableFormat {
 
                 // If the table is already aligned with consistent column widths,
                 // preserve it as-is rather than forcing our preferred minimum widths
-                if Self::is_table_already_aligned(&table_lines, flavor) {
+                if Self::is_table_already_aligned(&stripped_lines, flavor) {
                     return TableFormatResult {
                         lines: table_lines.iter().map(|s| s.to_string()).collect(),
                         auto_compacted: false,
@@ -612,7 +633,7 @@ impl MD060TableFormat {
                     };
                 }
 
-                let column_widths = Self::calculate_column_widths(&table_lines, flavor);
+                let column_widths = Self::calculate_column_widths(&stripped_lines, flavor);
 
                 // Calculate aligned table width: 1 (leading pipe) + num_columns * 3 (| cell |) + sum(column_widths)
                 let num_columns = column_widths.len();
@@ -622,16 +643,16 @@ impl MD060TableFormat {
                 // Auto-compact: if aligned table exceeds max width, use compact formatting instead
                 if calc_aligned_width > self.effective_max_width() {
                     auto_compacted = true;
-                    for line in table_lines {
+                    for line in &stripped_lines {
                         let cells = Self::parse_table_row_with_flavor(line, flavor);
                         result.push(Self::format_table_compact(&cells));
                     }
                 } else {
                     // Parse column alignments from delimiter row (always at index 1)
-                    let delimiter_cells = Self::parse_table_row_with_flavor(table_lines[1], flavor);
+                    let delimiter_cells = Self::parse_table_row_with_flavor(stripped_lines[1], flavor);
                     let column_alignments = Self::parse_column_alignments(&delimiter_cells);
 
-                    for line in table_lines {
+                    for line in &stripped_lines {
                         let cells = Self::parse_table_row_with_flavor(line, flavor);
                         let is_delimiter = Self::is_delimiter_row(&cells);
                         result.push(Self::format_table_row(
@@ -653,8 +674,14 @@ impl MD060TableFormat {
             }
         }
 
+        // Re-add blockquote prefix to all formatted lines
+        let prefixed_result: Vec<String> = result
+            .into_iter()
+            .map(|line| format!("{blockquote_prefix}{line}"))
+            .collect();
+
         TableFormatResult {
-            lines: result,
+            lines: prefixed_result,
             auto_compacted,
             aligned_width,
         }

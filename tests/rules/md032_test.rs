@@ -450,8 +450,10 @@ fn test_issue_268_blockquote_heading_then_indented_list() {
     );
 
     // The fix should actually work - this is what was broken in #268
+    // Note: Per markdownlint-cli, blank blockquote lines should NOT have trailing space
+    // (trailing space triggers MD009). So the blank line is ">" not "> ".
     let fixed = rule.fix(&ctx).unwrap();
-    let expected = "# Test\n\n> #### Heading\n> \n>   - List item\n";
+    let expected = "# Test\n\n> #### Heading\n>\n>   - List item\n";
     assert_eq!(
         fixed, expected,
         "Fix should insert blank blockquote line.\nGot: {fixed:?}\nExpected: {expected:?}"

@@ -179,11 +179,12 @@ impl MD031BlanksAroundFences {
                         // Strip blockquote prefix before checking for fence markers
                         let trimmed = end_line_content.trim();
                         let content_after_bq = if trimmed.starts_with('>') {
-                            trimmed.trim_start_matches(|c| c == '>' || c == ' ').trim()
+                            trimmed.trim_start_matches(['>', ' ']).trim()
                         } else {
                             trimmed
                         };
-                        let is_closing_fence = (content_after_bq.starts_with("```") || content_after_bq.starts_with("~~~"))
+                        let is_closing_fence = (content_after_bq.starts_with("```")
+                            || content_after_bq.starts_with("~~~"))
                             && content_after_bq
                                 .chars()
                                 .skip_while(|&c| c == '`' || c == '~')
@@ -922,10 +923,7 @@ echo "nested"
 >> ```
 >>
 >> More text";
-        assert_eq!(
-            fixed, expected,
-            "Fix should preserve nested blockquote prefix '>>'"
-        );
+        assert_eq!(fixed, expected, "Fix should preserve nested blockquote prefix '>>'");
     }
 
     #[test]

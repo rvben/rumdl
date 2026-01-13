@@ -5031,11 +5031,7 @@ Some content."#;
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let math_spans = ctx.math_spans();
-        assert_eq!(
-            math_spans.len(),
-            1,
-            "Should detect one display math span"
-        );
+        assert_eq!(math_spans.len(), 1, "Should detect one display math span");
 
         let span = &math_spans[0];
         assert!(span.is_display, "Should be display math");
@@ -5051,11 +5047,7 @@ Some content."#;
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         let math_spans = ctx.math_spans();
-        assert_eq!(
-            math_spans.len(),
-            1,
-            "Should detect one display math span"
-        );
+        assert_eq!(math_spans.len(), 1, "Should detect one display math span");
 
         let span = &math_spans[0];
         assert!(span.is_display, "Should be display math");
@@ -5080,10 +5072,7 @@ Some content."#;
         );
 
         // Position outside the math span
-        assert!(
-            !ctx.is_in_math_span(0),
-            "Position before math span should return false"
-        );
+        assert!(!ctx.is_in_math_span(0), "Position before math span should return false");
         assert!(
             !ctx.is_in_math_span(math_end + 1),
             "Position after math span should return false"
@@ -5186,11 +5175,7 @@ Some content."#;
 
         let math_spans = ctx.math_spans();
         assert_eq!(math_spans.len(), 1);
-        assert_eq!(
-            math_spans[0].byte_end,
-            content.len(),
-            "Math should end at document end"
-        );
+        assert_eq!(math_spans[0].byte_end, content.len(), "Math should end at document end");
     }
 
     #[test]
@@ -5200,18 +5185,11 @@ Some content."#;
 
         let math_spans = ctx.math_spans();
         // pulldown-cmark should parse these as separate spans
-        assert!(
-            math_spans.len() >= 1,
-            "Should detect at least one math span"
-        );
+        assert!(!math_spans.is_empty(), "Should detect at least one math span");
 
         // All positions should be in some math span
         for i in 0..content.len() {
-            assert!(
-                ctx.is_in_math_span(i),
-                "Position {} should be in a math span",
-                i
-            );
+            assert!(ctx.is_in_math_span(i), "Position {i} should be in a math span");
         }
     }
 

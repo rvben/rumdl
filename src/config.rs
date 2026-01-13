@@ -4271,10 +4271,10 @@ fn to_relative_display_path(path: &str) -> String {
     // Try to make relative to CWD
     if let Ok(cwd) = std::env::current_dir() {
         // Try with canonicalized paths first (handles symlinks)
-        if let (Ok(canonical_file), Ok(canonical_cwd)) = (file_path.canonicalize(), cwd.canonicalize()) {
-            if let Ok(relative) = canonical_file.strip_prefix(&canonical_cwd) {
-                return relative.to_string_lossy().to_string();
-            }
+        if let (Ok(canonical_file), Ok(canonical_cwd)) = (file_path.canonicalize(), cwd.canonicalize())
+            && let Ok(relative) = canonical_file.strip_prefix(&canonical_cwd)
+        {
+            return relative.to_string_lossy().to_string();
         }
 
         // Fall back to non-canonicalized comparison

@@ -955,6 +955,131 @@ fn test_md060_tables_in_blockquotes() {
 }
 
 #[test]
+fn test_md060_tables_in_nested_blockquotes() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test tables inside nested blockquotes (>> prefix)
+    let content = ">> | Col1 | Col2 |\n>> |---|---|\n>> | A | B |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All lines should preserve the >> prefix
+    assert!(lines[0].starts_with(">> "), "Header should preserve >> prefix");
+    assert!(lines[1].starts_with(">> "), "Delimiter should preserve >> prefix");
+    assert!(lines[2].starts_with(">> "), "Content should preserve >> prefix");
+}
+
+#[test]
+fn test_md060_tables_in_deeply_nested_blockquotes() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Test tables inside deeply nested blockquotes (>>> prefix)
+    let content = ">>> | X | Y | Z |\n>>> |---|---|---|\n>>> | 1 | 2 | 3 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All lines should preserve the >>> prefix
+    for (i, line) in lines.iter().enumerate() {
+        assert!(
+            line.starts_with(">>> "),
+            "Line {i} should preserve >>> prefix, got: {line}"
+        );
+    }
+}
+
+#[test]
+fn test_md060_blockquote_table_all_styles() {
+    // Test that all formatting styles preserve blockquote prefix
+    let content = "> | A | B |\n> |---|---|\n> | 1 | 2 |";
+
+    for style in ["aligned", "compact", "tight"] {
+        let rule = MD060TableFormat::new(true, style.to_string());
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        for (i, line) in lines.iter().enumerate() {
+            assert!(
+                line.starts_with("> "),
+                "Style '{style}' line {i} should preserve '> ' prefix, got: {line}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_md060_blockquote_table_compact_prefix() {
+    let rule = MD060TableFormat::new(true, "compact".to_string());
+
+    // Blockquote with no space after > (valid but unusual)
+    let content = ">| A | B |\n>|---|---|\n>| 1 | 2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Should preserve the >| prefix style (no space)
+    for (i, line) in lines.iter().enumerate() {
+        assert!(line.starts_with(">"), "Line {i} should start with >, got: {line}");
+    }
+}
+
+#[test]
+fn test_md060_blockquote_table_preserves_alignment() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Table with alignment indicators inside blockquote
+    let content = "> | Left | Center | Right |\n> |:---|:---:|---:|\n> | A | B | C |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Verify blockquote prefix is preserved
+    assert!(fixed.starts_with("> "), "Should start with blockquote prefix");
+
+    // Verify alignment indicators are preserved
+    assert!(fixed.contains(":---"), "Left alignment should be preserved");
+    assert!(fixed.contains("---:"), "Right alignment should be preserved");
+}
+
+#[test]
+fn test_md060_multiple_blockquote_tables() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Two separate tables in same blockquote (separated by blank blockquote line)
+    let content = "> | A | B |\n> |---|---|\n> | 1 | 2 |\n>\n> | X | Y |\n> |---|---|\n> | 3 | 4 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All non-empty lines should have blockquote prefix
+    for (i, line) in lines.iter().enumerate() {
+        if !line.is_empty() {
+            assert!(
+                line.starts_with(">"),
+                "Line {i} should have blockquote prefix, got: {line}"
+            );
+        }
+    }
+
+    // Both tables should have content preserved
+    assert!(
+        fixed.contains("1") && fixed.contains("2"),
+        "First table content preserved"
+    );
+    assert!(
+        fixed.contains("3") && fixed.contains("4"),
+        "Second table content preserved"
+    );
+}
+
+#[test]
 fn test_md060_adjacent_tables_without_blank_line() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 

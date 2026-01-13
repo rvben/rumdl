@@ -932,10 +932,7 @@ Text after.";
 >> | a  |
 >>
 >> More text";
-        assert_eq!(
-            fixed, expected,
-            "Fix should preserve nested blockquote prefix '>>'"
-        );
+        assert_eq!(fixed, expected, "Fix should preserve nested blockquote prefix '>>'");
     }
 
     #[test]

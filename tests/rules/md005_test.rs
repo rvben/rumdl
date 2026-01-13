@@ -358,8 +358,7 @@ fn test_ordered_and_unordered_in_separate_groups() {
     let md005_warnings = md005.check(&ctx).unwrap();
     assert!(
         md005_warnings.is_empty(),
-        "MD005 should not flag bullet as inconsistent with ordered item - separate groups. Got: {:?}",
-        md005_warnings
+        "MD005 should not flag bullet as inconsistent with ordered item - separate groups. Got: {md005_warnings:?}"
     );
 
     // MD007 may or may not flag the bullet (depends on expected indent)
@@ -375,8 +374,7 @@ fn test_ordered_and_unordered_in_separate_groups() {
         let md005_after = md005.check(&ctx_fixed).unwrap();
         assert!(
             md005_after.is_empty(),
-            "MD005 should not try to revert MD007's fix - no oscillation. Got: {:?}",
-            md005_after
+            "MD005 should not try to revert MD007's fix - no oscillation. Got: {md005_after:?}"
         );
     }
 }
@@ -395,8 +393,7 @@ fn test_bullet_before_ordered_in_separate_groups() {
     let md005_warnings = md005.check(&ctx).unwrap();
     assert!(
         md005_warnings.is_empty(),
-        "MD005 should not flag ordered as inconsistent with bullet - separate groups. Got: {:?}",
-        md005_warnings
+        "MD005 should not flag ordered as inconsistent with bullet - separate groups. Got: {md005_warnings:?}"
     );
 }
 
@@ -415,8 +412,7 @@ fn test_multiple_mixed_siblings_in_separate_groups() {
     let md005_warnings = md005.check(&ctx).unwrap();
     assert!(
         md005_warnings.is_empty(),
-        "MD005 should not flag - each type is internally consistent. Got: {:?}",
-        md005_warnings
+        "MD005 should not flag - each type is internally consistent. Got: {md005_warnings:?}"
     );
 }
 
@@ -433,7 +429,6 @@ fn test_inconsistency_within_same_type_detected() {
     let md005_warnings = md005.check(&ctx).unwrap();
     assert!(
         !md005_warnings.is_empty(),
-        "MD005 should flag inconsistent bullets (same type, different indents). Got: {:?}",
-        md005_warnings
+        "MD005 should flag inconsistent bullets (same type, different indents). Got: {md005_warnings:?}"
     );
 }
