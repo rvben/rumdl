@@ -39,6 +39,7 @@ mod md033_blockquote_test;
 mod md033_kramdown_test;
 // mod md033_extended_test; // Temporarily disabled - needs LintContext fixes
 mod md033_test;
+mod md034_comprehensive_test;
 mod md034_ipv6_test;
 mod md034_test;
 mod md035_test;
