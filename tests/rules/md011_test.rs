@@ -180,17 +180,3 @@ fn test_md011_not_false_positive_on_hashtags() {
     // Ambiguous case: defaults to standard reversed pattern
     assert_eq!(result, "[macro](define)\n");
 }
-
-#[test]
-#[ignore] // TODO: Improve mathematical expression detection - currently partially implemented
-fn test_md011_mathematical_expressions_not_flagged() {
-    let rule = MD011NoReversedLinks {};
-    let content =
-        "The function f(x)[derivative] is important.\nAlso g(y)[second derivative] and h(x,y)[partial derivative].\n";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Mathematical expressions should not be flagged as reversed links, but got: {result:?}"
-    );
-}

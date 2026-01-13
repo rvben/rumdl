@@ -404,16 +404,6 @@ mod comprehensive_tests {
         assert!(rule.check(&ctx).unwrap().is_empty());
     }
 
-    // 10. Start_indented configuration option
-    // Note: Based on the code analysis, start_indented is not currently implemented
-    // This test documents the expected behavior if it were implemented
-    #[test]
-    #[ignore = "start_indented configuration not implemented"]
-    fn test_start_indented_configuration() {
-        // This would test the behavior where top-level lists can start with indentation
-        // Currently not supported by the implementation
-    }
-
     // Additional edge cases
     #[test]
     fn test_empty_list_items() {
