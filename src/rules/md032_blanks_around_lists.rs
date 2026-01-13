@@ -352,6 +352,7 @@ impl MD032BlanksAroundLists {
                         // This ordered list item starting with non-1 needs a blank line before it
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
 
+                        let bq_prefix = ctx.blockquote_prefix_for_blank_line(line_idx);
                         warnings.push(LintWarning {
                             line: start_line,
                             column: start_col,
@@ -362,7 +363,7 @@ impl MD032BlanksAroundLists {
                             message: "Ordered list starting with non-1 should be preceded by blank line".to_string(),
                             fix: Some(Fix {
                                 range: line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
-                                replacement: "\n".to_string(),
+                                replacement: format!("{bq_prefix}\n"),
                             }),
                         });
                     }
@@ -562,9 +563,9 @@ impl MD032BlanksAroundLists {
                     && prev_prefix.trim() == prefix.trim()
                     && should_require
                 {
-                    // Use normalized prefix (just > markers + single space) for the blank line
-                    let normalized_prefix = normalize_blockquote_prefix(prefix);
-                    insertions.insert(start_line, normalized_prefix);
+                    // Use centralized helper for consistent blockquote prefix (no trailing space)
+                    let bq_prefix = ctx.blockquote_prefix_for_blank_line(start_line - 1);
+                    insertions.insert(start_line, bq_prefix);
                 }
             }
 
@@ -598,9 +599,9 @@ impl MD032BlanksAroundLists {
                     && !is_blank_in_context(line_after_block_content_str)
                     && after_prefix.trim() == prefix.trim()
                 {
-                    // Use normalized prefix (just > markers + single space) for the blank line
-                    let normalized_prefix = normalize_blockquote_prefix(prefix);
-                    insertions.insert(after_block_line_idx_1, normalized_prefix);
+                    // Use centralized helper for consistent blockquote prefix (no trailing space)
+                    let bq_prefix = ctx.blockquote_prefix_for_blank_line(end_line - 1);
+                    insertions.insert(after_block_line_idx_1, bq_prefix);
                 }
             }
         }
@@ -637,30 +638,6 @@ fn is_blank_in_context(line: &str) -> bool {
         // No blockquote prefix, check the whole line for blankness.
         line.trim().is_empty()
     }
-}
-
-/// Normalize a blockquote prefix to preserve marker structure but with single trailing space.
-/// For example: ">   " becomes "> ", and "> >   " becomes "> > "
-/// This preserves spacing between markers (for nested blockquotes like "> > ")
-/// while ensuring consistent trailing whitespace.
-fn normalize_blockquote_prefix(prefix: &str) -> String {
-    if prefix.is_empty() {
-        return String::new();
-    }
-
-    // Find the position of the last > marker
-    let last_marker_pos = prefix.rfind('>');
-
-    if last_marker_pos.is_none() {
-        // No blockquote markers, return empty
-        return String::new();
-    }
-
-    // Keep everything up to and including the last >, then add single space
-    let last_pos = last_marker_pos.unwrap();
-    let markers_portion = &prefix[..=last_pos];
-
-    format!("{markers_portion} ")
 }
 
 #[cfg(test)]
@@ -916,9 +893,9 @@ mod tests {
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
-        // Fix should add blank line before list only
+        // Fix should add blank line before list only (no trailing space per markdownlint-cli)
         assert_eq!(
-            fixed_content, "> Quote line 1\n> \n> - List item 1\n> - List item 2\n> Quote line 2",
+            fixed_content, "> Quote line 1\n>\n> - List item 1\n> - List item 2\n> Quote line 2",
             "Fix for blockquoted list failed. Got:\n{fixed_content}"
         );
 
@@ -1017,7 +994,8 @@ mod tests {
         check_warnings_have_fixes(content);
 
         let fixed_content = fix(content);
-        let expected = "> Text before\n> \n> - Item 1\n>   - Nested item\n> - Item 2\n> Text after";
+        // Per markdownlint-cli, blank lines in blockquotes have no trailing space
+        let expected = "> Text before\n>\n> - Item 1\n>   - Nested item\n> - Item 2\n> Text after";
         assert_eq!(fixed_content, expected, "Fix should preserve blockquote structure");
 
         let warnings_after_fix = lint(&fixed_content);
@@ -2247,44 +2225,44 @@ More text.
         );
     }
 
-    // Tests for normalize_blockquote_prefix helper function
     #[test]
-    fn test_normalize_blockquote_prefix_basic() {
-        assert_eq!(normalize_blockquote_prefix("> "), "> ");
-        assert_eq!(normalize_blockquote_prefix(">"), "> ");
-        assert_eq!(normalize_blockquote_prefix(">  "), "> ");
-        assert_eq!(normalize_blockquote_prefix(">   "), "> ");
+    fn test_fix_preserves_blockquote_prefix_before_list() {
+        // Issue #268: Fix should insert blockquote-prefixed blank lines inside blockquotes
+        let content = "> Text before
+> - Item 1
+> - Item 2";
+        let fixed = fix(content);
+
+        // The blank line inserted before the list should have the blockquote prefix (no trailing space per markdownlint-cli)
+        let expected = "> Text before
+>
+> - Item 1
+> - Item 2";
+        assert_eq!(
+            fixed, expected,
+            "Fix should insert '>' blank line, not plain blank line"
+        );
     }
 
     #[test]
-    fn test_normalize_blockquote_prefix_nested_adjacent() {
-        // Adjacent markers (no space between) should stay adjacent
-        assert_eq!(normalize_blockquote_prefix(">> "), ">> ");
-        assert_eq!(normalize_blockquote_prefix(">>"), ">> ");
-        assert_eq!(normalize_blockquote_prefix(">>  "), ">> ");
-        assert_eq!(normalize_blockquote_prefix(">>>   "), ">>> ");
-    }
+    fn test_fix_preserves_triple_nested_blockquote_prefix_for_list() {
+        // Triple-nested blockquotes should preserve full prefix
+        // Per markdownlint-cli, only preceding blank line is required
+        let content = ">>> Triple nested
+>>> - Item 1
+>>> - Item 2
+>>> More text";
+        let fixed = fix(content);
 
-    #[test]
-    fn test_normalize_blockquote_prefix_nested_with_spaces() {
-        // Spaces between markers should be preserved (common in nested blockquotes)
-        assert_eq!(normalize_blockquote_prefix("> > "), "> > ");
-        assert_eq!(normalize_blockquote_prefix("> >"), "> > ");
-        assert_eq!(normalize_blockquote_prefix("> >  "), "> > ");
-        assert_eq!(normalize_blockquote_prefix("> > >   "), "> > > ");
-    }
-
-    #[test]
-    fn test_normalize_blockquote_prefix_with_leading_space() {
-        assert_eq!(normalize_blockquote_prefix("  > "), "  > ");
-        assert_eq!(normalize_blockquote_prefix(" >> "), " >> ");
-        assert_eq!(normalize_blockquote_prefix("   >   "), "   > ");
-    }
-
-    #[test]
-    fn test_normalize_blockquote_prefix_empty() {
-        assert_eq!(normalize_blockquote_prefix(""), "");
-        assert_eq!(normalize_blockquote_prefix("   "), "");
-        assert_eq!(normalize_blockquote_prefix("text"), "");
+        // Should insert ">>>" blank line before list only
+        let expected = ">>> Triple nested
+>>>
+>>> - Item 1
+>>> - Item 2
+>>> More text";
+        assert_eq!(
+            fixed, expected,
+            "Fix should preserve triple-nested blockquote prefix '>>>'"
+        );
     }
 }

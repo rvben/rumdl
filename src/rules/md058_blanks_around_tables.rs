@@ -130,6 +130,8 @@ impl Rule for MD058BlanksAroundTables {
                         format!("Missing {needed} blank lines before table")
                     };
 
+                    let bq_prefix = ctx.blockquote_prefix_for_blank_line(table_block.start_line);
+                    let replacement = format!("{bq_prefix}\n").repeat(needed);
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         message,
@@ -141,7 +143,7 @@ impl Rule for MD058BlanksAroundTables {
                         fix: Some(Fix {
                             // Insert blank lines at the start of the table line
                             range: _line_index.line_col_to_byte_range(table_block.start_line + 1, 1),
-                            replacement: "\n".repeat(needed),
+                            replacement,
                         }),
                     });
                 }
@@ -167,6 +169,8 @@ impl Rule for MD058BlanksAroundTables {
                             format!("Missing {needed} blank lines after table")
                         };
 
+                        let bq_prefix = ctx.blockquote_prefix_for_blank_line(table_block.end_line);
+                        let replacement = format!("{bq_prefix}\n").repeat(needed);
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             message,
@@ -181,7 +185,7 @@ impl Rule for MD058BlanksAroundTables {
                                     table_block.end_line + 1,
                                     lines[table_block.end_line].len() + 1,
                                 ),
-                                replacement: "\n".repeat(needed),
+                                replacement,
                             }),
                         });
                     }
@@ -226,9 +230,10 @@ impl Rule for MD058BlanksAroundTables {
                     1
                 };
 
-                // Add the required number of blank lines
+                // Add the required number of blank lines with blockquote prefix
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                 for _ in 0..needed_blanks {
-                    result.push("".to_string());
+                    result.push(bq_prefix.clone());
                 }
                 warnings.remove(idx);
             }
@@ -255,9 +260,10 @@ impl Rule for MD058BlanksAroundTables {
                     1
                 };
 
-                // Add the required number of blank lines
+                // Add the required number of blank lines with blockquote prefix
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                 for _ in 0..needed_blanks {
-                    result.push("".to_string());
+                    result.push(bq_prefix.clone());
                 }
                 warnings.remove(idx);
             }
@@ -855,5 +861,106 @@ Text after.";
 
         // Should not flag any issues since table is complete and doesn't need blanks
         assert_eq!(result.len(), 0, "Should not flag any MD058 issues for a complete table");
+    }
+
+    #[test]
+    fn test_fix_preserves_blockquote_prefix_before_table() {
+        // Issue #268: Fix should insert blockquote-prefixed blank lines inside blockquotes
+        let rule = MD058BlanksAroundTables::default();
+
+        let content = "> Text before
+> | H1 | H2 |
+> |----|---|
+> | a  | b |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The blank line inserted before the table should have the blockquote prefix
+        let expected = "> Text before
+>
+> | H1 | H2 |
+> |----|---|
+> | a  | b |";
+        assert_eq!(
+            fixed, expected,
+            "Fix should insert '>' blank line before table, not plain blank line"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_blockquote_prefix_after_table() {
+        // Issue #268: Fix should insert blockquote-prefixed blank lines inside blockquotes
+        let rule = MD058BlanksAroundTables::default();
+
+        let content = "> | H1 | H2 |
+> |----|---|
+> | a  | b |
+> Text after";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The blank line inserted after the table should have the blockquote prefix
+        let expected = "> | H1 | H2 |
+> |----|---|
+> | a  | b |
+>
+> Text after";
+        assert_eq!(
+            fixed, expected,
+            "Fix should insert '>' blank line after table, not plain blank line"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_nested_blockquote_prefix_for_table() {
+        // Nested blockquotes should preserve the full prefix
+        let rule = MD058BlanksAroundTables::default();
+
+        let content = ">> Nested quote
+>> | H1 |
+>> |----|
+>> | a  |
+>> More text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should insert ">>" blank lines
+        let expected = ">> Nested quote
+>>
+>> | H1 |
+>> |----|
+>> | a  |
+>>
+>> More text";
+        assert_eq!(
+            fixed, expected,
+            "Fix should preserve nested blockquote prefix '>>'"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_triple_nested_blockquote_prefix_for_table() {
+        // Triple-nested blockquotes should preserve full prefix
+        let rule = MD058BlanksAroundTables::default();
+
+        let content = ">>> Triple nested
+>>> | A | B |
+>>> |---|---|
+>>> | 1 | 2 |
+>>> More text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        let expected = ">>> Triple nested
+>>>
+>>> | A | B |
+>>> |---|---|
+>>> | 1 | 2 |
+>>>
+>>> More text";
+        assert_eq!(
+            fixed, expected,
+            "Fix should preserve triple-nested blockquote prefix '>>>'"
+        );
     }
 }

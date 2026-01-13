@@ -114,6 +114,7 @@ impl Rule for MD065BlanksAroundHorizontalRules {
 
             // Check for blank line before HR (unless at start of document)
             if i > 0 && Self::count_blank_lines_before(&lines, i) == 0 {
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message: "Missing blank line before horizontal rule".to_string(),
@@ -124,13 +125,14 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(i + 1, 1),
-                        replacement: "\n".to_string(),
+                        replacement: format!("{bq_prefix}\n"),
                     }),
                 });
             }
 
             // Check for blank line after HR (unless at end of document)
             if i < lines.len() - 1 && Self::count_blank_lines_after(&lines, i) == 0 {
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message: "Missing blank line after horizontal rule".to_string(),
@@ -141,7 +143,7 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range(i + 1, lines[i].len() + 1),
-                        replacement: "\n".to_string(),
+                        replacement: format!("{bq_prefix}\n"),
                     }),
                 });
             }
@@ -168,7 +170,8 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                 .position(|w| w.line == i + 1 && w.message.contains("before horizontal rule"));
 
             if let Some(idx) = warning_before {
-                result.push("".to_string());
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
+                result.push(bq_prefix);
                 warnings.remove(idx);
             }
 
@@ -180,7 +183,8 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                 .position(|w| w.line == i + 1 && w.message.contains("after horizontal rule"));
 
             if let Some(idx) = warning_after {
-                result.push("".to_string());
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
+                result.push(bq_prefix);
                 warnings.remove(idx);
             }
         }
@@ -990,5 +994,93 @@ Final thoughts.";
 
         // Well-structured document should have no warnings
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_fix_preserves_blockquote_prefix_before_hr() {
+        // Issue #268: Fix should insert blockquote-prefixed blank lines inside blockquotes
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        let content = "> Text before
+> ***
+> Text after";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The blank lines inserted should have the blockquote prefix
+        let expected = "> Text before
+>
+> ***
+>
+> Text after";
+        assert_eq!(
+            fixed, expected,
+            "Fix should insert '>' blank lines around HR, not plain blank lines"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_nested_blockquote_prefix_for_hr() {
+        // Nested blockquotes should preserve the full prefix
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        let content = ">> Nested quote
+>> ---
+>> More text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should insert ">>" blank lines
+        let expected = ">> Nested quote
+>>
+>> ---
+>>
+>> More text";
+        assert_eq!(
+            fixed, expected,
+            "Fix should preserve nested blockquote prefix '>>'"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_blockquote_prefix_after_hr() {
+        // Issue #268: Fix should insert blockquote-prefixed blank lines after HR
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        let content = "> ---
+> Text after";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The blank line inserted after the HR should have the blockquote prefix
+        let expected = "> ---
+>
+> Text after";
+        assert_eq!(
+            fixed, expected,
+            "Fix should insert '>' blank line after HR, not plain blank line"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_triple_nested_blockquote_prefix_for_hr() {
+        // Triple-nested blockquotes should preserve full prefix
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        let content = ">>> Triple nested
+>>> ---
+>>> More text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        let expected = ">>> Triple nested
+>>>
+>>> ---
+>>>
+>>> More text";
+        assert_eq!(
+            fixed, expected,
+            "Fix should preserve triple-nested blockquote prefix '>>>'"
+        );
     }
 }

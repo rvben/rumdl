@@ -132,6 +132,22 @@ impl TableUtils {
         total_non_empty_parts > 0 && valid_delimiter_parts == total_non_empty_parts
     }
 
+    /// Strip blockquote prefix from a line, returning the content without the prefix
+    fn strip_blockquote_prefix(line: &str) -> &str {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('>') {
+            // Strip all blockquote markers and following space
+            let mut rest = trimmed;
+            while rest.starts_with('>') {
+                rest = rest.strip_prefix('>').unwrap_or(rest);
+                rest = rest.trim_start_matches(' ');
+            }
+            rest
+        } else {
+            line
+        }
+    }
+
     /// Find all table blocks in the content with optimized detection
     /// This version accepts code_blocks and code_spans directly for use during LintContext construction
     pub fn find_table_blocks_with_code_info(
@@ -169,10 +185,18 @@ impl TableUtils {
                 continue;
             }
 
+            // Strip blockquote prefix for table detection
+            let line_content = Self::strip_blockquote_prefix(lines[i]);
+
             // Look for potential table start
-            if Self::is_potential_table_row(lines[i]) {
-                // Check if the next line is a delimiter row
-                if i + 1 < lines.len() && Self::is_delimiter_row(lines[i + 1]) {
+            if Self::is_potential_table_row(line_content) {
+                // Check if the next line is a delimiter row (also strip blockquote prefix)
+                let next_line_content = if i + 1 < lines.len() {
+                    Self::strip_blockquote_prefix(lines[i + 1])
+                } else {
+                    ""
+                };
+                if i + 1 < lines.len() && Self::is_delimiter_row(next_line_content) {
                     // Found a table! Find its end
                     let table_start = i;
                     let header_line = i;
@@ -184,11 +208,13 @@ impl TableUtils {
                     let mut j = i + 2;
                     while j < lines.len() {
                         let line = lines[j];
-                        if line.trim().is_empty() {
-                            // Empty line ends the table
+                        // Strip blockquote prefix for checking
+                        let line_content = Self::strip_blockquote_prefix(line);
+                        if line_content.trim().is_empty() {
+                            // Empty line ends the table (including blockquote blank lines like ">")
                             break;
                         }
-                        if Self::is_potential_table_row(line) {
+                        if Self::is_potential_table_row(line_content) {
                             content_lines.push(j);
                             table_end = j;
                             j += 1;

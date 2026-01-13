@@ -176,9 +176,15 @@ impl MD031BlanksAroundFences {
                         // Verify this is actually a closing fence line (not just end of content)
                         // For properly closed fences, the end line should contain a fence marker
                         let end_line_content = lines.get(end_line).unwrap_or(&"");
+                        // Strip blockquote prefix before checking for fence markers
                         let trimmed = end_line_content.trim();
-                        let is_closing_fence = (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
-                            && trimmed
+                        let content_after_bq = if trimmed.starts_with('>') {
+                            trimmed.trim_start_matches(|c| c == '>' || c == ' ').trim()
+                        } else {
+                            trimmed
+                        };
+                        let is_closing_fence = (content_after_bq.starts_with("```") || content_after_bq.starts_with("~~~"))
+                            && content_after_bq
                                 .chars()
                                 .skip_while(|&c| c == '`' || c == '~')
                                 .all(|c| c.is_whitespace());
@@ -238,6 +244,7 @@ impl Rule for MD031BlanksAroundFences {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_line_range(*opening_line + 1, lines[*opening_line]);
 
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(*opening_line);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: start_line,
@@ -248,7 +255,7 @@ impl Rule for MD031BlanksAroundFences {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: line_index.line_col_to_byte_range_with_length(*opening_line + 1, 1, 0),
-                        replacement: "\n".to_string(),
+                        replacement: format!("{bq_prefix}\n"),
                     }),
                 });
             }
@@ -264,6 +271,7 @@ impl Rule for MD031BlanksAroundFences {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_line_range(*closing_line + 1, lines[*closing_line]);
 
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(*closing_line);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: start_line,
@@ -278,7 +286,7 @@ impl Rule for MD031BlanksAroundFences {
                             lines[*closing_line].len() + 1,
                             0,
                         ),
-                        replacement: "\n".to_string(),
+                        replacement: format!("{bq_prefix}\n"),
                     }),
                 });
             }
@@ -310,6 +318,7 @@ impl Rule for MD031BlanksAroundFences {
                     {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
+                        let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: start_line,
@@ -320,7 +329,7 @@ impl Rule for MD031BlanksAroundFences {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
-                                replacement: "\n".to_string(),
+                                replacement: format!("{bq_prefix}\n"),
                             }),
                         });
                     }
@@ -343,6 +352,7 @@ impl Rule for MD031BlanksAroundFences {
                     {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
+                        let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: start_line,
@@ -353,7 +363,7 @@ impl Rule for MD031BlanksAroundFences {
                             severity: Severity::Warning,
                             fix: Some(Fix {
                                 range: line_index.line_col_to_byte_range_with_length(i, 0, 0),
-                                replacement: "\n".to_string(),
+                                replacement: format!("{bq_prefix}\n"),
                             }),
                         });
                     }
@@ -410,14 +420,16 @@ impl Rule for MD031BlanksAroundFences {
         for (i, line) in lines.iter().enumerate() {
             // Add blank line before this line if needed
             if needs_blank_before.contains(&i) {
-                result.push(String::new());
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
+                result.push(bq_prefix);
             }
 
             result.push((*line).to_string());
 
             // Add blank line after this line if needed
             if needs_blank_after.contains(&i) {
-                result.push(String::new());
+                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
+                result.push(bq_prefix);
             }
         }
 
@@ -838,6 +850,107 @@ echo "nested"
             warnings.len(),
             4,
             "Should detect all fenced code blocks regardless of indentation, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_blockquote_prefix_before_fence() {
+        // Issue #268: Fix should insert blockquote-prefixed blank lines inside blockquotes
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = "> Text before
+> ```
+> code
+> ```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The blank line inserted before the fence should have the blockquote prefix
+        let expected = "> Text before
+>
+> ```
+> code
+> ```";
+        assert_eq!(
+            fixed, expected,
+            "Fix should insert '>' blank line, not plain blank line"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_blockquote_prefix_after_fence() {
+        // Issue #268: Fix should insert blockquote-prefixed blank lines inside blockquotes
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = "> ```
+> code
+> ```
+> Text after";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The blank line inserted after the fence should have the blockquote prefix
+        let expected = "> ```
+> code
+> ```
+>
+> Text after";
+        assert_eq!(
+            fixed, expected,
+            "Fix should insert '>' blank line after fence, not plain blank line"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_nested_blockquote_prefix() {
+        // Nested blockquotes should preserve the full prefix (e.g., ">>")
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = ">> Nested quote
+>> ```
+>> code
+>> ```
+>> More text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should insert ">>" blank lines, not ">" or plain
+        let expected = ">> Nested quote
+>>
+>> ```
+>> code
+>> ```
+>>
+>> More text";
+        assert_eq!(
+            fixed, expected,
+            "Fix should preserve nested blockquote prefix '>>'"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_triple_nested_blockquote_prefix() {
+        // Triple-nested blockquotes should preserve full prefix
+        let rule = MD031BlanksAroundFences::default();
+
+        let content = ">>> Triple nested
+>>> ```
+>>> code
+>>> ```
+>>> More text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        let expected = ">>> Triple nested
+>>>
+>>> ```
+>>> code
+>>> ```
+>>>
+>>> More text";
+        assert_eq!(
+            fixed, expected,
+            "Fix should preserve triple-nested blockquote prefix '>>>'"
         );
     }
 }
