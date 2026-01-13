@@ -11,13 +11,21 @@ static JSON_KEY_PATTERN: LazyLock<Regex> =
 
 /// Configuration for MD072 (Frontmatter key sort)
 ///
-/// This rule is disabled by default (opt-in) because alphabetical key sorting
+/// This rule is disabled by default (opt-in) because key sorting
 /// is an opinionated style choice. Many projects prefer semantic ordering.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct MD072Config {
     /// Whether this rule is enabled (default: false - opt-in rule)
     #[serde(default)]
     pub enabled: bool,
+
+    /// Custom key order. Keys listed here will be sorted in this order.
+    /// Keys not in this list will be sorted alphabetically after the specified keys.
+    /// If not set, all keys are sorted alphabetically (case-insensitive).
+    ///
+    /// Example: `key_order = ["title", "date", "author", "tags"]`
+    #[serde(default, alias = "key-order")]
+    pub key_order: Option<Vec<String>>,
 }
 
 impl RuleConfig for MD072Config {
@@ -139,36 +147,72 @@ impl MD072FrontmatterKeySort {
         keys
     }
 
-    /// Find the first pair of keys that are out of order (case-insensitive)
+    /// Get the sort position for a key based on custom key_order or alphabetical fallback.
+    /// Keys in key_order get their index (0, 1, 2...), keys not in key_order get
+    /// a high value so they sort after, with alphabetical sub-sorting.
+    fn key_sort_position(key: &str, key_order: Option<&[String]>) -> (usize, String) {
+        if let Some(order) = key_order {
+            // Find position in custom order (case-insensitive match)
+            let key_lower = key.to_lowercase();
+            for (idx, ordered_key) in order.iter().enumerate() {
+                if ordered_key.to_lowercase() == key_lower {
+                    return (idx, key_lower);
+                }
+            }
+            // Not in custom order - sort after with alphabetical
+            (usize::MAX, key_lower)
+        } else {
+            // No custom order - pure alphabetical
+            (0, key.to_lowercase())
+        }
+    }
+
+    /// Find the first pair of keys that are out of order
     /// Returns (out_of_place_key, should_come_after_key)
-    fn find_first_unsorted_pair(keys: &[String]) -> Option<(&str, &str)> {
+    fn find_first_unsorted_pair<'a>(keys: &'a [String], key_order: Option<&[String]>) -> Option<(&'a str, &'a str)> {
         for i in 1..keys.len() {
-            if keys[i].to_lowercase() < keys[i - 1].to_lowercase() {
+            let pos_curr = Self::key_sort_position(&keys[i], key_order);
+            let pos_prev = Self::key_sort_position(&keys[i - 1], key_order);
+            if pos_curr < pos_prev {
                 return Some((&keys[i], &keys[i - 1]));
             }
         }
         None
     }
 
-    /// Find the first pair of indexed keys that are out of order (case-insensitive)
+    /// Find the first pair of indexed keys that are out of order
     /// Returns (out_of_place_key, should_come_after_key)
-    fn find_first_unsorted_indexed_pair(keys: &[(usize, String)]) -> Option<(&str, &str)> {
+    fn find_first_unsorted_indexed_pair<'a>(
+        keys: &'a [(usize, String)],
+        key_order: Option<&[String]>,
+    ) -> Option<(&'a str, &'a str)> {
         for i in 1..keys.len() {
-            if keys[i].1.to_lowercase() < keys[i - 1].1.to_lowercase() {
+            let pos_curr = Self::key_sort_position(&keys[i].1, key_order);
+            let pos_prev = Self::key_sort_position(&keys[i - 1].1, key_order);
+            if pos_curr < pos_prev {
                 return Some((&keys[i].1, &keys[i - 1].1));
             }
         }
         None
     }
 
-    /// Check if keys are sorted alphabetically (case-insensitive)
-    fn are_keys_sorted(keys: &[String]) -> bool {
-        Self::find_first_unsorted_pair(keys).is_none()
+    /// Check if keys are sorted according to key_order (or alphabetically if None)
+    fn are_keys_sorted(keys: &[String], key_order: Option<&[String]>) -> bool {
+        Self::find_first_unsorted_pair(keys, key_order).is_none()
     }
 
-    /// Check if indexed keys are sorted alphabetically (case-insensitive)
-    fn are_indexed_keys_sorted(keys: &[(usize, String)]) -> bool {
-        Self::find_first_unsorted_indexed_pair(keys).is_none()
+    /// Check if indexed keys are sorted according to key_order (or alphabetically if None)
+    fn are_indexed_keys_sorted(keys: &[(usize, String)], key_order: Option<&[String]>) -> bool {
+        Self::find_first_unsorted_indexed_pair(keys, key_order).is_none()
+    }
+
+    /// Sort keys according to key_order, with alphabetical fallback for unlisted keys
+    fn sort_keys_by_order(keys: &mut [(String, Vec<&str>)], key_order: Option<&[String]>) {
+        keys.sort_by(|a, b| {
+            let pos_a = Self::key_sort_position(&a.0, key_order);
+            let pos_b = Self::key_sort_position(&b.0, key_order);
+            pos_a.cmp(&pos_b)
+        });
     }
 }
 
@@ -203,7 +247,9 @@ impl Rule for MD072FrontmatterKeySort {
                 }
 
                 let keys = Self::extract_yaml_keys(&frontmatter_lines);
-                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_indexed_pair(&keys) else {
+                let key_order = self.config.key_order.as_deref();
+                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_indexed_pair(&keys, key_order)
+                else {
                     return Ok(warnings);
                 };
 
@@ -250,7 +296,9 @@ impl Rule for MD072FrontmatterKeySort {
                 }
 
                 let keys = Self::extract_toml_keys(&frontmatter_lines);
-                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_indexed_pair(&keys) else {
+                let key_order = self.config.key_order.as_deref();
+                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_indexed_pair(&keys, key_order)
+                else {
                     return Ok(warnings);
                 };
 
@@ -297,7 +345,8 @@ impl Rule for MD072FrontmatterKeySort {
                 }
 
                 let keys = Self::extract_json_keys(&frontmatter_lines);
-                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_pair(&keys) else {
+                let key_order = self.config.key_order.as_deref();
+                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_pair(&keys, key_order) else {
                     return Ok(warnings);
                 };
 
@@ -399,7 +448,8 @@ impl MD072FrontmatterKeySort {
         }
 
         let keys = Self::extract_yaml_keys(&frontmatter_lines);
-        if Self::are_indexed_keys_sorted(&keys) {
+        let key_order = self.config.key_order.as_deref();
+        if Self::are_indexed_keys_sorted(&keys, key_order) {
             return Ok(content.to_string());
         }
 
@@ -416,11 +466,11 @@ impl MD072FrontmatterKeySort {
             };
 
             let block_lines: Vec<&str> = frontmatter_lines[start..end].to_vec();
-            key_blocks.push((key.to_lowercase(), block_lines));
+            key_blocks.push((key.clone(), block_lines));
         }
 
-        // Sort by key (case-insensitive)
-        key_blocks.sort_by(|a, b| a.0.cmp(&b.0));
+        // Sort by key_order, with alphabetical fallback for unlisted keys
+        Self::sort_keys_by_order(&mut key_blocks, key_order);
 
         // Reassemble frontmatter
         let content_lines: Vec<&str> = content.lines().collect();
@@ -456,53 +506,50 @@ impl MD072FrontmatterKeySort {
         }
 
         let keys = Self::extract_toml_keys(&frontmatter_lines);
-        if Self::are_indexed_keys_sorted(&keys) {
+        let key_order = self.config.key_order.as_deref();
+        if Self::are_indexed_keys_sorted(&keys, key_order) {
             return Ok(content.to_string());
         }
 
-        // Parse and re-serialize with sorted keys
-        let fm_content = frontmatter_lines.join("\n");
+        // Line-based reordering to preserve original formatting
+        // Each key owns all lines until the next top-level key
+        let mut key_blocks: Vec<(String, Vec<&str>)> = Vec::new();
 
-        match toml::from_str::<toml::Value>(&fm_content) {
-            Ok(value) => {
-                if let toml::Value::Table(table) = value {
-                    // toml crate's Table is already a BTreeMap which is sorted
-                    // But we need case-insensitive sorting
-                    let mut sorted_table = toml::map::Map::new();
-                    let mut keys: Vec<_> = table.keys().cloned().collect();
-                    keys.sort_by_key(|a| a.to_lowercase());
+        for (i, (line_idx, key)) in keys.iter().enumerate() {
+            let start = *line_idx;
+            let end = if i + 1 < keys.len() {
+                keys[i + 1].0
+            } else {
+                frontmatter_lines.len()
+            };
 
-                    for key in keys {
-                        if let Some(value) = table.get(&key) {
-                            sorted_table.insert(key, value.clone());
-                        }
-                    }
-
-                    match toml::to_string_pretty(&toml::Value::Table(sorted_table)) {
-                        Ok(sorted_toml) => {
-                            let lines: Vec<&str> = content.lines().collect();
-                            let fm_end = FrontMatterUtils::get_front_matter_end_line(content);
-
-                            let mut result = String::new();
-                            result.push_str("+++\n");
-                            result.push_str(sorted_toml.trim_end());
-                            result.push_str("\n+++");
-
-                            if fm_end < lines.len() {
-                                result.push('\n');
-                                result.push_str(&lines[fm_end..].join("\n"));
-                            }
-
-                            Ok(result)
-                        }
-                        Err(_) => Ok(content.to_string()),
-                    }
-                } else {
-                    Ok(content.to_string())
-                }
-            }
-            Err(_) => Ok(content.to_string()),
+            let block_lines: Vec<&str> = frontmatter_lines[start..end].to_vec();
+            key_blocks.push((key.clone(), block_lines));
         }
+
+        // Sort by key_order, with alphabetical fallback for unlisted keys
+        Self::sort_keys_by_order(&mut key_blocks, key_order);
+
+        // Reassemble frontmatter
+        let content_lines: Vec<&str> = content.lines().collect();
+        let fm_end = FrontMatterUtils::get_front_matter_end_line(content);
+
+        let mut result = String::new();
+        result.push_str("+++\n");
+        for (_, lines) in &key_blocks {
+            for line in lines {
+                result.push_str(line);
+                result.push('\n');
+            }
+        }
+        result.push_str("+++");
+
+        if fm_end < content_lines.len() {
+            result.push('\n');
+            result.push_str(&content_lines[fm_end..].join("\n"));
+        }
+
+        Ok(result)
     }
 
     fn fix_json(&self, content: &str) -> Result<String, LintError> {
@@ -512,8 +559,9 @@ impl MD072FrontmatterKeySort {
         }
 
         let keys = Self::extract_json_keys(&frontmatter_lines);
+        let key_order = self.config.key_order.as_deref();
 
-        if keys.is_empty() || Self::are_keys_sorted(&keys) {
+        if keys.is_empty() || Self::are_keys_sorted(&keys, key_order) {
             return Ok(content.to_string());
         }
 
@@ -523,10 +571,14 @@ impl MD072FrontmatterKeySort {
         // Parse and re-serialize with sorted keys
         match serde_json::from_str::<serde_json::Value>(&json_content) {
             Ok(serde_json::Value::Object(map)) => {
-                // serde_json::Map preserves insertion order, so we need to rebuild
+                // Sort keys according to key_order, with alphabetical fallback
                 let mut sorted_map = serde_json::Map::new();
                 let mut keys: Vec<_> = map.keys().cloned().collect();
-                keys.sort_by_key(|a| a.to_lowercase());
+                keys.sort_by(|a, b| {
+                    let pos_a = Self::key_sort_position(a, key_order);
+                    let pos_b = Self::key_sort_position(b, key_order);
+                    pos_a.cmp(&pos_b)
+                });
 
                 for key in keys {
                     if let Some(value) = map.get(&key) {
@@ -564,9 +616,20 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
 
-    /// Create an enabled rule for testing
+    /// Create an enabled rule for testing (alphabetical sort)
     fn create_enabled_rule() -> MD072FrontmatterKeySort {
-        MD072FrontmatterKeySort::from_config_struct(MD072Config { enabled: true })
+        MD072FrontmatterKeySort::from_config_struct(MD072Config {
+            enabled: true,
+            key_order: None,
+        })
+    }
+
+    /// Create an enabled rule with custom key order for testing
+    fn create_rule_with_key_order(keys: Vec<&str>) -> MD072FrontmatterKeySort {
+        MD072FrontmatterKeySort::from_config_struct(MD072Config {
+            enabled: true,
+            key_order: Some(keys.into_iter().map(String::from).collect()),
+        })
     }
 
     // ==================== Config Tests ====================
@@ -1501,5 +1564,389 @@ mod tests {
             fixed.contains("bbb: 'single quotes'"),
             "Single-quoted string should be preserved: {fixed}"
         );
+    }
+
+    // ==================== Custom Key Order Tests ====================
+
+    #[test]
+    fn test_yaml_custom_key_order_sorted() {
+        // Keys match the custom order: title, date, author
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "---\ntitle: Test\ndate: 2024-01-01\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Keys are in the custom order, should be considered sorted
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_yaml_custom_key_order_unsorted() {
+        // Keys NOT in the custom order: should report author before date
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "---\ntitle: Test\nauthor: John\ndate: 2024-01-01\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        // 'date' should come before 'author' according to custom order
+        assert!(result[0].message.contains("'date' should come before 'author'"));
+    }
+
+    #[test]
+    fn test_yaml_custom_key_order_unlisted_keys_alphabetical() {
+        // unlisted keys should come after specified keys, sorted alphabetically
+        let rule = create_rule_with_key_order(vec!["title"]);
+        let content = "---\ntitle: Test\nauthor: John\ndate: 2024-01-01\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // title is specified, author and date are not - they should be alphabetically after title
+        // author < date alphabetically, so this is sorted
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_yaml_custom_key_order_unlisted_keys_unsorted() {
+        // unlisted keys out of alphabetical order
+        let rule = create_rule_with_key_order(vec!["title"]);
+        let content = "---\ntitle: Test\nzebra: Zoo\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // zebra and author are unlisted, author < zebra alphabetically
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'author' should come before 'zebra'"));
+    }
+
+    #[test]
+    fn test_yaml_custom_key_order_fix() {
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "---\nauthor: John\ndate: 2024-01-01\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Keys should be in custom order: title, date, author
+        let title_pos = fixed.find("title:").unwrap();
+        let date_pos = fixed.find("date:").unwrap();
+        let author_pos = fixed.find("author:").unwrap();
+        assert!(
+            title_pos < date_pos && date_pos < author_pos,
+            "Fixed YAML should have keys in custom order: title, date, author. Got:\n{fixed}"
+        );
+    }
+
+    #[test]
+    fn test_yaml_custom_key_order_fix_with_unlisted() {
+        // Mix of listed and unlisted keys
+        let rule = create_rule_with_key_order(vec!["title", "author"]);
+        let content = "---\nzebra: Zoo\nauthor: John\ntitle: Test\naardvark: Ant\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Order should be: title, author (specified), then aardvark, zebra (alphabetical)
+        let title_pos = fixed.find("title:").unwrap();
+        let author_pos = fixed.find("author:").unwrap();
+        let aardvark_pos = fixed.find("aardvark:").unwrap();
+        let zebra_pos = fixed.find("zebra:").unwrap();
+
+        assert!(
+            title_pos < author_pos && author_pos < aardvark_pos && aardvark_pos < zebra_pos,
+            "Fixed YAML should have specified keys first, then unlisted alphabetically. Got:\n{fixed}"
+        );
+    }
+
+    #[test]
+    fn test_toml_custom_key_order_sorted() {
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "+++\ntitle = \"Test\"\ndate = \"2024-01-01\"\nauthor = \"John\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_toml_custom_key_order_unsorted() {
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "+++\nauthor = \"John\"\ntitle = \"Test\"\ndate = \"2024-01-01\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("TOML"));
+    }
+
+    #[test]
+    fn test_json_custom_key_order_sorted() {
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "{\n  \"title\": \"Test\",\n  \"date\": \"2024-01-01\",\n  \"author\": \"John\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_json_custom_key_order_unsorted() {
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "{\n  \"author\": \"John\",\n  \"title\": \"Test\",\n  \"date\": \"2024-01-01\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("JSON"));
+    }
+
+    #[test]
+    fn test_key_order_case_insensitive_match() {
+        // Key order should match case-insensitively
+        let rule = create_rule_with_key_order(vec!["Title", "Date", "Author"]);
+        let content = "---\ntitle: Test\ndate: 2024-01-01\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Keys match the custom order (case-insensitive)
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_key_order_partial_match() {
+        // Some keys specified, some not
+        let rule = create_rule_with_key_order(vec!["title"]);
+        let content = "---\ntitle: Test\ndate: 2024-01-01\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only 'title' is specified, so it comes first
+        // 'author' and 'date' are unlisted and sorted alphabetically: author < date
+        // But current order is date, author - WRONG
+        // Wait, content has: title, date, author
+        // title is specified (pos 0)
+        // date is unlisted (pos MAX, "date")
+        // author is unlisted (pos MAX, "author")
+        // Since both unlisted, compare alphabetically: author < date
+        // So author should come before date, but date comes before author in content
+        // This IS unsorted!
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'author' should come before 'date'"));
+    }
+
+    // ==================== Key Order Edge Cases ====================
+
+    #[test]
+    fn test_key_order_empty_array_falls_back_to_alphabetical() {
+        // Empty key_order should behave like alphabetical sorting
+        let rule = MD072FrontmatterKeySort::from_config_struct(MD072Config {
+            enabled: true,
+            key_order: Some(vec![]),
+        });
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // With empty key_order, all keys are unlisted → alphabetical
+        // author < title, but title comes first in content → unsorted
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'author' should come before 'title'"));
+    }
+
+    #[test]
+    fn test_key_order_single_key() {
+        // key_order with only one key
+        let rule = create_rule_with_key_order(vec!["title"]);
+        let content = "---\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_key_order_all_keys_specified() {
+        // All document keys are in key_order
+        let rule = create_rule_with_key_order(vec!["title", "author", "date"]);
+        let content = "---\ntitle: Test\nauthor: John\ndate: 2024-01-01\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_key_order_no_keys_match() {
+        // None of the document keys are in key_order
+        let rule = create_rule_with_key_order(vec!["foo", "bar", "baz"]);
+        let content = "---\nauthor: John\ndate: 2024-01-01\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // All keys are unlisted, so they sort alphabetically: author, date, title
+        // Current order is author, date, title - which IS sorted
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_key_order_no_keys_match_unsorted() {
+        // None of the document keys are in key_order, and they're out of alphabetical order
+        let rule = create_rule_with_key_order(vec!["foo", "bar", "baz"]);
+        let content = "---\ntitle: Test\ndate: 2024-01-01\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // All unlisted → alphabetical: author < date < title
+        // Current: title, date, author → unsorted
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_key_order_duplicate_keys_in_config() {
+        // Duplicate keys in key_order (should use first occurrence)
+        let rule = MD072FrontmatterKeySort::from_config_struct(MD072Config {
+            enabled: true,
+            key_order: Some(vec![
+                "title".to_string(),
+                "author".to_string(),
+                "title".to_string(), // duplicate
+            ]),
+        });
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // title (pos 0), author (pos 1) → sorted
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_key_order_with_comments_still_skips_fix() {
+        // key_order should not affect the comment-skipping behavior
+        let rule = create_rule_with_key_order(vec!["title", "author"]);
+        let content = "---\n# This is a comment\nauthor: John\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should detect unsorted AND indicate no auto-fix due to comments
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("auto-fix unavailable"));
+        assert!(result[0].fix.is_none());
+    }
+
+    #[test]
+    fn test_toml_custom_key_order_fix() {
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "+++\nauthor = \"John\"\ndate = \"2024-01-01\"\ntitle = \"Test\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Keys should be in custom order: title, date, author
+        let title_pos = fixed.find("title").unwrap();
+        let date_pos = fixed.find("date").unwrap();
+        let author_pos = fixed.find("author").unwrap();
+        assert!(
+            title_pos < date_pos && date_pos < author_pos,
+            "Fixed TOML should have keys in custom order. Got:\n{fixed}"
+        );
+    }
+
+    #[test]
+    fn test_json_custom_key_order_fix() {
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "{\n  \"author\": \"John\",\n  \"date\": \"2024-01-01\",\n  \"title\": \"Test\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Keys should be in custom order: title, date, author
+        let title_pos = fixed.find("\"title\"").unwrap();
+        let date_pos = fixed.find("\"date\"").unwrap();
+        let author_pos = fixed.find("\"author\"").unwrap();
+        assert!(
+            title_pos < date_pos && date_pos < author_pos,
+            "Fixed JSON should have keys in custom order. Got:\n{fixed}"
+        );
+    }
+
+    #[test]
+    fn test_key_order_unicode_keys() {
+        // Unicode keys in key_order
+        let rule = MD072FrontmatterKeySort::from_config_struct(MD072Config {
+            enabled: true,
+            key_order: Some(vec!["タイトル".to_string(), "著者".to_string()]),
+        });
+        let content = "---\nタイトル: テスト\n著者: 山田太郎\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Keys match the custom order
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_key_order_mixed_specified_and_unlisted_boundary() {
+        // Test the boundary between specified and unlisted keys
+        let rule = create_rule_with_key_order(vec!["z_last_specified"]);
+        let content = "---\nz_last_specified: value\na_first_unlisted: value\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // z_last_specified (pos 0) should come before a_first_unlisted (pos MAX)
+        // even though 'a' < 'z' alphabetically
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_key_order_fix_preserves_values() {
+        // Ensure fix preserves complex values when reordering with key_order
+        let rule = create_rule_with_key_order(vec!["title", "tags"]);
+        let content = "---\ntags:\n  - rust\n  - markdown\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // title should come before tags
+        let title_pos = fixed.find("title:").unwrap();
+        let tags_pos = fixed.find("tags:").unwrap();
+        assert!(title_pos < tags_pos, "title should come before tags");
+
+        // Nested list should be preserved
+        assert!(fixed.contains("- rust"), "List items should be preserved");
+        assert!(fixed.contains("- markdown"), "List items should be preserved");
+    }
+
+    #[test]
+    fn test_key_order_idempotent_fix() {
+        // Fixing twice should produce the same result
+        let rule = create_rule_with_key_order(vec!["title", "date", "author"]);
+        let content = "---\nauthor: John\ndate: 2024-01-01\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed_once = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed_once, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_twice = rule.fix(&ctx2).unwrap();
+
+        assert_eq!(fixed_once, fixed_twice, "Fix should be idempotent");
+    }
+
+    #[test]
+    fn test_key_order_respects_later_position_over_alphabetical() {
+        // If key_order says "z" comes before "a", that should be respected
+        let rule = create_rule_with_key_order(vec!["zebra", "aardvark"]);
+        let content = "---\nzebra: Zoo\naardvark: Ant\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // zebra (pos 0), aardvark (pos 1) → sorted according to key_order
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_key_order_detects_wrong_custom_order() {
+        // Document has aardvark before zebra, but key_order says zebra first
+        let rule = create_rule_with_key_order(vec!["zebra", "aardvark"]);
+        let content = "---\naardvark: Ant\nzebra: Zoo\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'zebra' should come before 'aardvark'"));
     }
 }

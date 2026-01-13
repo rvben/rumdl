@@ -2542,6 +2542,95 @@ lines_above = 2
             missing_rules.first().unwrap_or(&"MDxxx".to_string()),
         );
     }
+
+    // ==================== to_relative_display_path Tests ====================
+
+    #[test]
+    fn test_relative_path_in_cwd() {
+        // Create a temp file in the current directory
+        let cwd = std::env::current_dir().unwrap();
+        let test_path = cwd.join("test_file.md");
+        fs::write(&test_path, "test").unwrap();
+
+        let result = super::to_relative_display_path(test_path.to_str().unwrap());
+
+        // Should be relative (just the filename)
+        assert_eq!(result, "test_file.md");
+
+        // Cleanup
+        fs::remove_file(&test_path).unwrap();
+    }
+
+    #[test]
+    fn test_relative_path_in_subdirectory() {
+        // Create a temp file in a subdirectory
+        let cwd = std::env::current_dir().unwrap();
+        let subdir = cwd.join("test_subdir_for_relative_path");
+        fs::create_dir_all(&subdir).unwrap();
+        let test_path = subdir.join("test_file.md");
+        fs::write(&test_path, "test").unwrap();
+
+        let result = super::to_relative_display_path(test_path.to_str().unwrap());
+
+        // Should be relative path with subdirectory
+        assert_eq!(result, "test_subdir_for_relative_path/test_file.md");
+
+        // Cleanup
+        fs::remove_file(&test_path).unwrap();
+        fs::remove_dir(&subdir).unwrap();
+    }
+
+    #[test]
+    fn test_relative_path_outside_cwd_returns_original() {
+        // Use a path that's definitely outside CWD (root level)
+        let outside_path = "/tmp/definitely_not_in_cwd_test.md";
+
+        let result = super::to_relative_display_path(outside_path);
+
+        // Can't make relative to CWD, should return original
+        // (unless CWD happens to be /tmp, which is unlikely in tests)
+        let cwd = std::env::current_dir().unwrap();
+        if !cwd.starts_with("/tmp") {
+            assert_eq!(result, outside_path);
+        }
+    }
+
+    #[test]
+    fn test_relative_path_already_relative() {
+        // Already relative path that doesn't exist
+        let relative_path = "some/relative/path.md";
+
+        let result = super::to_relative_display_path(relative_path);
+
+        // Should return original since it can't be canonicalized
+        assert_eq!(result, relative_path);
+    }
+
+    #[test]
+    fn test_relative_path_with_dot_components() {
+        // Path with . and .. components
+        let cwd = std::env::current_dir().unwrap();
+        let test_path = cwd.join("test_dot_component.md");
+        fs::write(&test_path, "test").unwrap();
+
+        // Create path with redundant ./
+        let dotted_path = cwd.join(".").join("test_dot_component.md");
+        let result = super::to_relative_display_path(dotted_path.to_str().unwrap());
+
+        // Should resolve to clean relative path
+        assert_eq!(result, "test_dot_component.md");
+
+        // Cleanup
+        fs::remove_file(&test_path).unwrap();
+    }
+
+    #[test]
+    fn test_relative_path_empty_string() {
+        let result = super::to_relative_display_path("");
+
+        // Empty string should return empty string
+        assert_eq!(result, "");
+    }
 }
 
 /// Configuration source with clear precedence hierarchy.
@@ -4118,14 +4207,17 @@ fn validate_config_sourced_impl(
     ];
 
     for (section, key, file_path) in unknown_keys {
+        // Convert file path to relative for cleaner output
+        let display_path = file_path.as_ref().map(|p| to_relative_display_path(p));
+
         if section.contains("[global]") || section.contains("[tool.rumdl]") {
             let message = if let Some(suggestion) = suggest_similar_key(key, &known_global_keys) {
-                if let Some(path) = file_path {
+                if let Some(ref path) = display_path {
                     format!("Unknown global option in {path}: {key} (did you mean: {suggestion}?)")
                 } else {
                     format!("Unknown global option: {key} (did you mean: {suggestion}?)")
                 }
-            } else if let Some(path) = file_path {
+            } else if let Some(ref path) = display_path {
                 format!("Unknown global option in {path}: {key}")
             } else {
                 format!("Unknown global option: {key}")
@@ -4149,12 +4241,12 @@ fn validate_config_sourced_impl(
                 } else {
                     suggestion.to_lowercase()
                 };
-                if let Some(path) = file_path {
+                if let Some(ref path) = display_path {
                     format!("Unknown rule in {path}: {rule_name} (did you mean: {formatted_suggestion}?)")
                 } else {
                     format!("Unknown rule in config: {rule_name} (did you mean: {formatted_suggestion}?)")
                 }
-            } else if let Some(path) = file_path {
+            } else if let Some(ref path) = display_path {
                 format!("Unknown rule in {path}: {rule_name}")
             } else {
                 format!("Unknown rule in config: {rule_name}")
@@ -4167,6 +4259,32 @@ fn validate_config_sourced_impl(
         }
     }
     warnings
+}
+
+/// Convert a file path to a display-friendly relative path.
+///
+/// Tries to make the path relative to the current working directory.
+/// If that fails, returns the original path unchanged.
+fn to_relative_display_path(path: &str) -> String {
+    let file_path = Path::new(path);
+
+    // Try to make relative to CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        // Try with canonicalized paths first (handles symlinks)
+        if let (Ok(canonical_file), Ok(canonical_cwd)) = (file_path.canonicalize(), cwd.canonicalize()) {
+            if let Ok(relative) = canonical_file.strip_prefix(&canonical_cwd) {
+                return relative.to_string_lossy().to_string();
+            }
+        }
+
+        // Fall back to non-canonicalized comparison
+        if let Ok(relative) = file_path.strip_prefix(&cwd) {
+            return relative.to_string_lossy().to_string();
+        }
+    }
+
+    // Return original if we can't make it relative
+    path.to_string()
 }
 
 /// Validate a loaded config against the rule registry, using SourcedConfig for unknown key tracking.
