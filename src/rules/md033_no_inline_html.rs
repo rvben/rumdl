@@ -507,13 +507,21 @@ impl Rule for MD033NoInlineHtml {
                 .calculate_fix(content, tag, tag_byte_start)
                 .map(|(range, replacement)| Fix { range, replacement });
 
+            // Calculate actual end line and column for multiline tags
+            // Use byte_end - 1 to get the last character position of the tag
+            let (end_line, end_col) = if html_tag.byte_end > 0 {
+                ctx.offset_to_line_col(html_tag.byte_end - 1)
+            } else {
+                (line_num, html_tag.end_col + 1)
+            };
+
             // Report the HTML tag
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line: line_num,
-                column: html_tag.start_col + 1,   // Convert to 1-indexed
-                end_line: line_num,               // TODO: calculate actual end line for multiline tags
-                end_column: html_tag.end_col + 1, // Convert to 1-indexed
+                column: html_tag.start_col + 1, // Convert to 1-indexed
+                end_line,                       // Actual end line for multiline tags
+                end_column: end_col + 1,        // Actual end column
                 message: format!("Inline HTML found: {tag}"),
                 severity: Severity::Warning,
                 fix,
@@ -830,5 +838,49 @@ Regular text with <div>content</div> HTML tag.
             "Should flag <span>, got: {}",
             result[0].message
         );
+    }
+
+    #[test]
+    fn test_md033_multiline_tag_end_line_calculation() {
+        // Test that multiline HTML tags report correct end_line
+        let rule = MD033NoInlineHtml::default();
+        let content = "<div\n  class=\"test\"\n  id=\"example\">";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should find one HTML tag");
+        // Tag starts on line 1
+        assert_eq!(result[0].line, 1, "Start line should be 1");
+        // Tag ends on line 3 (where the closing > is)
+        assert_eq!(result[0].end_line, 3, "End line should be 3");
+    }
+
+    #[test]
+    fn test_md033_single_line_tag_same_start_end_line() {
+        // Test that single-line HTML tags have same start and end line
+        let rule = MD033NoInlineHtml::default();
+        let content = "Some text <div class=\"test\"> more text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should find one HTML tag");
+        assert_eq!(result[0].line, 1, "Start line should be 1");
+        assert_eq!(result[0].end_line, 1, "End line should be 1 for single-line tag");
+    }
+
+    #[test]
+    fn test_md033_multiline_tag_with_many_attributes() {
+        // Test multiline tag spanning multiple lines
+        let rule = MD033NoInlineHtml::default();
+        let content =
+            "Text\n<div\n  data-attr1=\"value1\"\n  data-attr2=\"value2\"\n  data-attr3=\"value3\">\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should find one HTML tag");
+        // Tag starts on line 2 (first line is "Text")
+        assert_eq!(result[0].line, 2, "Start line should be 2");
+        // Tag ends on line 5 (where the closing > is)
+        assert_eq!(result[0].end_line, 5, "End line should be 5");
     }
 }
