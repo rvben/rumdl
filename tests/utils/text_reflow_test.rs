@@ -2497,3 +2497,195 @@ mod issue_251_emphasis_continuation {
         );
     }
 }
+
+// =============================================================================
+// UTF-8 / Multi-byte Character Tests
+// =============================================================================
+// These tests verify that text reflow correctly handles multi-byte UTF-8
+// characters without panicking due to byte/character index mismatches.
+
+#[test]
+fn test_utf8_numbered_list_with_chinese_characters() {
+    // Regression test: numbered lists with multi-byte chars before content
+    // Previously caused panic due to byte/char index mismatch
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    let input = "1. 你好世界 - Hello World in Chinese\n2. 日本語 - Japanese text\n";
+    let result = reflow_markdown(input, &options);
+
+    // Should not panic and should preserve the content
+    assert!(result.contains("你好世界"), "Chinese characters should be preserved");
+    assert!(result.contains("日本語"), "Japanese characters should be preserved");
+    assert!(result.contains("1."), "List numbering should be preserved");
+    assert!(result.contains("2."), "List numbering should be preserved");
+}
+
+#[test]
+fn test_utf8_bullet_list_with_emoji() {
+    // Test bullet lists with emoji (multi-byte UTF-8)
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    let input = "- 🎉 Party time!\n- 🚀 Rocket launch\n- 🌟 Starry night\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(result.contains("🎉"), "Emoji should be preserved");
+    assert!(result.contains("🚀"), "Emoji should be preserved");
+    assert!(result.contains("🌟"), "Emoji should be preserved");
+}
+
+#[test]
+fn test_utf8_indented_list_with_cyrillic() {
+    // Test indented lists with Cyrillic characters
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    let input = "   - Привет мир (Hello World in Russian)\n   - Добрый день (Good day)\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(result.contains("Привет"), "Cyrillic should be preserved");
+    assert!(result.contains("Добрый"), "Cyrillic should be preserved");
+}
+
+#[test]
+fn test_utf8_blockquote_with_arabic() {
+    // Test blockquotes with Arabic text (RTL, multi-byte)
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    let input = "> مرحبا بالعالم - Hello World in Arabic\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(result.contains("مرحبا"), "Arabic text should be preserved");
+    assert!(result.starts_with(">"), "Blockquote marker should be preserved");
+}
+
+#[test]
+fn test_utf8_blockquote_with_leading_spaces_and_unicode() {
+    // Test blockquotes with leading whitespace and unicode
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    let input = "   > 日本語テキスト with some English\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(result.contains("日本語"), "Japanese should be preserved");
+    assert!(result.contains(">"), "Blockquote marker should be preserved");
+}
+
+#[test]
+fn test_utf8_mixed_scripts_in_numbered_list() {
+    // Test numbered list with mixed scripts (Latin, Chinese, emoji)
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    let input = "1. Hello 你好 🌍 World\n2. مرحبا Привет 🎉 Mixed\n3. Normal ASCII text\n";
+    let result = reflow_markdown(input, &options);
+
+    // All content should be preserved without panic
+    assert!(result.contains("Hello"), "Latin preserved");
+    assert!(result.contains("你好"), "Chinese preserved");
+    assert!(result.contains("🌍"), "Emoji preserved");
+    assert!(result.contains("مرحبا"), "Arabic preserved");
+    assert!(result.contains("Привет"), "Cyrillic preserved");
+}
+
+#[test]
+fn test_utf8_list_marker_after_multibyte_indent() {
+    // Edge case: what if the indent itself somehow contains multi-byte chars?
+    // This tests the boundary conditions of our byte-based space skipping
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    // Standard indentation with multi-byte content
+    let input = "    1. 日本語 text after marker\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(result.contains("日本語"), "Content after marker preserved");
+    assert!(result.contains("1."), "List marker preserved");
+}
+
+#[test]
+fn test_utf8_multiple_spaces_after_marker_with_unicode() {
+    // Test that multiple spaces after list marker are handled correctly
+    // even when followed by multi-byte characters
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    // Multiple spaces after the marker
+    let input = "-   🎉 Extra spaces before emoji\n1.   日本語 Extra spaces before Japanese\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(result.contains("🎉"), "Emoji preserved after extra spaces");
+    assert!(result.contains("日本語"), "Japanese preserved after extra spaces");
+}
+
+#[test]
+fn test_utf8_very_long_unicode_line_reflow() {
+    // Test that long lines with unicode characters reflow correctly
+    let options = ReflowOptions {
+        line_length: 40,
+        ..Default::default()
+    };
+
+    let input = "这是一个很长的中文句子，包含了很多汉字，需要被正确地换行处理。";
+    let result = reflow_line(input, &options);
+
+    // Should reflow without panic
+    assert!(!result.is_empty(), "Should produce output");
+    // All characters should be preserved across lines
+    let joined = result.join("");
+    assert!(joined.contains("中文"), "Chinese text preserved after reflow");
+}
+
+#[test]
+fn test_utf8_combining_characters() {
+    // Test with combining characters (e.g., accents that combine with base chars)
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    // é can be represented as e + combining acute accent
+    let input = "- Café résumé naïve\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("Café") || result.contains("Cafe"),
+        "Accented text preserved"
+    );
+}
+
+#[test]
+fn test_utf8_zero_width_characters() {
+    // Test with zero-width characters (joiners, non-joiners)
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+
+    // Zero-width space (U+200B) and zero-width joiner (U+200D)
+    let input = "1. Text\u{200B}with\u{200D}invisible\n";
+    let result = reflow_markdown(input, &options);
+
+    // Should not panic, content should be mostly preserved
+    assert!(result.contains("Text"), "Base text preserved");
+    assert!(result.contains("invisible"), "Text after zero-width preserved");
+}

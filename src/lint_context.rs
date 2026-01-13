@@ -6,6 +6,7 @@ use crate::utils::regex_cache::URL_SIMPLE_REGEX;
 use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -523,6 +524,7 @@ pub struct LintContext<'a> {
     pub broken_links: Vec<BrokenLinkInfo>, // Broken/undefined references
     pub footnote_refs: Vec<FootnoteRef>,  // Pre-parsed footnote references
     pub reference_defs: Vec<ReferenceDef>, // Reference definitions
+    reference_defs_map: HashMap<String, usize>, // O(1) lookup by lowercase ID -> index in reference_defs
     code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>, // Lazy-loaded inline code spans
     math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>, // Lazy-loaded math spans ($...$ and $$...$$)
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
@@ -687,6 +689,13 @@ impl<'a> LintContext<'a> {
 
         let reference_defs = profile_section!("Reference defs", profile, Self::parse_reference_defs(content, &lines));
 
+        // Build O(1) lookup map for reference definitions by lowercase ID
+        let reference_defs_map: HashMap<String, usize> = reference_defs
+            .iter()
+            .enumerate()
+            .map(|(idx, def)| (def.id.to_lowercase(), idx))
+            .collect();
+
         let list_blocks = profile_section!("List blocks", profile, Self::parse_list_blocks(content, &lines));
 
         // Compute character frequency for fast content analysis
@@ -728,6 +737,7 @@ impl<'a> LintContext<'a> {
             broken_links,
             footnote_refs,
             reference_defs,
+            reference_defs_map,
             code_spans_cache: OnceLock::from(Arc::new(code_spans)),
             math_spans_cache: OnceLock::new(), // Lazy-loaded on first access
             list_blocks,
@@ -925,13 +935,26 @@ impl<'a> LintContext<'a> {
         self.line_info(line_num).map(|info| info.byte_offset)
     }
 
-    /// Get URL for a reference link/image by its ID
+    /// Get URL for a reference link/image by its ID (O(1) lookup via HashMap)
     pub fn get_reference_url(&self, ref_id: &str) -> Option<&str> {
         let normalized_id = ref_id.to_lowercase();
-        self.reference_defs
-            .iter()
-            .find(|def| def.id == normalized_id)
-            .map(|def| def.url.as_str())
+        self.reference_defs_map
+            .get(&normalized_id)
+            .map(|&idx| self.reference_defs[idx].url.as_str())
+    }
+
+    /// Get a reference definition by its ID (O(1) lookup via HashMap)
+    pub fn get_reference_def(&self, ref_id: &str) -> Option<&ReferenceDef> {
+        let normalized_id = ref_id.to_lowercase();
+        self.reference_defs_map
+            .get(&normalized_id)
+            .map(|&idx| &self.reference_defs[idx])
+    }
+
+    /// Check if a reference definition exists by ID (O(1) lookup via HashMap)
+    pub fn has_reference_def(&self, ref_id: &str) -> bool {
+        let normalized_id = ref_id.to_lowercase();
+        self.reference_defs_map.contains_key(&normalized_id)
     }
 
     /// Check if a line is part of a list block
@@ -5206,5 +5229,101 @@ Some content."#;
             math_spans.is_empty() || !math_spans.iter().any(|s| s.content.contains("100")),
             "Unbalanced $ should not create math span containing 100"
         );
+    }
+
+    // =========================================================================
+    // Tests for O(1) reference definition lookups via HashMap
+    // =========================================================================
+
+    #[test]
+    fn test_reference_lookup_o1_basic() {
+        let content = r#"[ref1]: /url1
+[REF2]: /url2 "Title"
+[Ref3]: /url3
+
+Use [link][ref1] and [link][REF2]."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Verify we have 3 reference defs
+        assert_eq!(ctx.reference_defs.len(), 3);
+
+        // Test get_reference_url with various cases
+        assert_eq!(ctx.get_reference_url("ref1"), Some("/url1"));
+        assert_eq!(ctx.get_reference_url("REF1"), Some("/url1")); // case insensitive
+        assert_eq!(ctx.get_reference_url("Ref1"), Some("/url1")); // case insensitive
+        assert_eq!(ctx.get_reference_url("ref2"), Some("/url2"));
+        assert_eq!(ctx.get_reference_url("REF2"), Some("/url2"));
+        assert_eq!(ctx.get_reference_url("ref3"), Some("/url3"));
+        assert_eq!(ctx.get_reference_url("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_reference_lookup_o1_get_reference_def() {
+        let content = r#"[myref]: https://example.com "My Title"
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Test get_reference_def
+        let def = ctx.get_reference_def("myref").expect("Should find myref");
+        assert_eq!(def.url, "https://example.com");
+        assert_eq!(def.title.as_deref(), Some("My Title"));
+
+        // Case insensitive
+        let def2 = ctx.get_reference_def("MYREF").expect("Should find MYREF");
+        assert_eq!(def2.url, "https://example.com");
+
+        // Non-existent
+        assert!(ctx.get_reference_def("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_reference_lookup_o1_has_reference_def() {
+        let content = r#"[foo]: /foo
+[BAR]: /bar
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        // Test has_reference_def
+        assert!(ctx.has_reference_def("foo"));
+        assert!(ctx.has_reference_def("FOO")); // case insensitive
+        assert!(ctx.has_reference_def("bar"));
+        assert!(ctx.has_reference_def("Bar")); // case insensitive
+        assert!(!ctx.has_reference_def("baz")); // doesn't exist
+    }
+
+    #[test]
+    fn test_reference_lookup_o1_empty_content() {
+        let content = "No references here.";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert!(ctx.reference_defs.is_empty());
+        assert_eq!(ctx.get_reference_url("anything"), None);
+        assert!(ctx.get_reference_def("anything").is_none());
+        assert!(!ctx.has_reference_def("anything"));
+    }
+
+    #[test]
+    fn test_reference_lookup_o1_special_characters_in_id() {
+        let content = r#"[ref-with-dash]: /url1
+[ref_with_underscore]: /url2
+[ref.with.dots]: /url3
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert_eq!(ctx.get_reference_url("ref-with-dash"), Some("/url1"));
+        assert_eq!(ctx.get_reference_url("ref_with_underscore"), Some("/url2"));
+        assert_eq!(ctx.get_reference_url("ref.with.dots"), Some("/url3"));
+    }
+
+    #[test]
+    fn test_reference_lookup_o1_unicode_id() {
+        let content = r#"[日本語]: /japanese
+[émoji]: /emoji
+"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert_eq!(ctx.get_reference_url("日本語"), Some("/japanese"));
+        assert_eq!(ctx.get_reference_url("émoji"), Some("/emoji"));
+        assert_eq!(ctx.get_reference_url("ÉMOJI"), Some("/emoji")); // uppercase
     }
 }

@@ -1521,7 +1521,10 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
 
         // Preserve block quotes (but reflow their content)
         if trimmed.starts_with('>') {
-            let quote_prefix = line[0..line.find('>').unwrap() + 1].to_string();
+            // find() returns byte position which is correct for str slicing
+            // The unwrap is safe because we already verified trimmed starts with '>'
+            let gt_pos = line.find('>').expect("'>' must exist since trimmed.starts_with('>')");
+            let quote_prefix = line[0..gt_pos + 1].to_string();
             let quote_content = &line[quote_prefix.len()..].trim_start();
 
             let reflowed = reflow_line(quote_content, options);
@@ -1565,7 +1568,9 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     marker_end = indent + period_pos + 1; // Include the period
                     content_start = marker_end;
                     // Skip any spaces after the period to find content start
-                    while content_start < line.len() && line.chars().nth(content_start) == Some(' ') {
+                    // Use byte-based check since content_start is a byte index
+                    // This is safe because space is ASCII (single byte)
+                    while content_start < line.len() && line.as_bytes().get(content_start) == Some(&b' ') {
                         content_start += 1;
                     }
                 }
@@ -1574,7 +1579,9 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 marker_end = indent + 1; // Just the marker character
                 content_start = marker_end;
                 // Skip any spaces after the marker
-                while content_start < line.len() && line.chars().nth(content_start) == Some(' ') {
+                // Use byte-based check since content_start is a byte index
+                // This is safe because space is ASCII (single byte)
+                while content_start < line.len() && line.as_bytes().get(content_start) == Some(&b' ') {
                     content_start += 1;
                 }
             }
