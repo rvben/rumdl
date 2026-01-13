@@ -6,7 +6,7 @@
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rvben/rumdl/release.yml)](https://github.com/rvben/rumdl/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Crates.io](https://img.shields.io/crates/v/rumdl)](https://crates.io/crates/rumdl)
-[![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/) [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest) [![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers)
+[![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/) [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest) [![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers) [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn)
 
 ## A modern Markdown linter and formatter, built for speed with Rust
 
