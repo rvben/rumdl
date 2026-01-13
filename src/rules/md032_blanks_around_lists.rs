@@ -180,8 +180,27 @@ impl MD032BlanksAroundLists {
             let mut current_start = block.start_line;
             let mut prev_item_line = 0;
 
+            // Helper to get blockquote level (count of '>' chars) from a line
+            let get_blockquote_level = |line_num: usize| -> usize {
+                if line_num == 0 || line_num > ctx.lines.len() {
+                    return 0;
+                }
+                let line_content = ctx.lines[line_num - 1].content(ctx.content);
+                BLOCKQUOTE_PREFIX_RE
+                    .find(line_content)
+                    .map(|m| m.as_str().chars().filter(|&c| c == '>').count())
+                    .unwrap_or(0)
+            };
+
+            let mut prev_bq_level = 0;
+
             for &item_line in &block.item_lines {
+                let current_bq_level = get_blockquote_level(item_line);
+
                 if prev_item_line > 0 {
+                    // Check if blockquote level changed between items
+                    let blockquote_level_changed = prev_bq_level != current_bq_level;
+
                     // Check if there's a standalone code fence between prev_item_line and item_line
                     // A code fence that's indented as part of a list item should NOT split the list
                     let mut has_standalone_code_fence = false;
@@ -213,13 +232,14 @@ impl MD032BlanksAroundLists {
                         }
                     }
 
-                    if has_standalone_code_fence {
+                    if has_standalone_code_fence || blockquote_level_changed {
                         // End current segment before this item
                         segments.push((current_start, prev_item_line));
                         current_start = item_line;
                     }
                 }
                 prev_item_line = item_line;
+                prev_bq_level = current_bq_level;
             }
 
             // Add the final segment
@@ -2186,11 +2206,8 @@ More text.
     }
 
     #[test]
-    #[ignore = "rumdl doesn't yet detect blockquote level changes between list items as list-breaking"]
     fn test_blockquote_level_change_in_list() {
-        // Blockquote level changes mid-list - this SHOULD break the list
-        // Verify we still detect when blockquote level actually changes
-        // TODO: This is a separate enhancement from issue #260
+        // Blockquote level changes mid-list - this breaks the list
         let content = "> - item 1\n>> - deeper item\n> - item 2";
         // Each segment is a separate list context due to blockquote level change
         // markdownlint-cli reports 4 warnings for this case
