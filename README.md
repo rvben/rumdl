@@ -103,6 +103,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Markdownlint Migration](#markdownlint-migration)
   - [Inline Configuration](#inline-configuration)
   - [Configuration File Example](#configuration-file-example)
+  - [Style Guide Presets](#style-guide-presets)
   - [Initializing Configuration](#initializing-configuration)
   - [Configuration in pyproject.toml](#configuration-in-pyprojecttoml)
   - [Configuration Output](#configuration-output)
@@ -842,6 +843,19 @@ names = ["rumdl", "Markdown", "GitHub"]
 
 [MD048]
 code-fence-style = "backtick"
+```
+
+### Style Guide Presets
+
+Ready-to-use configurations for popular style guides are available in the [`examples/`](examples/) directory:
+
+- **[Google Style](examples/google-style.rumdl.toml)** - Google's Markdown style guide
+- **[Prettier-compatible](examples/prettier-compatible.rumdl.toml)** - Aligns with Prettier's markdown formatting
+
+Copy one to your project as `.rumdl.toml` or use with `--config`:
+
+```bash
+rumdl check --config examples/google-style.rumdl.toml .
 ```
 
 ### Initializing Configuration
