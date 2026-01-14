@@ -177,16 +177,17 @@ Severity affects:
 
 ## Whitespace Rules
 
-| Rule ID           | Rule Name                  | Description                                            |
-| ----------------- | -------------------------- | ------------------------------------------------------ |
-| [MD009](md009.md) | No trailing spaces         | No trailing spaces                                     |
-| [MD010](md010.md) | No hard tabs               | No hard tabs                                           |
-| [MD012](md012.md) | No multiple blanks         | No multiple consecutive blank lines                    |
-| [MD013](md013.md) | Line length                | Line length                                            |
-| [MD027](md027.md) | Multiple spaces blockquote | Multiple spaces after blockquote symbol                |
-| [MD028](md028.md) | Blanks blockquote          | Blank line inside blockquote                           |
-| [MD031](md031.md) | Blanks around fences       | Fenced code blocks should be surrounded by blank lines |
-| [MD047](md047.md) | File end newline           | Files should end with a single newline character       |
+| Rule ID           | Rule Name                      | Description                                            |
+| ----------------- | ------------------------------ | ------------------------------------------------------ |
+| [MD009](md009.md) | No trailing spaces             | No trailing spaces                                     |
+| [MD010](md010.md) | No hard tabs                   | No hard tabs                                           |
+| [MD012](md012.md) | No multiple blanks             | No multiple consecutive blank lines                    |
+| [MD013](md013.md) | Line length                    | Line length                                            |
+| [MD027](md027.md) | Multiple spaces blockquote     | Multiple spaces after blockquote symbol                |
+| [MD028](md028.md) | Blanks blockquote              | Blank line inside blockquote                           |
+| [MD031](md031.md) | Blanks around fences           | Fenced code blocks should be surrounded by blank lines |
+| [MD047](md047.md) | File end newline               | Files should end with a single newline character       |
+| [MD064](md064.md) | No multiple consecutive spaces | Multiple consecutive spaces in content                 |
 
 ## Formatting Rules
 

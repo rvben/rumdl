@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MD064: `max-consecutive-spaces` config option** (fixes #294)
+  - New option to allow configurable consecutive space threshold
+  - `max-consecutive-spaces = 2` allows traditional two-space sentence spacing
+  - Default remains `1` (flags any 2+ consecutive spaces)
+
+### Community
+
+- Opened official Discord server for the rumdl community (thanks @pygarap for the suggestion in #281)
+  - Join at https://discord.gg/ADTJFSFUyn
+  - Channels: #general, #announcements, #help, #development
+  - Release notifications automatically posted via GitHub webhook
+
 ## [0.0.216] - 2026-01-13
 
 ### Added
