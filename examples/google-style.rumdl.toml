@@ -1,0 +1,47 @@
+# Google Markdown Style Guide Configuration
+# https://google.github.io/styleguide/docguide/style.html
+#
+# This config enforces Google's Markdown conventions. Use alongside any flavor:
+#
+#   [global]
+#   flavor = "mkdocs"  # Flavor handles parsing, this config handles style
+#
+
+[global]
+line_length = 80  # Google: "Wrap to 80 characters"
+
+# Headings: ATX-style only (# Heading), not Setext (underlines)
+[MD003]
+style = "atx"
+
+# Lists: 4-space indent for nesting
+[MD007]
+indent = 4
+
+# Lists: Google uses lazy numbering (all 1.) for long lists
+# Use "one_or_ordered" to allow both lazy and explicit numbering
+[MD029]
+style = "one_or_ordered"
+
+# Lists: Google specifies 3 spaces after bullet, 2 after number
+# This aligns continuation text with first word
+#   *   List item text
+#   1.  Numbered item text
+[MD030]
+ul_single = 3
+ul_multi = 3
+ol_single = 2
+ol_multi = 2
+
+# Code blocks: Fenced (```) preferred over indented
+[MD046]
+style = "fenced"
+
+# The following rules are enabled by default and match Google's guide:
+# - MD009: No trailing spaces
+# - MD018: Space after hash in headings
+# - MD022: Blank lines around headings
+# - MD025: Single H1 per document
+# - MD033: No inline HTML (Google: "Strongly prefer Markdown")
+# - MD040: Code blocks should specify language
+# - MD047: Files end with single newline
