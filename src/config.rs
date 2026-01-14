@@ -4396,8 +4396,9 @@ fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool
 
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
 fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfigFragment>, ConfigError> {
-    let doc: toml::Value =
-        toml::from_str(content).map_err(|e| ConfigError::ParseError(format!("{path}: Failed to parse TOML: {e}")))?;
+    let display_path = to_relative_display_path(path);
+    let doc: toml::Value = toml::from_str(content)
+        .map_err(|e| ConfigError::ParseError(format!("{display_path}: Failed to parse TOML: {e}")))?;
     let mut fragment = SourcedConfigFragment::default();
     let source = ConfigSource::PyprojectToml;
     let file = Some(path.to_string());
@@ -4595,7 +4596,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                     per_file_map.insert(pattern.clone(), normalized_rules);
                 } else {
                     log::warn!(
-                        "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {path}, found {rules_value:?}"
+                        "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {display_path}, found {rules_value:?}"
                     );
                 }
             }
@@ -4619,7 +4620,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
                     per_file_map.insert(pattern.clone(), flavor);
                 } else {
                     log::warn!(
-                        "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, quarto"
+                        "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, quarto"
                     );
                 }
             }
@@ -4829,9 +4830,10 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
 
 /// Parses rumdl.toml / .rumdl.toml content.
 fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<SourcedConfigFragment, ConfigError> {
+    let display_path = to_relative_display_path(path);
     let doc = content
         .parse::<DocumentMut>()
-        .map_err(|e| ConfigError::ParseError(format!("{path}: Failed to parse TOML: {e}")))?;
+        .map_err(|e| ConfigError::ParseError(format!("{display_path}: Failed to parse TOML: {e}")))?;
     let mut fragment = SourcedConfigFragment::default();
     // source parameter provided by caller
     let file = Some(path.to_string());
@@ -4895,7 +4897,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected array for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -4912,7 +4914,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected boolean for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -4929,7 +4931,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected boolean for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -4946,7 +4948,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected integer for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -4969,7 +4971,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected string for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -4992,7 +4994,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected string for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -5005,7 +5007,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected boolean for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -5025,7 +5027,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected array for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -5045,7 +5047,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         log::warn!(
                             "[WARN] Expected array for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -5056,13 +5058,13 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                         if let Ok(flavor) = MarkdownFlavor::from_str(val) {
                             fragment.global.flavor.push_override(flavor, source, file.clone(), None);
                         } else {
-                            log::warn!("[WARN] Unknown markdown flavor '{val}' in {path}");
+                            log::warn!("[WARN] Unknown markdown flavor '{val}' in {display_path}");
                         }
                     } else {
                         log::warn!(
                             "[WARN] Expected string for global key '{}' in {}, found {}",
                             key,
-                            path,
+                            display_path,
                             value_item.type_name()
                         );
                     }
@@ -5072,7 +5074,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                     fragment
                         .unknown_keys
                         .push(("[global]".to_string(), key.to_string(), Some(path.to_string())));
-                    log::warn!("[WARN] Unknown key in [global] section of {path}: {key}");
+                    log::warn!("[WARN] Unknown key in [global] section of {display_path}: {key}");
                 }
             }
         }
@@ -5094,7 +5096,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
             } else {
                 let type_name = value_item.type_name();
                 log::warn!(
-                    "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {path}, found {type_name}"
+                    "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {display_path}, found {type_name}"
                 );
             }
         }
@@ -5117,14 +5119,14 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                     }
                     Err(_) => {
                         log::warn!(
-                            "[WARN] Invalid flavor '{flavor_str}' for pattern '{pattern}' in {path}. Valid values: standard, mkdocs, mdx, quarto"
+                            "[WARN] Invalid flavor '{flavor_str}' for pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, quarto"
                         );
                     }
                 }
             } else {
                 let type_name = value_item.type_name();
                 log::warn!(
-                    "[WARN] Expected string for per-file-flavor pattern '{pattern}' in {path}, found {type_name}"
+                    "[WARN] Expected string for per-file-flavor pattern '{pattern}' in {display_path}, found {type_name}"
                 );
             }
         }
@@ -5175,7 +5177,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                             }
                             Err(_) => {
                                 log::warn!(
-                                    "[WARN] Invalid severity '{severity_str}' for rule {norm_rule_name} in {path}. Valid values: error, warning"
+                                    "[WARN] Invalid severity '{severity_str}' for rule {norm_rule_name} in {display_path}. Valid values: error, warning"
                                 );
                             }
                         }
@@ -5211,7 +5213,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                                 }
                                 _ => {
                                     log::warn!(
-                                        "[WARN] Skipping unsupported array element type in key '{norm_rule_name}.{norm_rk}' in {path}"
+                                        "[WARN] Skipping unsupported array element type in key '{norm_rule_name}.{norm_rk}' in {display_path}"
                                     );
                                 }
                             }
@@ -5220,13 +5222,13 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                     }
                     Some(toml_edit::Value::InlineTable(_)) => {
                         log::warn!(
-                            "[WARN] Skipping inline table value for key '{norm_rule_name}.{norm_rk}' in {path}. Table conversion not yet fully implemented in parser."
+                            "[WARN] Skipping inline table value for key '{norm_rule_name}.{norm_rk}' in {display_path}. Table conversion not yet fully implemented in parser."
                         );
                         None
                     }
                     None => {
                         log::warn!(
-                            "[WARN] Skipping non-value item for key '{norm_rule_name}.{norm_rk}' in {path}. Expected simple value."
+                            "[WARN] Skipping non-value item for key '{norm_rule_name}.{norm_rk}' in {display_path}. Expected simple value."
                         );
                         None
                     }
@@ -5240,7 +5242,9 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
                 }
             }
         } else if item.is_value() {
-            log::warn!("[WARN] Ignoring top-level value key in {path}: '{key}'. Expected a table like [{key}].");
+            log::warn!(
+                "[WARN] Ignoring top-level value key in {display_path}: '{key}'. Expected a table like [{key}]."
+            );
         }
     }
 
@@ -5249,9 +5253,10 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
 
 /// Loads and converts a markdownlint config file (.json or .yaml) into a SourcedConfigFragment.
 fn load_from_markdownlint(path: &str) -> Result<SourcedConfigFragment, ConfigError> {
+    let display_path = to_relative_display_path(path);
     // Use the unified loader from markdownlint_config.rs
     let ml_config = crate::markdownlint_config::load_markdownlint_config(path)
-        .map_err(|e| ConfigError::ParseError(format!("{path}: {e}")))?;
+        .map_err(|e| ConfigError::ParseError(format!("{display_path}: {e}")))?;
     Ok(ml_config.map_to_sourced_rumdl_config_fragment(Some(path)))
 }
 
