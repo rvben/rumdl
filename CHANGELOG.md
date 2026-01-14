@@ -7,12 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.217] - 2026-01-14
+
 ### Added
 
 - **MD064: `max-consecutive-spaces` config option** (fixes #294)
   - New option to allow configurable consecutive space threshold
   - `max-consecutive-spaces = 2` allows traditional two-space sentence spacing
   - Default remains `1` (flags any 2+ consecutive spaces)
+
+- **Comprehensive Markdown flavor documentation**
+  - New `docs/flavors.md` with detailed flavor support guide
+  - Coverage of MkDocs, MDX, Quarto, GitHub, and Standard flavors
+
+### Fixed
+
+- **MD032: Detect lazy continuation in nested lists** (fixes #295)
+  - Lazy continuation lines in nested lists are now correctly identified
+  - Uses `content_column` from `ListItemInfo` to calculate proper indent threshold
+
+- **MD032: Detect blockquote level changes as list breaks**
+  - Lines with different blockquote nesting levels now properly break lists
+  - Prevents false positives when list items span blockquote boundaries
+
+- **MD033: Calculate correct end_line for multiline HTML tags**
+  - HTML tags spanning multiple lines now report accurate end positions
+  - Improves LSP diagnostic highlighting for multiline HTML elements
+
+- **Config warnings show relative paths instead of absolute** (fixes #291)
+  - Config warning messages now use project-relative paths
+  - Makes error messages cleaner and more portable
+
+- **Core correctness and performance improvements**
+  - Various fixes for edge cases in line processing
+  - Performance optimizations in lint context creation
 
 ### Community
 
