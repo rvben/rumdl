@@ -171,9 +171,38 @@ Disables specific rules for specific files or file patterns. This is useful when
 "docs/legacy/**/*.md" = ["MD003", "MD022"]
 ```
 
+**Pattern Syntax**:
+
+Patterns use standard glob syntax:
+
+- `*` matches any characters except path separators
+- `**` matches any characters including path separators (recursive)
+- `?` matches a single character
+- `{a,b}` matches either `a` or `b` (brace expansion)
+
+To match multiple specific files, use **brace expansion**:
+
+```toml
+[per-file-ignores]
+# Match both AGENTS.md and README.md
+"{AGENTS.md,README.md}" = ["MD033"]
+
+# Match multiple directories
+"{docs,guides}/**/*.md" = ["MD013"]
+```
+
+Alternatively, use separate entries (more verbose but equivalent):
+
+```toml
+[per-file-ignores]
+"AGENTS.md" = ["MD033"]
+"README.md" = ["MD033"]
+```
+
+> **Note**: Commas are literal characters in glob patterns. The pattern `"A.md,B.md"` matches a file literally named `A.md,B.md`, not two separate files. Use `"{A.md,B.md}"` to match multiple files.
+
 **Usage Notes**:
 
-- Patterns support glob syntax (`*`, `**`, `?`)
 - Rule IDs are case-insensitive but conventionally uppercase
 - More specific patterns take precedence over general ones
 - Useful for handling special files like:

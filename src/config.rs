@@ -138,6 +138,17 @@ pub fn normalize_key(key: &str) -> String {
     }
 }
 
+/// Warns if a per-file-ignores pattern contains a comma but no braces.
+/// This is a common mistake where users expect "A.md,B.md" to match both files,
+/// but glob syntax requires "{A.md,B.md}" for brace expansion.
+fn warn_comma_without_brace_in_pattern(pattern: &str, config_file: &str) {
+    if pattern.contains(',') && !pattern.contains('{') {
+        eprintln!("Warning: Pattern \"{pattern}\" in {config_file} contains a comma but no braces.");
+        eprintln!("  To match multiple files, use brace expansion: \"{{{pattern}}}\"");
+        eprintln!("  Or use separate entries for each file.");
+    }
+}
+
 /// Represents a rule-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
 pub struct RuleConfig {
@@ -4588,6 +4599,7 @@ fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfi
         {
             let mut per_file_map = HashMap::new();
             for (pattern, rules_value) in per_file_table {
+                warn_comma_without_brace_in_pattern(pattern, &display_path);
                 if let Ok(rules) = Vec::<String>::deserialize(rules_value.clone()) {
                     let normalized_rules = rules
                         .into_iter()
@@ -5086,6 +5098,7 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
     {
         let mut per_file_map = HashMap::new();
         for (pattern, value_item) in per_file_table.iter() {
+            warn_comma_without_brace_in_pattern(pattern, &display_path);
             if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
                 let rules: Vec<String> = formatted_array
                     .iter()

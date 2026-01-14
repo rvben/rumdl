@@ -2292,3 +2292,273 @@ flavor = "quarto"
     assert_eq!(config.global.cache_dir.as_deref(), Some("/pyproject/cache"));
     assert_eq!(config.global.flavor, rumdl_lib::config::MarkdownFlavor::Quarto);
 }
+
+/// Test for issue #296: per-file-ignores requires brace expansion for multiple files.
+/// Comma-separated patterns like "A.md,B.md" don't match individual files;
+/// users must use brace expansion "{A.md,B.md}" instead.
+#[test]
+fn test_per_file_ignores_brace_expansion_required() {
+    use std::path::PathBuf;
+
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // Test 1: Comma-separated pattern (without braces) - should NOT match individual files
+    // This is the exact pattern from issue #296
+    let config_content = r#"
+[per-file-ignores]
+"AGENTS.md,README.md" = ["MD033"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Comma-separated pattern should NOT match individual files
+    let ignored_agents = config.get_ignored_rules_for_file(&PathBuf::from("AGENTS.md"));
+    assert!(
+        ignored_agents.is_empty(),
+        "Pattern 'AGENTS.md,README.md' should NOT match 'AGENTS.md' (commas are literal in glob patterns)"
+    );
+
+    let ignored_readme = config.get_ignored_rules_for_file(&PathBuf::from("README.md"));
+    assert!(
+        ignored_readme.is_empty(),
+        "Pattern 'AGENTS.md,README.md' should NOT match 'README.md' (commas are literal in glob patterns)"
+    );
+
+    // But it WOULD match a file literally named "AGENTS.md,README.md" (edge case)
+    let ignored_literal = config.get_ignored_rules_for_file(&PathBuf::from("AGENTS.md,README.md"));
+    assert!(
+        ignored_literal.contains("MD033"),
+        "Pattern 'AGENTS.md,README.md' should match literal filename 'AGENTS.md,README.md'"
+    );
+
+    // Test 2: Brace expansion pattern - SHOULD match individual files
+    let config_content = r#"
+[per-file-ignores]
+"{AGENTS.md,README.md}" = ["MD033"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Brace expansion pattern SHOULD match individual files
+    let ignored_agents = config.get_ignored_rules_for_file(&PathBuf::from("AGENTS.md"));
+    assert!(
+        ignored_agents.contains("MD033"),
+        "Pattern '{{AGENTS.md,README.md}}' should match 'AGENTS.md'"
+    );
+
+    let ignored_readme = config.get_ignored_rules_for_file(&PathBuf::from("README.md"));
+    assert!(
+        ignored_readme.contains("MD033"),
+        "Pattern '{{AGENTS.md,README.md}}' should match 'README.md'"
+    );
+
+    // Should NOT match the literal comma-separated name
+    let ignored_literal = config.get_ignored_rules_for_file(&PathBuf::from("AGENTS.md,README.md"));
+    assert!(
+        ignored_literal.is_empty(),
+        "Brace pattern should NOT match literal 'AGENTS.md,README.md'"
+    );
+}
+
+/// Test brace expansion edge cases for per-file-ignores patterns.
+#[test]
+fn test_per_file_ignores_brace_expansion_edge_cases() {
+    use std::path::PathBuf;
+
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // Edge case 1: Multiple commas without braces
+    let config_content = r#"
+[per-file-ignores]
+"a.md,b.md,c.md" = ["MD033"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // None of the individual files should match
+    assert!(config.get_ignored_rules_for_file(&PathBuf::from("a.md")).is_empty());
+    assert!(config.get_ignored_rules_for_file(&PathBuf::from("b.md")).is_empty());
+    assert!(config.get_ignored_rules_for_file(&PathBuf::from("c.md")).is_empty());
+
+    // Edge case 2: Brace expansion with wildcards
+    let config_content = r#"
+[per-file-ignores]
+"{*.md,*.txt}" = ["MD013"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("test.md"))
+            .contains("MD013")
+    );
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("test.txt"))
+            .contains("MD013")
+    );
+    assert!(config.get_ignored_rules_for_file(&PathBuf::from("test.rs")).is_empty());
+
+    // Edge case 3: Comma in directory path (no braces) - should be treated literally
+    let config_content = r#"
+[per-file-ignores]
+"path/with,comma/file.md" = ["MD033"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Should only match the literal path with comma
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("path/with,comma/file.md"))
+            .contains("MD033")
+    );
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("path/with/file.md"))
+            .is_empty()
+    );
+
+    // Edge case 4: Brace at end of pattern (partial filename match)
+    let config_content = r#"
+[per-file-ignores]
+"README.{md,txt}" = ["MD041"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("README.md"))
+            .contains("MD041")
+    );
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("README.txt"))
+            .contains("MD041")
+    );
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("README.rst"))
+            .is_empty()
+    );
+}
+
+/// Test that patterns with both comma and braces work correctly (no false warning).
+#[test]
+fn test_per_file_ignores_brace_expansion_no_false_warning() {
+    use std::path::PathBuf;
+
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // Pattern with braces should work and not trigger warning
+    let config_content = r#"
+[per-file-ignores]
+"{docs,guides}/**/*.md" = ["MD013"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Pattern should correctly match files in either directory
+    let ignored_docs = config.get_ignored_rules_for_file(&PathBuf::from("docs/file.md"));
+    assert!(ignored_docs.contains("MD013"), "Should match docs/file.md");
+
+    let ignored_guides = config.get_ignored_rules_for_file(&PathBuf::from("guides/file.md"));
+    assert!(ignored_guides.contains("MD013"), "Should match guides/file.md");
+
+    // Should NOT match other directories
+    let ignored_other = config.get_ignored_rules_for_file(&PathBuf::from("other/file.md"));
+    assert!(ignored_other.is_empty(), "Should NOT match other/file.md");
+}
+
+/// Test per-file-ignores brace expansion works correctly in pyproject.toml.
+#[test]
+fn test_per_file_ignores_brace_expansion_pyproject() {
+    use std::path::PathBuf;
+
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("pyproject.toml");
+
+    // Test with pyproject.toml format
+    let config_content = r#"
+[tool.rumdl.per-file-ignores]
+"{AGENTS.md,README.md}" = ["MD033"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Brace expansion should work in pyproject.toml
+    let ignored_agents = config.get_ignored_rules_for_file(&PathBuf::from("AGENTS.md"));
+    assert!(
+        ignored_agents.contains("MD033"),
+        "Brace expansion should work in pyproject.toml for AGENTS.md"
+    );
+
+    let ignored_readme = config.get_ignored_rules_for_file(&PathBuf::from("README.md"));
+    assert!(
+        ignored_readme.contains("MD033"),
+        "Brace expansion should work in pyproject.toml for README.md"
+    );
+
+    // Test comma-separated (without braces) in pyproject.toml - should NOT match
+    let config_content = r#"
+[tool.rumdl.per-file-ignores]
+"AGENTS.md,README.md" = ["MD033"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Comma-separated should NOT match individual files
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("AGENTS.md"))
+            .is_empty(),
+        "Comma pattern in pyproject.toml should NOT match AGENTS.md"
+    );
+    assert!(
+        config
+            .get_ignored_rules_for_file(&PathBuf::from("README.md"))
+            .is_empty(),
+        "Comma pattern in pyproject.toml should NOT match README.md"
+    );
+}
