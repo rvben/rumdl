@@ -377,3 +377,242 @@ Text"#;
             .collect::<Vec<_>>()
     );
 }
+
+/// Issue #295: Nested list lazy continuation should be detected when allow_lazy_continuation=false
+#[test]
+fn test_md032_nested_list_lazy_continuation_detection() {
+    // When allow_lazy_continuation = false, text that isn't properly indented
+    // for the nested list item should be flagged as lazy continuation
+    let content = r#"# Header
+
+1. A list item.
+   1. A nested list item.
+   Naughty lazy continuation (indent 3).
+
+Text after.
+"#;
+
+    let mut config = Config::default();
+    // Disable lazy continuation to detect the issue
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // The naughty lazy continuation has indent 3, but the nested item has content_column 6
+    // So indent 3 < 6 means it's a lazy continuation, not proper indented continuation
+    // The warning is placed on line 4 (the list end) saying it should be followed by a blank line
+    assert!(
+        warnings.iter().any(|w| w.line == 4 && w.message.contains("followed")),
+        "MD032 should detect lazy continuation in nested list (indent 3 < content_column 6). Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #295: Properly indented nested list continuation should not be flagged
+#[test]
+fn test_md032_nested_list_proper_continuation_not_flagged() {
+    // Content with indent >= content_column should be valid continuation
+    let content = r#"# Header
+
+1. A list item.
+   1. A nested list item.
+      Proper continuation (indent 6).
+
+Text after.
+"#;
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // Line 5 has proper indent (6 >= content_column 6), so no MD032 warning
+    assert!(
+        !warnings.iter().any(|w| w.line == 5),
+        "MD032 should not flag properly indented continuation. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #295: Exact test case from the issue report
+#[test]
+fn test_md032_issue_295_exact_case() {
+    let content = "1. A list item.\n   1. A nested list item.\n   Naughty lazy continuation (indent 3).\n     Proper continuation (indent 5).\n";
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // Both lines 3 and 4 have indent < content_column (6), so list ends at line 2
+    // Warning should be on line 2 (the nested list item)
+    assert!(
+        warnings.iter().any(|w| w.line == 2 && w.message.contains("followed")),
+        "Issue #295 exact case should be detected. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #295: Three levels of nesting
+#[test]
+fn test_md032_triple_nested_lazy_continuation() {
+    let content = r#"# Header
+
+1. Level 1
+   1. Level 2
+      1. Level 3
+      Lazy for level 3 (indent 6, needs 9).
+
+Text after.
+"#;
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // Line 6 has indent 6, but level 3 item has content_column ~9
+    // Should flag the list as needing blank line
+    assert!(
+        warnings.iter().any(|w| w.line == 5 && w.message.contains("followed")),
+        "Triple nested lazy continuation should be detected. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #295: Boundary - indent exactly at content_column is valid
+#[test]
+fn test_md032_indent_exactly_at_content_column() {
+    // Nested item "   1. " starts content at column 6
+    // Line with exactly 6 spaces should be valid continuation
+    let content = "# Header\n\n1. Item\n   1. Nested\n      Exactly 6 spaces.\n\nText.\n";
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // Line 5 (Exactly 6 spaces) should be valid - no warning on line 4
+    assert!(
+        !warnings.iter().any(|w| w.line == 4),
+        "Indent exactly at content_column should be valid. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #295: Boundary - indent one less than content_column is lazy
+#[test]
+fn test_md032_indent_one_less_than_content_column() {
+    // Nested item "   1. " starts content at column 6
+    // Line with 5 spaces (one less) should be lazy
+    let content = "# Header\n\n1. Item\n   1. Nested\n     Only 5 spaces.\n\nText.\n";
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // Line 5 has indent 5, content_column is 6, so it's lazy
+    assert!(
+        warnings.iter().any(|w| w.line == 4 && w.message.contains("followed")),
+        "Indent one less than content_column should be lazy. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #295: Wide marker (two-digit number)
+#[test]
+fn test_md032_wide_marker_nested_lazy() {
+    // "10. " is 4 chars, so content starts at column 4
+    // Nested "    1. " has marker at 4, content at 7
+    let content = r#"# Header
+
+10. Item with wide marker
+    1. Nested item
+    Lazy (indent 4, needs 7).
+
+Text.
+"#;
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // Line 5 has indent 4, but nested item content_column is 7
+    assert!(
+        warnings.iter().any(|w| w.line == 4 && w.message.contains("followed")),
+        "Wide marker nested lazy should be detected. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}

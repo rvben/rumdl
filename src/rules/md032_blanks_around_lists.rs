@@ -283,6 +283,15 @@ impl MD032BlanksAroundLists {
                 // If this list was split by code fences, don't extend any segments
                 // They should remain as individual list items for MD032 purposes
                 if !has_code_fence_splits && *end < block.end_line {
+                    // Get the minimum indent required for proper continuation
+                    // This is the content column of the last list item in the segment
+                    let min_continuation_indent = ctx
+                        .lines
+                        .get(*end - 1)
+                        .and_then(|line_info| line_info.list_item.as_ref())
+                        .map(|item| item.content_column)
+                        .unwrap_or(2);
+
                     for check_line in (*end + 1)..=block.end_line {
                         if check_line - 1 < ctx.lines.len() {
                             let line = &ctx.lines[check_line - 1];
@@ -295,8 +304,8 @@ impl MD032BlanksAroundLists {
                             if line.in_code_block {
                                 break;
                             }
-                            // Include indented continuation
-                            if line.indent >= 2 {
+                            // Include indented continuation if indent meets threshold
+                            if line.indent >= min_continuation_indent {
                                 actual_end = check_line;
                             }
                             // Include lazy continuation lines (multiple consecutive lines without indent)
