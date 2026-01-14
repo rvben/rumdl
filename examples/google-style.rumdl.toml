@@ -14,9 +14,17 @@ line_length = 80  # Google: "Wrap to 80 characters"
 [MD003]
 style = "atx"
 
+# Lists: Google uses asterisk (*) for unordered lists
+[MD004]
+style = "asterisk"
+
 # Lists: 4-space indent for nesting
 [MD007]
 indent = 4
+
+# Trailing spaces: Google says use backslash for line breaks, not trailing spaces
+[MD009]
+strict = true
 
 # Lists: Google uses lazy numbering (all 1.) for long lists
 # Use "one_or_ordered" to allow both lazy and explicit numbering
@@ -38,7 +46,6 @@ ol_multi = 2
 style = "fenced"
 
 # The following rules are enabled by default and match Google's guide:
-# - MD009: No trailing spaces
 # - MD018: Space after hash in headings
 # - MD022: Blank lines around headings
 # - MD025: Single H1 per document
