@@ -852,11 +852,7 @@ Ready-to-use configurations for popular style guides are available in the [`exam
 - **[Google Style](examples/google-style.rumdl.toml)** - Google's Markdown style guide
 - **[Prettier-compatible](examples/prettier-compatible.rumdl.toml)** - Aligns with Prettier's markdown formatting
 
-Copy one to your project as `.rumdl.toml` or use with `--config`:
-
-```bash
-rumdl check --config examples/google-style.rumdl.toml .
-```
+Copy one to your project as `.rumdl.toml` to use it.
 
 ### Initializing Configuration
 
