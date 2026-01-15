@@ -2,7 +2,9 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::element_cache::ElementCache;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 mod md032_config;
@@ -164,6 +166,75 @@ impl MD032BlanksAroundLists {
             }
         }
         false
+    }
+
+    /// Detect lazy continuation lines within list items using pulldown-cmark's SoftBreak events.
+    ///
+    /// Lazy continuation occurs when text continues a list item paragraph but with less
+    /// indentation than expected. pulldown-cmark identifies this via SoftBreak followed by Text
+    /// within a list Item, where the Text starts at a column less than the item's content column.
+    fn detect_lazy_continuation_lines(ctx: &crate::lint_context::LintContext) -> HashSet<usize> {
+        let mut lazy_lines = HashSet::new();
+        let parser = Parser::new_ext(ctx.content, Options::all());
+
+        // Stack of (item_start_byte, expected_content_column) for nested items
+        let mut item_stack: Vec<usize> = vec![];
+        let mut after_soft_break = false;
+
+        for (event, range) in parser.into_offset_iter() {
+            match event {
+                Event::Start(Tag::Item) => {
+                    // Get the expected content column from pre-parsed LineInfo
+                    let line_num = Self::byte_to_line(&ctx.line_offsets, range.start);
+                    let content_col = ctx
+                        .lines
+                        .get(line_num.saturating_sub(1))
+                        .and_then(|li| li.list_item.as_ref())
+                        .map(|item| item.content_column)
+                        .unwrap_or(0);
+                    item_stack.push(content_col);
+                    after_soft_break = false;
+                }
+                Event::End(TagEnd::Item) => {
+                    item_stack.pop();
+                    after_soft_break = false;
+                }
+                Event::SoftBreak if !item_stack.is_empty() => {
+                    after_soft_break = true;
+                }
+                // Handle both Text and Code events after SoftBreak
+                // (lazy continuation can start with code spans like `token`)
+                Event::Text(_) | Event::Code(_) if after_soft_break => {
+                    if let Some(&expected_col) = item_stack.last() {
+                        let line_num = Self::byte_to_line(&ctx.line_offsets, range.start);
+                        let actual_indent = ctx
+                            .lines
+                            .get(line_num.saturating_sub(1))
+                            .map(|li| li.indent)
+                            .unwrap_or(0);
+
+                        // If the text starts at a column less than expected, it's lazy continuation
+                        if actual_indent < expected_col {
+                            lazy_lines.insert(line_num);
+                        }
+                    }
+                    after_soft_break = false;
+                }
+                _ => {
+                    after_soft_break = false;
+                }
+            }
+        }
+
+        lazy_lines
+    }
+
+    /// Convert a byte offset to a 1-indexed line number
+    fn byte_to_line(line_offsets: &[usize], byte_offset: usize) -> usize {
+        match line_offsets.binary_search(&byte_offset) {
+            Ok(idx) => idx + 1,
+            Err(idx) => idx.max(1),
+        }
     }
 
     // Convert centralized list blocks to the format expected by perform_checks
@@ -505,7 +576,48 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(Vec::new());
         }
 
-        self.perform_checks(ctx, &lines, &list_blocks, line_index)
+        let mut warnings = self.perform_checks(ctx, &lines, &list_blocks, line_index)?;
+
+        // When lazy continuation is not allowed, detect and warn about lazy continuation
+        // lines WITHIN list blocks (text that continues a list item but with less
+        // indentation than expected). Lazy continuation at the END of list blocks is
+        // already handled by the segment extension logic above.
+        if !self.config.allow_lazy_continuation {
+            let lazy_lines = Self::detect_lazy_continuation_lines(ctx);
+
+            for line_num in lazy_lines {
+                // Only warn about lazy continuation lines that are WITHIN a list block
+                // (i.e., between list items). End-of-block lazy continuation is already
+                // handled by the existing "list should be followed by blank line" logic.
+                let is_within_block = list_blocks
+                    .iter()
+                    .any(|(start, end, _)| line_num >= *start && line_num <= *end);
+
+                if !is_within_block {
+                    continue;
+                }
+
+                // Get the expected indent for context in the warning message
+                let line_content = lines.get(line_num.saturating_sub(1)).unwrap_or(&"");
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line_content);
+
+                // No automatic fix for within-list lazy continuation - adding a blank line
+                // would change document semantics (making it a separate paragraph instead
+                // of part of the list item). Let the user decide how to handle it.
+                warnings.push(LintWarning {
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    severity: Severity::Warning,
+                    rule_name: Some(self.name().to_string()),
+                    message: "Lazy continuation line should be properly indented or preceded by blank line".to_string(),
+                    fix: None,
+                });
+            }
+        }
+
+        Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -1625,42 +1737,55 @@ More text.
         // Lazy continuation text followed by another list item
         // In CommonMark, "Some text" becomes part of Item 1's lazy continuation,
         // and "- Item 2" starts a new list item within the same list.
-        // This is valid list structure, not a lazy continuation warning case.
+        // With allow_lazy_continuation = false, we warn about lazy continuation
+        // even within valid list structure (issue #295).
         let content = "- Item 1\nSome text\n- Item 2";
         let config = MD032Config {
             allow_lazy_continuation: false,
         };
         let warnings = lint_with_config(content, config);
-        // No MD032 warning because this is valid list structure
-        // (all content is within the list block)
+        // Should warn about lazy continuation on line 2
         assert_eq!(
             warnings.len(),
-            0,
-            "Valid list structure should not trigger lazy continuation warning"
+            1,
+            "Should warn about lazy continuation within list. Got: {warnings:?}"
         );
+        assert!(
+            warnings[0].message.contains("Lazy continuation"),
+            "Warning should be about lazy continuation"
+        );
+        assert_eq!(warnings[0].line, 2, "Warning should be on line 2");
     }
 
     #[test]
     fn test_lazy_continuation_multiple_in_document() {
-        // Multiple lists with lazy continuation at end
-        // First list: "- Item 1\nLazy 1" - lazy continuation is part of list
-        // Blank line separates the lists
-        // Second list: "- Item 2\nLazy 2" - lazy continuation followed by EOF
-        // Only the second list triggers a warning (list not followed by blank)
+        // Loose list (blank line between items) with lazy continuation
+        // In CommonMark, this is a single loose list, not two separate lists.
+        // "Lazy 1" is lazy continuation of Item 1
+        // "Lazy 2" is lazy continuation of Item 2, and list ends without blank line
         let content = "- Item 1\nLazy 1\n\n- Item 2\nLazy 2";
         let config = MD032Config {
             allow_lazy_continuation: false,
         };
         let warnings = lint_with_config(content, config.clone());
+        // Expect 2 warnings:
+        // 1. Line 2: lazy continuation within list
+        // 2. Line 4: list not followed by blank (second item ends at EOF)
         assert_eq!(
             warnings.len(),
-            1,
-            "Should warn for second list (not followed by blank). Got: {warnings:?}"
+            2,
+            "Should warn for both lazy continuations and list end. Got: {warnings:?}"
         );
 
         let fixed = fix_with_config(content, config.clone());
         let warnings_after = lint_with_config(&fixed, config);
-        assert_eq!(warnings_after.len(), 0, "No warnings should remain after fix");
+        // Within-list lazy continuation has no auto-fix (would change document semantics),
+        // so 1 warning remains after fixing the end-of-list issue
+        assert_eq!(
+            warnings_after.len(),
+            1,
+            "Within-list lazy continuation warning should remain (no auto-fix)"
+        );
     }
 
     #[test]
@@ -1770,6 +1895,179 @@ More text.
 
         let fixed = fix_with_config(content, config);
         assert_eq!(fixed, "- Item\n\n`code` continuation");
+    }
+
+    // =========================================================================
+    // Issue #295: Lazy continuation after nested sublists
+    // These tests verify detection of lazy continuation at outer indent level
+    // after nested sublists, followed by another list item.
+    // =========================================================================
+
+    #[test]
+    fn test_issue295_case1_nested_bullets_then_continuation_then_item() {
+        // Outer numbered item with nested bullets, lazy continuation, then next item
+        // The lazy continuation "A new Chat..." appears at column 1, not indented
+        let content = r#"1. Create a new Chat conversation:
+   - On the sidebar, select **New Chat**.
+   - In the box, type `/new`.
+   A new Chat conversation replaces the previous one.
+1. Under the Chat text box, turn off the toggle."#;
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // Should warn about line 4 "A new Chat..." which is lazy continuation
+        let lazy_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("Lazy continuation"))
+            .collect();
+        assert!(
+            !lazy_warnings.is_empty(),
+            "Should detect lazy continuation after nested bullets. Got: {warnings:?}"
+        );
+        assert!(
+            lazy_warnings.iter().any(|w| w.line == 4),
+            "Should warn on line 4. Got: {lazy_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue295_case3_code_span_starts_lazy_continuation() {
+        // Code span at the START of lazy continuation after nested bullets
+        // This is tricky because pulldown-cmark emits Code event, not Text
+        let content = r#"- `field`: Is the specific key:
+  - `password`: Accesses the password.
+  - `api_key`: Accesses the api_key.
+  `token`: Specifies which ID token to use.
+- `version_id`: Is the unique identifier."#;
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // Should warn about line 4 "`token`:..." which starts with code span
+        let lazy_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("Lazy continuation"))
+            .collect();
+        assert!(
+            !lazy_warnings.is_empty(),
+            "Should detect lazy continuation starting with code span. Got: {warnings:?}"
+        );
+        assert!(
+            lazy_warnings.iter().any(|w| w.line == 4),
+            "Should warn on line 4 (code span start). Got: {lazy_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue295_case4_deep_nesting_with_continuation_then_item() {
+        // Multiple nesting levels, lazy continuation, then next outer item
+        let content = r#"- Check out the branch, and test locally.
+  - If the MR requires significant modifications:
+    - **Skip local testing** and review instead.
+    - **Request verification** from the author.
+    - **Identify the minimal change** needed.
+  Your testing might result in opportunities.
+- If you don't understand, _say so_."#;
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // Should warn about line 6 "Your testing..." which is lazy continuation
+        let lazy_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("Lazy continuation"))
+            .collect();
+        assert!(
+            !lazy_warnings.is_empty(),
+            "Should detect lazy continuation after deep nesting. Got: {warnings:?}"
+        );
+        assert!(
+            lazy_warnings.iter().any(|w| w.line == 6),
+            "Should warn on line 6. Got: {lazy_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue295_ordered_list_nested_bullets_continuation() {
+        // Ordered list with nested bullets, continuation at outer level, then next item
+        // This is the exact pattern from debug_test6.md
+        let content = r#"# Test
+
+1. First item.
+   - Nested A.
+   - Nested B.
+   Continuation at outer level.
+1. Second item."#;
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // Should warn about line 6 "Continuation at outer level."
+        let lazy_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("Lazy continuation"))
+            .collect();
+        assert!(
+            !lazy_warnings.is_empty(),
+            "Should detect lazy continuation at outer level after nested. Got: {warnings:?}"
+        );
+        // Line 6 = "   Continuation at outer level." (3 spaces indent, but needs 4 for proper continuation)
+        assert!(
+            lazy_warnings.iter().any(|w| w.line == 6),
+            "Should warn on line 6. Got: {lazy_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue295_multiple_lazy_lines_after_nested() {
+        // Multiple lazy continuation lines after nested sublist
+        let content = r#"1. The device client receives a response.
+   - Those defined by OAuth Framework.
+   - Those specific to device authorization.
+   Those error responses are described below.
+   For more information on each response,
+   see the documentation.
+1. Next step in the process."#;
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // Should warn about lines 4, 5, 6 (all lazy continuation)
+        let lazy_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("Lazy continuation"))
+            .collect();
+        assert!(
+            lazy_warnings.len() >= 3,
+            "Should detect multiple lazy continuation lines. Got {} warnings: {lazy_warnings:?}",
+            lazy_warnings.len()
+        );
+    }
+
+    #[test]
+    fn test_issue295_properly_indented_not_lazy() {
+        // Properly indented continuation after nested sublist should NOT warn
+        let content = r#"1. First item.
+   - Nested A.
+   - Nested B.
+
+   Properly indented continuation.
+1. Second item."#;
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        let warnings = lint_with_config(content, config);
+        // With blank line before, this is a new paragraph, not lazy continuation
+        let lazy_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("Lazy continuation"))
+            .collect();
+        assert_eq!(
+            lazy_warnings.len(),
+            0,
+            "Should NOT warn when blank line separates continuation. Got: {lazy_warnings:?}"
+        );
     }
 
     #[test]
