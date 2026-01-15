@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.218] - 2026-01-15
+
+### Added
+
+- **Style Guide Preset examples**
+  - Google Markdown style guide config (`examples/google-style.toml`)
+  - Prettier-compatible markdown config (`examples/prettier-style.toml`)
+
+### Fixed
+
+- **MD032: Eliminate false positives on real-world repos**
+  - Tested against Rust Book (478 files) and MDN Content (14,100 files) with zero false positives
+  - Treat HTML comments as transparent for blank line checks
+  - Skip blank line warning when exiting blockquotes (boundary provides separation)
+  - Handle prose numbered items like "Chapter 19." (sentence continuation detection)
+  - Fix lazy continuation for code span continuations and nested sublists
+  - Remove incorrect uppercase heuristic that was closing lists prematurely
+
+- **Config: Correct rule alias mappings**
+  - Add `descriptive-link-text` alias for MD059
+  - Fix `table-cell-alignment` alias to map to MD060 (was incorrectly MD059)
+
+- **Config: Warn on per-file-ignores patterns with commas**
+  - Detects when patterns contain commas without braces
+  - Suggests correct glob syntax: `{*.md,*.txt}` instead of `*.md,*.txt`
+
 ## [0.0.217] - 2026-01-14
 
 ### Added
