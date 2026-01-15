@@ -583,10 +583,24 @@ impl MD032BlanksAroundLists {
                     let next_prefix = BLOCKQUOTE_PREFIX_RE
                         .find(next_line_str)
                         .map_or(String::new(), |m| m.as_str().to_string());
+
+                    // Check blockquote levels to detect boundary transitions
+                    // If the list ends inside a blockquote but the following line exits the blockquote
+                    // (fewer > chars in prefix), no blank line is needed - the blockquote boundary
+                    // provides semantic separation
+                    let end_line_str = lines[end_line - 1];
+                    let end_line_prefix = BLOCKQUOTE_PREFIX_RE
+                        .find(end_line_str)
+                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let end_line_bq_level = end_line_prefix.chars().filter(|&c| c == '>').count();
+                    let next_line_bq_level = next_prefix.chars().filter(|&c| c == '>').count();
+                    let exits_blockquote = end_line_bq_level > 0 && next_line_bq_level < end_line_bq_level;
+
                     let prefixes_match = next_prefix.trim() == prefix.trim();
 
                     // Only require blank lines for content in the same context (same blockquote level)
-                    if !is_next_excluded && prefixes_match {
+                    // Skip if the following line exits a blockquote - boundary provides separation
+                    if !is_next_excluded && prefixes_match && !exits_blockquote {
                         // Calculate precise character range for the last line of the list (not the line after)
                         let (start_line_last, start_col_last, end_line_last, end_col_last) =
                             calculate_line_range(end_line, lines[end_line - 1]);
@@ -803,8 +817,18 @@ impl MD032BlanksAroundLists {
                         .find(next_line_str)
                         .map_or(String::new(), |m| m.as_str().to_string());
 
+                    // Check blockquote levels to detect boundary transitions
+                    let end_line_str = lines[end_line - 1];
+                    let end_line_prefix = BLOCKQUOTE_PREFIX_RE
+                        .find(end_line_str)
+                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let end_line_bq_level = end_line_prefix.chars().filter(|&c| c == '>').count();
+                    let next_line_bq_level = next_prefix.chars().filter(|&c| c == '>').count();
+                    let exits_blockquote = end_line_bq_level > 0 && next_line_bq_level < end_line_bq_level;
+
                     // Compare trimmed prefixes to handle varying whitespace after > markers
-                    if !is_next_excluded && next_prefix.trim() == prefix.trim() {
+                    // Skip if exiting a blockquote - boundary provides separation
+                    if !is_next_excluded && next_prefix.trim() == prefix.trim() && !exits_blockquote {
                         // Use centralized helper for consistent blockquote prefix (no trailing space)
                         let bq_prefix = ctx.blockquote_prefix_for_blank_line(end_line - 1);
                         insertions.insert(end_line + 1, bq_prefix);
@@ -2274,6 +2298,62 @@ More text.
             warnings.len(),
             0,
             "Should not warn about ordered list inside HTML comment. Got: {warnings:?}"
+        );
+    }
+
+    // =========================================================================
+    // Blockquote Boundary Transition Tests
+    // When a list inside a blockquote ends and the next line exits the blockquote,
+    // no blank line is needed - the blockquote boundary provides semantic separation.
+    // =========================================================================
+
+    #[test]
+    fn test_blockquote_list_exit_no_warning() {
+        // Blockquote list followed by outer content - no blank line needed
+        let content = "- outer item\n  > - blockquote list 1\n  > - blockquote list 2\n- next outer item";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn when exiting blockquote. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_nested_blockquote_list_exit() {
+        // Nested blockquote list - exiting should not require blank line
+        let content =
+            "- outer\n  - nested\n    > - bq list 1\n    > - bq list 2\n  - back to nested\n- outer again";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn when exiting nested blockquote list. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_same_level_no_warning() {
+        // List INSIDE blockquote followed by text INSIDE same blockquote
+        // markdownlint-cli does NOT warn for this case - lazy continuation applies
+        let content = "> - item 1\n> - item 2\n> Text after";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn - text is lazy continuation in blockquote. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_list_with_special_chars() {
+        // Content with special chars like <> should not affect blockquote detection
+        let content = "- Item with <>&\n  > - blockquote item\n- Back to outer";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Special chars in content should not affect blockquote detection. Got: {warnings:?}"
         );
     }
 
