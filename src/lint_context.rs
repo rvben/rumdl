@@ -3289,7 +3289,13 @@ impl<'a> LintContext<'a> {
 
                     // WORKAROUND: If items are truly consecutive (no blank lines), they MUST be in the same list
                     // This handles edge cases where content patterns might otherwise split lists incorrectly
-                    if !continues_list && reasonable_distance && line_num > 0 && block.end_line == line_num - 1 {
+                    // Apply for: nested items (different types OK), OR same-level same-type items
+                    if !continues_list
+                        && (is_nested || same_type)
+                        && reasonable_distance
+                        && line_num > 0
+                        && block.end_line == line_num - 1
+                    {
                         // Check if the previous line was a list item or a continuation of a list item
                         // (including lazy continuation lines)
                         if block.item_lines.contains(&(line_num - 1)) {
@@ -3332,6 +3338,15 @@ impl<'a> LintContext<'a> {
                         );
                     } else {
                         // End current block and start a new one
+                        // When a different list type starts AT THE SAME LEVEL (not nested),
+                        // trim back lazy continuation lines (they become part of the gap, not the list)
+                        // For nested items, different types are fine - they're sub-lists
+                        if !same_type
+                            && !is_nested
+                            && let Some(&last_item) = block.item_lines.last()
+                        {
+                            block.end_line = last_item;
+                        }
 
                         list_blocks.push(block.clone());
 
@@ -3676,75 +3691,17 @@ impl<'a> LintContext<'a> {
 
                     // Allow lazy continuation if we're still within the same list block
                     // (not just immediately after a list item)
+                    // Also treat code span continuations as valid continuations regardless of indent
                     let is_lazy_continuation = !is_structural_separator
                         && !line_info.is_blank
-                        && (line_info.indent == 0 || line_info.indent >= min_required_indent);
+                        && (line_info.indent == 0
+                            || line_info.indent >= min_required_indent
+                            || line_info.in_code_span_continuation);
 
                     if is_lazy_continuation {
-                        // Additional check: if the line starts with uppercase and looks like a new sentence,
-                        // it's probably not a continuation
-                        // BUT: for blockquote lines with sufficient effective indent, always treat as continuation
-                        let line_content_raw = line_info.content(content);
-                        let block_bq_level_lazy = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
-                        let line_bq_level_lazy = line_content_raw
-                            .chars()
-                            .take_while(|c| *c == '>' || c.is_whitespace())
-                            .filter(|&c| c == '>')
-                            .count();
-                        let has_proper_blockquote_indent =
-                            if line_bq_level_lazy > 0 && line_bq_level_lazy == block_bq_level_lazy {
-                                // Compute effective indent after blockquote markers
-                                let mut pos = 0;
-                                let mut found_markers = 0;
-                                for c in line_content_raw.chars() {
-                                    pos += c.len_utf8();
-                                    if c == '>' {
-                                        found_markers += 1;
-                                        if found_markers == line_bq_level_lazy {
-                                            if line_content_raw.get(pos..pos + 1) == Some(" ") {
-                                                pos += 1;
-                                            }
-                                            break;
-                                        }
-                                    }
-                                }
-                                let after_bq = &line_content_raw[pos..];
-                                let effective_indent_lazy = after_bq.len() - after_bq.trim_start().len();
-                                let min_required_for_bq = if block.is_ordered { last_marker_width } else { 2 };
-                                effective_indent_lazy >= min_required_for_bq
-                            } else {
-                                false
-                            };
-
-                        // If it has proper blockquote indent, it's a continuation regardless of uppercase
-                        if has_proper_blockquote_indent {
-                            block.end_line = line_num;
-                        } else {
-                            let content_to_check = if !blockquote_prefix.is_empty() {
-                                // Strip blockquote prefix to check the actual content
-                                line_info
-                                    .content(content)
-                                    .strip_prefix(&blockquote_prefix)
-                                    .unwrap_or(line_info.content(content))
-                                    .trim()
-                            } else {
-                                line_info.content(content).trim()
-                            };
-
-                            let starts_with_uppercase =
-                                content_to_check.chars().next().is_some_and(|c| c.is_uppercase());
-
-                            // If it starts with uppercase and the previous line ended with punctuation,
-                            // it's likely a new paragraph, not a continuation
-                            if starts_with_uppercase && last_list_item_line > 0 {
-                                // This looks like a new paragraph
-                                list_blocks.push(block.clone());
-                                current_block = None;
-                            } else {
-                                // This is a lazy continuation line
-                                block.end_line = line_num;
-                            }
-                        }
+                        // Per CommonMark, lazy continuation continues until a blank line
+                        // or structural element, regardless of uppercase at line start
+                        block.end_line = line_num;
                     } else {
                         // Non-indented, non-blank line that's not a lazy continuation - end the block
                         list_blocks.push(block.clone());

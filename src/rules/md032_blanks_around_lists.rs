@@ -498,7 +498,23 @@ impl MD032BlanksAroundLists {
                         .line_info(line_idx)
                         .is_some_and(|info| info.in_code_block || info.in_front_matter);
 
-                    if !prev_is_blank && !prev_excluded {
+                    // Check if previous line looks like a sentence continuation
+                    // If the previous line is non-blank text that doesn't end with a sentence
+                    // terminator, this is likely a paragraph continuation, not a list item
+                    // e.g., "...in Chapter\n19. For now..." is a broken sentence, not a list
+                    let prev_trimmed = prev_line.trim();
+                    let is_sentence_continuation = !prev_is_blank
+                        && !prev_trimmed.is_empty()
+                        && !prev_trimmed.ends_with('.')
+                        && !prev_trimmed.ends_with('!')
+                        && !prev_trimmed.ends_with('?')
+                        && !prev_trimmed.ends_with(':')
+                        && !prev_trimmed.ends_with(';')
+                        && !prev_trimmed.ends_with('>')
+                        && !prev_trimmed.ends_with('-')
+                        && !prev_trimmed.ends_with('*');
+
+                    if !prev_is_blank && !prev_excluded && !is_sentence_continuation {
                         // This ordered list item starting with non-1 needs a blank line before it
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
 
@@ -2322,8 +2338,7 @@ More text.
     #[test]
     fn test_nested_blockquote_list_exit() {
         // Nested blockquote list - exiting should not require blank line
-        let content =
-            "- outer\n  - nested\n    > - bq list 1\n    > - bq list 2\n  - back to nested\n- outer again";
+        let content = "- outer\n  - nested\n    > - bq list 1\n    > - bq list 2\n  - back to nested\n- outer again";
         let warnings = lint(content);
         assert_eq!(
             warnings.len(),
