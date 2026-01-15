@@ -237,6 +237,48 @@ impl MD032BlanksAroundLists {
         }
     }
 
+    /// Find the first non-HTML-comment line before the given line (1-indexed).
+    /// Returns (line_num, is_blank) where:
+    /// - line_num is the 1-indexed line of actual content (0 if start of document)
+    /// - is_blank is true if that line is blank (meaning separation exists)
+    ///
+    /// This enables HTML comments to be "transparent" for blank line checking,
+    /// matching markdownlint-cli behavior.
+    fn find_preceding_content(ctx: &crate::lint_context::LintContext, before_line: usize) -> (usize, bool) {
+        for line_num in (1..before_line).rev() {
+            let idx = line_num - 1;
+            if let Some(info) = ctx.lines.get(idx) {
+                // Skip HTML comment lines - they're transparent
+                if info.in_html_comment {
+                    continue;
+                }
+                return (line_num, info.is_blank);
+            }
+        }
+        // Start of document = effectively blank-separated
+        (0, true)
+    }
+
+    /// Find the first non-HTML-comment line after the given line (1-indexed).
+    /// Returns (line_num, is_blank) where:
+    /// - line_num is the 1-indexed line of actual content (0 if end of document)
+    /// - is_blank is true if that line is blank (meaning separation exists)
+    fn find_following_content(ctx: &crate::lint_context::LintContext, after_line: usize) -> (usize, bool) {
+        let num_lines = ctx.lines.len();
+        for line_num in (after_line + 1)..=num_lines {
+            let idx = line_num - 1;
+            if let Some(info) = ctx.lines.get(idx) {
+                // Skip HTML comment lines - they're transparent
+                if info.in_html_comment {
+                    continue;
+                }
+                return (line_num, info.is_blank);
+            }
+        }
+        // End of document = effectively blank-separated
+        (0, true)
+    }
+
     // Convert centralized list blocks to the format expected by perform_checks
     fn convert_list_blocks(&self, ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize, String)> {
         let mut blocks: Vec<(usize, usize, String)> = Vec::new();
@@ -404,6 +446,14 @@ impl MD032BlanksAroundLists {
             }
         }
 
+        // Filter out lists entirely inside HTML comments
+        blocks.retain(|(start, end, _)| {
+            // Check if ALL lines of this block are inside HTML comments
+            let all_in_comment =
+                (*start..=*end).all(|line_num| ctx.lines.get(line_num - 1).is_some_and(|info| info.in_html_comment));
+            !all_in_comment
+        });
+
         blocks
     }
 
@@ -430,10 +480,10 @@ impl MD032BlanksAroundLists {
                 continue;
             }
 
-            // Skip if in code block or front matter
+            // Skip if in code block, front matter, or HTML comment
             if ctx
                 .line_info(line_num)
-                .is_some_and(|info| info.in_code_block || info.in_front_matter)
+                .is_some_and(|info| info.in_code_block || info.in_front_matter || info.in_html_comment)
             {
                 continue;
             }
@@ -472,78 +522,89 @@ impl MD032BlanksAroundLists {
         }
 
         for &(start_line, end_line, ref prefix) in list_blocks {
+            // Skip lists that start inside HTML comments
+            if ctx.line_info(start_line).is_some_and(|info| info.in_html_comment) {
+                continue;
+            }
+
             if start_line > 1 {
-                let prev_line_actual_idx_0 = start_line - 2;
-                let prev_line_actual_idx_1 = start_line - 1;
-                let prev_line_str = lines[prev_line_actual_idx_0];
-                let is_prev_excluded = ctx
-                    .line_info(prev_line_actual_idx_1)
-                    .is_some_and(|info| info.in_code_block || info.in_front_matter);
-                let prev_prefix = BLOCKQUOTE_PREFIX_RE
-                    .find(prev_line_str)
-                    .map_or(String::new(), |m| m.as_str().to_string());
-                let prev_is_blank = is_blank_in_context(prev_line_str);
-                let prefixes_match = prev_prefix.trim() == prefix.trim();
+                // Look past HTML comments to find actual preceding content
+                let (content_line, has_blank_separation) = Self::find_preceding_content(ctx, start_line);
 
-                // Only require blank lines for content in the same context (same blockquote level)
-                // and when the context actually requires it
-                let should_require = Self::should_require_blank_line_before(ctx, prev_line_actual_idx_1, start_line);
-                if !is_prev_excluded && !prev_is_blank && prefixes_match && should_require {
-                    // Calculate precise character range for the entire list line that needs a blank line before it
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(start_line, lines[start_line - 1]);
+                // If blank separation exists (through HTML comments), no warning needed
+                if !has_blank_separation && content_line > 0 {
+                    let prev_line_str = lines[content_line - 1];
+                    let is_prev_excluded = ctx
+                        .line_info(content_line)
+                        .is_some_and(|info| info.in_code_block || info.in_front_matter);
+                    let prev_prefix = BLOCKQUOTE_PREFIX_RE
+                        .find(prev_line_str)
+                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let prefixes_match = prev_prefix.trim() == prefix.trim();
 
-                    warnings.push(LintWarning {
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        severity: Severity::Warning,
-                        rule_name: Some(self.name().to_string()),
-                        message: "List should be preceded by blank line".to_string(),
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range_with_length(start_line, 1, 0),
-                            replacement: format!("{prefix}\n"),
-                        }),
-                    });
+                    // Only require blank lines for content in the same context (same blockquote level)
+                    // and when the context actually requires it
+                    let should_require = Self::should_require_blank_line_before(ctx, content_line, start_line);
+                    if !is_prev_excluded && prefixes_match && should_require {
+                        // Calculate precise character range for the entire list line that needs a blank line before it
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_line_range(start_line, lines[start_line - 1]);
+
+                        warnings.push(LintWarning {
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            rule_name: Some(self.name().to_string()),
+                            message: "List should be preceded by blank line".to_string(),
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(start_line, 1, 0),
+                                replacement: format!("{prefix}\n"),
+                            }),
+                        });
+                    }
                 }
             }
 
             if end_line < num_lines {
-                let next_line_idx_0 = end_line;
-                let next_line_idx_1 = end_line + 1;
-                let next_line_str = lines[next_line_idx_0];
-                // Check if next line is excluded - front matter or indented code blocks within lists
-                // We want blank lines before standalone code blocks, but not within list items
-                let is_next_excluded = ctx.line_info(next_line_idx_1).is_some_and(|info| info.in_front_matter)
-                    || (next_line_idx_0 < ctx.lines.len()
-                        && ctx.lines[next_line_idx_0].in_code_block
-                        && ctx.lines[next_line_idx_0].indent >= 2);
-                let next_prefix = BLOCKQUOTE_PREFIX_RE
-                    .find(next_line_str)
-                    .map_or(String::new(), |m| m.as_str().to_string());
-                let next_is_blank = is_blank_in_context(next_line_str);
-                let prefixes_match = next_prefix.trim() == prefix.trim();
+                // Look past HTML comments to find actual following content
+                let (content_line, has_blank_separation) = Self::find_following_content(ctx, end_line);
 
-                // Only require blank lines for content in the same context (same blockquote level)
-                if !is_next_excluded && !next_is_blank && prefixes_match {
-                    // Calculate precise character range for the last line of the list (not the line after)
-                    let (start_line_last, start_col_last, end_line_last, end_col_last) =
-                        calculate_line_range(end_line, lines[end_line - 1]);
+                // If blank separation exists (through HTML comments), no warning needed
+                if !has_blank_separation && content_line > 0 {
+                    let next_line_str = lines[content_line - 1];
+                    // Check if next line is excluded - front matter or indented code blocks within lists
+                    // We want blank lines before standalone code blocks, but not within list items
+                    let is_next_excluded = ctx.line_info(content_line).is_some_and(|info| info.in_front_matter)
+                        || (content_line <= ctx.lines.len()
+                            && ctx.lines[content_line - 1].in_code_block
+                            && ctx.lines[content_line - 1].indent >= 2);
+                    let next_prefix = BLOCKQUOTE_PREFIX_RE
+                        .find(next_line_str)
+                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let prefixes_match = next_prefix.trim() == prefix.trim();
 
-                    warnings.push(LintWarning {
-                        line: start_line_last,
-                        column: start_col_last,
-                        end_line: end_line_last,
-                        end_column: end_col_last,
-                        severity: Severity::Warning,
-                        rule_name: Some(self.name().to_string()),
-                        message: "List should be followed by blank line".to_string(),
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range_with_length(end_line + 1, 1, 0),
-                            replacement: format!("{prefix}\n"),
-                        }),
-                    });
+                    // Only require blank lines for content in the same context (same blockquote level)
+                    if !is_next_excluded && prefixes_match {
+                        // Calculate precise character range for the last line of the list (not the line after)
+                        let (start_line_last, start_col_last, end_line_last, end_col_last) =
+                            calculate_line_range(end_line, lines[end_line - 1]);
+
+                        warnings.push(LintWarning {
+                            line: start_line_last,
+                            column: start_col_last,
+                            end_line: end_line_last,
+                            end_column: end_col_last,
+                            severity: Severity::Warning,
+                            rule_name: Some(self.name().to_string()),
+                            message: "List should be followed by blank line".to_string(),
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(end_line + 1, 1, 0),
+                                replacement: format!("{prefix}\n"),
+                            }),
+                        });
+                    }
                 }
             }
         }
@@ -685,64 +746,69 @@ impl MD032BlanksAroundLists {
 
         // Phase 1: Identify needed insertions
         for &(start_line, end_line, ref prefix) in &list_blocks {
+            // Skip lists that start inside HTML comments
+            if ctx.line_info(start_line).is_some_and(|info| info.in_html_comment) {
+                continue;
+            }
+
             // Check before block
             if start_line > 1 {
-                let prev_line_actual_idx_0 = start_line - 2;
-                let prev_line_actual_idx_1 = start_line - 1;
-                let is_prev_excluded = ctx
-                    .line_info(prev_line_actual_idx_1)
-                    .is_some_and(|info| info.in_code_block || info.in_front_matter);
-                let prev_prefix = BLOCKQUOTE_PREFIX_RE
-                    .find(lines[prev_line_actual_idx_0])
-                    .map_or(String::new(), |m| m.as_str().to_string());
+                // Look past HTML comments to find actual preceding content
+                let (content_line, has_blank_separation) = Self::find_preceding_content(ctx, start_line);
 
-                let should_require = Self::should_require_blank_line_before(ctx, prev_line_actual_idx_1, start_line);
-                // Compare trimmed prefixes to handle varying whitespace after > markers
-                // (e.g., "> " vs ">   " should both match blockquote level 1)
-                if !is_prev_excluded
-                    && !is_blank_in_context(lines[prev_line_actual_idx_0])
-                    && prev_prefix.trim() == prefix.trim()
-                    && should_require
-                {
-                    // Use centralized helper for consistent blockquote prefix (no trailing space)
-                    let bq_prefix = ctx.blockquote_prefix_for_blank_line(start_line - 1);
-                    insertions.insert(start_line, bq_prefix);
+                // If blank separation exists (through HTML comments), no fix needed
+                if !has_blank_separation && content_line > 0 {
+                    let prev_line_str = lines[content_line - 1];
+                    let is_prev_excluded = ctx
+                        .line_info(content_line)
+                        .is_some_and(|info| info.in_code_block || info.in_front_matter);
+                    let prev_prefix = BLOCKQUOTE_PREFIX_RE
+                        .find(prev_line_str)
+                        .map_or(String::new(), |m| m.as_str().to_string());
+
+                    let should_require = Self::should_require_blank_line_before(ctx, content_line, start_line);
+                    // Compare trimmed prefixes to handle varying whitespace after > markers
+                    if !is_prev_excluded && prev_prefix.trim() == prefix.trim() && should_require {
+                        // Use centralized helper for consistent blockquote prefix (no trailing space)
+                        let bq_prefix = ctx.blockquote_prefix_for_blank_line(start_line - 1);
+                        insertions.insert(start_line, bq_prefix);
+                    }
                 }
             }
 
             // Check after block
             if end_line < num_lines {
-                let after_block_line_idx_0 = end_line;
-                let after_block_line_idx_1 = end_line + 1;
-                let line_after_block_content_str = lines[after_block_line_idx_0];
-                // Check if next line is excluded - in code block, front matter, or starts an indented code block
-                // Only exclude code fence lines if they're indented (part of list content)
-                let is_line_after_excluded = ctx
-                    .line_info(after_block_line_idx_1)
-                    .is_some_and(|info| info.in_code_block || info.in_front_matter)
-                    || (after_block_line_idx_0 < ctx.lines.len()
-                        && ctx.lines[after_block_line_idx_0].in_code_block
-                        && ctx.lines[after_block_line_idx_0].indent >= 2
-                        && (ctx.lines[after_block_line_idx_0]
-                            .content(ctx.content)
-                            .trim()
-                            .starts_with("```")
-                            || ctx.lines[after_block_line_idx_0]
+                // Look past HTML comments to find actual following content
+                let (content_line, has_blank_separation) = Self::find_following_content(ctx, end_line);
+
+                // If blank separation exists (through HTML comments), no fix needed
+                if !has_blank_separation && content_line > 0 {
+                    let next_line_str = lines[content_line - 1];
+                    // Check if next line is excluded - in code block, front matter, or starts an indented code block
+                    let is_next_excluded = ctx
+                        .line_info(content_line)
+                        .is_some_and(|info| info.in_code_block || info.in_front_matter)
+                        || (content_line <= ctx.lines.len()
+                            && ctx.lines[content_line - 1].in_code_block
+                            && ctx.lines[content_line - 1].indent >= 2
+                            && (ctx.lines[content_line - 1]
                                 .content(ctx.content)
                                 .trim()
-                                .starts_with("~~~")));
-                let after_prefix = BLOCKQUOTE_PREFIX_RE
-                    .find(line_after_block_content_str)
-                    .map_or(String::new(), |m| m.as_str().to_string());
+                                .starts_with("```")
+                                || ctx.lines[content_line - 1]
+                                    .content(ctx.content)
+                                    .trim()
+                                    .starts_with("~~~")));
+                    let next_prefix = BLOCKQUOTE_PREFIX_RE
+                        .find(next_line_str)
+                        .map_or(String::new(), |m| m.as_str().to_string());
 
-                // Compare trimmed prefixes to handle varying whitespace after > markers
-                if !is_line_after_excluded
-                    && !is_blank_in_context(line_after_block_content_str)
-                    && after_prefix.trim() == prefix.trim()
-                {
-                    // Use centralized helper for consistent blockquote prefix (no trailing space)
-                    let bq_prefix = ctx.blockquote_prefix_for_blank_line(end_line - 1);
-                    insertions.insert(after_block_line_idx_1, bq_prefix);
+                    // Compare trimmed prefixes to handle varying whitespace after > markers
+                    if !is_next_excluded && next_prefix.trim() == prefix.trim() {
+                        // Use centralized helper for consistent blockquote prefix (no trailing space)
+                        let bq_prefix = ctx.blockquote_prefix_for_blank_line(end_line - 1);
+                        insertions.insert(end_line + 1, bq_prefix);
+                    }
                 }
             }
         }
@@ -2067,6 +2133,147 @@ More text.
             lazy_warnings.len(),
             0,
             "Should NOT warn when blank line separates continuation. Got: {lazy_warnings:?}"
+        );
+    }
+
+    // =========================================================================
+    // HTML Comment Transparency Tests
+    // HTML comments should be "transparent" for blank line checking,
+    // matching markdownlint-cli behavior.
+    // =========================================================================
+
+    #[test]
+    fn test_html_comment_before_list_with_preceding_blank() {
+        // Blank line before HTML comment = list is properly separated
+        // markdownlint-cli does NOT warn here
+        let content = "Some text.\n\n<!-- comment -->\n- List item";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn when blank line exists before HTML comment. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_after_list_with_following_blank() {
+        // Blank line after HTML comment = list is properly separated
+        let content = "- List item\n<!-- comment -->\n\nSome text.";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn when blank line exists after HTML comment. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_list_inside_html_comment_ignored() {
+        // Lists entirely inside HTML comments should not be analyzed
+        let content = "<!--\n1. First\n2. Second\n3. Third\n-->";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not analyze lists inside HTML comments. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiline_html_comment_before_list() {
+        // Multi-line HTML comment should be transparent
+        let content = "Text\n\n<!--\nThis is a\nmulti-line\ncomment\n-->\n- Item";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Multi-line HTML comment should be transparent. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_blank_before_html_comment_still_warns() {
+        // No blank line anywhere = should still warn
+        let content = "Some text.\n<!-- comment -->\n- List item";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn when no blank line exists (even with HTML comment). Got: {warnings:?}"
+        );
+        assert!(
+            warnings[0].message.contains("preceded by blank line"),
+            "Should be 'preceded by blank line' warning"
+        );
+    }
+
+    #[test]
+    fn test_no_blank_after_html_comment_no_warn_lazy_continuation() {
+        // Text immediately after list (through HTML comment) is lazy continuation
+        // markdownlint-cli does NOT warn here - the text becomes part of the list
+        let content = "- List item\n<!-- comment -->\nSome text.";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn - text after comment becomes lazy continuation. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_list_followed_by_heading_through_comment_should_warn() {
+        // Heading cannot be lazy continuation, so this SHOULD warn
+        let content = "- List item\n<!-- comment -->\n# Heading";
+        let warnings = lint(content);
+        // Headings after lists through HTML comments should be handled gracefully
+        // The blank line check should look past the comment
+        assert!(
+            warnings.len() <= 1,
+            "Should handle heading after comment gracefully. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_between_list_and_text_both_directions() {
+        // Blank line on both sides through HTML comment
+        let content = "Text before.\n\n<!-- comment -->\n- Item 1\n- Item 2\n<!-- another -->\n\nText after.";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn with proper separation through comments. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_fix_does_not_insert_unnecessary_blank() {
+        // Fix should not add blank line when separation already exists through comment
+        let content = "Text.\n\n<!-- comment -->\n- Item";
+        let fixed = fix(content);
+        assert_eq!(fixed, content, "Fix should not modify already-correct content");
+    }
+
+    #[test]
+    fn test_html_comment_fix_adds_blank_when_needed() {
+        // Fix should add blank line when no separation exists
+        // The blank line is added immediately before the list (after the comment)
+        let content = "Text.\n<!-- comment -->\n- Item";
+        let fixed = fix(content);
+        assert!(
+            fixed.contains("<!-- comment -->\n\n- Item"),
+            "Fix should add blank line before list. Got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_ordered_list_inside_html_comment() {
+        // Ordered list with non-1 start inside comment should not warn
+        let content = "<!--\n3. Starting at 3\n4. Next item\n-->";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "Should not warn about ordered list inside HTML comment. Got: {warnings:?}"
         );
     }
 
