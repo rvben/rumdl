@@ -416,6 +416,18 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
+            // Skip Quarto/Pandoc citations ([@citation], @citation)
+            // Citations look like reference links but are bibliography references
+            if ctx.flavor == crate::config::MarkdownFlavor::Quarto && ctx.is_in_citation(link.byte_offset) {
+                continue;
+            }
+
+            // Skip links inside shortcodes ({{< ... >}} or {{% ... %}})
+            // Shortcodes may contain template syntax that looks like reference links
+            if ctx.is_in_shortcode(link.byte_offset) {
+                continue;
+            }
+
             if let Some(ref_id) = &link.reference_id {
                 let reference_lower = ref_id.to_lowercase();
 

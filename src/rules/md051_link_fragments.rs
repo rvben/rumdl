@@ -362,6 +362,18 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Skip Quarto/Pandoc citations ([@citation], @citation)
+            // Citations are bibliography references, not link fragments
+            if ctx.flavor == crate::config::MarkdownFlavor::Quarto && ctx.is_in_citation(link.byte_offset) {
+                continue;
+            }
+
+            // Skip links inside shortcodes ({{< ... >}} or {{% ... %}})
+            // Shortcodes may contain template syntax that looks like fragment links
+            if ctx.is_in_shortcode(link.byte_offset) {
+                continue;
+            }
+
             let url = &link.url;
 
             // Skip links without fragments or external URLs

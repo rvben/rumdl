@@ -145,11 +145,24 @@ impl Rule for MD042NoEmptyLinks {
 
         // Check if we're in MkDocs mode from the context
         let mkdocs_mode = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+        let quarto_mode = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
 
         // Use centralized link parsing from LintContext
         for link in &ctx.links {
             // Skip links inside Jinja templates
             if ctx.is_in_jinja_range(link.byte_offset) {
+                continue;
+            }
+
+            // Skip Quarto/Pandoc citations ([@citation], @citation)
+            // Citations look like reference links but are bibliography references
+            if quarto_mode && ctx.is_in_citation(link.byte_offset) {
+                continue;
+            }
+
+            // Skip links inside shortcodes ({{< ... >}} or {{% ... %}})
+            // Shortcodes may contain template syntax that looks like links
+            if ctx.is_in_shortcode(link.byte_offset) {
                 continue;
             }
 
