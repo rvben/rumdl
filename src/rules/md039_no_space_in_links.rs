@@ -103,6 +103,11 @@ impl Rule for MD039NoSpaceInLinks {
                 continue;
             }
 
+            // Skip links inside JSX expressions or MDX comments
+            if ctx.is_in_jsx_expression(link.byte_offset) || ctx.is_in_mdx_comment(link.byte_offset) {
+                continue;
+            }
+
             // Fast check if trimming is needed
             if !self.needs_trimming(&link.text) {
                 continue;
@@ -162,6 +167,11 @@ impl Rule for MD039NoSpaceInLinks {
         for image in &ctx.images {
             // Skip reference images (markdownlint doesn't check these)
             if image.is_reference {
+                continue;
+            }
+
+            // Skip images inside JSX expressions or MDX comments
+            if ctx.is_in_jsx_expression(image.byte_offset) || ctx.is_in_mdx_comment(image.byte_offset) {
                 continue;
             }
 

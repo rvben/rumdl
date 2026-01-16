@@ -126,10 +126,16 @@ impl Rule for MD012NoMultipleBlanks {
         // Use HashSet for O(1) lookups of lines that need to be checked
         let mut lines_to_check: HashSet<usize> = HashSet::new();
 
-        // Use filtered_lines to automatically skip front-matter and code blocks
+        // Use filtered_lines to automatically skip front-matter, code blocks, and Quarto divs
         // The in_code_block field in LineInfo is pre-computed using pulldown-cmark
         // and correctly handles both fenced code blocks and indented code blocks
-        for filtered_line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
+        // The in_quarto_div field is only set for Quarto flavor, so skip_quarto_divs() has no effect otherwise
+        for filtered_line in ctx
+            .filtered_lines()
+            .skip_front_matter()
+            .skip_code_blocks()
+            .skip_quarto_divs()
+        {
             let line_num = filtered_line.line_num - 1; // Convert 1-based to 0-based for internal tracking
             let line = filtered_line.content;
 
@@ -712,5 +718,48 @@ mod tests {
 
         let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
         assert_eq!(fixed, "# Heading\n\nParagraph\n", "Should reduce to single blank");
+    }
+
+    // Quarto flavor tests
+
+    #[test]
+    fn test_blank_lines_in_quarto_callout() {
+        // Blank lines inside Quarto callout blocks should be allowed
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Heading\n\n::: {.callout-note}\nNote content\n\n\nMore content\n:::\n\nAfter";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should not flag blanks inside Quarto callouts");
+    }
+
+    #[test]
+    fn test_blank_lines_in_quarto_div() {
+        // Blank lines inside generic Quarto divs should be allowed
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Text\n\n::: {.bordered}\nContent\n\n\nMore\n:::\n\nText";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should not flag blanks inside Quarto divs");
+    }
+
+    #[test]
+    fn test_blank_lines_outside_quarto_div_flagged() {
+        // Blank lines outside Quarto divs should still be flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Text\n\n\n::: {.callout-note}\nNote\n:::\n\n\nMore";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(!result.is_empty(), "Should flag blanks outside Quarto divs");
+    }
+
+    #[test]
+    fn test_quarto_divs_ignored_in_standard_flavor() {
+        // In standard flavor, Quarto div syntax is not special
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "::: {.callout-note}\nNote content\n\n\nMore content\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // In standard flavor, the triple blank inside "div" is flagged
+        assert!(!result.is_empty(), "Standard flavor should flag blanks in 'div'");
     }
 }

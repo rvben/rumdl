@@ -4,8 +4,8 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_url_range};
 use crate::utils::regex_cache::{
-    EMAIL_PATTERN, URL_IPV6_STR, URL_QUICK_CHECK_STR, URL_STANDARD_STR, URL_WWW_STR, get_cached_fancy_regex,
-    get_cached_regex,
+    EMAIL_PATTERN, URL_IPV6_STR, URL_QUICK_CHECK_STR, URL_STANDARD_STR, URL_WWW_STR, XMPP_URI_STR,
+    get_cached_fancy_regex, get_cached_regex,
 };
 
 use crate::filtered_lines::FilteredLinesExt;
@@ -17,8 +17,9 @@ const CUSTOM_PROTOCOL_PATTERN_STR: &str = r#"(?:grpc|ws|wss|ssh|git|svn|file|dat
 const MARKDOWN_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
 const MARKDOWN_EMPTY_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(\)"#;
 const MARKDOWN_EMPTY_REF_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\[\]"#;
+// Pattern for links in angle brackets - excludes HTTP(S), FTP(S), XMPP URIs, and emails
 const ANGLE_LINK_PATTERN_STR: &str =
-    r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
+    r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|xmpp:[^>]+|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
 const BADGE_LINK_LINE_STR: &str = r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#;
 const MARKDOWN_IMAGE_PATTERN_STR: &str = r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
 // Reference definition pattern - matches [label]: URL with optional title
@@ -41,8 +42,8 @@ pub struct MD034NoBareUrls;
 impl MD034NoBareUrls {
     #[inline]
     pub fn should_skip_content(&self, content: &str) -> bool {
-        // Skip if content has no URLs and no email addresses
-        // Fast byte scanning for common URL/email indicators
+        // Skip if content has no URLs, XMPP URIs, or email addresses
+        // Fast byte scanning for common URL/email/xmpp indicators
         let bytes = content.as_bytes();
         let has_colon = bytes.contains(&b':');
         let has_at = bytes.contains(&b'@');
@@ -272,6 +273,26 @@ impl MD034NoBareUrls {
             }
         }
 
+        // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
+        if let Ok(re) = get_cached_regex(XMPP_URI_STR) {
+            for mat in re.find_iter(line) {
+                let uri_str = mat.as_str();
+                let start_pos = mat.start();
+                let end_pos = mat.end();
+
+                // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
+                if start_pos > 0 && end_pos < line.len() {
+                    let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                    let next_char = line.as_bytes().get(end_pos).copied();
+                    if prev_char == Some(b'<') && next_char == Some(b'>') {
+                        continue;
+                    }
+                }
+
+                buffers.urls_found.push((start_pos, end_pos, uri_str.to_string()));
+            }
+        }
+
         // Process found URLs
         for &(start, _end, ref url_str) in buffers.urls_found.iter() {
             // Skip custom protocols
@@ -353,6 +374,11 @@ impl MD034NoBareUrls {
                 let email = mat.as_str();
                 let start = mat.start();
                 let end = mat.end();
+
+                // Skip if email is part of an XMPP URI (xmpp:user@domain)
+                if start >= 5 && &line[start - 5..start] == "xmpp:" {
+                    continue;
+                }
 
                 // Check if email is inside angle brackets or markdown link
                 let mut is_inside_construct = false;

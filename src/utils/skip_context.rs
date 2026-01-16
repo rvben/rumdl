@@ -8,7 +8,9 @@ use crate::lint_context::LintContext;
 use crate::utils::kramdown_utils::is_math_block_delimiter;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_critic;
+use crate::utils::mkdocs_extensions;
 use crate::utils::mkdocs_footnotes;
+use crate::utils::mkdocs_icons;
 use crate::utils::mkdocs_snippets;
 use crate::utils::mkdocs_tabs;
 use crate::utils::mkdocstrings_refs;
@@ -121,6 +123,18 @@ pub fn is_in_skip_context(ctx: &LintContext, byte_pos: usize) -> bool {
         return true;
     }
 
+    // Check MDX-specific contexts
+    if ctx.flavor == MarkdownFlavor::MDX {
+        // Check JSX expressions
+        if ctx.is_in_jsx_expression(byte_pos) {
+            return true;
+        }
+        // Check MDX comments
+        if ctx.is_in_mdx_comment(byte_pos) {
+            return true;
+        }
+    }
+
     // Check MkDocs snippet sections and multi-line blocks
     if ctx.flavor == MarkdownFlavor::MkDocs {
         if mkdocs_snippets::is_within_snippet_section(ctx.content, byte_pos) {
@@ -157,6 +171,18 @@ pub fn is_in_skip_context(ctx: &LintContext, byte_pos: usize) -> bool {
     }
 
     false
+}
+
+/// Check if a byte position is within a JSX expression (MDX: {expression})
+#[inline]
+pub fn is_in_jsx_expression(ctx: &LintContext, byte_pos: usize) -> bool {
+    ctx.flavor == MarkdownFlavor::MDX && ctx.is_in_jsx_expression(byte_pos)
+}
+
+/// Check if a byte position is within an MDX comment ({/* ... */})
+#[inline]
+pub fn is_in_mdx_comment(ctx: &LintContext, byte_pos: usize) -> bool {
+    ctx.flavor == MarkdownFlavor::MDX && ctx.is_in_mdx_comment(byte_pos)
 }
 
 /// Check if a line should be skipped due to MkDocs snippet syntax
@@ -297,6 +323,35 @@ pub fn is_table_line(line: &str) -> bool {
         return true;
     }
 
+    false
+}
+
+/// Check if a byte position is within an MkDocs icon shortcode
+/// Icon shortcodes use format like `:material-check:`, `:octicons-mark-github-16:`
+pub fn is_in_icon_shortcode(line: &str, position: usize, _flavor: MarkdownFlavor) -> bool {
+    // Only skip for MkDocs flavor, but check pattern for all flavors
+    // since emoji shortcodes are universal
+    mkdocs_icons::is_in_any_shortcode(line, position)
+}
+
+/// Check if a byte position is within PyMdown extension markup
+/// Includes: Keys (++ctrl+alt++), Caret (^text^), Insert (^^text^^), Mark (==text==)
+pub fn is_in_pymdown_markup(line: &str, position: usize, flavor: MarkdownFlavor) -> bool {
+    if flavor != MarkdownFlavor::MkDocs {
+        return false;
+    }
+    mkdocs_extensions::is_in_pymdown_markup(line, position)
+}
+
+/// Check if a byte position is within any MkDocs-specific markup
+/// Combines icon shortcodes and PyMdown extensions
+pub fn is_in_mkdocs_markup(line: &str, position: usize, flavor: MarkdownFlavor) -> bool {
+    if is_in_icon_shortcode(line, position, flavor) {
+        return true;
+    }
+    if is_in_pymdown_markup(line, position, flavor) {
+        return true;
+    }
     false
 }
 
@@ -443,5 +498,47 @@ More content"#;
             !is_in_front_matter(mixed_content, 4),
             "TOML block not at beginning should NOT be front matter"
         );
+    }
+
+    #[test]
+    fn test_is_in_icon_shortcode() {
+        let line = "Click :material-check: to confirm";
+        // Position 0-5 is "Click"
+        assert!(!is_in_icon_shortcode(line, 0, MarkdownFlavor::MkDocs));
+        // Position 6-22 is ":material-check:"
+        assert!(is_in_icon_shortcode(line, 6, MarkdownFlavor::MkDocs));
+        assert!(is_in_icon_shortcode(line, 15, MarkdownFlavor::MkDocs));
+        assert!(is_in_icon_shortcode(line, 21, MarkdownFlavor::MkDocs));
+        // Position 22+ is " to confirm"
+        assert!(!is_in_icon_shortcode(line, 22, MarkdownFlavor::MkDocs));
+    }
+
+    #[test]
+    fn test_is_in_pymdown_markup() {
+        // Test Keys notation
+        let line = "Press ++ctrl+c++ to copy";
+        assert!(!is_in_pymdown_markup(line, 0, MarkdownFlavor::MkDocs));
+        assert!(is_in_pymdown_markup(line, 6, MarkdownFlavor::MkDocs));
+        assert!(is_in_pymdown_markup(line, 10, MarkdownFlavor::MkDocs));
+        assert!(!is_in_pymdown_markup(line, 17, MarkdownFlavor::MkDocs));
+
+        // Test Mark notation
+        let line2 = "This is ==highlighted== text";
+        assert!(!is_in_pymdown_markup(line2, 0, MarkdownFlavor::MkDocs));
+        assert!(is_in_pymdown_markup(line2, 8, MarkdownFlavor::MkDocs));
+        assert!(is_in_pymdown_markup(line2, 15, MarkdownFlavor::MkDocs));
+        assert!(!is_in_pymdown_markup(line2, 23, MarkdownFlavor::MkDocs));
+
+        // Should not match for Standard flavor
+        assert!(!is_in_pymdown_markup(line, 10, MarkdownFlavor::Standard));
+    }
+
+    #[test]
+    fn test_is_in_mkdocs_markup() {
+        // Should combine both icon and pymdown
+        let line = ":material-check: and ++ctrl++";
+        assert!(is_in_mkdocs_markup(line, 5, MarkdownFlavor::MkDocs)); // In icon
+        assert!(is_in_mkdocs_markup(line, 23, MarkdownFlavor::MkDocs)); // In keys
+        assert!(!is_in_mkdocs_markup(line, 17, MarkdownFlavor::MkDocs)); // In " and "
     }
 }

@@ -6,6 +6,7 @@ use crate::rule_config_serde::RuleConfig;
 use crate::utils::element_cache::ElementCache;
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::mkdocs_admonitions;
+use crate::utils::quarto_divs;
 use crate::utils::range_utils::calculate_line_range;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
@@ -228,18 +229,26 @@ impl Rule for MD031BlanksAroundFences {
         let mut warnings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+        let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
 
         // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
         let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, &lines);
+
+        // Helper to check if a line is a Quarto div marker (opening or closing)
+        let is_quarto_div_marker =
+            |line: &str| -> bool { is_quarto && (quarto_divs::is_div_open(line) || quarto_divs::is_div_close(line)) };
 
         // Check blank lines around each fenced code block
         for (opening_line, closing_line) in &fenced_blocks {
             // Check for blank line before opening fence
             // Skip if right after frontmatter
+            // Skip if right after Quarto div marker (Quarto flavor)
             // Use is_effectively_empty_line to handle blockquote blank lines (issue #284)
+            let prev_line_is_quarto_marker = *opening_line > 0 && is_quarto_div_marker(lines[*opening_line - 1]);
             if *opening_line > 0
                 && !Self::is_effectively_empty_line(*opening_line - 1, &lines, ctx)
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
+                && !prev_line_is_quarto_marker
                 && self.should_require_blank_line(*opening_line, &lines)
             {
                 let (start_line, start_col, end_line, end_col) =
@@ -263,10 +272,14 @@ impl Rule for MD031BlanksAroundFences {
 
             // Check for blank line after closing fence
             // Allow Kramdown block attributes if configured
+            // Skip if followed by Quarto div marker (Quarto flavor)
             // Use is_effectively_empty_line to handle blockquote blank lines (issue #284)
+            let next_line_is_quarto_marker =
+                *closing_line + 1 < lines.len() && is_quarto_div_marker(lines[*closing_line + 1]);
             if *closing_line + 1 < lines.len()
                 && !Self::is_effectively_empty_line(*closing_line + 1, &lines, ctx)
                 && !is_kramdown_block_attribute(lines[*closing_line + 1])
+                && !next_line_is_quarto_marker
                 && self.should_require_blank_line(*closing_line, &lines)
             {
                 let (start_line, start_col, end_line, end_col) =
@@ -386,6 +399,11 @@ impl Rule for MD031BlanksAroundFences {
         let had_trailing_newline = content.ends_with('\n');
 
         let lines: Vec<&str> = content.lines().collect();
+        let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
+
+        // Helper to check if a line is a Quarto div marker (opening or closing)
+        let is_quarto_div_marker =
+            |line: &str| -> bool { is_quarto && (quarto_divs::is_div_open(line) || quarto_divs::is_div_close(line)) };
 
         // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
         let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, &lines);
@@ -396,20 +414,27 @@ impl Rule for MD031BlanksAroundFences {
 
         for (opening_line, closing_line) in &fenced_blocks {
             // Check if needs blank line before opening fence
+            // Skip if right after Quarto div marker (Quarto flavor)
             // Use is_effectively_empty_line to handle blockquote blank lines
+            let prev_line_is_quarto_marker = *opening_line > 0 && is_quarto_div_marker(lines[*opening_line - 1]);
             if *opening_line > 0
                 && !Self::is_effectively_empty_line(*opening_line - 1, &lines, ctx)
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
+                && !prev_line_is_quarto_marker
                 && self.should_require_blank_line(*opening_line, &lines)
             {
                 needs_blank_before.insert(*opening_line);
             }
 
             // Check if needs blank line after closing fence
+            // Skip if followed by Quarto div marker (Quarto flavor)
             // Use is_effectively_empty_line to handle blockquote blank lines
+            let next_line_is_quarto_marker =
+                *closing_line + 1 < lines.len() && is_quarto_div_marker(lines[*closing_line + 1]);
             if *closing_line + 1 < lines.len()
                 && !Self::is_effectively_empty_line(*closing_line + 1, &lines, ctx)
                 && !is_kramdown_block_attribute(lines[*closing_line + 1])
+                && !next_line_is_quarto_marker
                 && self.should_require_blank_line(*closing_line, &lines)
             {
                 needs_blank_after.insert(*closing_line);
@@ -950,5 +975,132 @@ echo "nested"
             fixed, expected,
             "Fix should preserve triple-nested blockquote prefix '>>>'"
         );
+    }
+
+    // ==================== Quarto Flavor Tests ====================
+
+    #[test]
+    fn test_quarto_code_block_after_div_open() {
+        // Code block immediately after Quarto div opening should not require blank line
+        let rule = MD031BlanksAroundFences::default();
+        let content = "::: {.callout-note}\n```python\ncode\n```\n:::";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Should not require blank line after Quarto div opening: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_code_block_before_div_close() {
+        // Code block immediately before Quarto div closing should not require blank line
+        let rule = MD031BlanksAroundFences::default();
+        let content = "::: {.callout-note}\nSome text\n```python\ncode\n```\n:::";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // Should only warn about the blank before the code block (after "Some text"), not after
+        assert!(
+            warnings.len() <= 1,
+            "Should not require blank line before Quarto div closing: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_code_block_outside_div_still_requires_blanks() {
+        // Code block outside Quarto div should still require blank lines
+        let rule = MD031BlanksAroundFences::default();
+        let content = "Some text\n```python\ncode\n```\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Should still require blank lines around code blocks outside divs"
+        );
+    }
+
+    #[test]
+    fn test_quarto_code_block_with_callout_note() {
+        // Code block inside callout-note should work without blank lines at boundaries
+        let rule = MD031BlanksAroundFences::default();
+        let content = "::: {.callout-note}\n```r\n1 + 1\n```\n:::\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Callout note with code block should have no warnings: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_nested_divs_with_code() {
+        // Nested divs with code blocks
+        let rule = MD031BlanksAroundFences::default();
+        let content = "::: {.outer}\n::: {.inner}\n```python\ncode\n```\n:::\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Nested divs with code blocks should have no warnings: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_div_markers_in_standard_flavor() {
+        // In standard flavor, ::: is not special, so normal rules apply
+        let rule = MD031BlanksAroundFences::default();
+        let content = "::: {.callout-note}\n```python\ncode\n```\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // In standard flavor, both before and after the code block need blank lines
+        // (unless the ":::" lines are treated as text and thus need blanks)
+        assert!(
+            !warnings.is_empty(),
+            "Standard flavor should require blanks around code blocks: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_fix_does_not_add_blanks_at_div_boundaries() {
+        // Fix should not add blank lines at div boundaries
+        let rule = MD031BlanksAroundFences::default();
+        let content = "::: {.callout-note}\n```python\ncode\n```\n:::";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should remain unchanged - no blanks needed
+        assert_eq!(fixed, content, "Fix should not add blanks at Quarto div boundaries");
+    }
+
+    #[test]
+    fn test_quarto_code_block_with_content_before() {
+        // Code block with content before it (inside div) needs blank
+        let rule = MD031BlanksAroundFences::default();
+        let content = "::: {.callout-note}\nHere is some code:\n```python\ncode\n```\n:::";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // Should warn about missing blank before code block (after "Here is some code:")
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should require blank before code block inside div: {warnings:?}"
+        );
+        assert!(warnings[0].message.contains("before"));
+    }
+
+    #[test]
+    fn test_quarto_code_block_with_content_after() {
+        // Code block with content after it (inside div) needs blank
+        let rule = MD031BlanksAroundFences::default();
+        let content = "::: {.callout-note}\n```python\ncode\n```\nMore content here.\n:::";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // Should warn about missing blank after code block (before "More content here.")
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should require blank after code block inside div: {warnings:?}"
+        );
+        assert!(warnings[0].message.contains("after"));
     }
 }

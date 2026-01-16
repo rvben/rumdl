@@ -58,7 +58,8 @@ pub struct FilteredLine<'a> {
 ///     .skip_html_blocks()
 ///     .skip_html_comments()
 ///     .skip_mkdocstrings()
-///     .skip_esm_blocks();
+///     .skip_esm_blocks()
+///     .skip_quarto_divs();
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct LineFilterConfig {
@@ -76,6 +77,12 @@ pub struct LineFilterConfig {
     pub skip_esm_blocks: bool,
     /// Skip lines inside math blocks ($$ ... $$)
     pub skip_math_blocks: bool,
+    /// Skip lines inside Quarto div blocks (::: ... :::)
+    pub skip_quarto_divs: bool,
+    /// Skip lines containing or inside JSX expressions (MDX: {expression})
+    pub skip_jsx_expressions: bool,
+    /// Skip lines inside MDX comments ({/* ... */})
+    pub skip_mdx_comments: bool,
 }
 
 impl LineFilterConfig {
@@ -155,6 +162,36 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside Quarto div blocks (::: ... :::)
+    ///
+    /// Quarto divs are fenced containers for callouts, panels, and other
+    /// structured content. Rules may need to skip them for accurate processing.
+    #[must_use]
+    pub fn skip_quarto_divs(mut self) -> Self {
+        self.skip_quarto_divs = true;
+        self
+    }
+
+    /// Skip lines containing or inside JSX expressions (MDX: {expression})
+    ///
+    /// JSX expressions contain JavaScript code and most markdown rules
+    /// should not process them as regular markdown content.
+    #[must_use]
+    pub fn skip_jsx_expressions(mut self) -> Self {
+        self.skip_jsx_expressions = true;
+        self
+    }
+
+    /// Skip lines inside MDX comments ({/* ... */})
+    ///
+    /// MDX comments are metadata and should not be processed by most
+    /// markdown linting rules.
+    #[must_use]
+    pub fn skip_mdx_comments(mut self) -> Self {
+        self.skip_mdx_comments = true;
+        self
+    }
+
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         (self.skip_front_matter && line_info.in_front_matter)
@@ -164,6 +201,9 @@ impl LineFilterConfig {
             || (self.skip_mkdocstrings && line_info.in_mkdocstrings)
             || (self.skip_esm_blocks && line_info.in_esm_block)
             || (self.skip_math_blocks && line_info.in_math_block)
+            || (self.skip_quarto_divs && line_info.in_quarto_div)
+            || (self.skip_jsx_expressions && line_info.in_jsx_expression)
+            || (self.skip_mdx_comments && line_info.in_mdx_comment)
     }
 }
 
@@ -327,6 +367,27 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_math_blocks(mut self) -> Self {
         self.config = self.config.skip_math_blocks();
+        self
+    }
+
+    /// Skip lines inside Quarto div blocks (::: ... :::)
+    #[must_use]
+    pub fn skip_quarto_divs(mut self) -> Self {
+        self.config = self.config.skip_quarto_divs();
+        self
+    }
+
+    /// Skip lines containing or inside JSX expressions (MDX: {expression})
+    #[must_use]
+    pub fn skip_jsx_expressions(mut self) -> Self {
+        self.config = self.config.skip_jsx_expressions();
+        self
+    }
+
+    /// Skip lines inside MDX comments ({/* ... */})
+    #[must_use]
+    pub fn skip_mdx_comments(mut self) -> Self {
+        self.config = self.config.skip_mdx_comments();
         self
     }
 }
@@ -584,6 +645,7 @@ More content."#;
 
     #[test]
     fn test_skip_esm_blocks() {
+        // MDX 2.0+ allows ESM imports/exports anywhere in the document
         let content = r#"import {Chart} from './components.js'
 import {Table} from './table.js'
 export const year = 2023
@@ -612,7 +674,7 @@ More content."#;
             "Should include content after ESM blocks"
         );
 
-        // Verify lines INSIDE ESM blocks (at top of file) are EXCLUDED
+        // Verify ALL ESM blocks are EXCLUDED (MDX 2.0+ allows imports anywhere)
         assert!(
             !lines.iter().any(|l| l.content.contains("import {Chart}")),
             "Should exclude import statements at top of file"
@@ -625,10 +687,10 @@ More content."#;
             !lines.iter().any(|l| l.content.contains("export const year")),
             "Should exclude export statements at top of file"
         );
-        // ESM blocks end once markdown starts, so import after markdown is NOT in ESM block
+        // MDX 2.0+ allows imports anywhere - they should ALL be excluded
         assert!(
-            lines.iter().any(|l| l.content.contains("import {Footer}")),
-            "Should include import statements after markdown content (not in ESM block)"
+            !lines.iter().any(|l| l.content.contains("import {Footer}")),
+            "Should exclude import statements even after markdown content (MDX 2.0+ ESM anywhere)"
         );
 
         // Verify line numbers are preserved
@@ -793,6 +855,274 @@ Regular text."#;
         assert!(
             !lines.iter().any(|l| l.content == "y = 2"),
             "Actual math block content should be excluded"
+        );
+    }
+
+    #[test]
+    fn test_skip_quarto_divs() {
+        let content = r#"# Heading
+
+::: {.callout-note}
+This is a callout note.
+With multiple lines.
+:::
+
+Regular text outside.
+
+::: {.bordered}
+Content inside bordered div.
+:::
+
+More content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Quarto, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_quarto_divs().into_iter().collect();
+
+        // Verify lines OUTSIDE Quarto divs are INCLUDED
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include markdown headings"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Regular text outside")),
+            "Should include content between divs"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("More content")),
+            "Should include content after divs"
+        );
+
+        // Verify lines INSIDE Quarto divs are EXCLUDED
+        assert!(
+            !lines.iter().any(|l| l.content.contains("::: {.callout-note}")),
+            "Should exclude callout div markers"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("This is a callout note")),
+            "Should exclude callout content"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Content inside bordered")),
+            "Should exclude bordered div content"
+        );
+    }
+
+    #[test]
+    fn test_skip_jsx_expressions() {
+        let content = r#"# MDX Document
+
+Here is some content with {myVariable} inline.
+
+{items.map(item => (
+  <Item key={item.id} />
+))}
+
+Regular paragraph after expression.
+
+{/* This should NOT be skipped by jsx_expressions filter */}
+{/* MDX comments have their own filter */}
+
+More content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_jsx_expressions().into_iter().collect();
+
+        // Verify lines OUTSIDE JSX expressions are INCLUDED
+        assert!(
+            lines.iter().any(|l| l.content.contains("# MDX Document")),
+            "Should include markdown headings"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Regular paragraph")),
+            "Should include regular paragraphs"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("More content")),
+            "Should include content after expressions"
+        );
+
+        // Verify lines with JSX expressions are EXCLUDED
+        assert!(
+            !lines.iter().any(|l| l.content.contains("{myVariable}")),
+            "Should exclude lines with inline JSX expressions"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("items.map")),
+            "Should exclude multi-line JSX expression content"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("<Item key")),
+            "Should exclude JSX inside expressions"
+        );
+    }
+
+    #[test]
+    fn test_skip_quarto_divs_nested() {
+        let content = r#"# Title
+
+::: {.outer}
+Outer content.
+
+::: {.inner}
+Inner content.
+:::
+
+Back to outer.
+:::
+
+Outside text."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Quarto, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_quarto_divs().into_iter().collect();
+
+        // Should include content outside all divs
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Title")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Outside text")),
+            "Should include text after divs"
+        );
+
+        // Should exclude all div content
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Outer content")),
+            "Should exclude outer div content"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Inner content")),
+            "Should exclude inner div content"
+        );
+    }
+
+    #[test]
+    fn test_skip_quarto_divs_not_in_standard_flavor() {
+        let content = r#"::: {.callout-note}
+This should NOT be skipped in standard flavor.
+:::"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_quarto_divs().into_iter().collect();
+
+        // In standard flavor, Quarto divs are not detected, so nothing is skipped
+        assert!(
+            lines.iter().any(|l| l.content.contains("This should NOT be skipped")),
+            "Standard flavor should not detect Quarto divs"
+        );
+    }
+
+    #[test]
+    fn test_skip_mdx_comments() {
+        let content = r#"# MDX Document
+
+{/* This is an MDX comment */}
+
+Regular content here.
+
+{/*
+  Multi-line
+  MDX comment
+*/}
+
+More content after comment."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_mdx_comments().into_iter().collect();
+
+        // Verify lines OUTSIDE MDX comments are INCLUDED
+        assert!(
+            lines.iter().any(|l| l.content.contains("# MDX Document")),
+            "Should include markdown headings"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Regular content")),
+            "Should include regular content"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("More content")),
+            "Should include content after comments"
+        );
+
+        // Verify lines with MDX comments are EXCLUDED
+        assert!(
+            !lines.iter().any(|l| l.content.contains("{/* This is")),
+            "Should exclude single-line MDX comments"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Multi-line")),
+            "Should exclude multi-line MDX comment content"
+        );
+    }
+
+    #[test]
+    fn test_jsx_expressions_with_nested_braces() {
+        // Test that nested braces are handled correctly
+        let content = r#"# Document
+
+{props.style || {color: "red", background: "blue"}}
+
+Regular content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_jsx_expressions().into_iter().collect();
+
+        // Verify nested braces don't break detection
+        assert!(
+            !lines.iter().any(|l| l.content.contains("props.style")),
+            "Should exclude JSX expression with nested braces"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Regular content")),
+            "Should include content after nested expression"
+        );
+    }
+
+    #[test]
+    fn test_jsx_and_mdx_comments_combined() {
+        // Test both filters together
+        let content = r#"# Title
+
+{variable}
+
+{/* comment */}
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        let lines: Vec<_> = ctx
+            .filtered_lines()
+            .skip_jsx_expressions()
+            .skip_mdx_comments()
+            .into_iter()
+            .collect();
+
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Title")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content")),
+            "Should include regular content"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("{variable}")),
+            "Should exclude JSX expression"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("{/* comment */")),
+            "Should exclude MDX comment"
+        );
+    }
+
+    #[test]
+    fn test_jsx_expressions_not_detected_in_standard_flavor() {
+        // JSX expressions should only be detected in MDX flavor
+        let content = r#"# Document
+
+{this is not JSX in standard markdown}
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_jsx_expressions().into_iter().collect();
+
+        // In standard markdown, braces are just text - nothing should be filtered
+        assert!(
+            lines.iter().any(|l| l.content.contains("{this is not JSX")),
+            "Should NOT exclude brace content in standard markdown"
         );
     }
 }

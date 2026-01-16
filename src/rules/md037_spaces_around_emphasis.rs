@@ -9,7 +9,10 @@ use crate::utils::emphasis_utils::{
 };
 use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
-use crate::utils::skip_context::{is_in_html_comment, is_in_math_context, is_in_table_cell};
+use crate::utils::skip_context::{
+    is_in_html_comment, is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup,
+    is_in_table_cell,
+};
 
 /// Check if an emphasis span has spacing issues that should be flagged
 #[inline]
@@ -101,10 +104,11 @@ impl Rule for MD037NoSpaceInEmphasis {
             self.check_line_for_emphasis_issues_fast(line.content, line.line_num, &mut warnings);
         }
 
-        // Filter out warnings for emphasis markers that are inside links, HTML comments, or math
+        // Filter out warnings for emphasis markers that are inside links, HTML comments, math, or MkDocs markup
         let mut filtered_warnings = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
 
-        for (line_idx, _line) in content.lines().enumerate() {
+        for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
             let line_start_pos = line_index.get_line_start_byte(line_num).unwrap_or(0);
 
@@ -113,14 +117,19 @@ impl Rule for MD037NoSpaceInEmphasis {
                 if warning.line == line_num {
                     // Calculate byte position of the warning
                     let byte_pos = line_start_pos + (warning.column - 1);
+                    // Calculate position within the line (0-indexed)
+                    let line_pos = warning.column - 1;
 
-                    // Skip if inside links, HTML comments, math contexts, tables, or code spans
+                    // Skip if inside links, HTML comments, math contexts, tables, code spans, MDX constructs, or MkDocs markup
                     // Note: is_in_code_span uses pulldown-cmark and correctly handles multi-line spans
                     if !self.is_in_link(ctx, byte_pos)
                         && !is_in_html_comment(content, byte_pos)
                         && !is_in_math_context(ctx, byte_pos)
                         && !is_in_table_cell(ctx, line_num, warning.column)
                         && !ctx.is_in_code_span(line_num, warning.column)
+                        && !is_in_jsx_expression(ctx, byte_pos)
+                        && !is_in_mdx_comment(ctx, byte_pos)
+                        && !is_in_mkdocs_markup(line, line_pos, ctx.flavor)
                     {
                         filtered_warnings.push(warning.clone());
                     }
@@ -582,6 +591,73 @@ This has * real spaced emphasis * that should be flagged."#;
         assert!(
             result2.is_empty(),
             "Should not flag asterisks inside multi-line code spans. Got: {result2:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_icon_shortcode_not_flagged() {
+        // Test that MkDocs icon shortcodes with asterisks inside are not flagged
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Icon shortcode syntax like :material-star: should not trigger MD037
+        // because it's valid MkDocs Material syntax
+        let content = "Click :material-check: to confirm and :fontawesome-solid-star: for favorites.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag MkDocs icon shortcodes. Got: {result:?}"
+        );
+
+        // Actual emphasis with spaces should still be flagged even in MkDocs mode
+        let content2 = "This has * real spaced emphasis * but also :material-check: icon.";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::MkDocs, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            !result2.is_empty(),
+            "Should still flag real spaced emphasis in MkDocs mode"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_pymdown_markup_not_flagged() {
+        // Test that PyMdown extension markup is not flagged as emphasis issues
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Keys notation (++ctrl+alt+delete++)
+        let content = "Press ++ctrl+c++ to copy.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag PyMdown Keys notation. Got: {result:?}"
+        );
+
+        // Mark notation (==highlighted==)
+        let content2 = "This is ==highlighted text== for emphasis.";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::MkDocs, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "Should not flag PyMdown Mark notation. Got: {result2:?}"
+        );
+
+        // Insert notation (^^inserted^^)
+        let content3 = "This is ^^inserted text^^ here.";
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::MkDocs, None);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert!(
+            result3.is_empty(),
+            "Should not flag PyMdown Insert notation. Got: {result3:?}"
+        );
+
+        // Mixed content with real emphasis issue and PyMdown markup
+        let content4 = "Press ++ctrl++ then * spaced emphasis * here.";
+        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::MkDocs, None);
+        let result4 = rule.check(&ctx4).unwrap();
+        assert!(
+            !result4.is_empty(),
+            "Should still flag real spaced emphasis alongside PyMdown markup"
         );
     }
 }

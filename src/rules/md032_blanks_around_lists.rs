@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::element_cache::ElementCache;
+use crate::utils::quarto_divs;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -237,20 +238,28 @@ impl MD032BlanksAroundLists {
         }
     }
 
-    /// Find the first non-HTML-comment line before the given line (1-indexed).
+    /// Find the first non-transparent line before the given line (1-indexed).
     /// Returns (line_num, is_blank) where:
     /// - line_num is the 1-indexed line of actual content (0 if start of document)
     /// - is_blank is true if that line is blank (meaning separation exists)
     ///
-    /// This enables HTML comments to be "transparent" for blank line checking,
+    /// Transparent elements (HTML comments, Quarto div markers) are skipped,
     /// matching markdownlint-cli behavior.
     fn find_preceding_content(ctx: &crate::lint_context::LintContext, before_line: usize) -> (usize, bool) {
+        let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
         for line_num in (1..before_line).rev() {
             let idx = line_num - 1;
             if let Some(info) = ctx.lines.get(idx) {
                 // Skip HTML comment lines - they're transparent
                 if info.in_html_comment {
                     continue;
+                }
+                // Skip Quarto div markers in Quarto flavor - they're transparent
+                if is_quarto {
+                    let trimmed = info.content(ctx.content).trim();
+                    if quarto_divs::is_div_open(trimmed) || quarto_divs::is_div_close(trimmed) {
+                        continue;
+                    }
                 }
                 return (line_num, info.is_blank);
             }
@@ -259,11 +268,14 @@ impl MD032BlanksAroundLists {
         (0, true)
     }
 
-    /// Find the first non-HTML-comment line after the given line (1-indexed).
+    /// Find the first non-transparent line after the given line (1-indexed).
     /// Returns (line_num, is_blank) where:
     /// - line_num is the 1-indexed line of actual content (0 if end of document)
     /// - is_blank is true if that line is blank (meaning separation exists)
+    ///
+    /// Transparent elements (HTML comments, Quarto div markers) are skipped.
     fn find_following_content(ctx: &crate::lint_context::LintContext, after_line: usize) -> (usize, bool) {
+        let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
         let num_lines = ctx.lines.len();
         for line_num in (after_line + 1)..=num_lines {
             let idx = line_num - 1;
@@ -271,6 +283,13 @@ impl MD032BlanksAroundLists {
                 // Skip HTML comment lines - they're transparent
                 if info.in_html_comment {
                     continue;
+                }
+                // Skip Quarto div markers in Quarto flavor - they're transparent
+                if is_quarto {
+                    let trimmed = info.content(ctx.content).trim();
+                    if quarto_divs::is_div_open(trimmed) || quarto_divs::is_div_close(trimmed) {
+                        continue;
+                    }
                 }
                 return (line_num, info.is_blank);
             }
@@ -2890,5 +2909,81 @@ More text.
             fixed, expected,
             "Fix should preserve triple-nested blockquote prefix '>>>'"
         );
+    }
+
+    // ==================== Quarto Flavor Tests ====================
+
+    fn lint_quarto(content: &str) -> Vec<LintWarning> {
+        let rule = MD032BlanksAroundLists::default();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        rule.check(&ctx).unwrap()
+    }
+
+    #[test]
+    fn test_quarto_list_after_div_open() {
+        // List immediately after Quarto div opening: div marker is transparent
+        let content = "Content\n\n::: {.callout-note}\n- Item 1\n- Item 2\n:::\n";
+        let warnings = lint_quarto(content);
+        // The blank line before div opening should count as separation
+        assert!(
+            warnings.is_empty(),
+            "Quarto div marker should be transparent before list: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_list_before_div_close() {
+        // List immediately before Quarto div closing: div close is at end, transparent
+        let content = "::: {.callout-note}\n\n- Item 1\n- Item 2\n:::\n";
+        let warnings = lint_quarto(content);
+        // The div closing marker is at end, should be transparent
+        assert!(
+            warnings.is_empty(),
+            "Quarto div marker should be transparent after list: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_list_needs_blank_without_div() {
+        // List still needs blank line without div providing separation
+        let content = "Content\n::: {.callout-note}\n- Item 1\n- Item 2\n:::\n";
+        let warnings = lint_quarto(content);
+        // No blank between "Content" and div opening (which is transparent)
+        // so list appears right after "Content" - needs blank
+        assert!(
+            !warnings.is_empty(),
+            "Should still require blank when not present: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_list_in_callout_with_content() {
+        // List inside callout with proper blank lines
+        let content = "::: {.callout-note}\nNote introduction:\n\n- Item 1\n- Item 2\n\nMore note content.\n:::\n";
+        let warnings = lint_quarto(content);
+        assert!(
+            warnings.is_empty(),
+            "List with proper blanks inside callout should pass: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_div_markers_not_transparent_in_standard_flavor() {
+        // In standard flavor, ::: is regular text
+        let content = "Content\n\n:::\n- Item 1\n- Item 2\n:::\n";
+        let warnings = lint(content); // Uses standard flavor
+        // In standard, ::: is just text, so list follows ::: without blank
+        assert!(
+            !warnings.is_empty(),
+            "Standard flavor should not treat ::: as transparent: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_nested_divs_with_list() {
+        // Nested Quarto divs with list inside
+        let content = "::: {.outer}\n::: {.inner}\n\n- Item 1\n- Item 2\n\n:::\n:::\n";
+        let warnings = lint_quarto(content);
+        assert!(warnings.is_empty(), "Nested divs with list should work: {warnings:?}");
     }
 }

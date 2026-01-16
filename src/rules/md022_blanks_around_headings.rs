@@ -4,6 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
+use crate::utils::quarto_divs;
 use crate::utils::range_utils::calculate_heading_range;
 use toml;
 
@@ -116,6 +117,7 @@ impl MD022BlanksAroundHeadings {
         // Content is normalized to LF at I/O boundary
         let line_ending = "\n";
         let had_trailing_newline = ctx.content.ends_with('\n');
+        let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
         let mut result = Vec::new();
         let mut skip_count: usize = 0;
 
@@ -131,7 +133,12 @@ impl MD022BlanksAroundHeadings {
                     if !line.is_blank && !line.in_html_comment {
                         let trimmed = line.content(ctx.content).trim();
                         // Check for single-line HTML comments too
-                        if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+                        if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+                            // Transparent - HTML comment
+                        } else if is_quarto && (quarto_divs::is_div_open(trimmed) || quarto_divs::is_div_close(trimmed))
+                        {
+                            // Transparent - Quarto div marker in Quarto flavor
+                        } else {
                             found_non_transparent = true;
                         }
                     }
@@ -164,7 +171,7 @@ impl MD022BlanksAroundHeadings {
                 let is_first_heading = Some(i) == heading_at_start_idx;
                 let heading_level = heading.level as usize;
 
-                // Count existing blank lines above in the result, skipping HTML comments and IAL
+                // Count existing blank lines above in the result, skipping HTML comments, IAL, and Quarto div markers
                 let mut blank_lines_above = 0;
                 let mut check_idx = result.len();
                 while check_idx > 0 {
@@ -178,6 +185,9 @@ impl MD022BlanksAroundHeadings {
                         check_idx -= 1;
                     } else if is_kramdown_block_attribute(trimmed) {
                         // Skip kramdown IAL - they are attached to headings and transparent
+                        check_idx -= 1;
+                    } else if is_quarto && (quarto_divs::is_div_open(trimmed) || quarto_divs::is_div_close(trimmed)) {
+                        // Skip Quarto div markers - they are transparent for blank line counting in Quarto flavor
                         check_idx -= 1;
                     } else {
                         break;
@@ -316,6 +326,7 @@ impl Rule for MD022BlanksAroundHeadings {
 
         // Content is normalized to LF at I/O boundary
         let line_ending = "\n";
+        let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
 
         let heading_at_start_idx = {
             let mut found_non_transparent = false;
@@ -329,7 +340,12 @@ impl Rule for MD022BlanksAroundHeadings {
                     if !line.is_blank && !line.in_html_comment {
                         let trimmed = line.content(ctx.content).trim();
                         // Check for single-line HTML comments too
-                        if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+                        if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+                            // Transparent - HTML comment
+                        } else if is_quarto && (quarto_divs::is_div_open(trimmed) || quarto_divs::is_div_close(trimmed))
+                        {
+                            // Transparent - Quarto div marker in Quarto flavor
+                        } else {
                             found_non_transparent = true;
                         }
                     }
@@ -387,6 +403,9 @@ impl Rule for MD022BlanksAroundHeadings {
                     } else if is_kramdown_block_attribute(trimmed) {
                         // Skip kramdown IAL - they are attached to headings and transparent for blank line counting
                         continue;
+                    } else if is_quarto && (quarto_divs::is_div_open(trimmed) || quarto_divs::is_div_close(trimmed)) {
+                        // Skip Quarto div markers - they are transparent for blank line counting in Quarto flavor
+                        continue;
                     } else if ctx.lines[j].in_front_matter {
                         // Skip frontmatter - first heading after frontmatter doesn't need blank line above
                         // Note: We only check in_front_matter flag, NOT the string "---", because
@@ -429,14 +448,36 @@ impl Rule for MD022BlanksAroundHeadings {
 
             // Check blank lines below
             if effective_last_line < ctx.lines.len() - 1 {
-                // Find next non-blank line
+                // Find next non-blank line, skipping transparent elements (blank lines, HTML comments, Quarto div markers)
                 let mut next_non_blank_idx = effective_last_line + 1;
-                while next_non_blank_idx < ctx.lines.len() && ctx.lines[next_non_blank_idx].is_blank {
-                    next_non_blank_idx += 1;
+                while next_non_blank_idx < ctx.lines.len() {
+                    let check_line = &ctx.lines[next_non_blank_idx];
+                    let check_trimmed = check_line.content(ctx.content).trim();
+                    if check_line.is_blank {
+                        next_non_blank_idx += 1;
+                    } else if check_line.in_html_comment
+                        || (check_trimmed.starts_with("<!--") && check_trimmed.ends_with("-->"))
+                    {
+                        // Skip HTML comments - they are transparent for blank line counting
+                        next_non_blank_idx += 1;
+                    } else if is_quarto
+                        && (quarto_divs::is_div_open(check_trimmed) || quarto_divs::is_div_close(check_trimmed))
+                    {
+                        // Skip Quarto div markers - they are transparent for blank line counting in Quarto flavor
+                        next_non_blank_idx += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                // If we've reached end of document (after skipping transparent elements), no blank needed
+                if next_non_blank_idx >= ctx.lines.len() {
+                    // End of document - no blank line needed after heading
+                    continue;
                 }
 
                 // Check if next line is a code fence or list item
-                let next_line_is_special = next_non_blank_idx < ctx.lines.len() && {
+                let next_line_is_special = {
                     let next_line = &ctx.lines[next_non_blank_idx];
                     let next_trimmed = next_line.content(ctx.content).trim();
 
@@ -457,8 +498,13 @@ impl Rule for MD022BlanksAroundHeadings {
 
                 // Only generate warning if next line is NOT a code fence or list item
                 if !next_line_is_special && let Some(required) = required_below_count {
-                    // Count blank lines below
-                    let blank_lines_below = next_non_blank_idx - effective_last_line - 1;
+                    // Count blank lines below (counting only blank lines, not skipped transparent lines)
+                    let mut blank_lines_below = 0;
+                    for k in (effective_last_line + 1)..next_non_blank_idx {
+                        if ctx.lines[k].is_blank {
+                            blank_lines_below += 1;
+                        }
+                    }
 
                     if blank_lines_below < required {
                         let needed_blanks = required - blank_lines_below;
@@ -1675,6 +1721,144 @@ More content."#;
         assert!(
             warnings.is_empty(),
             "Mixed headings with IAL should all work: {warnings:?}"
+        );
+    }
+
+    // ==================== Quarto Flavor Tests ====================
+
+    #[test]
+    fn test_quarto_div_marker_transparent_above_heading() {
+        // Quarto div markers should be transparent for blank line counting
+        // The blank line before the div opening should count toward the heading
+        let rule = MD022BlanksAroundHeadings::default();
+        // Content ends, blank, div opens, blank counts through div marker, heading
+        let content = "Content\n\n::: {.callout-note}\n# Heading\n\nMore content\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // The blank line before div opening should count as separation for heading
+        assert!(
+            warnings.is_empty(),
+            "Quarto div marker should be transparent above heading: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_div_marker_transparent_below_heading() {
+        // Quarto div opening marker should be transparent for blank line counting below heading
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\n\n::: {.callout-note}\nContent\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // The blank line after heading should count, and ::: should be transparent
+        assert!(
+            warnings.is_empty(),
+            "Quarto div marker should be transparent below heading: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_heading_inside_callout() {
+        // Heading inside Quarto callout should work normally
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "::: {.callout-note}\n\n## Note Title\n\nNote content\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Heading inside Quarto callout should have no warnings: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_heading_at_start_after_div_open() {
+        // Heading immediately after div open counts as being at document start
+        // because div marker is transparent for "first heading" detection
+        let rule = MD022BlanksAroundHeadings::default();
+        // This is the first heading in the document (div marker is transparent)
+        let content = "::: {.callout-warning}\n# Warning\n\nContent\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // The heading is at document start (after transparent div marker)
+        // BUT the default config has allowed_at_start = true, AND there's content inside the div
+        // that needs blank line below the heading. Let's check what we get.
+        // Actually, the heading needs a blank below (before "Content"), so let's fix the test.
+        // For this test, we want to verify the "above" requirement works with div marker transparency.
+        assert!(
+            warnings.is_empty(),
+            "Heading at start after div open should pass: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_heading_before_div_close() {
+        // Heading immediately before div close: the div close is at end of doc, so no blank needed after
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "::: {.callout-note}\nIntro\n\n## Section\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // The div closing marker is transparent, and at end of document there's nothing after it
+        // So technically the heading is at the end (nothing follows the div close).
+        // We need to check if the transparent marker logic works for end-of-document.
+        assert!(
+            warnings.is_empty(),
+            "Heading before div close should pass: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_div_markers_not_transparent_in_standard_flavor() {
+        // In standard flavor, ::: is regular text and breaks blank line sequences
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "Content\n\n:::\n# Heading\n\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // In standard flavor, the ::: is just text. So there's no blank between ::: and heading.
+        assert!(
+            !warnings.is_empty(),
+            "Standard flavor should not treat ::: as transparent: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_nested_divs_with_heading() {
+        // Nested Quarto divs with heading inside
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "::: {.outer}\n::: {.inner}\n\n# Heading\n\nContent\n:::\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Nested divs with heading should work: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_quarto_fix_preserves_div_markers() {
+        // Fix should preserve Quarto div markers
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "::: {.callout-note}\n\n## Note\n\nContent\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should preserve all the div markers
+        assert!(fixed.contains("::: {.callout-note}"), "Should preserve div opening");
+        assert!(fixed.contains(":::"), "Should preserve div closing");
+        assert!(fixed.contains("## Note"), "Should preserve heading");
+    }
+
+    #[test]
+    fn test_quarto_heading_needs_blank_without_div_transparency() {
+        // Without a blank line, heading after content should warn even with div marker between
+        // This tests that blank lines are still required, div markers just don't "reset" the count
+        let rule = MD022BlanksAroundHeadings::default();
+        // Content directly followed by div opening, then heading - should warn
+        let content = "Content\n::: {.callout-note}\n# Heading\n\nMore\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // The div marker is transparent, so we look through it.
+        // "Content" followed by heading with only a div marker in between - no blank!
+        assert!(
+            !warnings.is_empty(),
+            "Should still require blank line when not present: {warnings:?}"
         );
     }
 }

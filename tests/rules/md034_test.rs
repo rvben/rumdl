@@ -1180,3 +1180,174 @@ fn test_url_in_reference_definition_boundary() {
         "URL in reference definition should NOT be flagged: {result:?}"
     );
 }
+
+// =============================================================================
+// XMPP URI tests (GFM extended autolinks)
+// =============================================================================
+
+/// Test bare XMPP URIs are flagged
+#[test]
+fn test_bare_xmpp_uri() {
+    let rule = MD034NoBareUrls;
+
+    let content = "Contact me at xmpp:user@example.com";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Bare XMPP URI should be flagged");
+    assert!(
+        result[0].message.contains("xmpp:user@example.com"),
+        "Message should contain the XMPP URI"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Contact me at <xmpp:user@example.com>");
+}
+
+/// Test XMPP URI with resource path
+#[test]
+fn test_xmpp_uri_with_resource() {
+    let rule = MD034NoBareUrls;
+
+    let content = "My chat address: xmpp:foo@bar.baz/txt";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Bare XMPP URI with resource should be flagged");
+    assert!(
+        result[0].message.contains("xmpp:foo@bar.baz/txt"),
+        "Message should contain the XMPP URI with resource"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "My chat address: <xmpp:foo@bar.baz/txt>");
+}
+
+/// Test XMPP URI in angle brackets (properly formatted) is not flagged
+#[test]
+fn test_xmpp_uri_in_angle_brackets() {
+    let rule = MD034NoBareUrls;
+
+    let content = "Contact me at <xmpp:user@example.com>";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "XMPP URI in angle brackets should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test XMPP URI in markdown link is not flagged
+#[test]
+fn test_xmpp_uri_in_markdown_link() {
+    let rule = MD034NoBareUrls;
+
+    let content = "[Chat with me](xmpp:user@example.com)";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "XMPP URI in markdown link should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test multiple XMPP URIs
+#[test]
+fn test_multiple_xmpp_uris() {
+    let rule = MD034NoBareUrls;
+
+    let content = "Contact xmpp:alice@example.com or xmpp:bob@example.org/work";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 2, "Both bare XMPP URIs should be flagged");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Contact <xmpp:alice@example.com> or <xmpp:bob@example.org/work>");
+}
+
+/// Test XMPP URI mixed with regular URLs and emails
+#[test]
+fn test_xmpp_uri_mixed_with_urls_and_emails() {
+    let rule = MD034NoBareUrls;
+
+    let content = "Website: https://example.com\nEmail: user@example.com\nXMPP: xmpp:chat@example.com";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 3, "URL, email, and XMPP URI should all be flagged");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "Website: <https://example.com>\nEmail: <user@example.com>\nXMPP: <xmpp:chat@example.com>"
+    );
+}
+
+/// Test XMPP URI in code block is not flagged
+#[test]
+fn test_xmpp_uri_in_code_block() {
+    let rule = MD034NoBareUrls;
+
+    let content = "```\nxmpp:user@example.com\n```";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "XMPP URI in code block should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test XMPP URI in inline code is not flagged
+#[test]
+fn test_xmpp_uri_in_inline_code() {
+    let rule = MD034NoBareUrls;
+
+    let content = "Use `xmpp:user@example.com` for chat.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "XMPP URI in inline code should NOT be flagged: {result:?}"
+    );
+}
+
+/// Test XMPP URI variations per GFM spec
+#[test]
+fn test_xmpp_uri_variations() {
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        // Basic XMPP URI
+        ("xmpp:user@domain.com", 1, "<xmpp:user@domain.com>"),
+        // With subdomain
+        ("xmpp:chat@chat.example.org", 1, "<xmpp:chat@chat.example.org>"),
+        // With resource
+        ("xmpp:user@domain.net/mobile", 1, "<xmpp:user@domain.net/mobile>"),
+        // With complex resource
+        (
+            "xmpp:user@domain.com/resource/path",
+            1,
+            "<xmpp:user@domain.com/resource/path>",
+        ),
+        // With numbers
+        ("xmpp:user123@domain456.com", 1, "<xmpp:user123@domain456.com>"),
+        // With dots in username
+        ("xmpp:first.last@domain.com", 1, "<xmpp:first.last@domain.com>"),
+    ];
+
+    for (content, expected_count, expected_fix) in test_cases.iter() {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), *expected_count, "Failed for XMPP URI: {content}");
+
+        if *expected_count > 0 {
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, *expected_fix, "Fix failed for XMPP URI: {content}");
+        }
+    }
+}

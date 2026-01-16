@@ -109,6 +109,12 @@ pub struct LineInfo {
     pub is_horizontal_rule: bool,
     /// Whether this line is inside a math block ($$ ... $$)
     pub in_math_block: bool,
+    /// Whether this line is inside a Quarto div block (::: ... :::)
+    pub in_quarto_div: bool,
+    /// Whether this line contains or is inside a JSX expression (MDX only)
+    pub in_jsx_expression: bool,
+    /// Whether this line is inside an MDX comment {/* ... */} (MDX only)
+    pub in_mdx_comment: bool,
 }
 
 impl LineInfo {
@@ -409,6 +415,9 @@ use std::sync::{Arc, OnceLock};
 /// Map from line byte offset to list item data: (is_ordered, marker, marker_column, content_column, number)
 type ListItemMap = std::collections::HashMap<usize, (bool, String, usize, usize, Option<usize>)>;
 
+/// Type alias for byte ranges used in JSX expression and MDX comment detection
+type ByteRanges = Vec<(usize, usize)>;
+
 /// Character frequency data for fast content analysis
 #[derive(Debug, Clone, Default)]
 pub struct CharFrequency {
@@ -540,6 +549,8 @@ pub struct LintContext<'a> {
     jinja_ranges: Vec<(usize, usize)>,    // Pre-computed Jinja template ranges ({{ }}, {% %})
     pub flavor: MarkdownFlavor,           // Markdown flavor being used
     pub source_file: Option<PathBuf>,     // Source file path (for rules that need file context)
+    jsx_expression_ranges: Vec<(usize, usize)>, // Pre-computed JSX expression ranges (MDX: {expression})
+    mdx_comment_ranges: Vec<(usize, usize)>, // Pre-computed MDX comment ranges ({/* ... */})
 }
 
 /// Detailed blockquote parse result with all components
@@ -623,6 +634,15 @@ impl<'a> LintContext<'a> {
             }
         });
 
+        // Pre-compute Quarto div block ranges for Quarto flavor
+        let quarto_div_ranges = profile_section!("Quarto div ranges", profile, {
+            if flavor == MarkdownFlavor::Quarto {
+                crate::utils::quarto_divs::detect_div_block_ranges(content)
+            } else {
+                Vec::new()
+            }
+        });
+
         // Pre-compute line information AND emphasis spans (without headings/blockquotes yet)
         // Emphasis spans are captured during the same pulldown-cmark parse as list detection
         let (mut lines, emphasis_spans) = profile_section!(
@@ -635,6 +655,7 @@ impl<'a> LintContext<'a> {
                 flavor,
                 &html_comment_ranges,
                 &autodoc_ranges,
+                &quarto_div_ranges,
             )
         );
 
@@ -646,6 +667,13 @@ impl<'a> LintContext<'a> {
             "ESM blocks",
             profile,
             Self::detect_esm_blocks(content, &mut lines, flavor)
+        );
+
+        // Detect JSX expressions and MDX comments in MDX files
+        let (jsx_expression_ranges, mdx_comment_ranges) = profile_section!(
+            "JSX/MDX detection",
+            profile,
+            Self::detect_jsx_and_mdx_comments(content, &mut lines, flavor, &code_blocks)
         );
 
         // Collect link byte ranges early for heading detection (to skip lines inside link syntax)
@@ -753,6 +781,8 @@ impl<'a> LintContext<'a> {
             jinja_ranges,
             flavor,
             source_file,
+            jsx_expression_ranges,
+            mdx_comment_ranges,
         }
     }
 
@@ -1072,6 +1102,32 @@ impl<'a> LintContext<'a> {
         self.jinja_ranges
             .iter()
             .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+    }
+
+    /// Check if a byte position is within a JSX expression (MDX: {expression})
+    #[inline]
+    pub fn is_in_jsx_expression(&self, byte_pos: usize) -> bool {
+        self.jsx_expression_ranges
+            .iter()
+            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+    }
+
+    /// Check if a byte position is within an MDX comment ({/* ... */})
+    #[inline]
+    pub fn is_in_mdx_comment(&self, byte_pos: usize) -> bool {
+        self.mdx_comment_ranges
+            .iter()
+            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+    }
+
+    /// Get all JSX expression byte ranges
+    pub fn jsx_expression_ranges(&self) -> &[(usize, usize)] {
+        &self.jsx_expression_ranges
+    }
+
+    /// Get all MDX comment byte ranges
+    pub fn mdx_comment_ranges(&self) -> &[(usize, usize)] {
+        &self.mdx_comment_ranges
     }
 
     /// Check if a byte position is within a link reference definition title
@@ -2244,6 +2300,7 @@ impl<'a> LintContext<'a> {
         flavor: MarkdownFlavor,
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
         autodoc_ranges: &[crate::utils::skip_context::ByteRange],
+        quarto_div_ranges: &[crate::utils::skip_context::ByteRange],
     ) -> (Vec<LineInfo>, Vec<EmphasisSpan>) {
         let content_lines: Vec<&str> = content.lines().collect();
         let mut lines = Vec::with_capacity(content_lines.len());
@@ -2322,6 +2379,10 @@ impl<'a> LintContext<'a> {
             // Get math block status for this line
             let in_math_block = math_block_map.get(i).copied().unwrap_or(false);
 
+            // Check if line is inside a Quarto div block
+            let in_quarto_div = flavor == MarkdownFlavor::Quarto
+                && crate::utils::quarto_divs::is_within_div_block_ranges(quarto_div_ranges, byte_offset);
+
             lines.push(LineInfo {
                 byte_offset,
                 byte_len: line.len(),
@@ -2340,6 +2401,9 @@ impl<'a> LintContext<'a> {
                 in_code_span_continuation: false, // Will be populated after code spans are parsed
                 is_horizontal_rule: is_hr,
                 in_math_block,
+                in_quarto_div,
+                in_jsx_expression: false, // Will be populated for MDX files
+                in_mdx_comment: false,    // Will be populated for MDX files
             });
         }
 
@@ -2818,53 +2882,216 @@ impl<'a> LintContext<'a> {
         }
     }
 
-    /// Detect ESM import/export blocks in MDX files
-    /// ESM blocks consist of contiguous import/export statements at the top of the file
+    /// Detect ESM import/export blocks anywhere in MDX files
+    /// MDX 2.0+ allows imports/exports anywhere in the document, not just at the top
     fn detect_esm_blocks(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) {
         // Only process MDX files
         if !flavor.supports_esm_blocks() {
             return;
         }
 
-        let mut in_multiline_comment = false;
+        let mut in_multiline_import = false;
 
         for line in lines.iter_mut() {
-            // Skip blank lines and HTML comments
-            if line.is_blank || line.in_html_comment {
+            // Skip code blocks, front matter, and HTML comments
+            if line.in_code_block || line.in_front_matter || line.in_html_comment {
+                in_multiline_import = false;
                 continue;
             }
 
-            let trimmed = line.content(content).trim_start();
+            let line_content = line.content(content);
+            let trimmed = line_content.trim();
 
-            // Handle continuation of multi-line JS comments
-            if in_multiline_comment {
-                if trimmed.contains("*/") {
-                    in_multiline_comment = false;
+            // Handle continuation of multi-line import/export
+            if in_multiline_import {
+                line.in_esm_block = true;
+                // Check if this line completes the statement
+                // Multi-line import ends when we see the closing quote + optional semicolon
+                if trimmed.ends_with('\'')
+                    || trimmed.ends_with('"')
+                    || trimmed.ends_with("';")
+                    || trimmed.ends_with("\";")
+                    || line_content.contains(';')
+                {
+                    in_multiline_import = false;
                 }
                 continue;
             }
 
-            // Skip single-line JS comments (// and ///)
-            if trimmed.starts_with("//") {
-                continue;
-            }
-
-            // Handle start of multi-line JS comment
-            if trimmed.starts_with("/*") {
-                if !trimmed.contains("*/") {
-                    in_multiline_comment = true;
-                }
+            // Skip blank lines
+            if line.is_blank {
                 continue;
             }
 
             // Check if line starts with import or export
             if trimmed.starts_with("import ") || trimmed.starts_with("export ") {
                 line.in_esm_block = true;
-            } else {
-                // Once we hit a non-ESM, non-comment line, we're done with the ESM block
-                break;
+
+                // Determine if this is a complete single-line statement or starts a multi-line one
+                // Multi-line imports look like:
+                //   import {
+                //     Foo,
+                //     Bar
+                //   } from 'module'
+                // Single-line imports/exports end with a quote, semicolon, or are simple exports
+                let is_import = trimmed.starts_with("import ");
+
+                // Check for simple complete statements
+                let is_complete =
+                    // Ends with semicolon
+                    trimmed.ends_with(';')
+                    // import/export with from clause that ends with quote
+                    || (trimmed.contains(" from ") && (trimmed.ends_with('\'') || trimmed.ends_with('"')))
+                    // Simple export (export const/let/var/function/class without from)
+                    || (!is_import && !trimmed.contains(" from ") && (
+                        trimmed.starts_with("export const ")
+                        || trimmed.starts_with("export let ")
+                        || trimmed.starts_with("export var ")
+                        || trimmed.starts_with("export function ")
+                        || trimmed.starts_with("export class ")
+                        || trimmed.starts_with("export default ")
+                    ));
+
+                if !is_complete && is_import {
+                    // Only imports can span multiple lines in the typical case
+                    // Check if it looks like the start of a multi-line import
+                    // e.g., "import {" or "import type {"
+                    if trimmed.contains('{') && !trimmed.contains('}') {
+                        in_multiline_import = true;
+                    }
+                }
             }
         }
+    }
+
+    /// Detect JSX expressions {expression} and MDX comments {/* comment */} in MDX files
+    /// Returns (jsx_expression_ranges, mdx_comment_ranges)
+    fn detect_jsx_and_mdx_comments(
+        content: &str,
+        lines: &mut [LineInfo],
+        flavor: MarkdownFlavor,
+        code_blocks: &[(usize, usize)],
+    ) -> (ByteRanges, ByteRanges) {
+        // Only process MDX files
+        if !flavor.supports_jsx() {
+            return (Vec::new(), Vec::new());
+        }
+
+        let mut jsx_expression_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut mdx_comment_ranges: Vec<(usize, usize)> = Vec::new();
+
+        // Quick check - if no braces, no JSX expressions or MDX comments
+        if !content.contains('{') {
+            return (jsx_expression_ranges, mdx_comment_ranges);
+        }
+
+        let bytes = content.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if bytes[i] == b'{' {
+                // Check if we're in a code block
+                if code_blocks.iter().any(|(start, end)| i >= *start && i < *end) {
+                    i += 1;
+                    continue;
+                }
+
+                let start = i;
+
+                // Check if it's an MDX comment: {/* ... */}
+                if i + 2 < bytes.len() && &bytes[i + 1..i + 3] == b"/*" {
+                    // Find the closing */}
+                    let mut j = i + 3;
+                    while j + 2 < bytes.len() {
+                        if &bytes[j..j + 2] == b"*/" && j + 2 < bytes.len() && bytes[j + 2] == b'}' {
+                            let end = j + 3;
+                            mdx_comment_ranges.push((start, end));
+
+                            // Mark lines as in MDX comment
+                            Self::mark_lines_in_range(lines, content, start, end, |line| {
+                                line.in_mdx_comment = true;
+                            });
+
+                            i = end;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if j + 2 >= bytes.len() {
+                        // Unclosed MDX comment - mark rest as comment
+                        mdx_comment_ranges.push((start, bytes.len()));
+                        Self::mark_lines_in_range(lines, content, start, bytes.len(), |line| {
+                            line.in_mdx_comment = true;
+                        });
+                        break;
+                    }
+                } else {
+                    // Regular JSX expression: { ... }
+                    // Need to handle nested braces
+                    let mut brace_depth = 1;
+                    let mut j = i + 1;
+                    let mut in_string = false;
+                    let mut string_char = b'"';
+
+                    while j < bytes.len() && brace_depth > 0 {
+                        let c = bytes[j];
+
+                        // Handle strings to avoid counting braces inside them
+                        if !in_string && (c == b'"' || c == b'\'' || c == b'`') {
+                            in_string = true;
+                            string_char = c;
+                        } else if in_string && c == string_char && (j == 0 || bytes[j - 1] != b'\\') {
+                            in_string = false;
+                        } else if !in_string {
+                            if c == b'{' {
+                                brace_depth += 1;
+                            } else if c == b'}' {
+                                brace_depth -= 1;
+                            }
+                        }
+                        j += 1;
+                    }
+
+                    if brace_depth == 0 {
+                        let end = j;
+                        jsx_expression_ranges.push((start, end));
+
+                        // Mark lines as in JSX expression
+                        Self::mark_lines_in_range(lines, content, start, end, |line| {
+                            line.in_jsx_expression = true;
+                        });
+
+                        i = end;
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                i += 1;
+            }
+        }
+
+        (jsx_expression_ranges, mdx_comment_ranges)
+    }
+
+    /// Helper to mark lines within a byte range
+    fn mark_lines_in_range<F>(lines: &mut [LineInfo], content: &str, start: usize, end: usize, mut f: F)
+    where
+        F: FnMut(&mut LineInfo),
+    {
+        // Find lines that overlap with the range
+        for line in lines.iter_mut() {
+            let line_start = line.byte_offset;
+            let line_end = line.byte_offset + line.byte_len;
+
+            // Check if this line overlaps with the range
+            if line_start < end && line_end > start {
+                f(line);
+            }
+        }
+
+        // Silence unused warning for content (needed for signature consistency)
+        let _ = content;
     }
 
     /// Parse all inline code spans in the content using pulldown-cmark streaming parser

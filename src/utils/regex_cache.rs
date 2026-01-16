@@ -253,11 +253,22 @@ pub const URL_IPV6_STR: &str = concat!(
     r#"(?:#[^\s<>\[\]\\'\"`]*)?"#,    // Optional fragment
 );
 
+/// Pattern for XMPP URIs per GFM extended autolinks specification.
+///
+/// XMPP URIs use the format `xmpp:user@domain/resource` (without `://`).
+/// Reference: <https://github.github.com/gfm/#autolinks-extension->
+///
+/// # Examples
+/// - `xmpp:foo@bar.baz`
+/// - `xmpp:foo@bar.baz/txt`
+pub const XMPP_URI_STR: &str = r#"xmpp:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s<>\[\]\\'\"`]*)?"#;
+
 /// Quick check pattern for early exits.
 ///
 /// Use this for fast pre-filtering before running more expensive patterns.
 /// Matches if the text likely contains a URL or email address.
-pub const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?|ftp)://|@|www\."#;
+/// Includes `xmpp:` for GFM extended autolinks.
+pub const URL_QUICK_CHECK_STR: &str = r#"(?:https?|ftps?|ftp|xmpp)://|xmpp:|@|www\."#;
 
 /// Simple URL pattern for content detection.
 ///
@@ -290,6 +301,10 @@ pub static URL_SIMPLE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(URL_S
 
 /// Alias for `URL_SIMPLE_REGEX`. Used by MD013 for line length exemption.
 pub static URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| URL_SIMPLE_REGEX.clone());
+
+/// XMPP URI regex - for GFM extended autolinks.
+/// See [`XMPP_URI_STR`] for documentation.
+pub static XMPP_URI_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(XMPP_URI_STR).unwrap());
 
 // Heading patterns
 pub static ATX_HEADING_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s+|$)").unwrap());

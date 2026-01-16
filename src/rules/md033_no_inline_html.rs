@@ -15,13 +15,19 @@ use md033_config::MD033Config;
 pub struct MD033NoInlineHtml {
     config: MD033Config,
     allowed: HashSet<String>,
+    disallowed: HashSet<String>,
 }
 
 impl Default for MD033NoInlineHtml {
     fn default() -> Self {
         let config = MD033Config::default();
         let allowed = config.allowed_set();
-        Self { config, allowed }
+        let disallowed = config.disallowed_set();
+        Self {
+            config,
+            allowed,
+            disallowed,
+        }
     }
 }
 
@@ -33,14 +39,39 @@ impl MD033NoInlineHtml {
     pub fn with_allowed(allowed_vec: Vec<String>) -> Self {
         let config = MD033Config {
             allowed: allowed_vec.clone(),
+            disallowed: Vec::new(),
         };
         let allowed = config.allowed_set();
-        Self { config, allowed }
+        let disallowed = config.disallowed_set();
+        Self {
+            config,
+            allowed,
+            disallowed,
+        }
+    }
+
+    pub fn with_disallowed(disallowed_vec: Vec<String>) -> Self {
+        let config = MD033Config {
+            allowed: Vec::new(),
+            disallowed: disallowed_vec.clone(),
+        };
+        let allowed = config.allowed_set();
+        let disallowed = config.disallowed_set();
+        Self {
+            config,
+            allowed,
+            disallowed,
+        }
     }
 
     pub fn from_config_struct(config: MD033Config) -> Self {
         let allowed = config.allowed_set();
-        Self { config, allowed }
+        let disallowed = config.disallowed_set();
+        Self {
+            config,
+            allowed,
+            disallowed,
+        }
     }
 
     // Efficient check for allowed tags using HashSet (case-insensitive)
@@ -56,6 +87,27 @@ impl MD033NoInlineHtml {
             .next()
             .unwrap_or("");
         self.allowed.contains(&tag_name.to_lowercase())
+    }
+
+    /// Check if a tag is in the disallowed set (for disallowed-only mode)
+    #[inline]
+    fn is_tag_disallowed(&self, tag: &str) -> bool {
+        if self.disallowed.is_empty() {
+            return false;
+        }
+        // Remove angle brackets and slashes, then split by whitespace or '>'
+        let tag = tag.trim_start_matches('<').trim_start_matches('/');
+        let tag_name = tag
+            .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+            .next()
+            .unwrap_or("");
+        self.disallowed.contains(&tag_name.to_lowercase())
+    }
+
+    /// Check if operating in disallowed-only mode
+    #[inline]
+    fn is_disallowed_mode(&self) -> bool {
+        self.config.is_disallowed_mode()
     }
 
     // Check if a tag is an HTML comment
@@ -207,9 +259,13 @@ impl MD033NoInlineHtml {
             "frame",
             "frameset",
             "isindex",
+            "marquee",
+            "noembed",
             "noframes",
+            "plaintext",
             "strike",
             "tt",
+            "xmp",
         ];
 
         let lower = tag_name.to_ascii_lowercase();
@@ -467,6 +523,11 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
+            // Skip JSX fragments in MDX files (<> and </>)
+            if ctx.flavor.supports_jsx() && (html_tag.tag_name.is_empty() || tag == "<>" || tag == "</>") {
+                continue;
+            }
+
             // Skip non-HTML elements (placeholder syntax like <NAME>, <resource>)
             if !Self::is_html_element_or_custom(&html_tag.tag_name) {
                 continue;
@@ -492,9 +553,19 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
-            // Skip allowed tags
-            if self.is_tag_allowed(tag) {
-                continue;
+            // Determine whether to report this tag based on mode:
+            // - Disallowed mode: only report tags in the disallowed list
+            // - Default mode: report all tags except those in the allowed list
+            if self.is_disallowed_mode() {
+                // In disallowed mode, skip tags NOT in the disallowed list
+                if !self.is_tag_disallowed(tag) {
+                    continue;
+                }
+            } else {
+                // In default mode, skip allowed tags
+                if self.is_tag_allowed(tag) {
+                    continue;
+                }
             }
 
             // Skip tags with markdown attribute in MkDocs mode
@@ -882,5 +953,175 @@ Regular text with <div>content</div> HTML tag.
         assert_eq!(result[0].line, 2, "Start line should be 2");
         // Tag ends on line 5 (where the closing > is)
         assert_eq!(result[0].end_line, 5, "End line should be 5");
+    }
+
+    #[test]
+    fn test_md033_disallowed_mode_basic() {
+        // Test disallowed mode: only flags tags in the disallowed list
+        let rule = MD033NoInlineHtml::with_disallowed(vec!["script".to_string(), "iframe".to_string()]);
+        let content = "<div>Safe content</div><script>alert('xss')</script>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag <script>, not <div>
+        assert_eq!(result.len(), 1, "Should only flag disallowed tags");
+        assert!(result[0].message.contains("<script>"), "Should flag script tag");
+    }
+
+    #[test]
+    fn test_md033_disallowed_gfm_security_tags() {
+        // Test GFM security tags expansion
+        let rule = MD033NoInlineHtml::with_disallowed(vec!["gfm".to_string()]);
+        let content = r#"
+<div>Safe</div>
+<title>Bad title</title>
+<textarea>Bad textarea</textarea>
+<style>.bad{}</style>
+<iframe src="evil"></iframe>
+<script>evil()</script>
+<plaintext>old tag</plaintext>
+<span>Safe span</span>
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag: title, textarea, style, iframe, script, plaintext
+        // Should NOT flag: div, span
+        assert_eq!(result.len(), 6, "Should flag 6 GFM security tags");
+
+        let flagged_tags: Vec<&str> = result
+            .iter()
+            .filter_map(|w| w.message.split("<").nth(1))
+            .filter_map(|s| s.split(">").next())
+            .filter_map(|s| s.split_whitespace().next())
+            .collect();
+
+        assert!(flagged_tags.contains(&"title"), "Should flag title");
+        assert!(flagged_tags.contains(&"textarea"), "Should flag textarea");
+        assert!(flagged_tags.contains(&"style"), "Should flag style");
+        assert!(flagged_tags.contains(&"iframe"), "Should flag iframe");
+        assert!(flagged_tags.contains(&"script"), "Should flag script");
+        assert!(flagged_tags.contains(&"plaintext"), "Should flag plaintext");
+        assert!(!flagged_tags.contains(&"div"), "Should NOT flag div");
+        assert!(!flagged_tags.contains(&"span"), "Should NOT flag span");
+    }
+
+    #[test]
+    fn test_md033_disallowed_case_insensitive() {
+        // Test that disallowed check is case-insensitive
+        let rule = MD033NoInlineHtml::with_disallowed(vec!["script".to_string()]);
+        let content = "<SCRIPT>alert('xss')</SCRIPT><Script>alert('xss')</Script>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag both <SCRIPT> and <Script>
+        assert_eq!(result.len(), 2, "Should flag both case variants");
+    }
+
+    #[test]
+    fn test_md033_disallowed_with_attributes() {
+        // Test that disallowed mode works with tags that have attributes
+        let rule = MD033NoInlineHtml::with_disallowed(vec!["iframe".to_string()]);
+        let content = r#"<iframe src="https://evil.com" width="100" height="100"></iframe>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should flag iframe with attributes");
+        assert!(result[0].message.contains("iframe"), "Should flag iframe");
+    }
+
+    #[test]
+    fn test_md033_disallowed_all_gfm_tags() {
+        // Verify all GFM disallowed tags are covered
+        use md033_config::GFM_DISALLOWED_TAGS;
+        let rule = MD033NoInlineHtml::with_disallowed(vec!["gfm".to_string()]);
+
+        for tag in GFM_DISALLOWED_TAGS {
+            let content = format!("<{tag}>content</{tag}>");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+
+            assert_eq!(result.len(), 1, "GFM tag <{tag}> should be flagged");
+        }
+    }
+
+    #[test]
+    fn test_md033_disallowed_mixed_with_custom() {
+        // Test mixing "gfm" with custom disallowed tags
+        let rule = MD033NoInlineHtml::with_disallowed(vec![
+            "gfm".to_string(),
+            "marquee".to_string(), // Custom disallowed tag
+        ]);
+        let content = r#"<script>bad</script><marquee>annoying</marquee><div>ok</div>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag script (gfm) and marquee (custom)
+        assert_eq!(result.len(), 2, "Should flag both gfm and custom tags");
+    }
+
+    #[test]
+    fn test_md033_disallowed_empty_means_default_mode() {
+        // Empty disallowed list means default mode (flag all HTML)
+        let rule = MD033NoInlineHtml::with_disallowed(vec![]);
+        let content = "<div>content</div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag <div> in default mode
+        assert_eq!(result.len(), 1, "Empty disallowed = default mode");
+    }
+
+    #[test]
+    fn test_md033_jsx_fragments_in_mdx() {
+        // JSX fragments (<> and </>) should not trigger warnings in MDX
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"# MDX Document
+
+<>
+  <Heading />
+  <Content />
+</>
+
+<div>Regular HTML should still be flagged</div>
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag <div>, not the fragments or JSX components
+        assert_eq!(result.len(), 1, "Should only find one HTML tag (the div)");
+        assert!(
+            result[0].message.contains("<div>"),
+            "Should flag <div>, not JSX fragments"
+        );
+    }
+
+    #[test]
+    fn test_md033_jsx_components_in_mdx() {
+        // JSX components (capitalized) should not trigger warnings in MDX
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"<CustomComponent prop="value">
+  Content
+</CustomComponent>
+
+<MyButton onClick={handler}>Click</MyButton>
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // No warnings - all are JSX components
+        assert_eq!(result.len(), 0, "Should not flag JSX components in MDX");
+    }
+
+    #[test]
+    fn test_md033_jsx_not_skipped_in_standard_markdown() {
+        // In standard markdown, capitalized tags should still be flagged if they're valid HTML
+        let rule = MD033NoInlineHtml::default();
+        let content = "<Script>alert(1)</Script>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag <Script> in standard markdown (it's a valid HTML element)
+        assert_eq!(result.len(), 1, "Should flag <Script> in standard markdown");
     }
 }

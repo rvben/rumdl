@@ -258,6 +258,11 @@ impl MD044ProperNames {
                 continue;
             }
 
+            // Skip JSX expressions and MDX comments (MDX flavor)
+            if line_info.in_jsx_expression || line_info.in_mdx_comment {
+                continue;
+            }
+
             // Early return: skip lines that don't contain any potential matches
             let line_lower = line.to_lowercase();
             let has_line_matches = self.config.names.iter().any(|name| {
