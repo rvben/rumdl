@@ -340,6 +340,11 @@ impl MD034NoBareUrls {
                 continue;
             }
 
+            // Check if we're inside a Hugo/Quarto shortcode
+            if ctx.is_in_shortcode(absolute_pos) {
+                continue;
+            }
+
             // Clean up the URL by removing trailing punctuation
             let trimmed_url = self.trim_trailing_punctuation(url_str);
 
@@ -348,6 +353,13 @@ impl MD034NoBareUrls {
                 let trimmed_len = trimmed_url.len();
                 let (start_line, start_col, end_line, end_col) =
                     calculate_url_range(line_number, line, start, trimmed_len);
+
+                // For www URLs without protocol, add https:// prefix in the fix
+                let replacement = if trimmed_url.starts_with("www.") {
+                    format!("<https://{trimmed_url}>")
+                } else {
+                    format!("<{trimmed_url}>")
+                };
 
                 warnings.push(LintWarning {
                     rule_name: Some("MD034".to_string()),
@@ -362,7 +374,7 @@ impl MD034NoBareUrls {
                             let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
                             (line_start_byte + start)..(line_start_byte + start + trimmed_len)
                         },
-                        replacement: format!("<{trimmed_url}>"),
+                        replacement,
                     }),
                 });
             }

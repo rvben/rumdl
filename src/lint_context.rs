@@ -115,6 +115,16 @@ pub struct LineInfo {
     pub in_jsx_expression: bool,
     /// Whether this line is inside an MDX comment {/* ... */} (MDX only)
     pub in_mdx_comment: bool,
+    /// Whether this line is inside a JSX component (MDX only)
+    pub in_jsx_component: bool,
+    /// Whether this line is inside a JSX fragment (MDX only)
+    pub in_jsx_fragment: bool,
+    /// Whether this line is inside an MkDocs admonition block (!!! or ???)
+    pub in_admonition: bool,
+    /// Whether this line is inside an MkDocs content tab block (===)
+    pub in_content_tab: bool,
+    /// Whether this line is a definition list item (: definition)
+    pub in_definition_list: bool,
 }
 
 impl LineInfo {
@@ -551,6 +561,8 @@ pub struct LintContext<'a> {
     pub source_file: Option<PathBuf>,     // Source file path (for rules that need file context)
     jsx_expression_ranges: Vec<(usize, usize)>, // Pre-computed JSX expression ranges (MDX: {expression})
     mdx_comment_ranges: Vec<(usize, usize)>, // Pre-computed MDX comment ranges ({/* ... */})
+    citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (Quarto: @key, [@key])
+    shortcode_ranges: Vec<(usize, usize)>, // Pre-computed Hugo/Quarto shortcode ranges ({{< ... >}} and {{% ... %}})
 }
 
 /// Detailed blockquote parse result with all components
@@ -676,6 +688,13 @@ impl<'a> LintContext<'a> {
             Self::detect_jsx_and_mdx_comments(content, &mut lines, flavor, &code_blocks)
         );
 
+        // Detect MkDocs-specific constructs (admonitions, tabs, definition lists)
+        profile_section!(
+            "MkDocs constructs",
+            profile,
+            Self::detect_mkdocs_line_info(content, &mut lines, flavor)
+        );
+
         // Collect link byte ranges early for heading detection (to skip lines inside link syntax)
         let link_byte_ranges = profile_section!("Link byte ranges", profile, Self::collect_link_byte_ranges(content));
 
@@ -755,6 +774,25 @@ impl<'a> LintContext<'a> {
             crate::utils::jinja_utils::find_jinja_ranges(content)
         );
 
+        // Pre-compute Pandoc/Quarto citation ranges for Quarto flavor
+        let citation_ranges = profile_section!("Citation ranges", profile, {
+            if flavor == MarkdownFlavor::Quarto {
+                crate::utils::quarto_divs::find_citation_ranges(content)
+            } else {
+                Vec::new()
+            }
+        });
+
+        // Pre-compute Hugo/Quarto shortcode ranges ({{< ... >}} and {{% ... %}})
+        let shortcode_ranges = profile_section!("Shortcode ranges", profile, {
+            use crate::utils::regex_cache::HUGO_SHORTCODE_REGEX;
+            let mut ranges = Vec::new();
+            for mat in HUGO_SHORTCODE_REGEX.find_iter(content).flatten() {
+                ranges.push((mat.start(), mat.end()));
+            }
+            ranges
+        });
+
         Self {
             content,
             line_offsets,
@@ -783,6 +821,8 @@ impl<'a> LintContext<'a> {
             source_file,
             jsx_expression_ranges,
             mdx_comment_ranges,
+            citation_ranges,
+            shortcode_ranges,
         }
     }
 
@@ -1128,6 +1168,33 @@ impl<'a> LintContext<'a> {
     /// Get all MDX comment byte ranges
     pub fn mdx_comment_ranges(&self) -> &[(usize, usize)] {
         &self.mdx_comment_ranges
+    }
+
+    /// Check if a byte position is within a Pandoc/Quarto citation (@key or [@key])
+    /// Only active in Quarto flavor
+    #[inline]
+    pub fn is_in_citation(&self, byte_pos: usize) -> bool {
+        self.citation_ranges
+            .iter()
+            .any(|range| byte_pos >= range.start && byte_pos < range.end)
+    }
+
+    /// Get all citation byte ranges (Quarto flavor only)
+    pub fn citation_ranges(&self) -> &[crate::utils::skip_context::ByteRange] {
+        &self.citation_ranges
+    }
+
+    /// Check if a byte position is within a Hugo/Quarto shortcode ({{< ... >}} or {{% ... %}})
+    #[inline]
+    pub fn is_in_shortcode(&self, byte_pos: usize) -> bool {
+        self.shortcode_ranges
+            .iter()
+            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+    }
+
+    /// Get all shortcode byte ranges
+    pub fn shortcode_ranges(&self) -> &[(usize, usize)] {
+        &self.shortcode_ranges
     }
 
     /// Check if a byte position is within a link reference definition title
@@ -2402,8 +2469,13 @@ impl<'a> LintContext<'a> {
                 is_horizontal_rule: is_hr,
                 in_math_block,
                 in_quarto_div,
-                in_jsx_expression: false, // Will be populated for MDX files
-                in_mdx_comment: false,    // Will be populated for MDX files
+                in_jsx_expression: false,  // Will be populated for MDX files
+                in_mdx_comment: false,     // Will be populated for MDX files
+                in_jsx_component: false,   // Will be populated for MDX files
+                in_jsx_fragment: false,    // Will be populated for MDX files
+                in_admonition: false,      // Will be populated for MkDocs files
+                in_content_tab: false,     // Will be populated for MkDocs files
+                in_definition_list: false, // Will be populated for MkDocs files
             });
         }
 
@@ -3072,6 +3144,120 @@ impl<'a> LintContext<'a> {
         }
 
         (jsx_expression_ranges, mdx_comment_ranges)
+    }
+
+    /// Detect MkDocs-specific constructs (admonitions, tabs, definition lists)
+    /// and populate the corresponding fields in LineInfo
+    fn detect_mkdocs_line_info(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) {
+        if flavor != MarkdownFlavor::MkDocs {
+            return;
+        }
+
+        use crate::utils::mkdocs_admonitions;
+        use crate::utils::mkdocs_definition_lists;
+        use crate::utils::mkdocs_tabs;
+
+        let content_lines: Vec<&str> = content.lines().collect();
+
+        // Track admonition context
+        let mut in_admonition = false;
+        let mut admonition_indent = 0;
+
+        // Track tab context
+        let mut in_tab = false;
+        let mut tab_indent = 0;
+
+        // Track definition list context
+        let mut in_definition = false;
+
+        for (i, line) in content_lines.iter().enumerate() {
+            if i >= lines.len() {
+                break;
+            }
+
+            // Skip lines in code blocks
+            if lines[i].in_code_block {
+                continue;
+            }
+
+            // Check for admonition markers
+            if mkdocs_admonitions::is_admonition_start(line) {
+                in_admonition = true;
+                admonition_indent = mkdocs_admonitions::get_admonition_indent(line).unwrap_or(0);
+                lines[i].in_admonition = true;
+            } else if in_admonition {
+                // Check if still in admonition content
+                if line.trim().is_empty() {
+                    // Blank lines are part of admonitions
+                    lines[i].in_admonition = true;
+                } else if mkdocs_admonitions::is_admonition_content(line, admonition_indent) {
+                    lines[i].in_admonition = true;
+                } else {
+                    // End of admonition
+                    in_admonition = false;
+                    // Check if this line starts a new admonition
+                    if mkdocs_admonitions::is_admonition_start(line) {
+                        in_admonition = true;
+                        admonition_indent = mkdocs_admonitions::get_admonition_indent(line).unwrap_or(0);
+                        lines[i].in_admonition = true;
+                    }
+                }
+            }
+
+            // Check for tab markers
+            if mkdocs_tabs::is_tab_marker(line) {
+                in_tab = true;
+                tab_indent = mkdocs_tabs::get_tab_indent(line).unwrap_or(0);
+                lines[i].in_content_tab = true;
+            } else if in_tab {
+                // Check if still in tab content
+                if line.trim().is_empty() {
+                    // Blank lines are part of tabs
+                    lines[i].in_content_tab = true;
+                } else if mkdocs_tabs::is_tab_content(line, tab_indent) {
+                    lines[i].in_content_tab = true;
+                } else {
+                    // End of tab content
+                    in_tab = false;
+                    // Check if this line starts a new tab
+                    if mkdocs_tabs::is_tab_marker(line) {
+                        in_tab = true;
+                        tab_indent = mkdocs_tabs::get_tab_indent(line).unwrap_or(0);
+                        lines[i].in_content_tab = true;
+                    }
+                }
+            }
+
+            // Check for definition list items
+            if mkdocs_definition_lists::is_definition_line(line) {
+                in_definition = true;
+                lines[i].in_definition_list = true;
+            } else if in_definition {
+                // Check if continuation
+                if mkdocs_definition_lists::is_definition_continuation(line) {
+                    lines[i].in_definition_list = true;
+                } else if line.trim().is_empty() {
+                    // Blank line might continue definition
+                    lines[i].in_definition_list = true;
+                } else if mkdocs_definition_lists::could_be_term_line(line) {
+                    // This could be a new term - check if followed by definition
+                    if i + 1 < content_lines.len() && mkdocs_definition_lists::is_definition_line(content_lines[i + 1])
+                    {
+                        lines[i].in_definition_list = true;
+                    } else {
+                        in_definition = false;
+                    }
+                } else {
+                    in_definition = false;
+                }
+            } else if mkdocs_definition_lists::could_be_term_line(line) {
+                // Check if this is a term followed by a definition
+                if i + 1 < content_lines.len() && mkdocs_definition_lists::is_definition_line(content_lines[i + 1]) {
+                    lines[i].in_definition_list = true;
+                    in_definition = true;
+                }
+            }
+        }
     }
 
     /// Helper to mark lines within a byte range

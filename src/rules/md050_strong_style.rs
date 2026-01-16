@@ -4,6 +4,7 @@ use crate::utils::regex_cache::{BOLD_ASTERISK_REGEX, BOLD_UNDERSCORE_REGEX};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
 use crate::utils::regex_cache::get_cached_regex;
+use crate::utils::skip_context::is_in_mkdocs_markup;
 
 // Reference definition pattern
 const REF_DEF_REGEX_STR: &str = r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#;
@@ -112,22 +113,29 @@ impl MD050StrongStyle {
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let content = ctx.content;
+        let lines: Vec<&str> = content.lines().collect();
 
         // Count how many times each marker appears (prevalence-based approach)
         let mut asterisk_count = 0;
         for m in BOLD_ASTERISK_REGEX.find_iter(content) {
             // Skip matches in front matter
-            let (line_num, _) = ctx.offset_to_line_col(m.start());
+            let (line_num, col) = ctx.offset_to_line_col(m.start());
             let in_front_matter = ctx
                 .line_info(line_num)
                 .map(|info| info.in_front_matter)
                 .unwrap_or(false);
+
+            // Check MkDocs markup
+            let in_mkdocs_markup = lines
+                .get(line_num.saturating_sub(1))
+                .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
 
             if !in_front_matter
                 && !ctx.is_in_code_block_or_span(m.start())
                 && !self.is_in_link(ctx, m.start())
                 && !self.is_in_html_tag(ctx, m.start())
                 && !self.is_in_html_code_content(ctx, m.start())
+                && !in_mkdocs_markup
             {
                 asterisk_count += 1;
             }
@@ -136,17 +144,23 @@ impl MD050StrongStyle {
         let mut underscore_count = 0;
         for m in BOLD_UNDERSCORE_REGEX.find_iter(content) {
             // Skip matches in front matter
-            let (line_num, _) = ctx.offset_to_line_col(m.start());
+            let (line_num, col) = ctx.offset_to_line_col(m.start());
             let in_front_matter = ctx
                 .line_info(line_num)
                 .map(|info| info.in_front_matter)
                 .unwrap_or(false);
+
+            // Check MkDocs markup
+            let in_mkdocs_markup = lines
+                .get(line_num.saturating_sub(1))
+                .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
 
             if !in_front_matter
                 && !ctx.is_in_code_block_or_span(m.start())
                 && !self.is_in_link(ctx, m.start())
                 && !self.is_in_html_tag(ctx, m.start())
                 && !self.is_in_html_code_content(ctx, m.start())
+                && !in_mkdocs_markup
             {
                 underscore_count += 1;
             }
@@ -232,10 +246,11 @@ impl Rule for MD050StrongStyle {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
 
-                // Skip if this strong text is inside a code block, code span, link, or HTML code content
+                // Skip if this strong text is inside a code block, code span, link, HTML code content, or MkDocs markup
                 if ctx.is_in_code_block_or_span(match_byte_pos)
                     || self.is_in_link(ctx, match_byte_pos)
                     || self.is_in_html_code_content(ctx, match_byte_pos)
+                    || is_in_mkdocs_markup(line, m.start(), ctx.flavor)
                 {
                     continue;
                 }
@@ -316,21 +331,27 @@ impl Rule for MD050StrongStyle {
         };
 
         // Store matches with their positions
+        let lines: Vec<&str> = content.lines().collect();
 
         let matches: Vec<(usize, usize)> = strong_regex
             .find_iter(content)
             .filter(|m| {
                 // Skip matches in front matter
-                let (line_num, _) = ctx.offset_to_line_col(m.start());
+                let (line_num, col) = ctx.offset_to_line_col(m.start());
                 if let Some(line_info) = ctx.line_info(line_num)
                     && line_info.in_front_matter
                 {
                     return false;
                 }
+                // Skip MkDocs markup
+                let in_mkdocs_markup = lines
+                    .get(line_num.saturating_sub(1))
+                    .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
                 !ctx.is_in_code_block_or_span(m.start())
                     && !self.is_in_link(ctx, m.start())
                     && !self.is_in_html_tag(ctx, m.start())
                     && !self.is_in_html_code_content(ctx, m.start())
+                    && !in_mkdocs_markup
             })
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
@@ -698,6 +719,83 @@ This __should be flagged__ as inconsistent."#;
         // Only the strong text outside HTML tags should be flagged
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 7);
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use ** instead of __")
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_keys_notation_not_flagged() {
+        // Keys notation uses ++ which shouldn't be flagged as strong emphasis
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "Press ++ctrl+alt+del++ to restart.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Keys notation should not be flagged as strong emphasis
+        assert!(
+            result.is_empty(),
+            "Keys notation should not be flagged as strong emphasis. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_caret_notation_not_flagged() {
+        // Insert notation (^^text^^) should not be flagged as strong emphasis
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "This is ^^inserted^^ text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Insert notation should not be flagged as strong emphasis. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_mark_notation_not_flagged() {
+        // Mark notation (==highlight==) should not be flagged
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "This is ==highlighted== text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Mark notation should not be flagged as strong emphasis. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_mixed_content_with_real_strong() {
+        // Mixed content: MkDocs markup + real strong emphasis that should be flagged
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "Press ++ctrl++ and __underscore strong__ here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the real underscore strong should be flagged (not Keys notation)
+        assert_eq!(result.len(), 1, "Expected 1 warning, got: {result:?}");
+        assert!(
+            result[0]
+                .message
+                .contains("Strong emphasis should use ** instead of __")
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_icon_shortcode_not_flagged() {
+        // Icon shortcodes like :material-star: should not affect strong detection
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "Click :material-check: and __this should be flagged__.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // The underscore strong should still be flagged
+        assert_eq!(result.len(), 1);
         assert!(
             result[0]
                 .message

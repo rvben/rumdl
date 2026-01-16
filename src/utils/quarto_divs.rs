@@ -214,6 +214,83 @@ pub fn extract_id(line: &str) -> Option<String> {
     None
 }
 
+// ============================================================================
+// Pandoc/Quarto Citation Support
+// ============================================================================
+//
+// Pandoc citation syntax:
+// - Inline citation: @smith2020
+// - Parenthetical citation: [@smith2020]
+// - Suppress author: [-@smith2020]
+// - With locator: [@smith2020, p. 10]
+// - Multiple citations: [@smith2020; @jones2021]
+// - With prefix: [see @smith2020]
+//
+// Citation keys must start with a letter, digit, or underscore, and may contain
+// alphanumerics, underscores, hyphens, periods, and colons.
+
+/// Pattern to match bracketed citations: [@key], [-@key], [see @key], [@a; @b]
+static BRACKETED_CITATION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    // Matches [...] containing at least one @key
+    Regex::new(r"\[[^\]]*@[a-zA-Z0-9_][a-zA-Z0-9_:.#$%&\-+?<>~/]*[^\]]*\]").unwrap()
+});
+
+/// Pattern to match inline citations: @key (not inside brackets)
+/// Citation key: starts with letter/digit/underscore, contains alphanumerics and some punctuation
+/// The @ must be preceded by whitespace, start of line, or punctuation (not alphanumeric)
+static INLINE_CITATION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    // Match @ at start of string, after whitespace, or after non-alphanumeric (except @[)
+    Regex::new(r"(?:^|[\s\(\[\{,;:])(@[a-zA-Z0-9_][a-zA-Z0-9_:.#$%&\-+?<>~/]*)").unwrap()
+});
+
+/// Quick check if text might contain citations
+#[inline]
+pub fn has_citations(text: &str) -> bool {
+    text.contains('@')
+}
+
+/// Find all citation ranges in content (byte ranges)
+/// Returns ranges for both bracketed [@key] and inline @key citations
+pub fn find_citation_ranges(content: &str) -> Vec<ByteRange> {
+    let mut ranges = Vec::new();
+
+    // Find bracketed citations first (higher priority)
+    for mat in BRACKETED_CITATION_PATTERN.find_iter(content) {
+        ranges.push(ByteRange {
+            start: mat.start(),
+            end: mat.end(),
+        });
+    }
+
+    // Find inline citations (but not inside already-found brackets)
+    for cap in INLINE_CITATION_PATTERN.captures_iter(content) {
+        if let Some(mat) = cap.get(1) {
+            let start = mat.start();
+            // Skip if this is inside a bracketed citation
+            if !ranges.iter().any(|r| start >= r.start && start < r.end) {
+                ranges.push(ByteRange { start, end: mat.end() });
+            }
+        }
+    }
+
+    // Sort by start position
+    ranges.sort_by_key(|r| r.start);
+    ranges
+}
+
+/// Check if a byte position is within a citation
+pub fn is_in_citation(ranges: &[ByteRange], position: usize) -> bool {
+    ranges.iter().any(|r| position >= r.start && position < r.end)
+}
+
+/// Extract citation key from a citation string (removes @ prefix)
+pub fn extract_citation_key(citation: &str) -> Option<&str> {
+    citation.strip_prefix('@').or_else(|| {
+        // Handle [-@key] format
+        citation.strip_prefix("[-@").and_then(|s| s.strip_suffix(']'))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,5 +486,103 @@ Warning content here.
 
         let div_content = &content[ranges[0].start..ranges[0].end];
         assert!(div_content.contains("## Warning Title"));
+    }
+
+    // Citation tests
+    #[test]
+    fn test_has_citations() {
+        assert!(has_citations("See @smith2020 for details."));
+        assert!(has_citations("[@smith2020]"));
+        assert!(has_citations("Multiple [@a; @b] citations"));
+        assert!(!has_citations("No citations here"));
+        // has_citations is just a quick @ check - emails will pass (intended behavior)
+        assert!(has_citations("Email: user@example.com"));
+    }
+
+    #[test]
+    fn test_bracketed_citation_detection() {
+        let content = "See [@smith2020] for more info.";
+        let ranges = find_citation_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(&content[ranges[0].start..ranges[0].end], "[@smith2020]");
+    }
+
+    #[test]
+    fn test_inline_citation_detection() {
+        let content = "As @smith2020 argues, this is true.";
+        let ranges = find_citation_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(&content[ranges[0].start..ranges[0].end], "@smith2020");
+    }
+
+    #[test]
+    fn test_multiple_citations_in_brackets() {
+        let content = "See [@smith2020; @jones2021] for details.";
+        let ranges = find_citation_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(&content[ranges[0].start..ranges[0].end], "[@smith2020; @jones2021]");
+    }
+
+    #[test]
+    fn test_citation_with_prefix() {
+        let content = "[see @smith2020, p. 10]";
+        let ranges = find_citation_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(&content[ranges[0].start..ranges[0].end], "[see @smith2020, p. 10]");
+    }
+
+    #[test]
+    fn test_suppress_author_citation() {
+        let content = "The theory [-@smith2020] states that...";
+        let ranges = find_citation_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(&content[ranges[0].start..ranges[0].end], "[-@smith2020]");
+    }
+
+    #[test]
+    fn test_mixed_citations() {
+        let content = "@smith2020 argues that [@jones2021] is wrong.";
+        let ranges = find_citation_ranges(content);
+        assert_eq!(ranges.len(), 2);
+        // Inline citation
+        assert_eq!(&content[ranges[0].start..ranges[0].end], "@smith2020");
+        // Bracketed citation
+        assert_eq!(&content[ranges[1].start..ranges[1].end], "[@jones2021]");
+    }
+
+    #[test]
+    fn test_citation_key_extraction() {
+        assert_eq!(extract_citation_key("@smith2020"), Some("smith2020"));
+        assert_eq!(extract_citation_key("@Smith_2020"), Some("Smith_2020"));
+        assert_eq!(extract_citation_key("@key:with:colons"), Some("key:with:colons"));
+        assert_eq!(extract_citation_key("not-a-citation"), None);
+    }
+
+    #[test]
+    fn test_is_in_citation() {
+        let content = "See [@smith2020] here.";
+        let ranges = find_citation_ranges(content);
+
+        // Position inside citation
+        assert!(is_in_citation(&ranges, 5)); // Inside [@smith2020]
+        // Position outside citation
+        assert!(!is_in_citation(&ranges, 0)); // "See "
+        assert!(!is_in_citation(&ranges, 17)); // " here."
+    }
+
+    #[test]
+    fn test_email_not_confused_with_citation() {
+        // Email addresses should not match as inline citations when properly filtered
+        // The has_citations() is just a quick check, but find_citation_ranges uses more strict patterns
+        let content = "Contact user@example.com for help.";
+        let ranges = find_citation_ranges(content);
+        // Email should not be detected as citation (@ is preceded by alphanumeric)
+        assert!(
+            ranges.is_empty()
+                || !ranges.iter().any(|r| {
+                    let s = &content[r.start..r.end];
+                    s.contains("example.com")
+                })
+        );
     }
 }

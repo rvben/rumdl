@@ -1351,3 +1351,138 @@ fn test_xmpp_uri_variations() {
         }
     }
 }
+
+/// Test www URLs with query strings (GFM autolink extension)
+#[test]
+fn test_www_urls_with_query_string() {
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        (
+            "www.example.com?param=value",
+            1,
+            "<https://www.example.com?param=value>",
+        ),
+        ("www.example.com?a=1&b=2", 1, "<https://www.example.com?a=1&b=2>"),
+        (
+            "www.example.com/path?query=test",
+            1,
+            "<https://www.example.com/path?query=test>",
+        ),
+    ];
+
+    for (content, expected_count, expected_fix) in test_cases.iter() {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), *expected_count, "Failed for www URL: {content}");
+
+        if *expected_count > 0 {
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, *expected_fix, "Fix failed for www URL: {content}");
+        }
+    }
+}
+
+/// Test www URLs with fragment identifiers
+#[test]
+fn test_www_urls_with_fragment() {
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        ("www.example.com#section", 1, "<https://www.example.com#section>"),
+        (
+            "www.example.com/page#anchor",
+            1,
+            "<https://www.example.com/page#anchor>",
+        ),
+        ("www.example.com?q=1#frag", 1, "<https://www.example.com?q=1#frag>"),
+    ];
+
+    for (content, expected_count, expected_fix) in test_cases.iter() {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), *expected_count, "Failed for www URL: {content}");
+
+        if *expected_count > 0 {
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, *expected_fix, "Fix failed for www URL: {content}");
+        }
+    }
+}
+
+/// Test www URLs with port numbers
+#[test]
+fn test_www_urls_with_port() {
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        ("www.example.com:8080", 1, "<https://www.example.com:8080>"),
+        ("www.example.com:3000/path", 1, "<https://www.example.com:3000/path>"),
+        ("www.example.com:443?q=1", 1, "<https://www.example.com:443?q=1>"),
+    ];
+
+    for (content, expected_count, expected_fix) in test_cases.iter() {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), *expected_count, "Failed for www URL: {content}");
+
+        if *expected_count > 0 {
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, *expected_fix, "Fix failed for www URL: {content}");
+        }
+    }
+}
+
+/// Test www URLs in context (embedded in sentences)
+#[test]
+fn test_www_urls_in_context() {
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        ("Visit www.example.com for more info.", 1),
+        ("Check out www.example.com/docs#getting-started today!", 1),
+        ("Server at www.internal.example.com:8080/api is ready.", 1),
+    ];
+
+    for (content, expected_count) in test_cases.iter() {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), *expected_count, "Failed for: {content}");
+    }
+}
+
+/// Test www URLs properly formatted (should NOT be flagged)
+#[test]
+fn test_www_urls_not_flagged_when_formatted() {
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        "<https://www.example.com>",
+        "[link](https://www.example.com)",
+        "[www.example.com](https://www.example.com)",
+        "`www.example.com`",
+    ];
+
+    for content in test_cases.iter() {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Formatted www URL should NOT be flagged: {content}");
+    }
+}
+
+/// Test mixed www and protocol URLs
+#[test]
+fn test_www_and_protocol_urls_mixed() {
+    let rule = MD034NoBareUrls;
+
+    let content = "Visit www.example.com and https://other.com for info.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 2, "Both www and https URLs should be flagged");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "Visit <https://www.example.com> and <https://other.com> for info."
+    );
+}

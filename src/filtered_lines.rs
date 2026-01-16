@@ -83,6 +83,12 @@ pub struct LineFilterConfig {
     pub skip_jsx_expressions: bool,
     /// Skip lines inside MDX comments ({/* ... */})
     pub skip_mdx_comments: bool,
+    /// Skip lines inside MkDocs admonitions (!!! or ???)
+    pub skip_admonitions: bool,
+    /// Skip lines inside MkDocs content tabs (=== "Tab")
+    pub skip_content_tabs: bool,
+    /// Skip lines inside definition lists (:  definition)
+    pub skip_definition_lists: bool,
 }
 
 impl LineFilterConfig {
@@ -192,6 +198,35 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside MkDocs admonitions (!!! or ???)
+    ///
+    /// Admonitions are callout blocks and may have special formatting
+    /// that rules should not process as regular content.
+    #[must_use]
+    pub fn skip_admonitions(mut self) -> Self {
+        self.skip_admonitions = true;
+        self
+    }
+
+    /// Skip lines inside MkDocs content tabs (=== "Tab")
+    ///
+    /// Content tabs contain tabbed content that may need special handling.
+    #[must_use]
+    pub fn skip_content_tabs(mut self) -> Self {
+        self.skip_content_tabs = true;
+        self
+    }
+
+    /// Skip lines inside definition lists (:  definition)
+    ///
+    /// Definition lists have special formatting that rules should
+    /// not process as regular content.
+    #[must_use]
+    pub fn skip_definition_lists(mut self) -> Self {
+        self.skip_definition_lists = true;
+        self
+    }
+
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         (self.skip_front_matter && line_info.in_front_matter)
@@ -204,6 +239,9 @@ impl LineFilterConfig {
             || (self.skip_quarto_divs && line_info.in_quarto_div)
             || (self.skip_jsx_expressions && line_info.in_jsx_expression)
             || (self.skip_mdx_comments && line_info.in_mdx_comment)
+            || (self.skip_admonitions && line_info.in_admonition)
+            || (self.skip_content_tabs && line_info.in_content_tab)
+            || (self.skip_definition_lists && line_info.in_definition_list)
     }
 }
 
@@ -388,6 +426,27 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_mdx_comments(mut self) -> Self {
         self.config = self.config.skip_mdx_comments();
+        self
+    }
+
+    /// Skip lines inside MkDocs admonitions (!!! or ???)
+    #[must_use]
+    pub fn skip_admonitions(mut self) -> Self {
+        self.config = self.config.skip_admonitions();
+        self
+    }
+
+    /// Skip lines inside MkDocs content tabs (=== "Tab")
+    #[must_use]
+    pub fn skip_content_tabs(mut self) -> Self {
+        self.config = self.config.skip_content_tabs();
+        self
+    }
+
+    /// Skip lines inside definition lists (:  definition)
+    #[must_use]
+    pub fn skip_definition_lists(mut self) -> Self {
+        self.config = self.config.skip_definition_lists();
         self
     }
 }

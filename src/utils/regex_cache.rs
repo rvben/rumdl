@@ -235,9 +235,20 @@ pub const URL_STANDARD_STR: &str = concat!(
 ///
 /// Matches URLs starting with `www.` that lack a protocol prefix.
 /// These should be converted to proper URLs or flagged as bare URLs.
+/// Supports port, path, query string, and fragment like URL_STANDARD_STR.
+///
+/// # Examples
+/// - `www.example.com`
+/// - `www.example.com:8080`
+/// - `www.example.com/path`
+/// - `www.example.com?query=value`
+/// - `www.example.com#section`
 pub const URL_WWW_STR: &str = concat!(
     r#"www\.(?:[a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}"#, // www.domain.tld
+    r#"(?::\d+)?"#,                                        // Optional port
     r#"(?:/[^\s<>\[\]\\'\"`]*)?"#,                         // Optional path (allows parens)
+    r#"(?:\?[^\s<>\[\]\\'\"`]*)?"#,                        // Optional query (allows parens)
+    r#"(?:#[^\s<>\[\]\\'\"`]*)?"#,                         // Optional fragment (allows parens)
 );
 
 /// Pattern for IPv6 URLs specifically.

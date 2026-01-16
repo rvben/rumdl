@@ -2,6 +2,7 @@ use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
+use crate::utils::skip_context::is_in_mkdocs_markup;
 
 mod md049_config;
 use md049_config::MD049Config;
@@ -125,8 +126,22 @@ impl Rule for MD049EmphasisStyle {
             self.collect_emphasis_from_line(line.content, line.line_num, line_start, &mut emphasis_info);
         }
 
-        // Filter out emphasis markers that are inside links
-        emphasis_info.retain(|(_, _, abs_pos, _, _)| !self.is_in_link(ctx, *abs_pos));
+        // Filter out emphasis markers that are inside links or MkDocs markup
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        emphasis_info.retain(|(line_num, col, abs_pos, _, _)| {
+            // Skip if inside a link
+            if self.is_in_link(ctx, *abs_pos) {
+                return false;
+            }
+            // Skip if inside MkDocs markup (Keys, Caret, Mark, icon shortcodes)
+            if let Some(line) = lines.get(*line_num - 1) {
+                let line_pos = col.saturating_sub(1); // Convert 1-indexed col to 0-indexed position
+                if is_in_mkdocs_markup(line, line_pos, ctx.flavor) {
+                    return false;
+                }
+            }
+            true
+        });
 
         match self.config.style {
             EmphasisStyle::Consistent => {
@@ -305,5 +320,74 @@ This should be _flagged_ since we're using asterisk style.
         assert!(result[0].message.contains("Emphasis should use _ instead of *"));
         // Should be the "real emphasis" text on line 1
         assert!(result[0].line == 1);
+    }
+
+    #[test]
+    fn test_mkdocs_keys_notation_not_flagged() {
+        // Keys notation uses ++ which shouldn't be confused with emphasis
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "Press ++ctrl+alt+del++ to restart.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Keys notation should not be flagged as emphasis
+        assert!(
+            result.is_empty(),
+            "Keys notation should not be flagged as emphasis. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_caret_notation_not_flagged() {
+        // Caret notation (^superscript^ and ^^insert^^) should not be flagged
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "This is ^superscript^ and ^^inserted^^ text.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Caret notation should not be flagged as emphasis. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_mark_notation_not_flagged() {
+        // Mark notation (==highlight==) should not be flagged
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "This is ==highlighted== text.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Mark notation should not be flagged as emphasis. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_mixed_content_with_real_emphasis() {
+        // Mixed content: MkDocs markup + real emphasis that should be flagged
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "Press ++ctrl++ and _underscore emphasis_ here.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the real underscore emphasis should be flagged (not Keys notation)
+        assert_eq!(result.len(), 1, "Expected 1 warning, got: {result:?}");
+        assert!(result[0].message.contains("Emphasis should use * instead of _"));
+    }
+
+    #[test]
+    fn test_mkdocs_icon_shortcode_not_flagged() {
+        // Icon shortcodes like :material-star: should not affect emphasis detection
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "Click :material-check: and _this should be flagged_.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // The underscore emphasis should still be flagged
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Emphasis should use * instead of _"));
     }
 }

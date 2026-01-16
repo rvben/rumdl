@@ -1,4 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::mkdocs_extensions::is_inline_hilite_content;
 
 /// Rule MD038: No space inside code span markers
 ///
@@ -252,6 +253,12 @@ impl Rule for MD038NoSpaceInCode {
                     && trimmed.len() > 1
                     && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace())
                 {
+                    continue;
+                }
+
+                // Skip InlineHilite syntax in MkDocs: `#!python code`
+                // The space after the language specifier is legitimate
+                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs && is_inline_hilite_content(trimmed) {
                     continue;
                 }
 
@@ -752,6 +759,42 @@ mod tests {
         assert!(
             duration.as_millis() < 1000,
             "Performance test: Should process 100 Hugo templates in <1s, took {duration:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_inline_hilite_not_flagged() {
+        // InlineHilite syntax: `#!language code` should NOT be flagged
+        // The space after the language specifier is legitimate
+        let rule = MD038NoSpaceInCode::new();
+
+        let valid_cases = vec![
+            "`#!python print('hello')`",
+            "`#!js alert('hi')`",
+            "`#!c++ cout << x;`",
+            "Use `#!python import os` to import modules",
+            "`#!bash echo $HOME`",
+        ];
+
+        for case in valid_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::MkDocs, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "InlineHilite syntax should not be flagged in MkDocs: {case}"
+            );
+        }
+
+        // Test that InlineHilite IS flagged in Standard flavor (not MkDocs-aware)
+        let content = "`#!python print('hello')`";
+        let ctx_standard =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result_standard = rule.check(&ctx_standard).unwrap();
+        // In standard flavor, the content " print('hello')" has no special meaning
+        // But since "#!python print('hello')" doesn't have leading/trailing spaces, it's valid!
+        assert!(
+            result_standard.is_empty(),
+            "InlineHilite with no extra spaces should not be flagged even in Standard flavor"
         );
     }
 
