@@ -107,7 +107,8 @@ impl Rule for MD049EmphasisStyle {
         // Collect all emphasis from the document
         let mut emphasis_info = vec![];
 
-        // Process content lines, automatically skipping front matter, code blocks, HTML comments, and MDX constructs
+        // Process content lines, automatically skipping front matter, code blocks, HTML comments, MDX constructs, and math blocks
+        // Math blocks contain LaTeX syntax where _ and * have special meaning
         for line in ctx
             .filtered_lines()
             .skip_front_matter()
@@ -115,6 +116,7 @@ impl Rule for MD049EmphasisStyle {
             .skip_html_comments()
             .skip_jsx_expressions()
             .skip_mdx_comments()
+            .skip_math_blocks()
         {
             // Skip if the line doesn't contain any emphasis markers
             if !line.content.contains('*') && !line.content.contains('_') {

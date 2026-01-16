@@ -93,8 +93,14 @@ impl Rule for MD037NoSpaceInEmphasis {
 
         let mut warnings = Vec::new();
 
-        // Process content lines, automatically skipping front matter and code blocks
-        for line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
+        // Process content lines, automatically skipping front matter, code blocks, and math blocks
+        // Math blocks contain LaTeX syntax where _ and * have special meaning
+        for line in ctx
+            .filtered_lines()
+            .skip_front_matter()
+            .skip_code_blocks()
+            .skip_math_blocks()
+        {
             // Skip if the line doesn't contain any emphasis markers
             if !line.content.contains('*') && !line.content.contains('_') {
                 continue;
