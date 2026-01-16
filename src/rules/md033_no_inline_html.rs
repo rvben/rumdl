@@ -356,6 +356,35 @@ impl MD033NoInlineHtml {
         tag.contains(" markdown>") || tag.contains(" markdown=") || tag.contains(" markdown ")
     }
 
+    /// Check if a tag contains JSX-specific attributes that indicate it's JSX, not HTML
+    /// JSX uses different attribute names than HTML:
+    /// - `className` instead of `class`
+    /// - `htmlFor` instead of `for`
+    /// - camelCase event handlers (`onClick`, `onChange`, `onSubmit`, etc.)
+    /// - JSX expression syntax `={...}` for dynamic values
+    #[inline]
+    fn has_jsx_attributes(tag: &str) -> bool {
+        // JSX-specific attribute names (HTML uses class, for, onclick, etc.)
+        tag.contains("className")
+            || tag.contains("htmlFor")
+            || tag.contains("dangerouslySetInnerHTML")
+            // camelCase event handlers (JSX uses onClick, HTML uses onclick)
+            || tag.contains("onClick")
+            || tag.contains("onChange")
+            || tag.contains("onSubmit")
+            || tag.contains("onFocus")
+            || tag.contains("onBlur")
+            || tag.contains("onKeyDown")
+            || tag.contains("onKeyUp")
+            || tag.contains("onKeyPress")
+            || tag.contains("onMouseDown")
+            || tag.contains("onMouseUp")
+            || tag.contains("onMouseEnter")
+            || tag.contains("onMouseLeave")
+            // JSX expression syntax: ={expression} or ={ expression }
+            || tag.contains("={")
+    }
+
     // Check if a tag is actually a URL in angle brackets
     #[inline]
     fn is_url_in_angle_brackets(&self, tag: &str) -> bool {
@@ -525,6 +554,12 @@ impl Rule for MD033NoInlineHtml {
 
             // Skip JSX fragments in MDX files (<> and </>)
             if ctx.flavor.supports_jsx() && (html_tag.tag_name.is_empty() || tag == "<>" || tag == "</>") {
+                continue;
+            }
+
+            // Skip elements with JSX-specific attributes in MDX files
+            // e.g., <div className="...">, <button onClick={handler}>
+            if ctx.flavor.supports_jsx() && Self::has_jsx_attributes(tag) {
                 continue;
             }
 
@@ -1123,5 +1158,48 @@ Regular text with <div>content</div> HTML tag.
 
         // Should flag <Script> in standard markdown (it's a valid HTML element)
         assert_eq!(result.len(), 1, "Should flag <Script> in standard markdown");
+    }
+
+    #[test]
+    fn test_md033_jsx_attributes_in_mdx() {
+        // Elements with JSX-specific attributes should not trigger warnings in MDX
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"# MDX with JSX Attributes
+
+<div className="card big">Content</div>
+
+<button onClick={handleClick}>Click me</button>
+
+<label htmlFor="input-id">Label</label>
+
+<input onChange={handleChange} />
+
+<div class="html-class">Regular HTML should be flagged</div>
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag the div with regular HTML "class" attribute
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only flag HTML element without JSX attributes, got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("<div class="),
+            "Should flag the div with HTML class attribute"
+        );
+    }
+
+    #[test]
+    fn test_md033_jsx_attributes_not_skipped_in_standard() {
+        // In standard markdown, JSX attributes should still be flagged
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"<div className="card">Content</div>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should flag in standard markdown
+        assert_eq!(result.len(), 1, "Should flag JSX-style elements in standard markdown");
     }
 }
