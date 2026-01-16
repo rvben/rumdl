@@ -362,7 +362,11 @@ impl Rule for MD031BlanksAroundFences {
                     in_admonition = false;
 
                     // Check for blank line after admonition
-                    if !Self::is_effectively_empty_line(i, &lines, ctx) && self.should_require_blank_line(i - 1, &lines)
+                    // We need a blank line between the admonition content and the current line
+                    // Check if the previous line (i-1) is a blank line separator
+                    if i > 0
+                        && !Self::is_effectively_empty_line(i - 1, &lines, ctx)
+                        && self.should_require_blank_line(i - 1, &lines)
                     {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
