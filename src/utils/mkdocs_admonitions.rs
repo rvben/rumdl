@@ -96,33 +96,50 @@ pub fn is_admonition_content(line: &str, base_indent: usize) -> bool {
 }
 
 /// Check if content at a byte position is within an admonition block
+/// Uses a stack-based approach to properly handle nested admonitions.
 pub fn is_within_admonition(content: &str, position: usize) -> bool {
     let lines: Vec<&str> = content.lines().collect();
     let mut byte_pos = 0;
-    let mut in_admonition = false;
-    let mut admonition_indent = 0;
+    // Stack of admonition indent levels (supports nesting)
+    let mut admonition_stack: Vec<usize> = Vec::new();
 
     for line in lines {
         let line_end = byte_pos + line.len();
+        let line_indent = super::mkdocs_common::get_line_indent(line);
 
-        // Check if we're starting an admonition
+        // Check if we're starting a new admonition
         if is_admonition_start(line) {
-            in_admonition = true;
-            admonition_indent = get_admonition_indent(line).unwrap_or(0);
-        } else if in_admonition && !line.trim().is_empty() && !is_admonition_content(line, admonition_indent) {
-            // Non-empty line that's not properly indented ends the admonition
-            in_admonition = false;
-            admonition_indent = 0;
+            let admon_indent = get_admonition_indent(line).unwrap_or(0);
 
-            // Check if this line starts a new admonition
-            if is_admonition_start(line) {
-                in_admonition = true;
-                admonition_indent = get_admonition_indent(line).unwrap_or(0);
+            // Pop any outer admonitions that this one is not nested within.
+            // An admonition is nested within a parent if its marker appears in
+            // the parent's content area (indented >= parent_indent + 4)
+            while let Some(&parent_indent) = admonition_stack.last() {
+                if admon_indent >= parent_indent + 4 {
+                    // This admonition is nested inside the parent's content
+                    break;
+                }
+                // Not nested within this parent, pop it
+                admonition_stack.pop();
+            }
+
+            // Push this admonition onto the stack
+            admonition_stack.push(admon_indent);
+        } else if !admonition_stack.is_empty() && !line.trim().is_empty() {
+            // Non-empty line - check if we're still within any admonition
+            // Pop admonitions whose content indent requirement is not met
+            while let Some(&admon_indent) = admonition_stack.last() {
+                if line_indent >= admon_indent + 4 {
+                    // Content is properly indented for this admonition
+                    break;
+                }
+                // Content not indented enough, exit this admonition
+                admonition_stack.pop();
             }
         }
 
-        // Check if the position is within this line and we're in an admonition
-        if byte_pos <= position && position <= line_end && in_admonition {
+        // Check if the position is within this line and we're in any admonition
+        if byte_pos <= position && position <= line_end && !admonition_stack.is_empty() {
             return true;
         }
 
@@ -248,15 +265,82 @@ Outside."#;
 
         let outer_pos = content.find("Content of outer").unwrap();
         let inner_pos = content.find("Content of inner").unwrap();
-        let _back_outer_pos = content.find("Back to outer").unwrap();
+        let back_outer_pos = content.find("Back to outer").unwrap();
         let outside_pos = content.find("Outside").unwrap();
 
         assert!(is_within_admonition(content, outer_pos));
         assert!(is_within_admonition(content, inner_pos));
-        // Note: Our current implementation doesn't fully handle nested admonitions
-        // The "Back to outer" content may not be detected as within the outer admonition
-        // This is a known limitation but acceptable for now
-        // assert!(is_within_admonition(content, back_outer_pos));
+        // Stack-based approach properly handles returning to outer admonition
+        assert!(is_within_admonition(content, back_outer_pos));
+        assert!(!is_within_admonition(content, outside_pos));
+    }
+
+    #[test]
+    fn test_deeply_nested_admonitions() {
+        let content = r#"!!! note "Level 1"
+    Level 1 content.
+
+    !!! warning "Level 2"
+        Level 2 content.
+
+        !!! tip "Level 3"
+            Level 3 content.
+
+        Back to level 2.
+
+    Back to level 1.
+
+Outside all."#;
+
+        let level1_pos = content.find("Level 1 content").unwrap();
+        let level2_pos = content.find("Level 2 content").unwrap();
+        let level3_pos = content.find("Level 3 content").unwrap();
+        let back_level2_pos = content.find("Back to level 2").unwrap();
+        let back_level1_pos = content.find("Back to level 1").unwrap();
+        let outside_pos = content.find("Outside all").unwrap();
+
+        assert!(
+            is_within_admonition(content, level1_pos),
+            "Level 1 content should be in admonition"
+        );
+        assert!(
+            is_within_admonition(content, level2_pos),
+            "Level 2 content should be in admonition"
+        );
+        assert!(
+            is_within_admonition(content, level3_pos),
+            "Level 3 content should be in admonition"
+        );
+        assert!(
+            is_within_admonition(content, back_level2_pos),
+            "Back to level 2 should be in admonition"
+        );
+        assert!(
+            is_within_admonition(content, back_level1_pos),
+            "Back to level 1 should be in admonition"
+        );
+        assert!(
+            !is_within_admonition(content, outside_pos),
+            "Outside should not be in admonition"
+        );
+    }
+
+    #[test]
+    fn test_sibling_admonitions() {
+        let content = r#"!!! note "First"
+    First content.
+
+!!! warning "Second"
+    Second content.
+
+Outside."#;
+
+        let first_pos = content.find("First content").unwrap();
+        let second_pos = content.find("Second content").unwrap();
+        let outside_pos = content.find("Outside").unwrap();
+
+        assert!(is_within_admonition(content, first_pos));
+        assert!(is_within_admonition(content, second_pos));
         assert!(!is_within_admonition(content, outside_pos));
     }
 }
