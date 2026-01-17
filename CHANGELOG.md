@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Precedence: CLI flag → env var → config → default
   - Example: `RUMDL_OUTPUT_FORMAT=github rumdl check .`
 
+### Fixed
+
+- **MD050: Skip math blocks to avoid false positives in Quarto**
+  - LaTeX subscripts (`x_1`) and exponentiation (`a**b`) were incorrectly flagged as strong emphasis
+  - Now correctly skips content inside `$$...$$` math blocks
+
 ### Changed
 
 - **Documentation: Clarify CommonMark 0.31.2 spec version** ([#298](https://github.com/rvben/rumdl/issues/298))

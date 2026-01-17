@@ -4,7 +4,7 @@ use crate::utils::regex_cache::{BOLD_ASTERISK_REGEX, BOLD_UNDERSCORE_REGEX};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
 use crate::utils::regex_cache::get_cached_regex;
-use crate::utils::skip_context::is_in_mkdocs_markup;
+use crate::utils::skip_context::{is_in_math_context, is_in_mkdocs_markup};
 
 // Reference definition pattern
 const REF_DEF_REGEX_STR: &str = r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#;
@@ -136,6 +136,7 @@ impl MD050StrongStyle {
                 && !self.is_in_html_tag(ctx, m.start())
                 && !self.is_in_html_code_content(ctx, m.start())
                 && !in_mkdocs_markup
+                && !is_in_math_context(ctx, m.start())
             {
                 asterisk_count += 1;
             }
@@ -161,6 +162,7 @@ impl MD050StrongStyle {
                 && !self.is_in_html_tag(ctx, m.start())
                 && !self.is_in_html_code_content(ctx, m.start())
                 && !in_mkdocs_markup
+                && !is_in_math_context(ctx, m.start())
             {
                 underscore_count += 1;
             }
@@ -246,11 +248,12 @@ impl Rule for MD050StrongStyle {
                 // Calculate the byte position of this match in the document
                 let match_byte_pos = byte_pos + m.start();
 
-                // Skip if this strong text is inside a code block, code span, link, HTML code content, or MkDocs markup
+                // Skip if this strong text is inside a code block, code span, link, HTML code content, MkDocs markup, or math block
                 if ctx.is_in_code_block_or_span(match_byte_pos)
                     || self.is_in_link(ctx, match_byte_pos)
                     || self.is_in_html_code_content(ctx, match_byte_pos)
                     || is_in_mkdocs_markup(line, m.start(), ctx.flavor)
+                    || is_in_math_context(ctx, match_byte_pos)
                 {
                     continue;
                 }
@@ -343,7 +346,7 @@ impl Rule for MD050StrongStyle {
                 {
                     return false;
                 }
-                // Skip MkDocs markup
+                // Skip MkDocs markup and math blocks
                 let in_mkdocs_markup = lines
                     .get(line_num.saturating_sub(1))
                     .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
@@ -352,6 +355,7 @@ impl Rule for MD050StrongStyle {
                     && !self.is_in_html_tag(ctx, m.start())
                     && !self.is_in_html_code_content(ctx, m.start())
                     && !in_mkdocs_markup
+                    && !is_in_math_context(ctx, m.start())
             })
             .filter(|m| !self.is_escaped(content, m.start()))
             .map(|m| (m.start(), m.end()))
@@ -801,5 +805,125 @@ This __should be flagged__ as inconsistent."#;
                 .message
                 .contains("Strong emphasis should use ** instead of __")
         );
+    }
+
+    #[test]
+    fn test_math_block_not_flagged() {
+        // Math blocks contain _ and * characters that are not emphasis
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = r#"# Math Section
+
+$$
+E = mc^2
+x_1 + x_2 = y
+a**b = c
+$$
+
+This __should be flagged__ outside math.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the strong outside math block should be flagged
+        assert_eq!(result.len(), 1, "Expected 1 warning, got: {result:?}");
+        assert!(result[0].line > 7, "Warning should be on line after math block");
+    }
+
+    #[test]
+    fn test_math_block_with_underscores_not_flagged() {
+        // LaTeX subscripts use underscores that shouldn't be flagged
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = r#"$$
+x_1 + x_2 + x__3 = y
+\alpha__\beta
+$$
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Nothing should be flagged - all content is in math block
+        assert!(
+            result.is_empty(),
+            "Math block content should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_math_block_with_asterisks_not_flagged() {
+        // LaTeX multiplication uses asterisks that shouldn't be flagged
+        let rule = MD050StrongStyle::new(StrongStyle::Underscore);
+        let content = r#"$$
+a**b = c
+2 ** 3 = 8
+x***y
+$$
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Nothing should be flagged - all content is in math block
+        assert!(
+            result.is_empty(),
+            "Math block content should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_math_block_fix_preserves_content() {
+        // Fix should not modify content inside math blocks
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = r#"$$
+x__y = z
+$$
+
+This __word__ should change.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Math block content should be unchanged
+        assert!(fixed.contains("x__y = z"), "Math block content should be preserved");
+        // Strong outside should be fixed
+        assert!(fixed.contains("**word**"), "Strong outside math should be fixed");
+    }
+
+    #[test]
+    fn test_inline_math_simple() {
+        // Simple inline math without underscore patterns that could be confused with strong
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "The formula $E = mc^2$ is famous and __this__ is strong.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // __this__ should be flagged (it's outside the inline math)
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected 1 warning for strong outside math. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_math_blocks_and_strong() {
+        // Test with multiple math blocks and strong emphasis between them
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = r#"# Document
+
+$$
+a = b
+$$
+
+This __should be flagged__ text.
+
+$$
+c = d
+$$
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the strong between math blocks should be flagged
+        assert_eq!(result.len(), 1, "Expected 1 warning. Got: {result:?}");
+        assert!(result[0].message.contains("**"));
     }
 }

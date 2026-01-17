@@ -711,3 +711,107 @@ fn test_quarto_large_document_with_mixed_features() {
     let note_10_line = content.lines().position(|l| l.contains("Note 10")).unwrap();
     assert!(ctx.lines[note_10_line].in_quarto_div, "Note 10 should be in div");
 }
+
+// ====================================================================
+// MD050 Math Block Integration Tests
+// ====================================================================
+
+#[test]
+fn test_md050_skips_math_block_content() {
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD050StrongStyle;
+    use rumdl_lib::rules::strong_style::StrongStyle;
+
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let content = r#"# Math in Quarto
+
+$$
+x_1 + x_2 = y
+a__b = c
+$$
+
+This __should be flagged__ as inconsistent.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Quarto, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the strong outside math block should be flagged
+    assert_eq!(result.len(), 1, "Expected 1 warning, got: {result:?}");
+    // The warning should be on line 8 (the "This __should be flagged__" line)
+    assert_eq!(result[0].line, 8, "Warning should be on line 8, got {}", result[0].line);
+}
+
+#[test]
+fn test_md050_math_block_with_underscore_subscripts() {
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD050StrongStyle;
+    use rumdl_lib::rules::strong_style::StrongStyle;
+
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let content = r#"$$
+x_1 + x_2 + x_{12}
+y__subscript = z
+\alpha__\beta
+$$
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Quarto, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Nothing should be flagged - all content is in math block
+    assert!(
+        result.is_empty(),
+        "Math block content should not be flagged. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_md049_skips_math_block_content() {
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD049EmphasisStyle;
+    use rumdl_lib::rules::emphasis_style::EmphasisStyle;
+
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = r#"# Math in Quarto
+
+$$
+_a + _b = _c
+$$
+
+This _should be flagged_ as inconsistent.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Quarto, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the emphasis outside math block should be flagged
+    assert_eq!(result.len(), 1, "Expected 1 warning, got: {result:?}");
+    // The warning should be on line 7 (the "This _should be flagged_" line)
+    assert_eq!(result[0].line, 7, "Warning should be on line 7, got {}", result[0].line);
+}
+
+#[test]
+fn test_math_block_detection_consistent_with_lineinfo() {
+    // Verify LineInfo.in_math_block is set correctly for Quarto
+    let content = r#"# Heading
+
+$$
+E = mc^2
+$$
+
+Text here.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Quarto, None);
+
+    // Line 0: heading - not in math
+    assert!(!ctx.lines[0].in_math_block, "Heading should not be in math block");
+    // Line 2: math opener - in math
+    assert!(ctx.lines[2].in_math_block, "Math opener should be in math block");
+    // Line 3: math content - in math
+    assert!(ctx.lines[3].in_math_block, "Math content should be in math block");
+    // Line 4: math closer - in math
+    assert!(ctx.lines[4].in_math_block, "Math closer should be in math block");
+    // Line 6: text - not in math
+    assert!(
+        !ctx.lines[6].in_math_block,
+        "Text after math should not be in math block"
+    );
+}
