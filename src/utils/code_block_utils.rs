@@ -182,6 +182,84 @@ impl CodeBlockUtils {
             || crate::utils::skip_context::is_table_line(trimmed)
             || trimmed.starts_with(">") // Blockquotes
     }
+
+    /// Detect fenced code blocks with markdown/md language tag.
+    ///
+    /// Returns a vector of `MarkdownCodeBlock` containing byte ranges for the
+    /// content between the fences (excluding the fence lines themselves).
+    ///
+    /// Only detects fenced code blocks (``` or ~~~), not indented code blocks,
+    /// since indented blocks don't have a language tag.
+    pub fn detect_markdown_code_blocks(content: &str) -> Vec<MarkdownCodeBlock> {
+        use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+
+        let mut blocks = Vec::new();
+        let mut current_block: Option<MarkdownCodeBlockBuilder> = None;
+
+        let options = Options::all();
+        let parser = Parser::new_ext(content, options).into_offset_iter();
+
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+                    // Check if language is markdown or md (first word of info string)
+                    let language = info.split_whitespace().next().unwrap_or("");
+                    if language.eq_ignore_ascii_case("markdown") || language.eq_ignore_ascii_case("md") {
+                        // Find where content starts (after the opening fence line)
+                        let block_start = range.start;
+                        let content_start = content[block_start..]
+                            .find('\n')
+                            .map(|i| block_start + i + 1)
+                            .unwrap_or(content.len());
+
+                        current_block = Some(MarkdownCodeBlockBuilder { content_start });
+                    }
+                }
+                Event::End(TagEnd::CodeBlock) => {
+                    if let Some(builder) = current_block.take() {
+                        // Find where content ends (before the closing fence line)
+                        let block_end = range.end;
+
+                        // Validate range before slicing
+                        if builder.content_start > block_end || builder.content_start > content.len() {
+                            continue;
+                        }
+
+                        let search_range = &content[builder.content_start..block_end.min(content.len())];
+                        let content_end = search_range
+                            .rfind('\n')
+                            .map(|i| builder.content_start + i)
+                            .unwrap_or(builder.content_start);
+
+                        // Only add block if it has valid content range
+                        if content_end >= builder.content_start {
+                            blocks.push(MarkdownCodeBlock {
+                                content_start: builder.content_start,
+                                content_end,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        blocks
+    }
+}
+
+/// Information about a markdown code block for recursive formatting
+#[derive(Debug, Clone)]
+pub struct MarkdownCodeBlock {
+    /// Byte offset where the content starts (after opening fence line)
+    pub content_start: usize,
+    /// Byte offset where the content ends (before closing fence line)
+    pub content_end: usize,
+}
+
+/// Builder for MarkdownCodeBlock during parsing
+struct MarkdownCodeBlockBuilder {
+    content_start: usize,
 }
 
 #[cfg(test)]
@@ -520,5 +598,128 @@ mod tests {
             all_content.contains("code block in a list") || all_content.contains("print"),
             "Detected block should contain the code content: {all_content:?}"
         );
+    }
+
+    #[test]
+    fn test_detect_markdown_code_blocks() {
+        let content = r#"# Example
+
+```markdown
+# Heading
+Content here
+```
+
+```md
+Another heading
+More content
+```
+
+```rust
+// Not markdown
+fn main() {}
+```
+"#;
+
+        let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+
+        // Should detect 2 blocks (markdown and md, not rust)
+        assert_eq!(
+            blocks.len(),
+            2,
+            "Should detect exactly 2 markdown blocks, got {blocks:?}"
+        );
+
+        // First block should be the ```markdown block
+        let first = &blocks[0];
+        let first_content = &content[first.content_start..first.content_end];
+        assert!(
+            first_content.contains("# Heading"),
+            "First block should contain '# Heading', got: {first_content:?}"
+        );
+
+        // Second block should be the ```md block
+        let second = &blocks[1];
+        let second_content = &content[second.content_start..second.content_end];
+        assert!(
+            second_content.contains("Another heading"),
+            "Second block should contain 'Another heading', got: {second_content:?}"
+        );
+    }
+
+    #[test]
+    fn test_detect_markdown_code_blocks_empty() {
+        let content = "# Just a heading\n\nNo code blocks here\n";
+        let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+        assert_eq!(blocks.len(), 0);
+    }
+
+    #[test]
+    fn test_detect_markdown_code_blocks_case_insensitive() {
+        let content = "```MARKDOWN\nContent\n```\n";
+        let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+        assert_eq!(blocks.len(), 1);
+    }
+
+    #[test]
+    fn test_detect_markdown_code_blocks_at_eof_no_trailing_newline() {
+        // Block at end of file without trailing newline after closing fence
+        let content = "# Doc\n\n```markdown\nContent\n```";
+        let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+        assert_eq!(blocks.len(), 1);
+        // Content should be extractable without panic
+        let block_content = &content[blocks[0].content_start..blocks[0].content_end];
+        assert!(block_content.contains("Content"));
+    }
+
+    #[test]
+    fn test_detect_markdown_code_blocks_single_line_content() {
+        // Single line of content, no extra newlines
+        let content = "```markdown\nX\n```\n";
+        let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+        assert_eq!(blocks.len(), 1);
+        let block_content = &content[blocks[0].content_start..blocks[0].content_end];
+        assert_eq!(block_content, "X");
+    }
+
+    #[test]
+    fn test_detect_markdown_code_blocks_empty_content() {
+        // Block with no content between fences
+        let content = "```markdown\n```\n";
+        let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+        // Should detect block but with empty range or not at all
+        // Either behavior is acceptable as long as no panic
+        if !blocks.is_empty() {
+            // If detected, content range should be valid
+            assert!(blocks[0].content_start <= blocks[0].content_end);
+        }
+    }
+
+    #[test]
+    fn test_detect_markdown_code_blocks_validates_ranges() {
+        // Ensure no panic on various edge cases
+        let test_cases = [
+            "",                             // Empty content
+            "```markdown",                  // Unclosed block
+            "```markdown\n",                // Unclosed block with newline
+            "```\n```",                     // Non-markdown block
+            "```markdown\n```",             // Empty markdown block
+            "   ```markdown\n   X\n   ```", // Indented block
+        ];
+
+        for content in test_cases {
+            // Should not panic
+            let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+            // All detected blocks should have valid ranges
+            for block in &blocks {
+                assert!(
+                    block.content_start <= block.content_end,
+                    "Invalid range in content: {content:?}"
+                );
+                assert!(
+                    block.content_end <= content.len(),
+                    "Range exceeds content length in: {content:?}"
+                );
+            }
+        }
     }
 }
