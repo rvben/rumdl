@@ -118,6 +118,20 @@ fn is_cjk_sentence_ending(c: char) -> bool {
     matches!(c, '。' | '！' | '？')
 }
 
+/// Check if a character is a closing quote mark
+/// Includes straight quotes and curly/smart quotes
+fn is_closing_quote(c: char) -> bool {
+    // " (straight double), ' (straight single), " (U+201D right double), ' (U+2019 right single)
+    matches!(c, '"' | '\'' | '\u{201D}' | '\u{2019}')
+}
+
+/// Check if a character is an opening quote mark
+/// Includes straight quotes and curly/smart quotes
+fn is_opening_quote(c: char) -> bool {
+    // " (straight double), ' (straight single), " (U+201C left double), ' (U+2018 left single)
+    matches!(c, '"' | '\'' | '\u{201C}' | '\u{2018}')
+}
+
 /// Check if a character is a CJK character (Chinese, Japanese, Korean)
 fn is_cjk_char(c: char) -> bool {
     // CJK Unified Ideographs and common extensions
@@ -185,10 +199,28 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         return false;
     }
 
-    // Must be followed by space, or by emphasis/strikethrough marker followed by space
+    // Must be followed by space, closing quote, or emphasis/strikethrough marker followed by space
     let (_space_pos, after_space_pos) = if next_char == ' ' {
         // Normal case: punctuation followed by space
         (pos + 1, pos + 2)
+    } else if is_closing_quote(next_char) && pos + 2 < chars.len() {
+        // Sentence ends with quote - check what follows the quote
+        if chars[pos + 2] == ' ' {
+            // Just quote followed by space: 'sentence." '
+            (pos + 2, pos + 3)
+        } else if (chars[pos + 2] == '*' || chars[pos + 2] == '_') && pos + 3 < chars.len() && chars[pos + 3] == ' ' {
+            // Quote followed by emphasis: 'sentence."* '
+            (pos + 3, pos + 4)
+        } else if (chars[pos + 2] == '*' || chars[pos + 2] == '_')
+            && pos + 4 < chars.len()
+            && chars[pos + 3] == chars[pos + 2]
+            && chars[pos + 4] == ' '
+        {
+            // Quote followed by bold: 'sentence."** '
+            (pos + 4, pos + 5)
+        } else {
+            return false;
+        }
     } else if (next_char == '*' || next_char == '_') && pos + 2 < chars.len() && chars[pos + 2] == ' ' {
         // Sentence ends with emphasis: "sentence.* " or "sentence._ "
         (pos + 2, pos + 3)
@@ -217,10 +249,13 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         return false;
     }
 
-    // Skip leading emphasis/strikethrough markers to find the actual first letter
+    // Skip leading emphasis/strikethrough markers and opening quotes to find the actual first letter
     let mut first_letter_pos = next_char_pos;
     while first_letter_pos < chars.len()
-        && (chars[first_letter_pos] == '*' || chars[first_letter_pos] == '_' || chars[first_letter_pos] == '~')
+        && (chars[first_letter_pos] == '*'
+            || chars[first_letter_pos] == '_'
+            || chars[first_letter_pos] == '~'
+            || is_opening_quote(chars[first_letter_pos]))
     {
         first_letter_pos += 1;
     }
@@ -276,10 +311,14 @@ fn split_into_sentences_with_set(text: &str, abbreviations: &HashSet<String>) ->
         current_sentence.push(c);
 
         if is_sentence_boundary(text, pos, abbreviations) {
-            // Consume any trailing emphasis/strikethrough markers (they belong to the current sentence)
-            while chars.peek() == Some(&'*') || chars.peek() == Some(&'_') || chars.peek() == Some(&'~') {
-                current_sentence.push(chars.next().unwrap());
-                pos += 1;
+            // Consume any trailing emphasis/strikethrough markers and quotes (they belong to the current sentence)
+            while let Some(&next) = chars.peek() {
+                if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {
+                    current_sentence.push(chars.next().unwrap());
+                    pos += 1;
+                } else {
+                    break;
+                }
             }
 
             // Consume the space after the sentence
@@ -1807,8 +1846,24 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     || prev_trimmed.ends_with("?*")
                     || prev_trimmed.ends_with("._")
                     || prev_trimmed.ends_with("!_")
-                    || prev_trimmed.ends_with("?_"))
-                    && !text_ends_with_abbreviation(prev_trimmed.trim_end_matches(['*', '_']), &abbreviations);
+                    || prev_trimmed.ends_with("?_")
+                    // Quote-terminated sentences (straight and curly quotes)
+                    || prev_trimmed.ends_with(".\"")
+                    || prev_trimmed.ends_with("!\"")
+                    || prev_trimmed.ends_with("?\"")
+                    || prev_trimmed.ends_with(".'")
+                    || prev_trimmed.ends_with("!'")
+                    || prev_trimmed.ends_with("?'")
+                    || prev_trimmed.ends_with(".\u{201D}")
+                    || prev_trimmed.ends_with("!\u{201D}")
+                    || prev_trimmed.ends_with("?\u{201D}")
+                    || prev_trimmed.ends_with(".\u{2019}")
+                    || prev_trimmed.ends_with("!\u{2019}")
+                    || prev_trimmed.ends_with("?\u{2019}"))
+                    && !text_ends_with_abbreviation(
+                        prev_trimmed.trim_end_matches(['*', '_', '"', '\'', '\u{201D}', '\u{2019}']),
+                        &abbreviations,
+                    );
 
                 if has_hard_break(prev_line) || (options.sentence_per_line && ends_with_sentence) {
                     // Start a new part after hard break or complete sentence

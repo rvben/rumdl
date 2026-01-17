@@ -2689,3 +2689,147 @@ fn test_utf8_zero_width_characters() {
     assert!(result.contains("Text"), "Base text preserved");
     assert!(result.contains("invisible"), "Text after zero-width preserved");
 }
+
+// ============================================================
+// Sentence reflow with quotes
+// ============================================================
+
+#[test]
+fn test_sentence_split_when_next_sentence_starts_with_quote() {
+    // Sentence ends with period, next sentence starts with opening quote
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = r#"Builders create significant business value. "AI native" workers set the AI vision."#;
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].ends_with("value."), "First sentence ends with 'value.'");
+    assert!(
+        lines[1].starts_with("\"AI"),
+        "Second sentence starts with opening quote"
+    );
+}
+
+#[test]
+fn test_sentence_split_when_period_inside_closing_quote() {
+    // Sentence ends with period inside quote, next sentence follows
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = r#"Users electable "to make Gemini helpful." Personal context is provided."#;
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(
+        lines[0].ends_with("helpful.\""),
+        "First sentence ends with closing quote after period: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines[1].starts_with("Personal"),
+        "Second sentence starts with 'Personal'"
+    );
+}
+
+#[test]
+fn test_curly_quotes_sentence_boundary() {
+    // Curly/smart quotes should also be recognized
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    // Using Unicode escape sequences for curly quotes
+    // \u{201C} = left double quotation mark "
+    // \u{201D} = right double quotation mark "
+    let input = "First sentence.\u{201C}Second sentence.\u{201D} Third sentence.";
+    let result = reflow_markdown(input, &options);
+
+    // Note: The left curly quote after period is trickier because there's no space
+    // But the right curly quote followed by space should work
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should split at sentence boundaries: {result:?}");
+}
+
+#[test]
+fn test_exclamation_with_quotes() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = r#"She said "Amazing!" He replied "Incredible!""#;
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split at exclamation: {result:?}");
+    assert!(
+        lines[0].ends_with("Amazing!\""),
+        "First sentence should end with exclamation and quote"
+    );
+}
+
+#[test]
+fn test_question_with_quotes() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = r#"He asked "Really?" She answered yes."#;
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split at question mark: {result:?}");
+    assert!(
+        lines[0].ends_with("Really?\""),
+        "First sentence should end with question and quote"
+    );
+}
+
+#[test]
+fn test_single_quote_sentence_boundary() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "The character said 'Done.' Next line follows.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split at period with single quote: {result:?}");
+    assert!(lines[0].ends_with("Done.'"), "First sentence ends with single quote");
+}
+
+#[test]
+fn test_mixed_quotes_and_emphasis() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = r#"He wrote *"Important text."* Then continued."#;
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "Should split with mixed emphasis and quotes: {result:?}"
+    );
+}
