@@ -419,6 +419,43 @@ pub static TOC_SECTION_START: LazyLock<Regex> =
 // Blockquote patterns
 pub static BLOCKQUOTE_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*>+\s*)").unwrap());
 
+/// Check if a line is blank in the context of blockquotes.
+///
+/// A line is considered "blank" if:
+/// - It's empty or contains only whitespace
+/// - It's a blockquote continuation line with no content (e.g., ">", ">>", "> ")
+///
+/// This is essential for rules like MD058 (blanks-around-tables), MD065 (blanks-around-horizontal-rules),
+/// and any other rule that needs to detect blank lines that might be inside blockquotes.
+///
+/// # Examples
+/// ```
+/// use rumdl_lib::utils::regex_cache::is_blank_in_blockquote_context;
+///
+/// assert!(is_blank_in_blockquote_context(""));           // Empty line
+/// assert!(is_blank_in_blockquote_context("   "));        // Whitespace only
+/// assert!(is_blank_in_blockquote_context(">"));          // Blockquote continuation
+/// assert!(is_blank_in_blockquote_context("> "));         // Blockquote with trailing space
+/// assert!(is_blank_in_blockquote_context(">>"));         // Nested blockquote
+/// assert!(is_blank_in_blockquote_context("> > "));       // Spaced nested blockquote
+/// assert!(!is_blank_in_blockquote_context("> text"));    // Blockquote with content
+/// assert!(!is_blank_in_blockquote_context("text"));      // Regular text
+/// ```
+pub fn is_blank_in_blockquote_context(line: &str) -> bool {
+    if line.trim().is_empty() {
+        return true;
+    }
+    // Check if line is a blockquote prefix with no content after it
+    // Handle spaced nested blockquotes like "> > " by recursively checking remainder
+    if let Some(m) = BLOCKQUOTE_PREFIX_RE.find(line) {
+        let remainder = &line[m.end()..];
+        // The remainder should be empty/whitespace OR another blockquote prefix (for spaced nesting)
+        is_blank_in_blockquote_context(remainder)
+    } else {
+        false
+    }
+}
+
 // MD013 specific patterns
 pub static IMAGE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^!\[.*?\]\[.*?\]$").unwrap());
 pub static LINK_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap());
@@ -1133,5 +1170,69 @@ mod tests {
         assert!(URL_IPV6_REGEX.is_match("https://[::1]/"));
         assert!(URL_QUICK_CHECK_REGEX.is_match("https://example.com"));
         assert!(URL_SIMPLE_REGEX.is_match("https://example.com"));
+    }
+
+    // =========================================================================
+    // Tests for is_blank_in_blockquote_context
+    // This is a shared utility used by MD058, MD065, and other rules that need
+    // to detect blank lines inside blockquotes (Issue #305)
+    // =========================================================================
+
+    #[test]
+    fn test_is_blank_in_blockquote_context_regular_blanks() {
+        // Regular blank lines
+        assert!(is_blank_in_blockquote_context(""));
+        assert!(is_blank_in_blockquote_context("   "));
+        assert!(is_blank_in_blockquote_context("\t"));
+        assert!(is_blank_in_blockquote_context("  \t  "));
+    }
+
+    #[test]
+    fn test_is_blank_in_blockquote_context_blockquote_blanks() {
+        // Blockquote continuation lines with no content (should be treated as blank)
+        assert!(is_blank_in_blockquote_context(">"));
+        assert!(is_blank_in_blockquote_context("> "));
+        assert!(is_blank_in_blockquote_context(">  "));
+        assert!(is_blank_in_blockquote_context(">>"));
+        assert!(is_blank_in_blockquote_context(">> "));
+        assert!(is_blank_in_blockquote_context(">>>"));
+        assert!(is_blank_in_blockquote_context(">>> "));
+    }
+
+    #[test]
+    fn test_is_blank_in_blockquote_context_spaced_nested() {
+        // Spaced nested blockquotes ("> > " style)
+        assert!(is_blank_in_blockquote_context("> > "));
+        assert!(is_blank_in_blockquote_context("> > > "));
+        assert!(is_blank_in_blockquote_context(">  >  "));
+    }
+
+    #[test]
+    fn test_is_blank_in_blockquote_context_with_leading_space() {
+        // Blockquote with leading whitespace
+        assert!(is_blank_in_blockquote_context("  >"));
+        assert!(is_blank_in_blockquote_context("  > "));
+        assert!(is_blank_in_blockquote_context("  >>"));
+    }
+
+    #[test]
+    fn test_is_blank_in_blockquote_context_not_blank() {
+        // Lines with actual content (should NOT be treated as blank)
+        assert!(!is_blank_in_blockquote_context("text"));
+        assert!(!is_blank_in_blockquote_context("> text"));
+        assert!(!is_blank_in_blockquote_context(">> text"));
+        assert!(!is_blank_in_blockquote_context("> | table |"));
+        assert!(!is_blank_in_blockquote_context("| table |"));
+        assert!(!is_blank_in_blockquote_context("> # Heading"));
+        assert!(!is_blank_in_blockquote_context(">text")); // No space after > but has text
+    }
+
+    #[test]
+    fn test_is_blank_in_blockquote_context_edge_cases() {
+        // Edge cases
+        assert!(!is_blank_in_blockquote_context(">a")); // Content immediately after >
+        assert!(!is_blank_in_blockquote_context("> a")); // Single char content
+        assert!(is_blank_in_blockquote_context(">   ")); // Multiple spaces after >
+        assert!(!is_blank_in_blockquote_context(">  text")); // Multiple spaces before content
     }
 }

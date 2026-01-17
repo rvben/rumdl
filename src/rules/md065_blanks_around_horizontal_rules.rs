@@ -10,9 +10,12 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 pub struct MD065BlanksAroundHorizontalRules;
 
 impl MD065BlanksAroundHorizontalRules {
-    /// Check if a line is blank
+    /// Check if a line is blank (including blockquote continuation lines)
+    ///
+    /// Uses the shared `is_blank_in_blockquote_context` utility function for
+    /// consistent blank line detection across all rules.
     fn is_blank_line(line: &str) -> bool {
-        line.trim().is_empty()
+        crate::utils::regex_cache::is_blank_in_blockquote_context(line)
     }
 
     /// Check if this might be a setext heading underline (not a horizontal rule)
