@@ -947,6 +947,10 @@ pub fn process_file_with_index(
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();
 
+    // Check embedded markdown blocks and add their warnings
+    let embedded_warnings = check_embedded_markdown_blocks(&content, &filtered_rules, config);
+    all_warnings.extend(embedded_warnings);
+
     // Sort warnings by line number, then column
     all_warnings.sort_by(|a, b| {
         if a.line == b.line {
@@ -1152,6 +1156,102 @@ fn format_embedded_markdown_blocks_recursive(
     }
 
     formatted_count
+}
+
+/// Check markdown content embedded in fenced code blocks with `markdown` or `md` language.
+///
+/// This function detects markdown code blocks and runs lint checks on their content,
+/// returning warnings with adjusted line numbers that point to the correct location
+/// in the parent file.
+///
+/// Returns a vector of warnings from all embedded markdown blocks.
+pub fn check_embedded_markdown_blocks(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+) -> Vec<rumdl_lib::rule::LintWarning> {
+    check_embedded_markdown_blocks_recursive(content, rules, config, 0)
+}
+
+/// Internal recursive implementation with depth tracking.
+fn check_embedded_markdown_blocks_recursive(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+    depth: usize,
+) -> Vec<rumdl_lib::rule::LintWarning> {
+    // Prevent excessive recursion
+    if depth >= MAX_EMBEDDED_DEPTH {
+        return Vec::new();
+    }
+
+    let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+
+    if blocks.is_empty() {
+        return Vec::new();
+    }
+
+    let mut all_warnings = Vec::new();
+
+    for block in blocks {
+        // Extract the content between the fences
+        let block_content = &content[block.content_start..block.content_end];
+
+        // Skip empty blocks
+        if block_content.trim().is_empty() {
+            continue;
+        }
+
+        // Calculate the line offset for this block
+        // Count newlines before content_start to get the starting line number
+        let line_offset = content[..block.content_start].matches('\n').count();
+
+        // Strip common indentation from all lines
+        let (stripped_content, _common_indent) = strip_common_indent(block_content);
+
+        // First, recursively check any nested markdown blocks
+        let nested_warnings = check_embedded_markdown_blocks_recursive(&stripped_content, rules, config, depth + 1);
+
+        // Adjust nested warning line numbers and add to results
+        for mut warning in nested_warnings {
+            warning.line += line_offset;
+            warning.end_line += line_offset;
+            // Clear fix since byte offsets won't be valid for parent file
+            warning.fix = None;
+            all_warnings.push(warning);
+        }
+
+        // Create a context and collect warnings for the embedded content
+        // Skip file-scoped rules that don't apply to embedded snippets
+        let ctx = LintContext::new(&stripped_content, config.markdown_flavor(), None);
+        for rule in rules {
+            // Skip file-scoped rules for embedded content
+            match rule.name() {
+                "MD041" => continue, // "First line in file should be heading" - not a file
+                "MD047" => continue, // "File should end with newline" - not a file
+                _ => {}
+            }
+
+            if let Ok(rule_warnings) = rule.check(&ctx) {
+                for warning in rule_warnings {
+                    // Create adjusted warning with correct line numbers
+                    let adjusted_warning = rumdl_lib::rule::LintWarning {
+                        message: warning.message.clone(),
+                        line: warning.line + line_offset,
+                        column: warning.column,
+                        end_line: warning.end_line + line_offset,
+                        end_column: warning.end_column,
+                        severity: warning.severity,
+                        fix: None, // Clear fix since byte offsets won't be valid
+                        rule_name: warning.rule_name,
+                    };
+                    all_warnings.push(adjusted_warning);
+                }
+            }
+        }
+    }
+
+    all_warnings
 }
 
 /// Strip common leading indentation from all non-empty lines.
@@ -1856,5 +1956,66 @@ mod tests {
         // Verify the embedded content is NOT changed by MD041 (no fix available)
         assert_eq!(content, original, "MD041 should not change embedded H2 (no fix)");
         assert_eq!(formatted, 0, "No formatting changes expected");
+    }
+
+    #[test]
+    fn test_check_embedded_markdown_blocks() {
+        let config = rumdl_config::Config::default();
+        let rules = rumdl_lib::rules::all_rules(&config);
+
+        // Content with violations inside embedded markdown
+        let content = "# Doc\n```markdown\n##  Bad heading\n```\n";
+
+        let warnings = check_embedded_markdown_blocks(content, &rules, &config);
+
+        // Should find violations in embedded content
+        assert!(!warnings.is_empty(), "Should find warnings in embedded markdown");
+
+        // Check that warnings have adjusted line numbers
+        // The embedded content starts at line 3 (after "# Doc\n```markdown\n")
+        let md019_warning = warnings
+            .iter()
+            .find(|w| w.rule_name.as_ref().is_some_and(|n| n == "MD019"));
+        assert!(md019_warning.is_some(), "Should find MD019 warning for extra space");
+
+        // Line should be 3 (line 1 = "# Doc", line 2 = "```markdown", line 3 = "##  Bad heading")
+        if let Some(w) = md019_warning {
+            assert_eq!(w.line, 3, "MD019 warning should be on line 3");
+        }
+    }
+
+    #[test]
+    fn test_check_embedded_markdown_blocks_skips_file_scoped_rules() {
+        let config = rumdl_config::Config::default();
+        let rules = rumdl_lib::rules::all_rules(&config);
+
+        // Content that would trigger MD041 (no H1 first) and MD047 (no trailing newline)
+        let content = "# Doc\n```markdown\n## Not H1\nNo trailing newline```\n";
+
+        let warnings = check_embedded_markdown_blocks(content, &rules, &config);
+
+        // MD041 and MD047 should be filtered out for embedded content
+        let md041 = warnings
+            .iter()
+            .find(|w| w.rule_name.as_ref().is_some_and(|n| n == "MD041"));
+        let md047 = warnings
+            .iter()
+            .find(|w| w.rule_name.as_ref().is_some_and(|n| n == "MD047"));
+
+        assert!(md041.is_none(), "MD041 should be skipped for embedded content");
+        assert!(md047.is_none(), "MD047 should be skipped for embedded content");
+    }
+
+    #[test]
+    fn test_check_embedded_markdown_blocks_empty() {
+        let config = rumdl_config::Config::default();
+        let rules = rumdl_lib::rules::all_rules(&config);
+
+        // No embedded markdown
+        let content = "# Doc\n\nSome text\n";
+
+        let warnings = check_embedded_markdown_blocks(content, &rules, &config);
+
+        assert!(warnings.is_empty(), "Should have no warnings without embedded markdown");
     }
 }
