@@ -20,6 +20,7 @@ Global settings are configured in the `[global]` section of your configuration f
 | [`line_length`](#line_length)             | `integer`  | `80`           | Default line length for rules             |
 | [`flavor`](#flavor)                       | `string`   | `"standard"`   | Markdown flavor to use                    |
 | [`per-file-flavor`](#per-file-flavor)     | `table`    | `{}`           | Per-file flavor overrides                 |
+| [`output-format`](#output-format)         | `string`   | `"text"`       | Output format for linting results         |
 | [`cache`](#cache)                         | `boolean`  | `true`         | Enable result caching                     |
 | [`cache_dir`](#cache_dir)                 | `string`   | `.rumdl_cache` | Directory for cache files                 |
 
@@ -449,25 +450,28 @@ flavor = "mkdocs"  # Use MkDocs flavor
 
 **Available Flavors**:
 
-- `"standard"` (default): Standard Markdown syntax
-- `"mkdocs"`: MkDocs-specific extensions and syntax
+- `"standard"` (default): [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) + GFM extensions (tables, task lists, strikethrough, autolinks)
+- `"gfm"`: GitHub Flavored Markdown with security-sensitive HTML warnings and extended autolinks
+- `"mkdocs"`: MkDocs-specific extensions (admonitions, content tabs, autorefs, mkdocstrings)
+- `"mdx"`: MDX with JSX components, attributes, expressions, and ESM imports
+- `"quarto"`: Quarto/RMarkdown for scientific publishing (citations, shortcodes, div blocks)
 
-**Note**: Additional flavors like `"gfm"` (GitHub Flavored Markdown) and `"commonmark"` are planned for future releases. Currently, specifying these will emit a warning and use standard flavor.
+**Aliases**: `"commonmark"` is an alias for `"standard"`, `"github"` is an alias for `"gfm"`
 
 **Behavior**:
 
-- Affects how certain rules behave, particularly:
-  - MD042: Empty links handling (MkDocs allows certain shorthand links)
-  - MD052: Reference-style links and images (MkDocs has special syntax)
-  - Future: May affect table parsing, code blocks, and other flavor-specific features
-- Some rules may be automatically adjusted based on the flavor
+- The `standard` flavor is based on CommonMark 0.31.2 with widely-adopted GFM extensions enabled by default
+- Each flavor adjusts specific rule behavior where that system differs from standard Markdown
+- See [Flavors Overview](flavors.md) for detailed rule adjustments per flavor
 
 **Usage Notes**:
 
 - Choose the flavor that matches your documentation system
-- MkDocs flavor is useful for projects using MkDocs or Material for MkDocs
-- Currently only `standard` and `mkdocs` have implementation differences
-- Future releases will add support for additional flavors with their specific features
+- Use `standard` for generic Markdown or when you want the strictest linting
+- Use `gfm` for GitHub-hosted documentation with security-conscious HTML handling
+- Use `mkdocs` for MkDocs or Material for MkDocs projects
+- Use `mdx` for React/Next.js documentation with JSX components
+- Use `quarto` for scientific documents with R/Python code execution
 
 **Example CLI usage**:
 
@@ -549,6 +553,67 @@ flavor = "standard"  # Default for files not matching any pattern
 "packages/website/docs/**/*.md" = "mkdocs"
 "packages/storybook/**/*.mdx" = "mdx"
 "packages/api/docs/**/*.md" = "standard"
+```
+
+### `output-format`
+
+**Type**: `string`
+**Default**: `"text"`
+**CLI Equivalent**: `--output-format`
+**Environment Variable**: `RUMDL_OUTPUT_FORMAT`
+
+Specifies the output format for linting results.
+
+```toml
+[global]
+output-format = "github"  # Use GitHub Actions format
+```
+
+**Available Formats**:
+
+- `"text"` (default): Human-readable output with colors
+- `"full"`: Detailed output with context
+- `"concise"`: Minimal output (one line per warning)
+- `"grouped"`: Group warnings by file
+- `"json"`: JSON output for programmatic use
+- `"json-lines"`: One JSON object per line (streaming)
+- `"github"`: GitHub Actions annotations
+- `"gitlab"`: GitLab CI format
+- `"pylint"`: PyLint-compatible format
+- `"azure"`: Azure Pipelines format
+- `"sarif"`: SARIF format for security tools
+- `"junit"`: JUnit XML format for CI systems
+
+**Precedence**:
+
+1. CLI flag (`--output-format`) wins
+2. Environment variable (`RUMDL_OUTPUT_FORMAT`) overrides config
+3. Config file setting (`output-format`)
+4. Default (`"text"`)
+
+**Usage Notes**:
+
+- Use `github` format in GitHub Actions for inline annotations
+- Use `json` or `sarif` for integration with other tools
+- The environment variable is useful for CI/CD pipelines where you want to override the project config
+
+**Example CLI usage**:
+
+```bash
+# Use GitHub format for Actions
+rumdl check --output-format github .
+
+# Or via environment variable
+RUMDL_OUTPUT_FORMAT=github rumdl check .
+```
+
+**Example GitHub Actions workflow**:
+
+```yaml
+- name: Lint Markdown
+  env:
+    RUMDL_OUTPUT_FORMAT: github
+  run: rumdl check .
 ```
 
 ### `cache`

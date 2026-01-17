@@ -95,10 +95,14 @@ pub fn perform_check_run(
     // Create output writer for linting results
     let output_writer = OutputWriter::new(args.stderr, quiet, args.silent);
 
-    // Determine output format
+    // Read RUMDL_OUTPUT_FORMAT env var (if set)
+    let env_output_format = std::env::var("RUMDL_OUTPUT_FORMAT").ok();
+
+    // Determine output format with precedence: CLI → env var → config → legacy → default
     let output_format_str = args
         .output_format
         .as_deref()
+        .or(env_output_format.as_deref())
         .or(config.global.output_format.as_deref())
         .or_else(|| {
             // Legacy support: map --output json to --output-format json

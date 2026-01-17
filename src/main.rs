@@ -566,7 +566,7 @@ pub struct CheckArgs {
 
     /// Output format for linting results
     #[arg(long, value_parser = ["text", "full", "concise", "grouped", "json", "json-lines", "github", "gitlab", "pylint", "azure", "sarif", "junit"],
-          help = "Output format for linting results (text, full, concise, grouped, json, json-lines, github, gitlab, pylint, azure, sarif, junit)")]
+          help = "Output format (default: text, or $RUMDL_OUTPUT_FORMAT, or output-format in config)")]
     output_format: Option<String>,
 
     /// Show absolute file paths instead of project-relative paths
