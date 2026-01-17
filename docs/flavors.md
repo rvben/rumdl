@@ -44,9 +44,15 @@ When no flavor is configured, rumdl auto-detects based on file extension:
 | `.qmd`, `.Rmd`     | `quarto`        |
 | `.md`, `.markdown` | `standard`      |
 
+## Specification Versions
+
+rumdl uses [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) for Markdown parsing, which implements [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) (January 2024).
+
+The `standard` flavor includes CommonMark plus widely-adopted GFM extensions (tables, task lists, strikethrough, autolinks). Other flavors build on this baseline with additional syntax support.
+
 ## Flavor Details
 
-- **[Standard](flavors/standard.md)** - Default behavior with CommonMark and basic GFM support
+- **[Standard](flavors/standard.md)** - CommonMark 0.31.2 + GFM extensions (tables, task lists, strikethrough, autolinks)
 - **[GFM](flavors/gfm.md)** - GitHub-specific features: security-sensitive HTML warnings, extended autolinks
 - **[MkDocs](flavors/mkdocs.md)** - Admonitions, content tabs, autorefs, mkdocstrings, extended syntax
 - **[MDX](flavors/mdx.md)** - JSX components, JSX attributes, expressions, ESM imports
