@@ -388,7 +388,8 @@ impl MD034NoBareUrls {
                 let end = mat.end();
 
                 // Skip if email is part of an XMPP URI (xmpp:user@domain)
-                if start >= 5 && &line[start - 5..start] == "xmpp:" {
+                // Check character boundary to avoid panics with multi-byte UTF-8
+                if start >= 5 && line.is_char_boundary(start - 5) && &line[start - 5..start] == "xmpp:" {
                     continue;
                 }
 

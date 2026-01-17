@@ -1486,3 +1486,53 @@ fn test_www_and_protocol_urls_mixed() {
         "Visit <https://www.example.com> and <https://other.com> for info."
     );
 }
+
+/// Test that multi-byte UTF-8 characters before emails don't cause panics
+/// Regression test for kubernetes/website Bengali text issue
+#[test]
+fn test_email_detection_with_multibyte_utf8() {
+    let rule = MD034NoBareUrls;
+
+    // Bengali text followed by email - the email address starts at a byte offset
+    // that could land inside a multi-byte character if we subtract 5 naively
+    let content = "কুবারনেটিস কমিউনিটির মধ্যে ঘটে যাওয়া ঘটনাগুলির জন্য, conduct@kubernetes.io মাধ্যমে";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // The email should be detected
+    assert_eq!(result.len(), 1, "Email should be detected in Bengali text");
+    assert!(
+        result[0].message.contains("Email address without angle brackets"),
+        "Should flag bare email"
+    );
+}
+
+/// Test various multi-byte UTF-8 edge cases with emails
+#[test]
+fn test_email_detection_various_scripts() {
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        // Japanese
+        ("日本語テキスト user@example.com 日本語", 1),
+        // Chinese
+        ("中文文本 user@example.com 更多中文", 1),
+        // Arabic
+        ("نص عربي user@example.com نص آخر", 1),
+        // Emoji
+        ("🎉 email@test.com 🎉", 1),
+        // Mixed scripts
+        ("日本語 中文 العربية user@example.com more", 1),
+    ];
+
+    for (content, expected_count) in test_cases.iter() {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            *expected_count,
+            "Failed for multi-byte content: {content}"
+        );
+    }
+}
