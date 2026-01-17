@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.220] - 2026-01-17
+
+### Added
+
+- **`RUMDL_OUTPUT_FORMAT` environment variable** ([#297](https://github.com/rvben/rumdl/issues/297))
+  - Override output format in CI/CD without modifying config files
+  - Precedence: CLI flag → env var → config → default
+  - Example: `RUMDL_OUTPUT_FORMAT=github rumdl check .`
+
+### Changed
+
+- **Documentation: Clarify CommonMark 0.31.2 spec version** ([#298](https://github.com/rvben/rumdl/issues/298))
+  - Explicitly document that rumdl uses CommonMark 0.31.2 via pulldown-cmark
+  - Clarify that `standard` flavor includes GFM extensions (tables, task lists, strikethrough, autolinks)
+  - Document `commonmark` as alias for `standard`, `github` as alias for `gfm`
+  - Add `output-format` setting documentation with all 12 available formats
+
 ## [0.0.219] - 2026-01-17
 
 ### Added
