@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.219] - 2026-01-17
+
+### Added
+
+- **Comprehensive markdown flavor support**
+  - **GFM flavor**: Security-sensitive HTML tag detection in MD033, extended autolinks including `xmpp:` protocol in MD034
+  - **MkDocs flavor**: mkdocstrings block support, extended markdown syntax (keys `[[Ctrl]]`, caret `^^sup^^`, mark `==highlight==`, ins `++inserted++`, tilde `~sub~`)
+  - **MDX flavor**: JSX attribute detection (`className`, `htmlFor`, `onClick`, etc.), JSX expression handling, ESM import/export support
+  - **Quarto flavor**: Pandoc citation syntax (`@ref`, `[@ref]`), shortcode detection (`{{< >}}`), div blocks and callouts (`::: {.callout-*}`), math block handling for emphasis rules
+
+- **Comprehensive UTF-8 stress tests**
+  - Systematic testing of all rules against 11 scripts (Bengali, Arabic, Chinese, Japanese, Korean, Thai, Hindi, Russian, Greek, Emoji, ZWJ sequences)
+  - Tests for check(), fix(), and fix range character boundaries
+  - Catches UTF-8 panics before they reach production
+
+### Fixed
+
+- **MD034: UTF-8 panic with multi-byte text before emails**
+  - Fixed crash when email follows Bengali, Chinese, Arabic, or other multi-byte UTF-8 text
+  - The `xmpp:` prefix check was slicing at invalid character boundaries
+  - Discovered during testing against kubernetes/website
+
+- **MD031: Blank line detection after MkDocs admonition blocks**
+  - Corrected blank line requirements after admonition content
+
+- **MkDocs: Nested admonition handling**
+  - Implemented stack-based detection for properly nested admonitions
+
+### Changed
+
+- **Documentation: Split flavor docs into separate files**
+  - `docs/flavors.md` is now a concise overview with links
+  - Each flavor has its own file: `docs/flavors/standard.md`, `gfm.md`, `mkdocs.md`, `mdx.md`, `quarto.md`
+  - Easier to find, reference, and maintain flavor-specific documentation
+
 ## [0.0.218] - 2026-01-15
 
 ### Added
