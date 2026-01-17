@@ -4,12 +4,13 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 
 ## Quick Reference
 
-| Flavor     | Use Case                             | Rules Affected                                         |
-| ---------- | ------------------------------------ | ------------------------------------------------------ |
-| `standard` | Default Markdown with GFM extensions | Baseline behavior                                      |
-| `mkdocs`   | MkDocs / Material for MkDocs         | MD024, MD031, MD033, MD040, MD042, MD046, MD052, MD056 |
-| `mdx`      | MDX (JSX in Markdown)                | MD033                                                  |
-| `quarto`   | Quarto / RMarkdown                   | MD038, MD040                                           |
+| Flavor     | Use Case                             | Rules Affected                                                              |
+| ---------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| `standard` | Default Markdown with GFM extensions | Baseline behavior                                                           |
+| `gfm`      | GitHub Flavored Markdown             | MD033 (security tags), MD034 (extended autolinks)                           |
+| `mkdocs`   | MkDocs / Material for MkDocs         | MD024, MD031, MD033, MD038, MD040, MD042, MD046, MD049, MD050, MD052, MD056 |
+| `mdx`      | MDX (JSX in Markdown)                | MD013, MD033, MD037, MD039, MD044, MD049                                    |
+| `quarto`   | Quarto / RMarkdown                   | MD034, MD037, MD038, MD040, MD042, MD049, MD050, MD051, MD052               |
 
 ## Configuration
 
@@ -45,9 +46,9 @@ When no flavor is configured, rumdl auto-detects based on file extension:
 
 ## Standard Flavor
 
-**Alias**: `gfm`, `github`, `commonmark`
+**Alias**: `commonmark`
 
-The default flavor. Uses pulldown-cmark which already supports GitHub Flavored Markdown (GFM) extensions:
+The default flavor. Uses pulldown-cmark which already supports common GFM extensions:
 
 - Tables
 - Task lists
@@ -55,6 +56,37 @@ The default flavor. Uses pulldown-cmark which already supports GitHub Flavored M
 - Autolinks
 
 All rules use their default behavior.
+
+## GFM Flavor
+
+**Alias**: `github`
+
+For content targeting GitHub specifically. Extends standard flavor with:
+
+### Security-Sensitive HTML Tags
+
+MD033 is configured to flag potentially dangerous HTML elements that GitHub may render:
+
+```markdown
+<!-- These are flagged in GFM mode -->
+<script>alert('xss')</script>
+<iframe src="..."></iframe>
+<form action="...">...</form>
+```
+
+### Extended Autolinks
+
+MD034 recognizes additional URL schemes from the GFM autolink extension:
+
+- `xmpp:` - XMPP URIs (e.g., `xmpp:user@example.com`)
+- Extended email detection with proper protocol handling
+
+### Rule Behavior Changes
+
+| Rule  | Standard Behavior              | GFM Behavior                              |
+| ----- | ------------------------------ | ----------------------------------------- |
+| MD033 | Flag all inline HTML           | Warn on security-sensitive tags           |
+| MD034 | Detect standard URLs/emails    | Include xmpp: and extended autolinks      |
 
 ## MkDocs Flavor
 
@@ -145,18 +177,49 @@ MkDocs table handling with extensions like `md_in_html`:
 
 **Affected rules**: MD056 (table column count)
 
+#### mkdocstrings Blocks
+
+mkdocstrings autodoc syntax is recognized:
+
+```markdown
+::: module.path
+    options:
+        show_source: true
+
+::: package.submodule.Class
+```
+
+**Affected rules**: MD031 (blanks around fences), MD038 (code spans)
+
+#### Extended Markdown Syntax
+
+MkDocs extensions for special formatting:
+
+```markdown
+++inserted text++     <!-- ins extension -->
+==marked text==       <!-- mark extension -->
+^^superscript^^       <!-- caret extension -->
+~subscript~           <!-- tilde extension -->
+[[keyboard keys]]     <!-- keys extension -->
+```
+
+**Affected rules**: MD038 (code spans), MD049 (emphasis style), MD050 (strong style)
+
 ### Rule Behavior Changes
 
-| Rule  | Standard Behavior                | MkDocs Behavior                    |
-| ----- | -------------------------------- | ---------------------------------- |
-| MD024 | Flag duplicate headings          | Skip headings in snippet sections  |
-| MD031 | Require blanks around all fences | Respect admonition/tab context     |
-| MD033 | Flag all inline HTML             | Allow `markdown="1"` attribute     |
-| MD040 | Require language on code blocks  | Allow `title=` without language    |
-| MD042 | Flag empty links `[]()`          | Allow auto-references `[Class][]`  |
-| MD046 | Detect code block style globally | Account for admonition/tab context |
-| MD052 | Flag undefined references        | Allow auto-references and snippets |
-| MD056 | Strict column count              | Handle MkDocs table extensions     |
+| Rule  | Standard Behavior                | MkDocs Behavior                          |
+| ----- | -------------------------------- | ---------------------------------------- |
+| MD024 | Flag duplicate headings          | Skip headings in snippet sections        |
+| MD031 | Require blanks around all fences | Respect admonition/tab/mkdocstrings      |
+| MD033 | Flag all inline HTML             | Allow `markdown="1"` attribute           |
+| MD038 | Flag spaces in code spans        | Handle keys/caret/mark syntax            |
+| MD040 | Require language on code blocks  | Allow `title=` without language          |
+| MD042 | Flag empty links `[]()`          | Allow auto-references `[Class][]`        |
+| MD046 | Detect code block style globally | Account for admonition/tab context       |
+| MD049 | Check emphasis consistency       | Handle mark/inserted syntax              |
+| MD050 | Check strong consistency         | Handle mark/caret/tilde syntax           |
+| MD052 | Flag undefined references        | Allow auto-references and snippets       |
+| MD056 | Strict column count              | Handle MkDocs table extensions           |
 
 ## MDX Flavor
 
@@ -180,17 +243,66 @@ Capitalized tags are treated as JSX components, not HTML:
 
 **Affected rules**: MD033 (inline HTML)
 
+#### JSX Attributes
+
+Elements with JSX-specific attributes are recognized as JSX, not HTML:
+
+```markdown
+<!-- These use JSX attributes and are not flagged -->
+<div className="container">...</div>
+<label htmlFor="input-id">Label</label>
+<button onClick={handler}>Click</button>
+<input onChange={handleChange} />
+```
+
+JSX-specific attributes include: `className`, `htmlFor`, `onClick`, `onChange`, `onSubmit`, `dangerouslySetInnerHTML`, and other camelCase event handlers.
+
+**Affected rules**: MD033 (inline HTML)
+
+#### JSX Expressions
+
+JSX expressions and comments are recognized:
+
+```markdown
+The value is {computedValue}.
+
+{/* This is a JSX comment */}
+
+<Component prop={expression} />
+```
+
+**Affected rules**: MD037 (no space in emphasis), MD039 (no space in links), MD044 (proper names), MD049 (emphasis style)
+
+#### ESM Imports/Exports
+
+MDX 2.0+ supports ESM anywhere in the document:
+
+```markdown
+import { Component } from './component'
+export const metadata = { title: 'Page' }
+
+# Heading
+
+<Component />
+```
+
+**Affected rules**: MD013 (line length - ESM lines can be longer)
+
 ### Rule Behavior Changes
 
-| Rule  | Standard Behavior    | MDX Behavior                     |
-| ----- | -------------------- | -------------------------------- |
-| MD033 | Flag all inline HTML | Allow capitalized JSX components |
+| Rule  | Standard Behavior        | MDX Behavior                             |
+| ----- | ------------------------ | ---------------------------------------- |
+| MD013 | Check all line lengths   | Allow longer ESM import/export lines     |
+| MD033 | Flag all inline HTML     | Allow JSX components and JSX attributes  |
+| MD037 | Check emphasis spacing   | Skip JSX expressions                     |
+| MD039 | Check link spacing       | Skip JSX expressions                     |
+| MD044 | Check proper names       | Skip inside JSX expressions              |
+| MD049 | Check emphasis style     | Skip JSX expressions                     |
 
 ### Limitations
 
-- ESM imports/exports (`import`, `export`) are recognized but don't affect rule behavior
-- JSX expressions `{expression}` are not specially handled
-- MDX 2.0+ specific syntax may not be fully supported
+- Complex nested JSX expressions may not be fully parsed
+- MDX compile-time expressions are treated as runtime expressions
 
 ## Quarto Flavor
 
@@ -229,17 +341,91 @@ print("Hello")
 
 **Affected rules**: MD040 (fenced code language)
 
+#### Pandoc Citations
+
+Quarto supports Pandoc citation syntax:
+
+```markdown
+According to @smith2020, the results show...
+
+Multiple citations [@smith2020; @jones2021] confirm this.
+
+Suppress author: [-@smith2020] showed...
+
+In-text: @smith2020 [p. 42] argues that...
+```
+
+**Affected rules**: MD042 (empty links), MD051 (link fragments), MD052 (reference links)
+
+#### Shortcodes
+
+Quarto/Hugo shortcodes are recognized:
+
+```markdown
+{{< video https://youtube.com/watch?v=xxx >}}
+
+{{< include _content.qmd >}}
+
+{{% callout note %}}
+This is a callout.
+{{% /callout %}}
+```
+
+**Affected rules**: MD034 (bare URLs - URLs in shortcodes not flagged), MD042, MD051, MD052
+
+#### Div Blocks and Callouts
+
+Quarto div syntax with attributes:
+
+```markdown
+::: {.callout-note}
+This is a note callout.
+:::
+
+::: {.column-margin}
+Marginal content here.
+:::
+
+::: {#fig-layout layout-ncol=2}
+![Caption A](imageA.png)
+
+![Caption B](imageB.png)
+:::
+```
+
+**Affected rules**: MD031 (blanks around fences)
+
+#### Math Blocks
+
+LaTeX math blocks are recognized and excluded from emphasis checking:
+
+```markdown
+$$
+E = mc^2
+$$
+
+Inline math $\alpha + \beta$ is also recognized.
+```
+
+**Affected rules**: MD037 (no space in emphasis), MD049 (emphasis style), MD050 (strong style)
+
 ### Rule Behavior Changes
 
 | Rule  | Standard Behavior           | Quarto Behavior                          |
 | ----- | --------------------------- | ---------------------------------------- |
+| MD034 | Flag all bare URLs          | Skip URLs inside shortcodes              |
+| MD037 | Check emphasis spacing      | Skip math blocks                         |
 | MD038 | Check all code spans        | Handle Quarto-specific syntax            |
 | MD040 | Standard language detection | Recognize `{language}` and `#\|` options |
+| MD042 | Flag empty links            | Skip citations and shortcodes            |
+| MD049 | Check emphasis consistency  | Skip math blocks                         |
+| MD050 | Check strong consistency    | Skip math blocks                         |
+| MD051 | Validate link fragments     | Skip citations and shortcodes            |
+| MD052 | Flag undefined references   | Skip citations and shortcodes            |
 
 ### Limitations
 
-- Quarto shortcodes (`{{< >}}`) are not specially handled
-- Cross-reference syntax (`@fig-example`) is treated as regular text
+- Complex Pandoc filter syntax may not be fully recognized
 - YAML front matter extensions are parsed as standard YAML
 
 ## Adding Flavor Support
