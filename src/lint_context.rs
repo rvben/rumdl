@@ -1,4 +1,5 @@
 use crate::config::MarkdownFlavor;
+use crate::inline_config::InlineConfig;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use crate::utils::element_cache::ElementCache;
@@ -563,6 +564,7 @@ pub struct LintContext<'a> {
     mdx_comment_ranges: Vec<(usize, usize)>, // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (Quarto: @key, [@key])
     shortcode_ranges: Vec<(usize, usize)>, // Pre-computed Hugo/Quarto shortcode ranges ({{< ... >}} and {{% ... %}})
+    inline_config: InlineConfig,           // Parsed inline configuration comments for rule disabling
 }
 
 /// Detailed blockquote parse result with all components
@@ -823,7 +825,16 @@ impl<'a> LintContext<'a> {
             mdx_comment_ranges,
             citation_ranges,
             shortcode_ranges,
+            inline_config: InlineConfig::from_content(content),
         }
+    }
+
+    /// Check if a rule is disabled at a specific line number (1-indexed)
+    ///
+    /// This method checks both persistent disable comments (<!-- rumdl-disable -->)
+    /// and line-specific comments (<!-- rumdl-disable-line -->, <!-- rumdl-disable-next-line -->).
+    pub fn is_rule_disabled(&self, rule_name: &str, line_number: usize) -> bool {
+        self.inline_config.is_rule_disabled(rule_name, line_number)
     }
 
     /// Get code spans - computed lazily on first access
