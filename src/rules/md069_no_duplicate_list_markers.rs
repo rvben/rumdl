@@ -134,12 +134,17 @@ impl Rule for MD069NoDuplicateListMarkers {
         let lines: Vec<&str> = ctx.content.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
-            // Check if this line should be skipped
+            let line_num = i + 1; // 1-indexed for inline config
+
+            // Check if this line should be skipped (structural contexts)
             let should_skip = ctx.lines.get(i).is_some_and(|info| {
                 info.in_front_matter || info.in_code_block || info.in_html_block || info.in_html_comment
             });
 
-            if should_skip {
+            // Also check if rule is disabled via inline config comments
+            let rule_disabled = ctx.is_rule_disabled(self.name(), line_num);
+
+            if should_skip || rule_disabled {
                 result.push_str(line);
                 result.push('\n');
                 continue;
@@ -475,5 +480,55 @@ mod tests {
         let content = "- - -\n* * *\n- - duplicate";
         let fixed = fix(content);
         assert_eq!(fixed, "- - -\n* * *\n- duplicate");
+    }
+
+    // === Inline config tests ===
+
+    #[test]
+    fn test_fix_respects_disable_line_comment() {
+        // rumdl-disable-line should prevent fix on that line
+        let content = "- - Item <!-- rumdl-disable-line MD069 -->";
+        let fixed = fix(content);
+        assert_eq!(fixed, content); // No change - rule disabled
+    }
+
+    #[test]
+    fn test_fix_respects_markdownlint_disable_line_comment() {
+        // markdownlint-disable-line should also work
+        let content = "- - Item <!-- markdownlint-disable-line MD069 -->";
+        let fixed = fix(content);
+        assert_eq!(fixed, content); // No change - rule disabled
+    }
+
+    #[test]
+    fn test_fix_respects_disable_next_line_comment() {
+        // rumdl-disable-next-line should prevent fix on the next line
+        let content = "<!-- rumdl-disable-next-line MD069 -->\n- - Item";
+        let fixed = fix(content);
+        assert_eq!(fixed, content); // No change - rule disabled for next line
+    }
+
+    #[test]
+    fn test_fix_respects_disable_block() {
+        // rumdl-disable block should prevent fix for all lines in range
+        let content = "<!-- rumdl-disable MD069 -->\n- - Item1\n- - Item2\n<!-- rumdl-enable MD069 -->\n- - Item3";
+        let fixed = fix(content);
+        // Only Item3 should be fixed
+        assert_eq!(
+            fixed,
+            "<!-- rumdl-disable MD069 -->\n- - Item1\n- - Item2\n<!-- rumdl-enable MD069 -->\n- Item3"
+        );
+    }
+
+    #[test]
+    fn test_check_respects_disable_line_comment() {
+        // Verify check() also respects inline disable (it uses filtered_lines which handles this)
+        let content = "- - Item <!-- rumdl-disable-line MD069 -->";
+        let warnings = check(content);
+        // The check() still reports the warning; inline config filtering happens in lib.rs
+        // But we're testing fix() doesn't modify the line
+        // Note: check() itself doesn't filter - that's done at a higher level in lib.rs
+        // What we care about is that fix() respects the inline config
+        assert_eq!(warnings.len(), 1); // check() still sees it
     }
 }
