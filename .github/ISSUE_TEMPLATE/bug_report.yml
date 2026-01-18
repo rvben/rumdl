@@ -5,7 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report a bug! Please fill out the form below.
+        Thanks for taking the time to report a bug!
+
+        **Before reporting, please search [existing issues](https://github.com/rvben/rumdl/issues?q=is%3Aissue+label%3Abug) to avoid duplicates.**
 
   - type: input
     id: version

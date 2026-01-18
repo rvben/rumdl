@@ -5,7 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting a feature! Please describe your idea below.
+        Thanks for suggesting a feature!
+
+        **Before submitting, please search [existing issues](https://github.com/rvben/rumdl/issues?q=is%3Aissue+label%3Aenhancement) to avoid duplicates.**
 
   - type: textarea
     id: problem
