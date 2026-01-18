@@ -33,7 +33,7 @@ pub struct ConfigLoaded;
 pub struct ConfigValidated;
 
 /// Markdown flavor/dialect enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MarkdownFlavor {
     /// Standard Markdown without flavor-specific adjustments
@@ -49,9 +49,25 @@ pub enum MarkdownFlavor {
     /// Quarto/RMarkdown flavor for scientific publishing (.qmd, .Rmd files)
     #[serde(rename = "quarto")]
     Quarto,
-    // Future flavors can be added here when they have actual implementation differences
-    // Planned: GFM (GitHub Flavored Markdown) - for GitHub-specific features like tables, strikethrough
-    // Planned: CommonMark - for strict CommonMark compliance
+}
+
+/// Custom JSON schema for MarkdownFlavor that includes all accepted values and aliases
+fn markdown_flavor_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, quarto. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto.",
+        "type": "string",
+        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "quarto", "qmd", "rmd", "rmarkdown"]
+    })
+}
+
+impl schemars::JsonSchema for MarkdownFlavor {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("MarkdownFlavor")
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        markdown_flavor_schema(generator)
+    }
 }
 
 impl fmt::Display for MarkdownFlavor {
@@ -2085,6 +2101,42 @@ disable = ["MD001"]
         assert!(schema_json.contains("\"title\": \"Config\""));
         assert!(schema_json.contains("\"global\""));
         assert!(schema_json.contains("\"per-file-ignores\""));
+    }
+
+    #[test]
+    fn test_markdown_flavor_schema_matches_fromstr() {
+        // Extract enum values from the actual generated schema
+        // This ensures the test stays in sync with the schema automatically
+        use schemars::schema_for;
+
+        let schema = schema_for!(MarkdownFlavor);
+        let schema_json = serde_json::to_value(&schema).expect("Failed to serialize schema");
+
+        // Extract enum values from schema
+        let enum_values = schema_json
+            .get("enum")
+            .expect("Schema should have 'enum' field")
+            .as_array()
+            .expect("enum should be an array");
+
+        assert!(!enum_values.is_empty(), "Schema enum should not be empty");
+
+        // Verify all schema enum values are parseable by FromStr
+        for value in enum_values {
+            let str_value = value.as_str().expect("enum value should be a string");
+            let result = str_value.parse::<MarkdownFlavor>();
+            assert!(
+                result.is_ok(),
+                "Schema value '{str_value}' should be parseable by FromStr but got: {:?}",
+                result.err()
+            );
+        }
+
+        // Also verify the aliases in FromStr that aren't in schema (empty string, none)
+        for alias in ["", "none"] {
+            let result = alias.parse::<MarkdownFlavor>();
+            assert!(result.is_ok(), "FromStr alias '{alias}' should be parseable");
+        }
     }
 
     #[test]

@@ -149,28 +149,19 @@
       "minimum": 0
     },
     "MarkdownFlavor": {
-      "description": "Markdown flavor/dialect enumeration",
-      "oneOf": [
-        {
-          "description": "Standard Markdown without flavor-specific adjustments",
-          "type": "string",
-          "const": "standard"
-        },
-        {
-          "description": "MkDocs flavor with auto-reference support",
-          "type": "string",
-          "const": "mkdocs"
-        },
-        {
-          "description": "MDX flavor with JSX and ESM support (.mdx files)",
-          "type": "string",
-          "const": "mdx"
-        },
-        {
-          "description": "Quarto/RMarkdown flavor for scientific publishing (.qmd, .Rmd files)",
-          "type": "string",
-          "const": "quarto"
-        }
+      "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, quarto. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto.",
+      "type": "string",
+      "enum": [
+        "standard",
+        "gfm",
+        "github",
+        "commonmark",
+        "mkdocs",
+        "mdx",
+        "quarto",
+        "qmd",
+        "rmd",
+        "rmarkdown"
       ]
     },
     "RuleConfig": {
