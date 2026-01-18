@@ -28,6 +28,7 @@
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::sentence_utils::is_after_sentence_ending;
 use crate::utils::skip_context::is_table_line;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -45,28 +46,44 @@ static MULTIPLE_SPACES_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD064Config {
-    /// Maximum allowed consecutive spaces (default: 1)
+    /// Allow exactly two spaces after sentence-ending punctuation (default: false)
     ///
-    /// When set to 1 (default), any occurrence of 2+ consecutive spaces is flagged.
-    /// When set to 2, allows exactly 2 consecutive spaces (useful for two-space
-    /// sentence spacing convention) but flags 3+ spaces.
+    /// When enabled, allows exactly 2 spaces after sentence-ending punctuation
+    /// (`.`, `!`, `?`) while still flagging multiple spaces elsewhere. This
+    /// supports the traditional typewriter convention of two spaces after sentences.
     ///
-    /// Example with `max-consecutive-spaces = 2`:
+    /// Sentence-ending punctuation includes:
+    /// - Period: `.`
+    /// - Exclamation mark: `!`
+    /// - Question mark: `?`
+    ///
+    /// Also recognizes closing punctuation after sentence endings:
+    /// - Quotes: `."`, `!"`, `?"`, `.'`, `!'`, `?'`
+    /// - Parentheses: `.)`, `!)`, `?)`
+    /// - Brackets: `.]`, `!]`, `?]`
+    /// - Ellipsis: `...`
+    ///
+    /// Example with `allow-sentence-double-space = true`:
     /// ```markdown
-    /// This is fine.  Two spaces here.   <- 3 spaces flagged
+    /// First sentence.  Second sentence.    <- OK (2 spaces after period)
+    /// Multiple   spaces here.              <- Flagged (3 spaces, not after sentence)
+    /// Word  word in middle.                <- Flagged (2 spaces, not after sentence)
     /// ```
-    #[serde(default = "default_max_consecutive_spaces", alias = "max_consecutive_spaces")]
-    pub max_consecutive_spaces: usize,
+    #[serde(
+        default = "default_allow_sentence_double_space",
+        alias = "allow_sentence_double_space"
+    )]
+    pub allow_sentence_double_space: bool,
 }
 
-fn default_max_consecutive_spaces() -> usize {
-    1
+fn default_allow_sentence_double_space() -> bool {
+    false
 }
 
 impl Default for MD064Config {
     fn default() -> Self {
         Self {
-            max_consecutive_spaces: default_max_consecutive_spaces(),
+            allow_sentence_double_space: default_allow_sentence_double_space(),
         }
     }
 }
@@ -332,11 +349,6 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                 let match_end = mat.end();
                 let space_count = match_end - match_start;
 
-                // Skip if space count is within the allowed threshold
-                if space_count <= self.config.max_consecutive_spaces {
-                    continue;
-                }
-
                 // Skip if this is leading indentation
                 if self.is_leading_indentation(line.content, match_start) {
                     continue;
@@ -383,6 +395,15 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                     continue;
                 }
 
+                // Allow exactly 2 spaces after sentence-ending punctuation if configured
+                // This supports the traditional typewriter convention of two spaces after sentences
+                if self.config.allow_sentence_double_space
+                    && space_count == 2
+                    && is_after_sentence_ending(line.content, match_start)
+                {
+                    continue;
+                }
+
                 // Calculate absolute byte position
                 let abs_byte_start = line_start_byte + match_start;
 
@@ -394,6 +415,15 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                 // Calculate byte range for the fix
                 let abs_byte_end = line_start_byte + match_end;
 
+                // Determine the replacement: if allow_sentence_double_space is enabled
+                // and this is after a sentence ending, collapse to 2 spaces, otherwise to 1
+                let replacement =
+                    if self.config.allow_sentence_double_space && is_after_sentence_ending(line.content, match_start) {
+                        "  ".to_string() // Collapse to two spaces after sentence
+                    } else {
+                        " ".to_string() // Collapse to single space
+                    };
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message: format!("Multiple consecutive spaces ({space_count}) found"),
@@ -404,7 +434,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: abs_byte_start..abs_byte_end,
-                        replacement: " ".to_string(), // Collapse to single space
+                        replacement,
                     }),
                 });
             }
@@ -903,192 +933,370 @@ Normal paragraph.
         assert_eq!(result.len(), 1, "Should flag extra spaces in reference link title");
     }
 
-    // Config tests
+    // === allow-sentence-double-space tests ===
 
     #[test]
-    fn test_default_config() {
-        let config = MD064Config::default();
-        assert_eq!(config.max_consecutive_spaces, 1);
-    }
-
-    #[test]
-    fn test_config_kebab_case() {
-        let toml_str = r#"
-            max-consecutive-spaces = 2
-        "#;
-        let config: MD064Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.max_consecutive_spaces, 2);
-    }
-
-    #[test]
-    fn test_config_snake_case_backwards_compatibility() {
-        let toml_str = r#"
-            max_consecutive_spaces = 2
-        "#;
-        let config: MD064Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.max_consecutive_spaces, 2);
-    }
-
-    #[test]
-    fn test_max_consecutive_spaces_two_allows_double_spaces() {
-        // With max_consecutive_spaces = 2, double spaces should be allowed
-        let config = MD064Config {
-            max_consecutive_spaces: 2,
-        };
-        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
-
-        let content = "This is fine.  Two spaces between sentences.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Double spaces should be allowed with max=2");
-    }
-
-    #[test]
-    fn test_max_consecutive_spaces_two_flags_triple_spaces() {
-        // With max_consecutive_spaces = 2, triple spaces should still be flagged
-        let config = MD064Config {
-            max_consecutive_spaces: 2,
-        };
-        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
-
-        let content = "This has   three spaces here.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Triple spaces should be flagged with max=2");
-    }
-
-    #[test]
-    fn test_max_consecutive_spaces_mixed() {
-        // Mix of 2 and 3 spaces - only 3 should be flagged
-        let config = MD064Config {
-            max_consecutive_spaces: 2,
-        };
-        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
-
-        let content = "Two spaces.  OK here.   Three spaces flagged.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Only triple spaces should be flagged");
-        assert_eq!(result[0].column, 22, "Should flag the triple space at column 22");
-    }
-
-    #[test]
-    fn test_fix_respects_max_consecutive_spaces() {
-        // Fix should collapse to max_consecutive_spaces, not always to 1
-        let config = MD064Config {
-            max_consecutive_spaces: 2,
-        };
-        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
-
-        let content = "Has   three spaces here.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let fixed = rule.fix(&ctx).unwrap();
-        // Note: current fix always collapses to 1 space, which is acceptable
-        // The important thing is that it fixes the violation
-        assert!(!fixed.contains("   "), "Triple spaces should be fixed");
-    }
-
-    #[test]
-    fn test_default_config_section_returns_schema() {
+    fn test_sentence_double_space_disabled_by_default() {
+        // Default config should flag double spaces after sentences
         let rule = MD064NoMultipleConsecutiveSpaces::new();
-        let config_section = rule.default_config_section();
-
-        assert!(config_section.is_some(), "Should return config section");
-
-        let (rule_name, toml_value) = config_section.unwrap();
-        assert_eq!(rule_name, "MD064");
-
-        // Should be a table with max-consecutive-spaces key
-        if let toml::Value::Table(table) = toml_value {
-            assert!(
-                table.contains_key("max-consecutive-spaces"),
-                "Should contain max-consecutive-spaces key"
-            );
-        } else {
-            panic!("Expected a toml table");
-        }
+        let content = "First sentence.  Second sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Default should flag 2 spaces after period");
     }
 
     #[test]
-    fn test_max_consecutive_spaces_zero_flags_all_double_spaces() {
-        // Edge case: max=0 should flag everything (2+ spaces always exceeds 0)
+    fn test_sentence_double_space_enabled_allows_period() {
+        // With allow_sentence_double_space, 2 spaces after period should be OK
         let config = MD064Config {
-            max_consecutive_spaces: 0,
+            allow_sentence_double_space: true,
+            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
-        let content = "Double  spaces here.";
+        let content = "First sentence.  Second sentence.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "max=0 should flag double spaces");
+        assert!(result.is_empty(), "Should allow 2 spaces after period");
     }
 
     #[test]
-    fn test_max_consecutive_spaces_three_allows_triple() {
-        // Higher threshold: max=3 allows up to 3 consecutive spaces
+    fn test_sentence_double_space_enabled_allows_exclamation() {
         let config = MD064Config {
-            max_consecutive_spaces: 3,
+            allow_sentence_double_space: true,
+            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
-        // Use 5 spaces (not 4, as 4 is skipped as tab replacement pattern)
-        let content = "Two  spaces OK.   Three spaces OK.     Five spaces flagged.";
+        let content = "Wow!  That was great.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Only 5 spaces should be flagged with max=3");
+        assert!(result.is_empty(), "Should allow 2 spaces after exclamation");
     }
 
     #[test]
-    fn test_exact_boundary_at_threshold() {
-        // Exact boundary: spaces exactly at threshold should be allowed
-        // Use max=3 to avoid tab replacement pattern (multiples of 4 are skipped)
+    fn test_sentence_double_space_enabled_allows_question() {
         let config = MD064Config {
-            max_consecutive_spaces: 3,
+            allow_sentence_double_space: true,
+            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
-        // 3 spaces exactly at threshold - should be allowed
-        let content = "Three   spaces exactly.";
+        let content = "Is this OK?  Yes it is.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Exactly 3 spaces should be allowed with max=3");
-
-        // 5 spaces - two over threshold - should be flagged (skip 4 as it's tab pattern)
-        let content = "Five     spaces here.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "5 spaces should be flagged with max=3");
+        assert!(result.is_empty(), "Should allow 2 spaces after question mark");
     }
 
     #[test]
-    fn test_config_with_skip_contexts() {
-        // Verify skip contexts still work with custom threshold
+    fn test_sentence_double_space_flags_mid_sentence() {
+        // Even with allow_sentence_double_space, mid-sentence double spaces should be flagged
         let config = MD064Config {
-            max_consecutive_spaces: 2,
+            allow_sentence_double_space: true,
+            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
-        // Code span should be skipped even with custom config
-        let content = "Text `code   with   spaces` more   text.";
+        let content = "Word  word in the middle.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Only "more   text" should be flagged (3 spaces), not code span
-        assert_eq!(result.len(), 1, "Only content outside code span flagged");
+        assert_eq!(result.len(), 1, "Should flag 2 spaces mid-sentence");
+    }
+
+    #[test]
+    fn test_sentence_double_space_flags_triple_after_period() {
+        // 3+ spaces after sentence should still be flagged
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "First sentence.   Three spaces here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag 3 spaces even after period");
+    }
+
+    #[test]
+    fn test_sentence_double_space_with_closing_quote() {
+        // "Quoted sentence."  Next sentence.
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = r#"He said "Hello."  Then he left."#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after .\" ");
+
+        // With single quote
+        let content = "She said 'Goodbye.'  And she was gone.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after .' ");
+    }
+
+    #[test]
+    fn test_sentence_double_space_with_curly_quotes() {
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        // Curly double quote: U+201C (") and U+201D (")
+        // Build string with actual Unicode characters
+        let content = format!(
+            "He said {}Hello.{}  Then left.",
+            '\u{201C}', // "
+            '\u{201D}'  // "
+        );
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after curly double quote");
+
+        // Curly single quote: U+2018 (') and U+2019 (')
+        let content = format!(
+            "She said {}Hi.{}  And left.",
+            '\u{2018}', // '
+            '\u{2019}'  // '
+        );
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after curly single quote");
+    }
+
+    #[test]
+    fn test_sentence_double_space_with_closing_paren() {
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "(See reference.)  The next point is.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after .) ");
+    }
+
+    #[test]
+    fn test_sentence_double_space_with_closing_bracket() {
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "[Citation needed.]  More text here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after .] ");
+    }
+
+    #[test]
+    fn test_sentence_double_space_with_ellipsis() {
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "He paused...  Then continued.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after ellipsis");
+    }
+
+    #[test]
+    fn test_sentence_double_space_complex_ending() {
+        // Multiple closing punctuation: .")
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = r#"(He said "Yes.")  Then they agreed."#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after .\") ");
+    }
+
+    #[test]
+    fn test_sentence_double_space_mixed_content() {
+        // Mix of sentence endings and mid-sentence spaces
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "Good sentence.  Bad  mid-sentence.  Another good one!  OK?  Yes.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should only flag mid-sentence double space");
         assert!(
-            result[0].column > 25,
-            "Warning should be for 'more   text' not code span"
+            result[0].column > 15 && result[0].column < 25,
+            "Should flag the 'Bad  mid' double space"
         );
     }
 
     #[test]
-    fn test_from_config_integration() {
-        // Test the full config loading path
+    fn test_sentence_double_space_fix_collapses_to_two() {
+        // Fix should collapse 3+ spaces to 2 after sentence, 1 elsewhere
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "Sentence.   Three spaces here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "Sentence.  Three spaces here.",
+            "Should collapse to 2 spaces after sentence"
+        );
+    }
+
+    #[test]
+    fn test_sentence_double_space_fix_collapses_mid_sentence_to_one() {
+        // Fix should collapse mid-sentence spaces to 1
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "Word  word here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Word word here.", "Should collapse to 1 space mid-sentence");
+    }
+
+    #[test]
+    fn test_sentence_double_space_config_kebab_case() {
+        let toml_str = r#"
+            allow-sentence-double-space = true
+        "#;
+        let config: MD064Config = toml::from_str(toml_str).unwrap();
+        assert!(config.allow_sentence_double_space);
+    }
+
+    #[test]
+    fn test_sentence_double_space_config_snake_case() {
+        let toml_str = r#"
+            allow_sentence_double_space = true
+        "#;
+        let config: MD064Config = toml::from_str(toml_str).unwrap();
+        assert!(config.allow_sentence_double_space);
+    }
+
+    #[test]
+    fn test_sentence_double_space_at_line_start() {
+        // Period at very start shouldn't cause issues
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        // This is an edge case - spaces at start are leading indentation
+        let content = ".  Text after period at start.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        // This should not panic
+        let _result = rule.check(&ctx).unwrap();
+    }
+
+    #[test]
+    fn test_sentence_double_space_guillemets() {
+        // French-style quotes (guillemets)
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "Il a dit «Oui.»  Puis il est parti.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after .» (guillemet)");
+    }
+
+    #[test]
+    fn test_sentence_double_space_multiple_sentences() {
+        // Multiple consecutive sentences with double spacing
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "First.  Second.  Third.  Fourth.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow all sentence-ending double spaces");
+    }
+
+    #[test]
+    fn test_sentence_double_space_abbreviation_detection() {
+        // Known abbreviations should NOT be treated as sentence endings
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+            ..Default::default()
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        // "Dr.  Smith" - Dr. is a known abbreviation, should be flagged
+        let content = "Dr.  Smith arrived.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag Dr. as abbreviation, not sentence ending");
+
+        // "Prof.  Williams" - Prof. is a known abbreviation
+        let content = "Prof.  Williams teaches.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag Prof. as abbreviation");
+
+        // "e.g.  this" - e.g. is a known abbreviation
+        let content = "Use e.g.  this example.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag e.g. as abbreviation");
+
+        // Unknown abbreviation-like words are treated as potential sentence endings
+        // "Inc.  Next" - Inc. is NOT in our abbreviation list
+        let content = "Acme Inc.  Next company.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Inc. not in abbreviation list, treated as sentence end"
+        );
+    }
+
+    #[test]
+    fn test_sentence_double_space_default_config_has_correct_defaults() {
+        let config = MD064Config::default();
+        assert!(
+            !config.allow_sentence_double_space,
+            "Default allow_sentence_double_space should be false"
+        );
+    }
+
+    #[test]
+    fn test_sentence_double_space_from_config_integration() {
         use crate::config::Config;
         use std::collections::BTreeMap;
 
         let mut config = Config::default();
         let mut values = BTreeMap::new();
-        values.insert("max-consecutive-spaces".to_string(), toml::Value::Integer(2));
+        values.insert("allow-sentence-double-space".to_string(), toml::Value::Boolean(true));
         config.rules.insert(
             "MD064".to_string(),
             crate::config::RuleConfig { severity: None, values },
@@ -1097,27 +1305,9 @@ Normal paragraph.
         let rule = MD064NoMultipleConsecutiveSpaces::from_config(&config);
 
         // Verify the rule uses the loaded config
-        let content = "Two  spaces OK.   Three spaces flagged.";
+        let content = "Sentence.  Two spaces OK.  But three   is not.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should use loaded config value of 2");
-    }
-
-    #[test]
-    fn test_very_large_threshold_effectively_disables_rule() {
-        // Very large threshold should effectively disable the rule
-        let config = MD064Config {
-            max_consecutive_spaces: usize::MAX,
-        };
-        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
-
-        // Even many spaces should be allowed
-        let content = "Many          spaces here.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Very large threshold should allow any number of spaces"
-        );
+        assert_eq!(result.len(), 1, "Should only flag the triple spaces");
     }
 }
