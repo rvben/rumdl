@@ -82,19 +82,6 @@ impl MD018NoMissingSpaceAtx {
                 return None;
             }
 
-            // Skip if it looks like a hashtag (e.g., #tag, #123)
-            // But only skip if it's lowercase or a number to avoid skipping headings like #Summary
-            if hash_count == 1 && !content.is_empty() {
-                let first_char = content.chars().next();
-                if let Some(ch) = first_char {
-                    // Skip if it's a lowercase letter or number (common hashtag pattern)
-                    // Don't skip uppercase as those are likely headings
-                    if (ch.is_lowercase() || ch.is_numeric()) && !content.contains(' ') {
-                        return None;
-                    }
-                }
-            }
-
             // This looks like a malformed heading that needs a space
             let fixed = format!("{}{} {}", " ".repeat(indent), "#".repeat(hash_count), after_hashes);
             return Some((indent + hash_count, fixed));
@@ -170,25 +157,6 @@ impl Rule for MD018NoMissingSpaceAtx {
                         let after_marker = &trimmed[heading.marker.len()..];
                         if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t')
                         {
-                            // Skip hashtag-like patterns (e.g., #tag, #123, #29039)
-                            // But only for single-hash patterns to avoid skipping ##Heading
-                            // This prevents false positives on GitHub issue refs and social hashtags
-                            if heading.level == 1 {
-                                let content = after_marker.trim();
-                                // Get first "word" (up to space, comma, or closing paren)
-                                let first_word: String = content
-                                    .chars()
-                                    .take_while(|c| !c.is_whitespace() && *c != ',' && *c != ')')
-                                    .collect();
-                                if let Some(first_char) = first_word.chars().next() {
-                                    // Skip if first word starts with lowercase or number (hashtag/issue ref)
-                                    // Don't skip uppercase as those are likely intended headings
-                                    if first_char.is_lowercase() || first_char.is_numeric() {
-                                        continue;
-                                    }
-                                }
-                            }
-
                             // Missing space after ATX marker
                             let hash_end_col = line_info.indent + heading.marker.len() + 1; // 1-indexed
                             let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
@@ -510,38 +478,45 @@ const element = document.querySelector('#main-content');
     }
 
     #[test]
-    fn test_github_issue_refs_and_hashtags_skipped() {
+    fn test_all_malformed_headings_detected() {
         let rule = MD018NoMissingSpaceAtx::new();
 
-        // Issue refs like #29039 should NOT be detected (starts with number)
+        // All patterns at line start should be detected as malformed headings
+        // (matching markdownlint behavior)
+
+        // Lowercase single-hash - should be detected
         assert!(
-            rule.check_atx_heading_line("#29039)").is_none(),
-            "#29039) should not be detected as malformed heading"
+            rule.check_atx_heading_line("#hello").is_some(),
+            "#hello SHOULD be detected as malformed heading"
         );
         assert!(
-            rule.check_atx_heading_line("#123").is_none(),
-            "#123 should not be detected as malformed heading"
+            rule.check_atx_heading_line("#tag").is_some(),
+            "#tag SHOULD be detected as malformed heading"
         );
         assert!(
-            rule.check_atx_heading_line("#12345").is_none(),
-            "#12345 should not be detected as malformed heading"
+            rule.check_atx_heading_line("#hashtag").is_some(),
+            "#hashtag SHOULD be detected as malformed heading"
+        );
+        assert!(
+            rule.check_atx_heading_line("#javascript").is_some(),
+            "#javascript SHOULD be detected as malformed heading"
         );
 
-        // Hashtags starting with lowercase should NOT be detected
+        // Numeric patterns - should be detected (could be headings like "# 123")
         assert!(
-            rule.check_atx_heading_line("#tag").is_none(),
-            "#tag should not be detected as malformed heading"
+            rule.check_atx_heading_line("#123").is_some(),
+            "#123 SHOULD be detected as malformed heading"
         );
         assert!(
-            rule.check_atx_heading_line("#hashtag").is_none(),
-            "#hashtag should not be detected as malformed heading"
+            rule.check_atx_heading_line("#12345").is_some(),
+            "#12345 SHOULD be detected as malformed heading"
         );
         assert!(
-            rule.check_atx_heading_line("#javascript").is_none(),
-            "#javascript should not be detected as malformed heading"
+            rule.check_atx_heading_line("#29039)").is_some(),
+            "#29039) SHOULD be detected as malformed heading"
         );
 
-        // Uppercase single-hash SHOULD be detected (likely intended heading)
+        // Uppercase single-hash - should be detected
         assert!(
             rule.check_atx_heading_line("#Summary").is_some(),
             "#Summary SHOULD be detected as malformed heading"
@@ -555,7 +530,7 @@ const element = document.querySelector('#main-content');
             "#API SHOULD be detected as malformed heading"
         );
 
-        // Multi-hash patterns SHOULD always be detected (not social hashtags)
+        // Multi-hash patterns - should be detected
         assert!(
             rule.check_atx_heading_line("##introduction").is_some(),
             "##introduction SHOULD be detected as malformed heading"
@@ -565,32 +540,201 @@ const element = document.querySelector('#main-content');
             "###section SHOULD be detected as malformed heading"
         );
         assert!(
+            rule.check_atx_heading_line("###fer").is_some(),
+            "###fer SHOULD be detected as malformed heading"
+        );
+        assert!(
             rule.check_atx_heading_line("##123").is_some(),
             "##123 SHOULD be detected as malformed heading"
         );
     }
 
     #[test]
-    fn test_issue_refs_in_list_continuations() {
+    fn test_patterns_that_should_not_be_flagged() {
         let rule = MD018NoMissingSpaceAtx::new();
 
-        // Real-world example from Deno Releases.md
-        // Issue refs in continuation lines should NOT be flagged
-        let content = "- fix(compile): temporary fallback\n  #29039)";
+        // Just hashes (horizontal rule or empty)
+        assert!(rule.check_atx_heading_line("###").is_none());
+        assert!(rule.check_atx_heading_line("#").is_none());
+
+        // Content too short
+        assert!(rule.check_atx_heading_line("##a").is_none());
+
+        // Emphasis markers
+        assert!(rule.check_atx_heading_line("#*emphasis").is_none());
+
+        // More than 6 hashes
+        assert!(rule.check_atx_heading_line("#######TooBig").is_none());
+
+        // Proper headings with space
+        assert!(rule.check_atx_heading_line("# Hello").is_none());
+        assert!(rule.check_atx_heading_line("## World").is_none());
+        assert!(rule.check_atx_heading_line("### Section").is_none());
+    }
+
+    #[test]
+    fn test_inline_issue_refs_not_at_line_start() {
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Inline patterns (not at line start) are not checked by check_atx_heading_line
+        // because that function only checks lines that START with #
+
+        // These should return None because they don't start with #
+        assert!(rule.check_atx_heading_line("See issue #123").is_none());
+        assert!(rule.check_atx_heading_line("Check #trending on Twitter").is_none());
+        assert!(rule.check_atx_heading_line("- fix: issue #29039").is_none());
+    }
+
+    #[test]
+    fn test_lowercase_patterns_full_check() {
+        // Integration test: verify lowercase patterns are flagged through full check() flow
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = "#hello\n\n#world\n\n#tag";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 3, "All three lowercase patterns should be flagged");
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[1].line, 3);
+        assert_eq!(result[2].line, 5);
+    }
+
+    #[test]
+    fn test_numeric_patterns_full_check() {
+        // Integration test: verify numeric patterns are flagged through full check() flow
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = "#123\n\n#456\n\n#29039";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 3, "All three numeric patterns should be flagged");
+    }
+
+    #[test]
+    fn test_fix_lowercase_patterns() {
+        // Verify fix() correctly handles lowercase patterns
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = "#hello\nSome text.\n\n#world";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        let expected = "# hello\nSome text.\n\n# world";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_numeric_patterns() {
+        // Verify fix() correctly handles numeric patterns
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = "#123\nContent.\n\n##456";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        let expected = "# 123\nContent.\n\n## 456";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_indented_malformed_headings() {
+        // ATX headings can have 0-3 spaces of indentation
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // 1-3 spaces should still be detected as malformed headings
         assert!(
-            result.is_empty(),
-            "#29039) in list continuation should not be flagged. Got: {result:?}"
+            rule.check_atx_heading_line(" #hello").is_some(),
+            "1-space indented #hello should be detected"
+        );
+        assert!(
+            rule.check_atx_heading_line("  #hello").is_some(),
+            "2-space indented #hello should be detected"
+        );
+        assert!(
+            rule.check_atx_heading_line("   #hello").is_some(),
+            "3-space indented #hello should be detected"
         );
 
-        // Multiple issue refs
-        let content = "- fix: issue (#28986, #29005,\n  #29024, #29039)";
+        // 4+ spaces is a code block, not checked by this function
+        // (code block detection happens at LintContext level)
+    }
+
+    #[test]
+    fn test_tab_after_hash_is_valid() {
+        // Tab after hash is valid (acts like space)
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        assert!(
+            rule.check_atx_heading_line("#\tHello").is_none(),
+            "Tab after # should be valid"
+        );
+        assert!(
+            rule.check_atx_heading_line("##\tWorld").is_none(),
+            "Tab after ## should be valid"
+        );
+    }
+
+    #[test]
+    fn test_mixed_case_patterns() {
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // All should be detected regardless of case
+        assert!(rule.check_atx_heading_line("#hELLO").is_some());
+        assert!(rule.check_atx_heading_line("#Hello").is_some());
+        assert!(rule.check_atx_heading_line("#HELLO").is_some());
+        assert!(rule.check_atx_heading_line("#hello").is_some());
+    }
+
+    #[test]
+    fn test_unicode_lowercase() {
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Unicode lowercase should be detected
+        assert!(
+            rule.check_atx_heading_line("#über").is_some(),
+            "Unicode lowercase #über should be detected"
+        );
+        assert!(
+            rule.check_atx_heading_line("#café").is_some(),
+            "Unicode lowercase #café should be detected"
+        );
+        assert!(
+            rule.check_atx_heading_line("#日本語").is_some(),
+            "Japanese #日本語 should be detected"
+        );
+    }
+
+    #[test]
+    fn test_matches_markdownlint_behavior() {
+        // Comprehensive test matching markdownlint's expected behavior
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = r#"#hello
+
+## world
+
+###fer
+
+#123
+
+#Tag
+"#;
+
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Issue refs in list should not be flagged. Got: {result:?}"
-        );
+
+        // markdownlint flags: #hello (line 1), ###fer (line 5), #123 (line 7), #Tag (line 9)
+        // ## world is correct (has space)
+        let flagged_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+
+        assert!(flagged_lines.contains(&1), "#hello should be flagged");
+        assert!(!flagged_lines.contains(&3), "## world should NOT be flagged");
+        assert!(flagged_lines.contains(&5), "###fer should be flagged");
+        assert!(flagged_lines.contains(&7), "#123 should be flagged");
+        assert!(flagged_lines.contains(&9), "#Tag should be flagged");
+
+        assert_eq!(result.len(), 4, "Should have exactly 4 warnings");
     }
 }
