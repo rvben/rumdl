@@ -32,6 +32,7 @@ pub mod mkdocstrings_refs;
 pub mod quarto_divs;
 pub mod range_utils;
 pub mod regex_cache;
+pub mod sentence_utils;
 pub mod skip_context;
 pub mod string_interner;
 pub mod table_utils;

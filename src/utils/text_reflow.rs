@@ -11,6 +11,10 @@ use crate::utils::regex_cache::{
     LINKED_IMAGE_INLINE_INLINE, LINKED_IMAGE_INLINE_REF, LINKED_IMAGE_REF_INLINE, LINKED_IMAGE_REF_REF,
     REF_IMAGE_REGEX, REF_LINK_REGEX, SHORTCUT_REF_REGEX, WIKI_LINK_REGEX,
 };
+use crate::utils::sentence_utils::{
+    get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_quote, is_opening_quote,
+    text_ends_with_abbreviation,
+};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashSet;
 
@@ -41,107 +45,6 @@ impl Default for ReflowOptions {
             abbreviations: None,
         }
     }
-}
-
-/// Get the effective abbreviations set based on options
-/// All abbreviations are normalized to lowercase for case-insensitive matching
-/// Custom abbreviations are always merged with built-in defaults
-fn get_abbreviations(custom: &Option<Vec<String>>) -> HashSet<String> {
-    // Only include abbreviations that:
-    // 1. Conventionally ALWAYS have a period in standard writing
-    // 2. Are followed by something (name, example), not sentence-final
-    //
-    // Do NOT include:
-    // - Words that don't typically take periods (vs, etc)
-    // - Abbreviations that can end sentences (Inc., Ph.D., U.S.)
-    let mut abbreviations: HashSet<String> = [
-        // Titles - always have period, always followed by a name
-        "Mr", "Mrs", "Ms", "Dr", "Prof", "Sr", "Jr",
-        // Latin - always written with periods, introduce examples/references
-        "i.e", "e.g",
-    ]
-    .iter()
-    .map(|s| s.to_lowercase())
-    .collect();
-
-    // Always extend defaults with custom abbreviations
-    // Strip any trailing periods and normalize to lowercase for consistent matching
-    if let Some(custom_list) = custom {
-        for abbr in custom_list {
-            let normalized = abbr.trim_end_matches('.').to_lowercase();
-            if !normalized.is_empty() {
-                abbreviations.insert(normalized);
-            }
-        }
-    }
-
-    abbreviations
-}
-
-/// Check if text ends with a common abbreviation followed by a period
-///
-/// Abbreviations only count when followed by a period, not ! or ?.
-/// This prevents false positives where words ending in abbreviation-like
-/// letter sequences (e.g., "paradigms" ending in "ms") are incorrectly
-/// detected as abbreviations.
-///
-/// Examples:
-///   - "Dr." -> true (abbreviation)
-///   - "Dr?" -> false (question, not abbreviation)
-///   - "paradigms." -> false (not in abbreviation list)
-///   - "paradigms?" -> false (question mark, not abbreviation)
-///
-/// See: Issue #150
-fn text_ends_with_abbreviation(text: &str, abbreviations: &HashSet<String>) -> bool {
-    // Only check if text ends with a period (abbreviations require periods)
-    if !text.ends_with('.') {
-        return false;
-    }
-
-    // Remove the trailing period
-    let without_period = text.trim_end_matches('.');
-
-    // Get the last word by splitting on whitespace
-    let last_word = without_period.split_whitespace().last().unwrap_or("");
-
-    if last_word.is_empty() {
-        return false;
-    }
-
-    // O(1) HashSet lookup (abbreviations are already lowercase)
-    abbreviations.contains(&last_word.to_lowercase())
-}
-
-/// Check if a character is CJK sentence-ending punctuation
-/// These include: 。(ideographic full stop), ！(fullwidth exclamation), ？(fullwidth question)
-fn is_cjk_sentence_ending(c: char) -> bool {
-    matches!(c, '。' | '！' | '？')
-}
-
-/// Check if a character is a closing quote mark
-/// Includes straight quotes and curly/smart quotes
-fn is_closing_quote(c: char) -> bool {
-    // " (straight double), ' (straight single), " (U+201D right double), ' (U+2019 right single)
-    matches!(c, '"' | '\'' | '\u{201D}' | '\u{2019}')
-}
-
-/// Check if a character is an opening quote mark
-/// Includes straight quotes and curly/smart quotes
-fn is_opening_quote(c: char) -> bool {
-    // " (straight double), ' (straight single), " (U+201C left double), ' (U+2018 left single)
-    matches!(c, '"' | '\'' | '\u{201C}' | '\u{2018}')
-}
-
-/// Check if a character is a CJK character (Chinese, Japanese, Korean)
-fn is_cjk_char(c: char) -> bool {
-    // CJK Unified Ideographs and common extensions
-    matches!(c,
-        '\u{4E00}'..='\u{9FFF}' |   // CJK Unified Ideographs
-        '\u{3400}'..='\u{4DBF}' |   // CJK Unified Ideographs Extension A
-        '\u{3040}'..='\u{309F}' |   // Hiragana
-        '\u{30A0}'..='\u{30FF}' |   // Katakana
-        '\u{AC00}'..='\u{D7AF}'     // Hangul Syllables
-    )
 }
 
 /// Detect if a character position is a sentence boundary
