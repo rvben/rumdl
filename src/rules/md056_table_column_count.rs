@@ -18,7 +18,10 @@ impl Default for MD056TableColumnCount {
 impl MD056TableColumnCount {
     /// Try to fix a table row to match the expected column count
     fn fix_table_row(&self, row: &str, expected_count: usize, flavor: crate::config::MarkdownFlavor) -> Option<String> {
-        let current_count = TableUtils::count_cells_with_flavor(row, flavor);
+        // Extract blockquote prefix if present
+        let (prefix, content) = TableUtils::extract_blockquote_prefix(row);
+
+        let current_count = TableUtils::count_cells_with_flavor(content, flavor);
 
         if current_count == expected_count || current_count == 0 {
             return None;
@@ -27,21 +30,36 @@ impl MD056TableColumnCount {
         // For standard flavor with too many cells, first try escaping pipes in inline code.
         // This preserves content and produces valid GitHub-compatible output.
         if flavor == crate::config::MarkdownFlavor::Standard && current_count > expected_count {
-            let escaped_row = TableUtils::escape_pipes_in_inline_code(row);
+            let escaped_row = TableUtils::escape_pipes_in_inline_code(content);
             let escaped_count = TableUtils::count_cells_with_flavor(&escaped_row, flavor);
 
             // If escaping pipes in inline code fixes the cell count, use that
             if escaped_count == expected_count {
-                return Some(escaped_row.trim().to_string());
+                let fixed = escaped_row.trim().to_string();
+                return Some(if prefix.is_empty() {
+                    fixed
+                } else {
+                    format!("{prefix}{fixed}")
+                });
             }
 
             // If escaping reduced cell count, continue fixing with escaped version
             if escaped_count < current_count {
-                return self.fix_row_by_truncation(&escaped_row, expected_count, flavor);
+                let fixed = self.fix_row_by_truncation(&escaped_row, expected_count, flavor)?;
+                return Some(if prefix.is_empty() {
+                    fixed
+                } else {
+                    format!("{prefix}{fixed}")
+                });
             }
         }
 
-        self.fix_row_by_truncation(row, expected_count, flavor)
+        let fixed = self.fix_row_by_truncation(content, expected_count, flavor)?;
+        Some(if prefix.is_empty() {
+            fixed
+        } else {
+            format!("{prefix}{fixed}")
+        })
     }
 
     /// Fix a table row by truncating or adding cells
@@ -600,5 +618,68 @@ Some text in between.
 
         assert!(!fixed.ends_with('\n'));
         assert!(fixed.contains("| 1 | 2 |  |"));
+    }
+
+    #[test]
+    fn test_blockquote_table_column_mismatch() {
+        let rule = MD056TableColumnCount;
+        let content = "> | Header 1 | Header 2 | Header 3 |
+> |----------|----------|----------|
+> | Cell 1   | Cell 2   |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 3);
+        assert!(result[0].message.contains("has 2 cells, but expected 3"));
+    }
+
+    #[test]
+    fn test_fix_blockquote_table_preserves_prefix() {
+        let rule = MD056TableColumnCount;
+        let content = "> | Header 1 | Header 2 | Header 3 |
+> |----------|----------|----------|
+> | Cell 1   | Cell 2   |
+> | Cell 4   | Cell 5   | Cell 6   |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Each line should still start with "> "
+        for line in fixed.lines() {
+            assert!(line.starts_with("> "), "Line should preserve blockquote prefix: {line}");
+        }
+        // The fixed row should have 3 cells
+        assert!(fixed.contains("> | Cell 1 | Cell 2 |  |"));
+    }
+
+    #[test]
+    fn test_fix_nested_blockquote_table() {
+        let rule = MD056TableColumnCount;
+        let content = ">> | A | B | C |
+>> |---|---|---|
+>> | 1 | 2 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Each line should preserve the nested blockquote prefix
+        for line in fixed.lines() {
+            assert!(line.starts_with(">> "), "Line should preserve nested blockquote prefix: {line}");
+        }
+        assert!(fixed.contains(">> | 1 | 2 |  |"));
+    }
+
+    #[test]
+    fn test_blockquote_table_too_many_columns() {
+        let rule = MD056TableColumnCount;
+        let content = "> | A | B |
+> |---|---|
+> | 1 | 2 | 3 | 4 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should preserve blockquote prefix while truncating columns
+        assert!(fixed.lines().nth(2).unwrap().starts_with("> "));
+        assert!(fixed.contains("> | 1 | 2 |"));
+        assert!(!fixed.contains("| 3 |"));
     }
 }

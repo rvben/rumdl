@@ -150,8 +150,14 @@ impl MD055TablePipeStyle {
 
     /// Fix a table row to match the target style
     /// Uses surgical fixes: only adds/removes pipes, preserves all user formatting
+    ///
+    /// Handles tables inside blockquotes by stripping the blockquote prefix,
+    /// fixing the table content, then restoring the prefix.
     fn fix_table_row(&self, line: &str, target_style: &str) -> String {
-        let trimmed = line.trim();
+        // Extract blockquote prefix if present
+        let (prefix, content) = TableUtils::extract_blockquote_prefix(line);
+
+        let trimmed = content.trim();
         if !trimmed.contains('|') {
             return line.to_string();
         }
@@ -159,7 +165,7 @@ impl MD055TablePipeStyle {
         let has_leading = trimmed.starts_with('|');
         let has_trailing = trimmed.ends_with('|');
 
-        match target_style {
+        let fixed_content = match target_style {
             "leading_and_trailing" => {
                 let mut result = trimmed.to_string();
 
@@ -224,7 +230,14 @@ impl MD055TablePipeStyle {
 
                 result
             }
-            _ => line.to_string(),
+            _ => return line.to_string(),
+        };
+
+        // Restore the blockquote prefix if there was one
+        if prefix.is_empty() {
+            fixed_content
+        } else {
+            format!("{prefix}{fixed_content}")
         }
     }
 }
@@ -570,5 +583,82 @@ mod tests {
         let result = rule.fix_table_row("|", "leading_and_trailing");
         // Should not panic and should handle gracefully
         assert!(!result.is_empty());
+    }
+
+    // === Issue #305: Blockquote table tests ===
+
+    #[test]
+    fn test_fix_table_row_in_blockquote() {
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+
+        // Blockquote table without leading pipe
+        let result = rule.fix_table_row("> H1 | H2", "leading_and_trailing");
+        assert_eq!(result, "> | H1 | H2 |");
+
+        // Blockquote table that already has pipes
+        let result = rule.fix_table_row("> | H1 | H2 |", "leading_and_trailing");
+        assert_eq!(result, "> | H1 | H2 |");
+
+        // Removing pipes from blockquote table
+        let result = rule.fix_table_row("> | H1 | H2 |", "no_leading_or_trailing");
+        assert_eq!(result, "> H1 | H2");
+    }
+
+    #[test]
+    fn test_fix_table_row_in_nested_blockquote() {
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+
+        // Double-nested blockquote
+        let result = rule.fix_table_row(">> H1 | H2", "leading_and_trailing");
+        assert_eq!(result, ">> | H1 | H2 |");
+
+        // Triple-nested blockquote
+        let result = rule.fix_table_row(">>> H1 | H2", "leading_and_trailing");
+        assert_eq!(result, ">>> | H1 | H2 |");
+    }
+
+    #[test]
+    fn test_blockquote_table_full_document() {
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+
+        // Full table in blockquote (2 columns, matching delimiter)
+        let content = "> H1 | H2\n> ----|----\n> a  | b";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.fix(&ctx).unwrap();
+
+        // Each line should have the blockquote prefix preserved and pipes added
+        // The leading_and_trailing style adds "| " after blockquote prefix
+        assert!(result.starts_with("> |"), "Header should start with blockquote + pipe. Got:\n{result}");
+        // Delimiter row gets leading pipe added, so check for "> | ---" pattern
+        assert!(result.contains("> | ----"), "Delimiter should have blockquote prefix + leading pipe. Got:\n{result}");
+    }
+
+    #[test]
+    fn test_blockquote_table_no_leading_trailing() {
+        let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
+
+        // Table with pipes that should be removed
+        let content = "> | H1 | H2 |\n> |----|----|---|\n> | a  | b |";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.fix(&ctx).unwrap();
+
+        // Pipes should be removed but blockquote prefix preserved
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines[0].starts_with("> "), "Line should start with blockquote prefix");
+        assert!(!lines[0].starts_with("> |"), "Leading pipe should be removed. Got: {}", lines[0]);
+    }
+
+    #[test]
+    fn test_mixed_regular_and_blockquote_tables() {
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+
+        // Document with both regular and blockquote tables
+        let content = "H1 | H2\n---|---\na | b\n\n> H3 | H4\n> ---|---\n> c | d";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.fix(&ctx).unwrap();
+
+        // Both tables should be fixed
+        assert!(result.contains("| H1 | H2 |"), "Regular table should have pipes added");
+        assert!(result.contains("> | H3 | H4 |"), "Blockquote table should have pipes added with prefix preserved");
     }
 }
