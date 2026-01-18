@@ -258,8 +258,13 @@ impl TableUtils {
     ///
     /// For Standard/GFM flavor, pipes in inline code ARE cell delimiters (matches GitHub).
     /// For MkDocs flavor, pipes in inline code are NOT cell delimiters.
+    ///
+    /// This function strips blockquote prefixes before counting cells, so it works
+    /// correctly for tables inside blockquotes.
     pub fn count_cells_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> usize {
-        Self::split_table_row_with_flavor(row, flavor).len()
+        // Strip blockquote prefix if present before counting cells
+        let (_, content) = Self::extract_blockquote_prefix(row);
+        Self::split_table_row_with_flavor(content, flavor).len()
     }
 
     /// Mask pipes inside inline code blocks with a placeholder character
@@ -514,8 +519,13 @@ impl TableUtils {
     }
 
     /// Determine the pipe style of a table row
+    ///
+    /// Handles tables inside blockquotes by stripping the blockquote prefix
+    /// before analyzing the pipe style.
     pub fn determine_pipe_style(line: &str) -> Option<&'static str> {
-        let trimmed = line.trim();
+        // Strip blockquote prefix if present before analyzing pipe style
+        let content = Self::strip_blockquote_prefix(line);
+        let trimmed = content.trim();
         if !trimmed.contains('|') {
             return None;
         }
@@ -529,6 +539,44 @@ impl TableUtils {
             (false, true) => Some("trailing_only"),
             (false, false) => Some("no_leading_or_trailing"),
         }
+    }
+
+    /// Extract blockquote prefix from a line, returning (prefix, content).
+    ///
+    /// This is useful for stripping the prefix before processing, then restoring it after.
+    /// For example: `"> | H1 | H2 |"` returns `("> ", "| H1 | H2 |")`.
+    pub fn extract_blockquote_prefix(line: &str) -> (&str, &str) {
+        // Find where the actual content starts (after blockquote markers and spaces)
+        let bytes = line.as_bytes();
+        let mut pos = 0;
+
+        // Skip leading whitespace (indent before blockquote marker)
+        while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+            pos += 1;
+        }
+
+        // If no blockquote marker, return empty prefix
+        if pos >= bytes.len() || bytes[pos] != b'>' {
+            return ("", line);
+        }
+
+        // Skip all blockquote markers and spaces
+        while pos < bytes.len() {
+            if bytes[pos] == b'>' {
+                pos += 1;
+                // Skip optional space after >
+                if pos < bytes.len() && bytes[pos] == b' ' {
+                    pos += 1;
+                }
+            } else if bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                pos += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Split at the position where content starts
+        (&line[..pos], &line[pos..])
     }
 }
 
@@ -1007,5 +1055,84 @@ But no delimiter row
             TableUtils::split_table_row_with_flavor("| Type | `x | y` |", crate::config::MarkdownFlavor::Standard);
         // In GFM, `x | y` splits into separate cells
         assert_eq!(cells.len(), 3);
+    }
+
+    // === extract_blockquote_prefix tests ===
+
+    #[test]
+    fn test_extract_blockquote_prefix_no_blockquote() {
+        // Regular table row without blockquote
+        let (prefix, content) = TableUtils::extract_blockquote_prefix("| H1 | H2 |");
+        assert_eq!(prefix, "");
+        assert_eq!(content, "| H1 | H2 |");
+    }
+
+    #[test]
+    fn test_extract_blockquote_prefix_single_level() {
+        // Single blockquote level
+        let (prefix, content) = TableUtils::extract_blockquote_prefix("> | H1 | H2 |");
+        assert_eq!(prefix, "> ");
+        assert_eq!(content, "| H1 | H2 |");
+    }
+
+    #[test]
+    fn test_extract_blockquote_prefix_double_level() {
+        // Double blockquote level
+        let (prefix, content) = TableUtils::extract_blockquote_prefix(">> | H1 | H2 |");
+        assert_eq!(prefix, ">> ");
+        assert_eq!(content, "| H1 | H2 |");
+    }
+
+    #[test]
+    fn test_extract_blockquote_prefix_triple_level() {
+        // Triple blockquote level
+        let (prefix, content) = TableUtils::extract_blockquote_prefix(">>> | H1 | H2 |");
+        assert_eq!(prefix, ">>> ");
+        assert_eq!(content, "| H1 | H2 |");
+    }
+
+    #[test]
+    fn test_extract_blockquote_prefix_with_spaces() {
+        // Blockquote with spaces between markers
+        let (prefix, content) = TableUtils::extract_blockquote_prefix("> > | H1 | H2 |");
+        assert_eq!(prefix, "> > ");
+        assert_eq!(content, "| H1 | H2 |");
+    }
+
+    #[test]
+    fn test_extract_blockquote_prefix_indented() {
+        // Indented blockquote
+        let (prefix, content) = TableUtils::extract_blockquote_prefix("  > | H1 | H2 |");
+        assert_eq!(prefix, "  > ");
+        assert_eq!(content, "| H1 | H2 |");
+    }
+
+    #[test]
+    fn test_extract_blockquote_prefix_no_space_after() {
+        // Blockquote without space after marker
+        let (prefix, content) = TableUtils::extract_blockquote_prefix(">| H1 | H2 |");
+        assert_eq!(prefix, ">");
+        assert_eq!(content, "| H1 | H2 |");
+    }
+
+    #[test]
+    fn test_determine_pipe_style_in_blockquote() {
+        // determine_pipe_style should handle blockquotes correctly
+        assert_eq!(
+            TableUtils::determine_pipe_style("> | H1 | H2 |"),
+            Some("leading_and_trailing")
+        );
+        assert_eq!(
+            TableUtils::determine_pipe_style("> H1 | H2"),
+            Some("no_leading_or_trailing")
+        );
+        assert_eq!(
+            TableUtils::determine_pipe_style(">> | H1 | H2 |"),
+            Some("leading_and_trailing")
+        );
+        assert_eq!(
+            TableUtils::determine_pipe_style(">>> | H1 | H2"),
+            Some("leading_only")
+        );
     }
 }
