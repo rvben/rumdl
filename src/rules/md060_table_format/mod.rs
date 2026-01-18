@@ -411,13 +411,22 @@ impl MD060TableFormat {
         format!("|{}|", formatted_cells.join("|"))
     }
 
-    /// Checks if a table is already aligned with consistent column widths.
+    /// Checks if a table is already aligned with consistent column widths
+    /// and the delimiter row style matches the target style.
     ///
     /// A table is considered "already aligned" if:
     /// 1. All rows have the same display length
     /// 2. Each column has consistent cell width across all rows
     /// 3. The delimiter row has valid minimum widths (at least 3 chars per cell)
-    fn is_table_already_aligned(table_lines: &[&str], flavor: crate::config::MarkdownFlavor) -> bool {
+    /// 4. The delimiter row style matches the target style (compact_delimiter parameter)
+    ///
+    /// The `compact_delimiter` parameter indicates whether the target style is "aligned-no-space"
+    /// (true = no spaces around dashes, false = spaces around dashes).
+    fn is_table_already_aligned(
+        table_lines: &[&str],
+        flavor: crate::config::MarkdownFlavor,
+        compact_delimiter: bool,
+    ) -> bool {
         if table_lines.len() < 2 {
             return false;
         }
@@ -457,9 +466,27 @@ impl MD060TableFormat {
                     return false;
                 }
             }
+
+            // Check if delimiter row style matches the target style
+            // compact_delimiter=true means "aligned-no-space" (no spaces around dashes)
+            // compact_delimiter=false means "aligned" (spaces around dashes)
+            let delimiter_has_spaces = delimiter_row.iter().all(|cell| {
+                cell.starts_with(' ') && cell.ends_with(' ')
+            });
+
+            // If target is compact (no spaces) but current has spaces, not aligned
+            // If target is spaced but current has no spaces, not aligned
+            if compact_delimiter && delimiter_has_spaces {
+                return false;
+            }
+            if !compact_delimiter && !delimiter_has_spaces {
+                return false;
+            }
         }
 
         // Check each column has consistent width across all content rows
+        // Use cell.width() to get display width INCLUDING padding, not trimmed content
+        // This correctly handles CJK characters (display width 2, byte length 3)
         for col_idx in 0..num_columns {
             let mut widths = Vec::new();
             for (row_idx, row) in parsed.iter().enumerate() {
@@ -468,10 +495,10 @@ impl MD060TableFormat {
                     continue;
                 }
                 if let Some(cell) = row.get(col_idx) {
-                    widths.push(cell.len());
+                    widths.push(cell.width());
                 }
             }
-            // All content cells in this column should have the same raw width
+            // All content cells in this column should have the same display width
             if !widths.is_empty() && !widths.iter().all(|&w| w == widths[0]) {
                 return false;
             }
@@ -623,9 +650,9 @@ impl MD060TableFormat {
             "aligned" | "aligned-no-space" => {
                 let compact_delimiter = style == "aligned-no-space";
 
-                // If the table is already aligned with consistent column widths,
-                // preserve it as-is rather than forcing our preferred minimum widths
-                if Self::is_table_already_aligned(&stripped_lines, flavor) {
+                // If the table is already aligned with consistent column widths
+                // AND the delimiter style matches the target style, preserve as-is
+                if Self::is_table_already_aligned(&stripped_lines, flavor, compact_delimiter) {
                     return TableFormatResult {
                         lines: table_lines.iter().map(|s| s.to_string()).collect(),
                         auto_compacted: false,
@@ -1621,5 +1648,143 @@ mod tests {
             fixed.contains("| --- |"),
             "Should be compact format when inheriting MD013 limit"
         );
+    }
+
+    // === Issue #311: aligned-no-space style tests ===
+
+    #[test]
+    fn test_aligned_no_space_reformats_spaced_delimiter() {
+        // Table with "aligned" style (spaces around dashes) should be reformatted
+        // when target style is "aligned-no-space"
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned-no-space".to_string(),
+            max_width: LineLength::from_const(0),
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        // Input: aligned table with spaces around dashes
+        let content = "| Header 1 | Header 2 |\n| -------- | -------- |\n| Cell 1   | Cell 2   |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should have no spaces around dashes in delimiter row
+        // The dashes may be longer to match column width, but should have no spaces
+        assert!(
+            !fixed.contains("| ----"),
+            "Delimiter should NOT have spaces after pipe. Got:\n{fixed}"
+        );
+        assert!(
+            !fixed.contains("---- |"),
+            "Delimiter should NOT have spaces before pipe. Got:\n{fixed}"
+        );
+        // Verify it has the compact delimiter format (dashes touching pipes)
+        assert!(
+            fixed.contains("|----"),
+            "Delimiter should have dashes touching the leading pipe. Got:\n{fixed}"
+        );
+    }
+
+    #[test]
+    fn test_aligned_reformats_compact_delimiter() {
+        // Table with "aligned-no-space" style (no spaces around dashes) should be reformatted
+        // when target style is "aligned"
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        // Input: aligned-no-space table (no spaces around dashes)
+        let content = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should have spaces around dashes in delimiter row
+        assert!(
+            fixed.contains("| -------- | -------- |") || fixed.contains("| ---------- | ---------- |"),
+            "Delimiter should have spaces around dashes. Got:\n{fixed}"
+        );
+    }
+
+    #[test]
+    fn test_aligned_no_space_preserves_matching_table() {
+        // Table already in "aligned-no-space" style should be preserved
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned-no-space".to_string(),
+            max_width: LineLength::from_const(0),
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        // Input: already in aligned-no-space style
+        let content = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be preserved as-is
+        assert_eq!(fixed, content, "Table already in aligned-no-space style should be preserved");
+    }
+
+    #[test]
+    fn test_aligned_preserves_matching_table() {
+        // Table already in "aligned" style should be preserved
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        // Input: already in aligned style
+        let content = "| Header 1 | Header 2 |\n| -------- | -------- |\n| Cell 1   | Cell 2   |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be preserved as-is
+        assert_eq!(fixed, content, "Table already in aligned style should be preserved");
+    }
+
+    #[test]
+    fn test_cjk_table_display_width_consistency() {
+        // Test that is_table_already_aligned correctly uses display width, not byte length
+        // CJK characters have display width of 2, but byte length of 3 in UTF-8
+        //
+        // This table is NOT aligned because line lengths differ
+        // (CJK chars take 3 bytes in UTF-8 but only 2 columns in display)
+        let table_lines = vec![
+            "| 名前 | Age |",
+            "|------|-----|",
+            "| 田中 | 25  |",
+        ];
+
+        // First check is raw line length equality (byte-based), which fails
+        let is_aligned =
+            MD060TableFormat::is_table_already_aligned(&table_lines, crate::config::MarkdownFlavor::Standard, false);
+        assert!(
+            !is_aligned,
+            "Table with uneven raw line lengths should NOT be considered aligned"
+        );
+    }
+
+    #[test]
+    fn test_cjk_width_calculation_in_aligned_check() {
+        // calculate_cell_display_width trims content before calculating width
+        // Verify CJK width is correctly calculated (2 per character)
+        let cjk_width = MD060TableFormat::calculate_cell_display_width("名前");
+        assert_eq!(cjk_width, 4, "Two CJK characters should have display width 4");
+
+        let ascii_width = MD060TableFormat::calculate_cell_display_width("Age");
+        assert_eq!(ascii_width, 3, "Three ASCII characters should have display width 3");
+
+        // Test that spacing is trimmed before width calculation
+        let padded_cjk = MD060TableFormat::calculate_cell_display_width(" 名前 ");
+        assert_eq!(padded_cjk, 4, "Padded CJK should have same width after trim");
+
+        // Test mixed content
+        let mixed = MD060TableFormat::calculate_cell_display_width(" 日本語ABC ");
+        // 3 CJK chars (width 6) + 3 ASCII (width 3) = 9
+        assert_eq!(mixed, 9, "Mixed CJK/ASCII content");
     }
 }
