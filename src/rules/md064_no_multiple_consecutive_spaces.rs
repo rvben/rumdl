@@ -950,7 +950,6 @@ Normal paragraph.
         // With allow_sentence_double_space, 2 spaces after period should be OK
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -964,7 +963,6 @@ Normal paragraph.
     fn test_sentence_double_space_enabled_allows_exclamation() {
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -978,7 +976,6 @@ Normal paragraph.
     fn test_sentence_double_space_enabled_allows_question() {
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -993,7 +990,6 @@ Normal paragraph.
         // Even with allow_sentence_double_space, mid-sentence double spaces should be flagged
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1008,7 +1004,6 @@ Normal paragraph.
         // 3+ spaces after sentence should still be flagged
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1023,7 +1018,6 @@ Normal paragraph.
         // "Quoted sentence."  Next sentence.
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1043,7 +1037,6 @@ Normal paragraph.
     fn test_sentence_double_space_with_curly_quotes() {
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1073,7 +1066,6 @@ Normal paragraph.
     fn test_sentence_double_space_with_closing_paren() {
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1087,7 +1079,6 @@ Normal paragraph.
     fn test_sentence_double_space_with_closing_bracket() {
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1101,7 +1092,6 @@ Normal paragraph.
     fn test_sentence_double_space_with_ellipsis() {
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1116,7 +1106,6 @@ Normal paragraph.
         // Multiple closing punctuation: .")
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1131,7 +1120,6 @@ Normal paragraph.
         // Mix of sentence endings and mid-sentence spaces
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1150,7 +1138,6 @@ Normal paragraph.
         // Fix should collapse 3+ spaces to 2 after sentence, 1 elsewhere
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1168,7 +1155,6 @@ Normal paragraph.
         // Fix should collapse mid-sentence spaces to 1
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1201,7 +1187,6 @@ Normal paragraph.
         // Period at very start shouldn't cause issues
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1217,7 +1202,6 @@ Normal paragraph.
         // French-style quotes (guillemets)
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1232,7 +1216,6 @@ Normal paragraph.
         // Multiple consecutive sentences with double spacing
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 
@@ -1247,7 +1230,6 @@ Normal paragraph.
         // Known abbreviations should NOT be treated as sentence endings
         let config = MD064Config {
             allow_sentence_double_space: true,
-            ..Default::default()
         };
         let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
 

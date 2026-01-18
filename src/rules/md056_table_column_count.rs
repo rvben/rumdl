@@ -663,7 +663,10 @@ Some text in between.
 
         // Each line should preserve the nested blockquote prefix
         for line in fixed.lines() {
-            assert!(line.starts_with(">> "), "Line should preserve nested blockquote prefix: {line}");
+            assert!(
+                line.starts_with(">> "),
+                "Line should preserve nested blockquote prefix: {line}"
+            );
         }
         assert!(fixed.contains(">> | 1 | 2 |  |"));
     }

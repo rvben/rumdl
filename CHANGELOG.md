@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.221] - 2026-01-18
+
+### Added
+
+- **Embedded markdown linting in fenced code blocks**
+  - Lint markdown content inside ` ```markdown ` code blocks
+  - Provides lint warnings for markdown examples in documentation
+  - Auto-fix support formats embedded markdown preserving code fence indentation
+
+### Fixed
+
+- **MD064: Remove `max-consecutive-spaces` config, improve sentence detection**
+  - Removed conceptually inconsistent `max-consecutive-spaces` option
+  - Share sentence detection logic with text reflow (DRY)
+  - Add proper abbreviation detection (Dr., Prof., e.g., i.e., Mr., Mrs.)
+  - Add CJK sentence-ending punctuation support (。, ！, ？)
+  - Fix UTF-8 byte boundary handling for multi-byte characters
+
+- **MD055/MD056: Handle tables inside blockquotes in fix mode**
+  - Tables within blockquotes now preserve `> ` prefix when fixed
+  - Pipe style and column count fixes work correctly in nested contexts
+
+- **MD060: Improve alignment detection for CJK and delimiter styles**
+  - Better handling of CJK character widths in table alignment
+  - Improved delimiter row style detection
+
+- **MD069: Respect inline disable comments in fix mode**
+  - `<!-- markdownlint-disable MD069 -->` now properly prevents fixes
+  - Exposed inline config checks for rule disable detection
+
+- **MD058/MD065: Recognize blockquote continuation lines as blank**
+  - Lines with only `>` are now treated as blank for table separation rules
+  - Fixes false positives in blockquoted content
+
+- **Text reflow: Recognize sentence boundaries with quotation marks**
+  - Sentences ending with closing quotes (`.\"`, `!\"`, `?\"`) now detected correctly
+  - Supports both straight and curly quotation marks
+
+### Changed
+
+- **Refactored sentence detection into shared module**
+  - New `sentence_utils` module provides reusable sentence boundary detection
+  - Used by both MD064 (consecutive spaces) and text reflow (MD013)
+  - Reduces code duplication by ~100 lines
+
 ## [0.0.220] - 2026-01-17
 
 ### Added

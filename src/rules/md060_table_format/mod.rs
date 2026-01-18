@@ -470,9 +470,9 @@ impl MD060TableFormat {
             // Check if delimiter row style matches the target style
             // compact_delimiter=true means "aligned-no-space" (no spaces around dashes)
             // compact_delimiter=false means "aligned" (spaces around dashes)
-            let delimiter_has_spaces = delimiter_row.iter().all(|cell| {
-                cell.starts_with(' ') && cell.ends_with(' ')
-            });
+            let delimiter_has_spaces = delimiter_row
+                .iter()
+                .all(|cell| cell.starts_with(' ') && cell.ends_with(' '));
 
             // If target is compact (no spaces) but current has spaces, not aligned
             // If target is spaced but current has no spaces, not aligned
@@ -1724,7 +1724,10 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
 
         // Should be preserved as-is
-        assert_eq!(fixed, content, "Table already in aligned-no-space style should be preserved");
+        assert_eq!(
+            fixed, content,
+            "Table already in aligned-no-space style should be preserved"
+        );
     }
 
     #[test]
@@ -1753,11 +1756,7 @@ mod tests {
         //
         // This table is NOT aligned because line lengths differ
         // (CJK chars take 3 bytes in UTF-8 but only 2 columns in display)
-        let table_lines = vec![
-            "| 名前 | Age |",
-            "|------|-----|",
-            "| 田中 | 25  |",
-        ];
+        let table_lines = vec!["| 名前 | Age |", "|------|-----|", "| 田中 | 25  |"];
 
         // First check is raw line length equality (byte-based), which fails
         let is_aligned =

@@ -1130,9 +1130,6 @@ But no delimiter row
             TableUtils::determine_pipe_style(">> | H1 | H2 |"),
             Some("leading_and_trailing")
         );
-        assert_eq!(
-            TableUtils::determine_pipe_style(">>> | H1 | H2"),
-            Some("leading_only")
-        );
+        assert_eq!(TableUtils::determine_pipe_style(">>> | H1 | H2"), Some("leading_only"));
     }
 }

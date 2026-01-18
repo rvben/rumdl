@@ -628,9 +628,15 @@ mod tests {
 
         // Each line should have the blockquote prefix preserved and pipes added
         // The leading_and_trailing style adds "| " after blockquote prefix
-        assert!(result.starts_with("> |"), "Header should start with blockquote + pipe. Got:\n{result}");
+        assert!(
+            result.starts_with("> |"),
+            "Header should start with blockquote + pipe. Got:\n{result}"
+        );
         // Delimiter row gets leading pipe added, so check for "> | ---" pattern
-        assert!(result.contains("> | ----"), "Delimiter should have blockquote prefix + leading pipe. Got:\n{result}");
+        assert!(
+            result.contains("> | ----"),
+            "Delimiter should have blockquote prefix + leading pipe. Got:\n{result}"
+        );
     }
 
     #[test]
@@ -645,7 +651,11 @@ mod tests {
         // Pipes should be removed but blockquote prefix preserved
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines[0].starts_with("> "), "Line should start with blockquote prefix");
-        assert!(!lines[0].starts_with("> |"), "Leading pipe should be removed. Got: {}", lines[0]);
+        assert!(
+            !lines[0].starts_with("> |"),
+            "Leading pipe should be removed. Got: {}",
+            lines[0]
+        );
     }
 
     #[test]
@@ -659,6 +669,9 @@ mod tests {
 
         // Both tables should be fixed
         assert!(result.contains("| H1 | H2 |"), "Regular table should have pipes added");
-        assert!(result.contains("> | H3 | H4 |"), "Blockquote table should have pipes added with prefix preserved");
+        assert!(
+            result.contains("> | H3 | H4 |"),
+            "Blockquote table should have pipes added with prefix preserved"
+        );
     }
 }
