@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/rvben/rumdl/tree/main/docs
+    about: Check the documentation for rule details and configuration options
+  - name: Rule Reference
+    url: https://github.com/rvben/rumdl/blob/main/docs/RULES.md
+    about: Browse all available lint rules
+  - name: Question or Discussion
+    url: https://github.com/rvben/rumdl/discussions
+    about: Ask questions or start a discussion (not a bug or feature request)
