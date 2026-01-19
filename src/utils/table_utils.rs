@@ -10,6 +10,19 @@ pub struct TableBlock {
     pub header_line: usize,
     pub delimiter_line: usize,
     pub content_lines: Vec<usize>,
+    /// If the table is inside a list item, this contains:
+    /// - The list marker prefix for the header line (e.g., "- ", "1. ")
+    /// - The content indent (number of spaces for continuation lines)
+    pub list_context: Option<ListTableContext>,
+}
+
+/// Context information for tables inside list items
+#[derive(Debug, Clone)]
+pub struct ListTableContext {
+    /// The list marker prefix including any leading whitespace (e.g., "- ", "  1. ")
+    pub list_prefix: String,
+    /// Number of spaces for continuation lines to align with content
+    pub content_indent: usize,
 }
 
 /// Shared table detection utilities
@@ -188,14 +201,32 @@ impl TableUtils {
             // Strip blockquote prefix for table detection
             let line_content = Self::strip_blockquote_prefix(lines[i]);
 
+            // Check if this is a list item that contains a table row
+            let (list_prefix, list_content, content_indent) = Self::extract_list_prefix(line_content);
+            let (is_list_table, effective_content) = if !list_prefix.is_empty()
+                && Self::is_potential_table_row_content(list_content)
+            {
+                (true, list_content)
+            } else {
+                (false, line_content)
+            };
+
             // Look for potential table start
-            if Self::is_potential_table_row(line_content) {
-                // Check if the next line is a delimiter row (also strip blockquote prefix)
+            if is_list_table || Self::is_potential_table_row(effective_content) {
+                // For list tables, we need to check indented continuation lines
+                // For regular tables, check the next line directly
                 let next_line_content = if i + 1 < lines.len() {
-                    Self::strip_blockquote_prefix(lines[i + 1])
+                    let next_raw = Self::strip_blockquote_prefix(lines[i + 1]);
+                    if is_list_table {
+                        // For list tables, strip the expected indentation
+                        Self::strip_list_continuation_indent(next_raw, content_indent)
+                    } else {
+                        next_raw
+                    }
                 } else {
                     ""
                 };
+
                 if i + 1 < lines.len() && Self::is_delimiter_row(next_line_content) {
                     // Found a table! Find its end
                     let table_start = i;
@@ -209,11 +240,29 @@ impl TableUtils {
                     while j < lines.len() {
                         let line = lines[j];
                         // Strip blockquote prefix for checking
-                        let line_content = Self::strip_blockquote_prefix(line);
+                        let raw_content = Self::strip_blockquote_prefix(line);
+
+                        // For list tables, strip expected indentation
+                        let line_content = if is_list_table {
+                            Self::strip_list_continuation_indent(raw_content, content_indent)
+                        } else {
+                            raw_content
+                        };
+
                         if line_content.trim().is_empty() {
-                            // Empty line ends the table (including blockquote blank lines like ">")
+                            // Empty line ends the table
                             break;
                         }
+
+                        // For list tables, the continuation line must have proper indentation
+                        if is_list_table {
+                            let leading_spaces = raw_content.len() - raw_content.trim_start().len();
+                            if leading_spaces < content_indent {
+                                // Not enough indentation - end of table
+                                break;
+                            }
+                        }
+
                         if Self::is_potential_table_row(line_content) {
                             content_lines.push(j);
                             table_end = j;
@@ -224,12 +273,22 @@ impl TableUtils {
                         }
                     }
 
+                    let list_context = if is_list_table {
+                        Some(ListTableContext {
+                            list_prefix: list_prefix.to_string(),
+                            content_indent,
+                        })
+                    } else {
+                        None
+                    };
+
                     tables.push(TableBlock {
                         start_line: table_start,
                         end_line: table_end,
                         header_line,
                         delimiter_line,
                         content_lines,
+                        list_context,
                     });
                     i = table_end + 1;
                 } else {
@@ -241,6 +300,50 @@ impl TableUtils {
         }
 
         tables
+    }
+
+    /// Strip list continuation indentation from a line.
+    /// For lines that are continuations of a list item's content, strip the expected indent.
+    fn strip_list_continuation_indent(line: &str, expected_indent: usize) -> &str {
+        let bytes = line.as_bytes();
+        let mut spaces = 0;
+
+        for &b in bytes {
+            if b == b' ' {
+                spaces += 1;
+            } else if b == b'\t' {
+                // Tab counts as up to 4 spaces, rounding up to next multiple of 4
+                spaces = (spaces / 4 + 1) * 4;
+            } else {
+                break;
+            }
+
+            if spaces >= expected_indent {
+                break;
+            }
+        }
+
+        // Strip at most expected_indent characters
+        let strip_count = spaces.min(expected_indent).min(line.len());
+        // Count actual bytes to strip (handling tabs)
+        let mut byte_count = 0;
+        let mut counted_spaces = 0;
+        for &b in bytes {
+            if counted_spaces >= strip_count {
+                break;
+            }
+            if b == b' ' {
+                counted_spaces += 1;
+                byte_count += 1;
+            } else if b == b'\t' {
+                counted_spaces = (counted_spaces / 4 + 1) * 4;
+                byte_count += 1;
+            } else {
+                break;
+            }
+        }
+
+        &line[byte_count..]
     }
 
     /// Find all table blocks in the content with optimized detection
@@ -577,6 +680,169 @@ impl TableUtils {
 
         // Split at the position where content starts
         (&line[..pos], &line[pos..])
+    }
+
+    /// Extract list marker prefix from a line, returning (prefix, content, content_indent).
+    ///
+    /// This handles unordered list markers (`-`, `*`, `+`) and ordered list markers (`1.`, `10)`, etc.)
+    /// Returns:
+    /// - prefix: The list marker including any leading whitespace and trailing space (e.g., "- ", "  1. ")
+    /// - content: The content after the list marker
+    /// - content_indent: The number of spaces needed for continuation lines to align with content
+    ///
+    /// For example:
+    /// - `"- | H1 | H2 |"` returns `("- ", "| H1 | H2 |", 2)`
+    /// - `"1. | H1 | H2 |"` returns `("1. ", "| H1 | H2 |", 3)`
+    /// - `"  - table"` returns `("  - ", "table", 4)`
+    ///
+    /// Returns `("", line, 0)` if the line doesn't start with a list marker.
+    pub fn extract_list_prefix(line: &str) -> (&str, &str, usize) {
+        let bytes = line.as_bytes();
+
+        // Skip leading whitespace
+        let leading_spaces = bytes.iter().take_while(|&&b| b == b' ' || b == b'\t').count();
+        let mut pos = leading_spaces;
+
+        if pos >= bytes.len() {
+            return ("", line, 0);
+        }
+
+        // Check for unordered list marker: -, *, +
+        if matches!(bytes[pos], b'-' | b'*' | b'+') {
+            pos += 1;
+
+            // Must be followed by space or tab (or end of line for marker-only lines)
+            if pos >= bytes.len() || bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                // Skip the space after marker if present
+                if pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+                    pos += 1;
+                }
+                let content_indent = pos;
+                return (&line[..pos], &line[pos..], content_indent);
+            }
+            // Not a list marker (e.g., "-word" or "--")
+            return ("", line, 0);
+        }
+
+        // Check for ordered list marker: digits followed by . or ) then space
+        if bytes[pos].is_ascii_digit() {
+            let digit_start = pos;
+            while pos < bytes.len() && bytes[pos].is_ascii_digit() {
+                pos += 1;
+            }
+
+            // Must have at least one digit
+            if pos > digit_start && pos < bytes.len() {
+                // Check for . or ) followed by space/tab
+                if bytes[pos] == b'.' || bytes[pos] == b')' {
+                    pos += 1;
+                    if pos >= bytes.len() || bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                        // Skip the space after marker if present
+                        if pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+                            pos += 1;
+                        }
+                        let content_indent = pos;
+                        return (&line[..pos], &line[pos..], content_indent);
+                    }
+                }
+            }
+        }
+
+        ("", line, 0)
+    }
+
+    /// Extract the table row content from a line, stripping any list/blockquote prefix.
+    ///
+    /// This is useful for processing table rows that may be inside list items or blockquotes.
+    /// The line_index indicates which line of the table this is (0 = header, 1 = delimiter, etc.)
+    pub fn extract_table_row_content<'a>(
+        line: &'a str,
+        table_block: &TableBlock,
+        line_index: usize,
+    ) -> &'a str {
+        // First strip blockquote prefix
+        let (_, after_blockquote) = Self::extract_blockquote_prefix(line);
+
+        // Then handle list prefix if present
+        if let Some(ref list_ctx) = table_block.list_context {
+            if line_index == 0 {
+                // Header line: strip list prefix
+                Self::extract_list_prefix(after_blockquote).1
+            } else {
+                // Continuation lines: strip indentation
+                Self::strip_list_continuation_indent(after_blockquote, list_ctx.content_indent)
+            }
+        } else {
+            after_blockquote
+        }
+    }
+
+    /// Check if the content after a list marker looks like a table row.
+    /// This is used to detect tables that start on the same line as a list marker.
+    pub fn is_list_item_with_table_row(line: &str) -> bool {
+        let (prefix, content, _) = Self::extract_list_prefix(line);
+        if prefix.is_empty() {
+            return false;
+        }
+
+        // Check if the content after the list marker is a table row
+        // It must start with | (proper table format within a list)
+        let trimmed = content.trim();
+        if !trimmed.starts_with('|') {
+            return false;
+        }
+
+        // Use our table row detection on the content
+        Self::is_potential_table_row_content(content)
+    }
+
+    /// Internal helper: Check if content (without list/blockquote prefix) looks like a table row.
+    fn is_potential_table_row_content(content: &str) -> bool {
+        let trimmed = content.trim();
+        if trimmed.is_empty() || !trimmed.contains('|') {
+            return false;
+        }
+
+        // Skip lines that are clearly code or inline code
+        if trimmed.starts_with('`') || trimmed.contains("``") {
+            return false;
+        }
+
+        // Must have at least 2 parts when split by |
+        let parts: Vec<&str> = trimmed.split('|').collect();
+        if parts.len() < 2 {
+            return false;
+        }
+
+        // Check if it looks like a table row by having reasonable content between pipes
+        let mut valid_parts = 0;
+        let mut total_non_empty_parts = 0;
+
+        for part in &parts {
+            let part_trimmed = part.trim();
+            if part_trimmed.is_empty() {
+                continue;
+            }
+            total_non_empty_parts += 1;
+
+            if !part_trimmed.contains('\n') {
+                valid_parts += 1;
+            }
+        }
+
+        if total_non_empty_parts > 0 && valid_parts != total_non_empty_parts {
+            return false;
+        }
+
+        if total_non_empty_parts == 0 {
+            return trimmed.starts_with('|') && trimmed.ends_with('|') && parts.len() >= 3;
+        }
+
+        if trimmed.starts_with('|') && trimmed.ends_with('|') {
+            valid_parts >= 1
+        } else {
+            valid_parts >= 2
+        }
     }
 }
 
@@ -975,6 +1241,7 @@ But no delimiter row
             header_line: 0,
             delimiter_line: 1,
             content_lines: vec![2, 3, 4, 5],
+            list_context: None,
         };
 
         // Test Debug trait
@@ -989,6 +1256,7 @@ But no delimiter row
         assert_eq!(cloned.header_line, block.header_line);
         assert_eq!(cloned.delimiter_line, block.delimiter_line);
         assert_eq!(cloned.content_lines, block.content_lines);
+        assert!(cloned.list_context.is_none());
     }
 
     #[test]

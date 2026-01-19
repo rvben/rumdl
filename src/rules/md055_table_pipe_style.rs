@@ -100,8 +100,10 @@ impl MD055TablePipeStyle {
         let mut leading_only_count = 0;
         let mut trailing_only_count = 0;
 
-        // Count style of header row
-        if let Some(style) = TableUtils::determine_pipe_style(lines[table_block.header_line]) {
+        // Count style of header row (table line index 0)
+        let header_content =
+            TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
+        if let Some(style) = TableUtils::determine_pipe_style(header_content) {
             match style {
                 "leading_and_trailing" => leading_and_trailing_count += 1,
                 "no_leading_or_trailing" => no_leading_or_trailing_count += 1,
@@ -111,9 +113,10 @@ impl MD055TablePipeStyle {
             }
         }
 
-        // Count style of content rows
-        for &line_idx in &table_block.content_lines {
-            if let Some(style) = TableUtils::determine_pipe_style(lines[line_idx]) {
+        // Count style of content rows (table line indices 2, 3, 4, ...)
+        for (i, &line_idx) in table_block.content_lines.iter().enumerate() {
+            let content = TableUtils::extract_table_row_content(lines[line_idx], table_block, 2 + i);
+            if let Some(style) = TableUtils::determine_pipe_style(content) {
                 match style {
                     "leading_and_trailing" => leading_and_trailing_count += 1,
                     "no_leading_or_trailing" => no_leading_or_trailing_count += 1,
@@ -148,24 +151,64 @@ impl MD055TablePipeStyle {
         }
     }
 
-    /// Fix a table row to match the target style
-    /// Uses surgical fixes: only adds/removes pipes, preserves all user formatting
+    /// Fix a table row to match the target style, with full context for list tables
     ///
-    /// Handles tables inside blockquotes by stripping the blockquote prefix,
-    /// fixing the table content, then restoring the prefix.
-    fn fix_table_row(&self, line: &str, target_style: &str) -> String {
-        // Extract blockquote prefix if present
-        let (prefix, content) = TableUtils::extract_blockquote_prefix(line);
+    /// This handles tables inside list items by stripping the list prefix,
+    /// fixing the table content, then restoring the appropriate prefix.
+    fn fix_table_row_with_context(
+        &self,
+        line: &str,
+        target_style: &str,
+        table_block: &TableBlock,
+        table_line_index: usize,
+    ) -> String {
+        // Extract blockquote prefix first
+        let (bq_prefix, after_bq) = TableUtils::extract_blockquote_prefix(line);
 
-        let trimmed = content.trim();
+        // Handle list context if present
+        if let Some(ref list_ctx) = table_block.list_context {
+            if table_line_index == 0 {
+                // Header line: extract list prefix
+                let (list_prefix, content, _) = TableUtils::extract_list_prefix(after_bq);
+                let fixed_content = self.fix_table_content(content.trim(), target_style);
+
+                // Restore prefixes: blockquote + list prefix + fixed content
+                if bq_prefix.is_empty() && list_prefix.is_empty() {
+                    fixed_content
+                } else {
+                    format!("{bq_prefix}{list_prefix}{fixed_content}")
+                }
+            } else {
+                // Continuation lines: strip indentation, then restore it
+                let content_indent = list_ctx.content_indent;
+                let stripped = TableUtils::extract_table_row_content(line, table_block, table_line_index);
+                let fixed_content = self.fix_table_content(stripped.trim(), target_style);
+
+                // Restore prefixes: blockquote + indentation + fixed content
+                let indent = " ".repeat(content_indent);
+                format!("{bq_prefix}{indent}{fixed_content}")
+            }
+        } else {
+            // No list context, just handle blockquote prefix
+            let fixed_content = self.fix_table_content(after_bq.trim(), target_style);
+            if bq_prefix.is_empty() {
+                fixed_content
+            } else {
+                format!("{bq_prefix}{fixed_content}")
+            }
+        }
+    }
+
+    /// Fix the table content (without any prefix handling)
+    fn fix_table_content(&self, trimmed: &str, target_style: &str) -> String {
         if !trimmed.contains('|') {
-            return line.to_string();
+            return trimmed.to_string();
         }
 
         let has_leading = trimmed.starts_with('|');
         let has_trailing = trimmed.ends_with('|');
 
-        let fixed_content = match target_style {
+        match target_style {
             "leading_and_trailing" => {
                 let mut result = trimmed.to_string();
 
@@ -230,14 +273,7 @@ impl MD055TablePipeStyle {
 
                 result
             }
-            _ => return line.to_string(),
-        };
-
-        // Restore the blockquote prefix if there was one
-        if prefix.is_empty() {
-            fixed_content
-        } else {
-            format!("{prefix}{fixed_content}")
+            _ => trimmed.to_string(),
         }
     }
 }
@@ -307,11 +343,12 @@ impl Rule for MD055TablePipeStyle {
             let table_start_line = table_block.start_line + 1; // Convert to 1-indexed
             let table_end_line = table_block.end_line + 1; // Convert to 1-indexed
 
-            // Build the complete fixed table content
+            // Build the complete fixed table content with proper table line indices
             let mut fixed_table_lines: Vec<String> = Vec::with_capacity(all_line_indices.len());
-            for &line_idx in &all_line_indices {
+            for (table_line_idx, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
-                let fixed_line = self.fix_table_row(line, target_style);
+                let fixed_line =
+                    self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
                 if line_idx < lines.len() - 1 {
                     fixed_table_lines.push(format!("{fixed_line}\n"));
                 } else {
@@ -322,9 +359,11 @@ impl Rule for MD055TablePipeStyle {
             let table_range = line_index.multi_line_range(table_start_line, table_end_line);
 
             // Check all rows in the table
-            for &line_idx in &all_line_indices {
+            for (table_line_idx, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
-                if let Some(current_style) = TableUtils::determine_pipe_style(line) {
+                // Extract content to properly check pipe style (handles list/blockquote prefixes)
+                let content = TableUtils::extract_table_row_content(line, table_block, table_line_idx);
+                if let Some(current_style) = TableUtils::determine_pipe_style(content) {
                     // Only flag lines with actual style mismatches
                     let needs_fixing = current_style != target_style;
 
@@ -403,14 +442,16 @@ impl Rule for MD055TablePipeStyle {
                 configured_style
             };
 
-            // Fix all rows in the table
-            let all_lines = std::iter::once(table_block.header_line)
+            // Fix all rows in the table with proper table line indices
+            let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
-                .chain(table_block.content_lines.iter().copied());
+                .chain(table_block.content_lines.iter().copied())
+                .collect();
 
-            for line_idx in all_lines {
+            for (table_line_idx, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
-                let fixed_line = self.fix_table_row(line, target_style);
+                let fixed_line =
+                    self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
                 result_lines[line_idx] = fixed_line;
             }
         }

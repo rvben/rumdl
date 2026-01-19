@@ -16,50 +16,72 @@ impl Default for MD056TableColumnCount {
 }
 
 impl MD056TableColumnCount {
-    /// Try to fix a table row to match the expected column count
-    fn fix_table_row(&self, row: &str, expected_count: usize, flavor: crate::config::MarkdownFlavor) -> Option<String> {
-        // Extract blockquote prefix if present
-        let (prefix, content) = TableUtils::extract_blockquote_prefix(row);
-
-        let current_count = TableUtils::count_cells_with_flavor(content, flavor);
+    /// Try to fix a table row content (with list context awareness)
+    fn fix_table_row_content(
+        &self,
+        row_content: &str,
+        expected_count: usize,
+        flavor: crate::config::MarkdownFlavor,
+        table_block: &crate::utils::table_utils::TableBlock,
+        line_index: usize,
+        original_line: &str,
+    ) -> Option<String> {
+        let current_count = TableUtils::count_cells_with_flavor(row_content, flavor);
 
         if current_count == expected_count || current_count == 0 {
             return None;
         }
 
         // For standard flavor with too many cells, first try escaping pipes in inline code.
-        // This preserves content and produces valid GitHub-compatible output.
         if flavor == crate::config::MarkdownFlavor::Standard && current_count > expected_count {
-            let escaped_row = TableUtils::escape_pipes_in_inline_code(content);
+            let escaped_row = TableUtils::escape_pipes_in_inline_code(row_content);
             let escaped_count = TableUtils::count_cells_with_flavor(&escaped_row, flavor);
 
-            // If escaping pipes in inline code fixes the cell count, use that
             if escaped_count == expected_count {
                 let fixed = escaped_row.trim().to_string();
-                return Some(if prefix.is_empty() {
-                    fixed
-                } else {
-                    format!("{prefix}{fixed}")
-                });
+                return Some(self.restore_prefixes(&fixed, table_block, line_index, original_line));
             }
 
-            // If escaping reduced cell count, continue fixing with escaped version
             if escaped_count < current_count {
-                let fixed = self.fix_row_by_truncation(&escaped_row, expected_count, flavor)?;
-                return Some(if prefix.is_empty() {
-                    fixed
-                } else {
-                    format!("{prefix}{fixed}")
-                });
+                if let Some(fixed) = self.fix_row_by_truncation(&escaped_row, expected_count, flavor) {
+                    return Some(self.restore_prefixes(&fixed, table_block, line_index, original_line));
+                }
             }
         }
 
-        let fixed = self.fix_row_by_truncation(content, expected_count, flavor)?;
-        Some(if prefix.is_empty() {
-            fixed
+        let fixed = self.fix_row_by_truncation(row_content, expected_count, flavor)?;
+        Some(self.restore_prefixes(&fixed, table_block, line_index, original_line))
+    }
+
+    /// Restore list/blockquote prefixes to a fixed row
+    fn restore_prefixes(
+        &self,
+        fixed_content: &str,
+        table_block: &crate::utils::table_utils::TableBlock,
+        line_index: usize,
+        original_line: &str,
+    ) -> String {
+        // Extract blockquote prefix from original
+        let (blockquote_prefix, _) = TableUtils::extract_blockquote_prefix(original_line);
+
+        // Handle list context
+        if let Some(ref list_ctx) = table_block.list_context {
+            if line_index == 0 {
+                // Header line: use list prefix
+                format!("{blockquote_prefix}{}{fixed_content}", list_ctx.list_prefix)
+            } else {
+                // Continuation lines: use indentation
+                let indent = " ".repeat(list_ctx.content_indent);
+                format!("{blockquote_prefix}{indent}{fixed_content}")
+            }
         } else {
-            format!("{prefix}{fixed}")
-        })
+            // No list context, just blockquote
+            if blockquote_prefix.is_empty() {
+                fixed_content.to_string()
+            } else {
+                format!("{blockquote_prefix}{fixed_content}")
+            }
+        }
     }
 
     /// Fix a table row by truncating or adding cells
@@ -191,18 +213,20 @@ impl Rule for MD056TableColumnCount {
         let table_blocks = &ctx.table_blocks;
 
         for table_block in table_blocks {
-            // Determine expected column count from header row
-            let expected_count = TableUtils::count_cells_with_flavor(lines[table_block.header_line], flavor);
-
-            if expected_count == 0 {
-                continue; // Skip invalid tables
-            }
-
             // Collect all table lines for building the whole-table fix
             let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
                 .chain(table_block.content_lines.iter().copied())
                 .collect();
+
+            // Determine expected column count from header row (strip list/blockquote prefix first)
+            let header_content =
+                TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
+            let expected_count = TableUtils::count_cells_with_flavor(header_content, flavor);
+
+            if expected_count == 0 {
+                continue; // Skip invalid tables
+            }
 
             // Build the whole-table fix once for all warnings in this table
             // This ensures that applying Quick Fix on any row fixes the entire table
@@ -211,10 +235,11 @@ impl Rule for MD056TableColumnCount {
 
             // Build the complete fixed table content
             let mut fixed_table_lines: Vec<String> = Vec::with_capacity(all_line_indices.len());
-            for &line_idx in &all_line_indices {
+            for (i, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
+                let row_content = TableUtils::extract_table_row_content(line, table_block, i);
                 let fixed_line = self
-                    .fix_table_row(line, expected_count, flavor)
+                    .fix_table_row_content(row_content, expected_count, flavor, table_block, i, line)
                     .unwrap_or_else(|| line.to_string());
                 if line_idx < lines.len() - 1 {
                     fixed_table_lines.push(format!("{fixed_line}\n"));
@@ -226,9 +251,10 @@ impl Rule for MD056TableColumnCount {
             let table_range = ctx.line_index.multi_line_range(table_start_line, table_end_line);
 
             // Check all rows in the table
-            for &line_idx in &all_line_indices {
+            for (i, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
-                let count = TableUtils::count_cells_with_flavor(line, flavor);
+                let row_content = TableUtils::extract_table_row_content(line, table_block, i);
+                let count = TableUtils::count_cells_with_flavor(row_content, flavor);
 
                 if count > 0 && count != expected_count {
                     // Calculate precise character range for the entire table row
@@ -265,22 +291,28 @@ impl Rule for MD056TableColumnCount {
         let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
         for table_block in table_blocks {
-            // Determine expected column count from header row
-            let expected_count = TableUtils::count_cells_with_flavor(lines[table_block.header_line], flavor);
+            // Collect all table lines
+            let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
+                .chain(std::iter::once(table_block.delimiter_line))
+                .chain(table_block.content_lines.iter().copied())
+                .collect();
+
+            // Determine expected column count from header row (strip list/blockquote prefix first)
+            let header_content =
+                TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
+            let expected_count = TableUtils::count_cells_with_flavor(header_content, flavor);
 
             if expected_count == 0 {
                 continue; // Skip invalid tables
             }
 
             // Fix all rows in the table
-            let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
-                .chain(std::iter::once(table_block.delimiter_line))
-                .chain(table_block.content_lines.iter().copied())
-                .collect();
-
-            for &line_idx in &all_line_indices {
+            for (i, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
-                if let Some(fixed_line) = self.fix_table_row(line, expected_count, flavor) {
+                let row_content = TableUtils::extract_table_row_content(line, table_block, i);
+                if let Some(fixed_line) =
+                    self.fix_table_row_content(row_content, expected_count, flavor, table_block, i, line)
+                {
                     result_lines[line_idx] = fixed_line;
                 }
             }

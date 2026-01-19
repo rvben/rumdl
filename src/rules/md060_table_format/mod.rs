@@ -591,10 +591,32 @@ impl MD060TableFormat {
         // All lines in the same table should have the same blockquote level
         let (blockquote_prefix, _) = Self::extract_blockquote_prefix(table_lines[0]);
 
-        // Strip blockquote prefix from all lines for processing
+        // Extract list prefix if present (for tables inside list items)
+        let list_context = &table_block.list_context;
+        let (list_prefix, continuation_indent) = if let Some(ctx) = list_context {
+            (ctx.list_prefix.as_str(), " ".repeat(ctx.content_indent))
+        } else {
+            ("", String::new())
+        };
+
+        // Strip blockquote prefix and list prefix from all lines for processing
         let stripped_lines: Vec<&str> = table_lines
             .iter()
-            .map(|line| Self::extract_blockquote_prefix(line).1)
+            .enumerate()
+            .map(|(i, line)| {
+                let after_blockquote = Self::extract_blockquote_prefix(line).1;
+                if list_context.is_some() {
+                    if i == 0 {
+                        // Header line: strip list prefix
+                        crate::utils::table_utils::TableUtils::extract_list_prefix(after_blockquote).1
+                    } else {
+                        // Continuation lines: strip expected indentation
+                        after_blockquote.strip_prefix(&continuation_indent).unwrap_or(after_blockquote.trim_start())
+                    }
+                } else {
+                    after_blockquote
+                }
+            })
             .collect();
 
         let style = self.config.style.as_str();
@@ -701,10 +723,23 @@ impl MD060TableFormat {
             }
         }
 
-        // Re-add blockquote prefix to all formatted lines
+        // Re-add blockquote prefix and list prefix to all formatted lines
         let prefixed_result: Vec<String> = result
             .into_iter()
-            .map(|line| format!("{blockquote_prefix}{line}"))
+            .enumerate()
+            .map(|(i, line)| {
+                if list_context.is_some() {
+                    if i == 0 {
+                        // Header line: add list prefix
+                        format!("{blockquote_prefix}{list_prefix}{line}")
+                    } else {
+                        // Continuation lines: add indentation
+                        format!("{blockquote_prefix}{continuation_indent}{line}")
+                    }
+                } else {
+                    format!("{blockquote_prefix}{line}")
+                }
+            })
             .collect();
 
         TableFormatResult {
