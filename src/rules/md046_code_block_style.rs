@@ -807,6 +807,14 @@ impl MD046CodeBlockStyle {
     }
 }
 
+#[inline]
+fn line_idx_from_offset(line_offsets: &[usize], offset: usize) -> usize {
+    match line_offsets.binary_search(&offset) {
+        Ok(idx) => idx,
+        Err(idx) => idx.saturating_sub(1),
+    }
+}
+
 impl Rule for MD046CodeBlockStyle {
     fn name(&self) -> &'static str {
         "MD046"
@@ -883,14 +891,7 @@ impl Rule for MD046CodeBlockStyle {
             }
 
             // Find the line index for this block's start
-            let start_line_idx = ctx
-                .line_offsets
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|&(_, &offset)| offset <= start)
-                .map(|(idx, _)| idx)
-                .unwrap_or(0);
+            let start_line_idx = line_idx_from_offset(&ctx.line_offsets, start);
 
             match event {
                 Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))) => {

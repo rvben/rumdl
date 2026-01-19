@@ -32,6 +32,26 @@ impl MD009TrailingSpaces {
         line.chars().rev().take_while(|&c| c == ' ').count()
     }
 
+    fn count_trailing_spaces_ascii(line: &str) -> usize {
+        line.as_bytes().iter().rev().take_while(|&&b| b == b' ').count()
+    }
+
+    fn trimmed_len_ascii_whitespace(line: &str) -> usize {
+        line.as_bytes()
+            .iter()
+            .rposition(|b| !b.is_ascii_whitespace())
+            .map(|idx| idx + 1)
+            .unwrap_or(0)
+    }
+
+    fn calculate_trailing_range_ascii(
+        line: usize,
+        line_len: usize,
+        content_end: usize,
+    ) -> (usize, usize, usize, usize) {
+        (line, content_end, line, line_len + 1)
+    }
+
     fn is_empty_list_item_line(line: &str, prev_line: Option<&str>) -> bool {
         // A line is an empty list item line if:
         // 1. It's blank or only contains spaces
@@ -69,7 +89,12 @@ impl Rule for MD009TrailingSpaces {
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
-            let trailing_spaces = Self::count_trailing_spaces(line);
+            let line_is_ascii = line.is_ascii();
+            let trailing_spaces = if line_is_ascii {
+                Self::count_trailing_spaces_ascii(line)
+            } else {
+                Self::count_trailing_spaces(line)
+            };
 
             // Skip if no trailing spaces
             if trailing_spaces == 0 {
@@ -77,7 +102,12 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Handle empty lines
-            if line.trim().is_empty() {
+            let trimmed_len = if line_is_ascii {
+                Self::trimmed_len_ascii_whitespace(line)
+            } else {
+                line.trim_end().len()
+            };
+            if trimmed_len == 0 {
                 if trailing_spaces > 0 {
                     // Check if this is an empty list item line and config allows it
                     let prev_line = if line_num > 0 { Some(lines[line_num - 1]) } else { None };
@@ -86,7 +116,17 @@ impl Rule for MD009TrailingSpaces {
                     }
 
                     // Calculate precise character range for all trailing spaces on empty line
-                    let (start_line, start_col, end_line, end_col) = calculate_trailing_range(line_num + 1, line, 0);
+                    let (start_line, start_col, end_line, end_col) = if line_is_ascii {
+                        Self::calculate_trailing_range_ascii(line_num + 1, line.len(), 0)
+                    } else {
+                        calculate_trailing_range(line_num + 1, line, 0)
+                    };
+                    let line_start = *ctx.line_offsets.get(line_num).unwrap_or(&0);
+                    let fix_range = if line_is_ascii {
+                        line_start..line_start + line.len()
+                    } else {
+                        _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len())
+                    };
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -97,7 +137,7 @@ impl Rule for MD009TrailingSpaces {
                         message: "Empty line has trailing spaces".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                            range: fix_range,
                             replacement: String::new(),
                         }),
                     });
@@ -125,7 +165,11 @@ impl Rule for MD009TrailingSpaces {
 
             // Check if this is an empty blockquote line ("> " or ">> " etc)
             // These are allowed by MD028 to have a single trailing space
-            let trimmed = line.trim_end();
+            let trimmed = if line_is_ascii {
+                &line[..trimmed_len]
+            } else {
+                line.trim_end()
+            };
             let is_empty_blockquote_with_space = trimmed.chars().all(|c| c == '>' || c == ' ' || c == '\t')
                 && trimmed.contains('>')
                 && trailing_spaces == 1;
@@ -134,8 +178,23 @@ impl Rule for MD009TrailingSpaces {
                 continue; // Allow single trailing space for empty blockquote lines
             }
             // Calculate precise character range for all trailing spaces
-            let (start_line, start_col, end_line, end_col) =
-                calculate_trailing_range(line_num + 1, line, trimmed.len());
+            let (start_line, start_col, end_line, end_col) = if line_is_ascii {
+                Self::calculate_trailing_range_ascii(line_num + 1, line.len(), trimmed.len())
+            } else {
+                calculate_trailing_range(line_num + 1, line, trimmed.len())
+            };
+            let line_start = *ctx.line_offsets.get(line_num).unwrap_or(&0);
+            let fix_range = if line_is_ascii {
+                let start = line_start + trimmed.len();
+                let end = start + trailing_spaces;
+                start..end
+            } else {
+                _line_index.line_col_to_byte_range_with_length(
+                    line_num + 1,
+                    trimmed.chars().count() + 1,
+                    trailing_spaces,
+                )
+            };
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
@@ -150,11 +209,7 @@ impl Rule for MD009TrailingSpaces {
                 },
                 severity: Severity::Warning,
                 fix: Some(Fix {
-                    range: _line_index.line_col_to_byte_range_with_length(
-                        line_num + 1,
-                        trimmed.chars().count() + 1,
-                        trailing_spaces,
-                    ),
+                    range: fix_range,
                     replacement: if !self.config.strict
                         && !is_truly_last_line
                         && trailing_spaces == self.config.br_spaces.get()

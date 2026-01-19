@@ -5,6 +5,7 @@
 use crate::rule::Rule;
 use crate::rules;
 use crate::types::LineLength;
+use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 use indexmap::IndexMap;
 use log;
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,7 @@ use std::io;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::{Arc, OnceLock};
 use toml_edit::DocumentMut;
 
 // ============================================================================
@@ -187,7 +189,7 @@ fn arbitrary_value_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Sch
 }
 
 /// Represents the complete configuration loaded from rumdl.toml
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[schemars(
     description = "rumdl configuration for linting Markdown files. Rules can be configured individually using [MD###] sections with rule-specific options."
 )]
@@ -224,6 +226,35 @@ pub struct Config {
     /// Project root directory, used for resolving relative paths in per-file-ignores
     #[serde(skip)]
     pub project_root: Option<std::path::PathBuf>,
+
+    #[serde(skip)]
+    #[schemars(skip)]
+    per_file_ignores_cache: Arc<OnceLock<PerFileIgnoreCache>>,
+
+    #[serde(skip)]
+    #[schemars(skip)]
+    per_file_flavor_cache: Arc<OnceLock<PerFileFlavorCache>>,
+}
+
+impl PartialEq for Config {
+    fn eq(&self, other: &Self) -> bool {
+        self.global == other.global
+            && self.per_file_ignores == other.per_file_ignores
+            && self.per_file_flavor == other.per_file_flavor
+            && self.rules == other.rules
+            && self.project_root == other.project_root
+    }
+}
+
+#[derive(Debug)]
+struct PerFileIgnoreCache {
+    globset: GlobSet,
+    rules: Vec<Vec<String>>,
+}
+
+#[derive(Debug)]
+struct PerFileFlavorCache {
+    matchers: Vec<(GlobMatcher, MarkdownFlavor)>,
 }
 
 impl Config {
@@ -254,8 +285,6 @@ impl Config {
     /// Get the set of rules that should be ignored for a specific file based on per-file-ignores configuration
     /// Returns a HashSet of rule names (uppercase, e.g., "MD033") that match the given file path
     pub fn get_ignored_rules_for_file(&self, file_path: &Path) -> HashSet<String> {
-        use globset::{Glob, GlobSetBuilder};
-
         let mut ignored_rules = HashSet::new();
 
         if self.per_file_ignores.is_empty() {
@@ -282,33 +311,16 @@ impl Config {
             std::borrow::Cow::Borrowed(file_path)
         };
 
-        // Build a globset for efficient matching
-        let mut builder = GlobSetBuilder::new();
-        let mut pattern_to_rules: Vec<(usize, &Vec<String>)> = Vec::new();
-
-        for (idx, (pattern, rules)) in self.per_file_ignores.iter().enumerate() {
-            if let Ok(glob) = Glob::new(pattern) {
-                builder.add(glob);
-                pattern_to_rules.push((idx, rules));
-            } else {
-                log::warn!("Invalid glob pattern in per-file-ignores: {pattern}");
-            }
-        }
-
-        let globset = match builder.build() {
-            Ok(gs) => gs,
-            Err(e) => {
-                log::error!("Failed to build globset for per-file-ignores: {e}");
-                return ignored_rules;
-            }
-        };
+        let cache = self
+            .per_file_ignores_cache
+            .get_or_init(|| PerFileIgnoreCache::new(&self.per_file_ignores));
 
         // Match the file path against all patterns
-        for match_idx in globset.matches(path_for_matching.as_ref()) {
-            if let Some((_, rules)) = pattern_to_rules.get(match_idx) {
+        for match_idx in cache.globset.matches(path_for_matching.as_ref()) {
+            if let Some(rules) = cache.rules.get(match_idx) {
                 for rule in rules.iter() {
                     // Normalize rule names to uppercase (MD033, md033 -> MD033)
-                    ignored_rules.insert(normalize_key(rule));
+                    ignored_rules.insert(rule.clone());
                 }
             }
         }
@@ -320,8 +332,6 @@ impl Config {
     /// Returns the first matching pattern's flavor, or falls back to global flavor,
     /// or auto-detects from extension, or defaults to Standard.
     pub fn get_flavor_for_file(&self, file_path: &Path) -> MarkdownFlavor {
-        use globset::GlobBuilder;
-
         // If no per-file patterns, use fallback logic
         if self.per_file_flavor.is_empty() {
             return self.resolve_flavor_fallback(file_path);
@@ -346,17 +356,14 @@ impl Config {
             std::borrow::Cow::Borrowed(file_path)
         };
 
+        let cache = self
+            .per_file_flavor_cache
+            .get_or_init(|| PerFileFlavorCache::new(&self.per_file_flavor));
+
         // Iterate in config order and return first match (IndexMap preserves order)
-        for (pattern, flavor) in &self.per_file_flavor {
-            // Use GlobBuilder with literal_separator(true) for standard glob semantics
-            // where * does NOT match path separators (only ** does)
-            if let Ok(glob) = GlobBuilder::new(pattern).literal_separator(true).build() {
-                let matcher = glob.compile_matcher();
-                if matcher.is_match(path_for_matching.as_ref()) {
-                    return *flavor;
-                }
-            } else {
-                log::warn!("Invalid glob pattern in per-file-flavor: {pattern}");
+        for (matcher, flavor) in &cache.matchers {
+            if matcher.is_match(path_for_matching.as_ref()) {
+                return *flavor;
             }
         }
 
@@ -372,6 +379,45 @@ impl Config {
         }
         // Auto-detect from extension
         MarkdownFlavor::from_path(file_path)
+    }
+}
+
+impl PerFileIgnoreCache {
+    fn new(per_file_ignores: &HashMap<String, Vec<String>>) -> Self {
+        let mut builder = GlobSetBuilder::new();
+        let mut rules = Vec::new();
+
+        for (pattern, rules_list) in per_file_ignores {
+            if let Ok(glob) = Glob::new(pattern) {
+                builder.add(glob);
+                rules.push(rules_list.iter().map(|rule| normalize_key(rule)).collect());
+            } else {
+                log::warn!("Invalid glob pattern in per-file-ignores: {pattern}");
+            }
+        }
+
+        let globset = builder.build().unwrap_or_else(|e| {
+            log::error!("Failed to build globset for per-file-ignores: {e}");
+            GlobSetBuilder::new().build().unwrap()
+        });
+
+        Self { globset, rules }
+    }
+}
+
+impl PerFileFlavorCache {
+    fn new(per_file_flavor: &IndexMap<String, MarkdownFlavor>) -> Self {
+        let mut matchers = Vec::new();
+
+        for (pattern, flavor) in per_file_flavor {
+            if let Ok(glob) = GlobBuilder::new(pattern).literal_separator(true).build() {
+                matchers.push((glob.compile_matcher(), *flavor));
+            } else {
+                log::warn!("Invalid glob pattern in per-file-flavor: {pattern}");
+            }
+        }
+
+        Self { matchers }
     }
 }
 
@@ -3740,6 +3786,8 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             per_file_flavor: sourced.per_file_flavor.value,
             rules,
             project_root: sourced.project_root,
+            per_file_ignores_cache: Arc::new(OnceLock::new()),
+            per_file_flavor_cache: Arc::new(OnceLock::new()),
         }
     }
 }

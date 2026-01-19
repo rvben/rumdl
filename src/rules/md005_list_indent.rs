@@ -54,7 +54,7 @@ impl LineCacheInfo {
         //     3. P.marker_column is maximal among all candidates (closest parent)
         //
         // This matches the original O(n) backward scan logic but pre-computes in O(n).
-        let mut indent_to_line: HashMap<usize, usize> = HashMap::new();
+        let mut indent_stack: Vec<(usize, usize)> = Vec::new();
 
         for (idx, line_info) in ctx.lines.iter().enumerate() {
             let content = line_info.content(ctx.content).trim_start();
@@ -72,29 +72,19 @@ impl LineCacheInfo {
                 let line_num = idx + 1; // Convert to 1-indexed
                 let marker_column = list_item.marker_column;
 
-                // Find parent: most recent list item with strictly less indentation
-                // Scan through tracked indents to find the best parent (O(k) where k = unique indents)
-                let mut best_parent: Option<(usize, usize)> = None; // (indent, line_num)
-
-                for (&tracked_indent, &tracked_line) in &indent_to_line {
-                    if tracked_indent < marker_column {
-                        // Potential parent - keep the one with largest indent (closest parent)
-                        if best_parent.is_none() || tracked_indent > best_parent.unwrap().0 {
-                            best_parent = Some((tracked_indent, tracked_line));
-                        }
+                // Maintain a monotonic stack of indentation levels (O(1) amortized)
+                while let Some(&(indent, _)) = indent_stack.last() {
+                    if indent < marker_column {
+                        break;
                     }
+                    indent_stack.pop();
                 }
 
-                if let Some((_parent_indent, parent_line)) = best_parent {
-                    parent_map.insert(line_num, parent_line);
+                if let Some((_, parent_line)) = indent_stack.last() {
+                    parent_map.insert(line_num, *parent_line);
                 }
 
-                // Track this list item for future children
-                // CRITICAL: Remove all entries at this indent level or deeper, since they cannot
-                // be parents of any future list items (a parent must have strictly less indentation).
-                // This ensures we always find the most recent list item with less indentation.
-                indent_to_line.retain(|&indent, _| indent < marker_column);
-                indent_to_line.insert(marker_column, line_num);
+                indent_stack.push((marker_column, line_num));
             }
             flags.push(flag);
         }

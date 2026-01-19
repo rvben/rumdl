@@ -97,8 +97,19 @@ impl<'a> LineIndex<'a> {
     pub fn line_col_to_byte_range_with_length(&self, line: usize, column: usize, length: usize) -> Range<usize> {
         let line = line.saturating_sub(1);
         let line_start = *self.line_starts.get(line).unwrap_or(&self.content.len());
-
-        let current_line = self.content.lines().nth(line).unwrap_or("");
+        let line_end = self.line_starts.get(line + 1).copied().unwrap_or(self.content.len());
+        let mut current_line = &self.content[line_start..line_end];
+        if let Some(stripped) = current_line.strip_suffix('\n') {
+            current_line = stripped.strip_suffix('\r').unwrap_or(stripped);
+        }
+        if current_line.is_ascii() {
+            let line_len = current_line.len();
+            let start_byte = column.saturating_sub(1).min(line_len);
+            let end_byte = start_byte.saturating_add(length).min(line_len);
+            let start = line_start + start_byte;
+            let end = line_start + end_byte;
+            return start..end;
+        }
         // Column is 1-indexed character position, not byte position
         let char_col = column.saturating_sub(1);
         let char_count = current_line.chars().count();

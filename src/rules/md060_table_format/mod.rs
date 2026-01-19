@@ -611,7 +611,9 @@ impl MD060TableFormat {
                         crate::utils::table_utils::TableUtils::extract_list_prefix(after_blockquote).1
                     } else {
                         // Continuation lines: strip expected indentation
-                        after_blockquote.strip_prefix(&continuation_indent).unwrap_or(after_blockquote.trim_start())
+                        after_blockquote
+                            .strip_prefix(&continuation_indent)
+                            .unwrap_or(after_blockquote.trim_start())
                     }
                 } else {
                     after_blockquote

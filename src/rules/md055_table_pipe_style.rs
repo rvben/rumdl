@@ -101,8 +101,7 @@ impl MD055TablePipeStyle {
         let mut trailing_only_count = 0;
 
         // Count style of header row (table line index 0)
-        let header_content =
-            TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
+        let header_content = TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
         if let Some(style) = TableUtils::determine_pipe_style(header_content) {
             match style {
                 "leading_and_trailing" => leading_and_trailing_count += 1,
@@ -347,8 +346,7 @@ impl Rule for MD055TablePipeStyle {
             let mut fixed_table_lines: Vec<String> = Vec::with_capacity(all_line_indices.len());
             for (table_line_idx, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
-                let fixed_line =
-                    self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
+                let fixed_line = self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
                 if line_idx < lines.len() - 1 {
                     fixed_table_lines.push(format!("{fixed_line}\n"));
                 } else {
@@ -450,8 +448,7 @@ impl Rule for MD055TablePipeStyle {
 
             for (table_line_idx, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
-                let fixed_line =
-                    self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
+                let fixed_line = self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
                 result_lines[line_idx] = fixed_line;
             }
         }

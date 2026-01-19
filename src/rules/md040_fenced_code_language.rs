@@ -177,16 +177,12 @@ fn detect_fenced_code_blocks(content: &str, line_offsets: &[usize]) -> Vec<Fence
     for (event, range) in parser {
         if let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) = event {
             // Find the line index for this byte offset
-            let line_idx = line_offsets
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|&(_, offset)| *offset <= range.start)
-                .map(|(idx, _)| idx)
-                .unwrap_or(0);
+            let line_idx = line_idx_from_offset(line_offsets, range.start);
 
             // Determine fence marker from the actual line content
-            let line = content.lines().nth(line_idx).unwrap_or("");
+            let line_start = line_offsets.get(line_idx).copied().unwrap_or(0);
+            let line_end = line_offsets.get(line_idx + 1).copied().unwrap_or(content.len());
+            let line = content.get(line_start..line_end).unwrap_or("");
             let trimmed = line.trim();
             let fence_marker = if trimmed.starts_with('`') {
                 let count = trimmed.chars().take_while(|&c| c == '`').count();
@@ -210,6 +206,14 @@ fn detect_fenced_code_blocks(content: &str, line_offsets: &[usize]) -> Vec<Fence
     }
 
     blocks
+}
+
+#[inline]
+fn line_idx_from_offset(line_offsets: &[usize], offset: usize) -> usize {
+    match line_offsets.binary_search(&offset) {
+        Ok(idx) => idx,
+        Err(idx) => idx.saturating_sub(1),
+    }
 }
 
 /// Compute disabled line ranges from disable/enable comments

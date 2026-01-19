@@ -42,10 +42,10 @@ impl MD056TableColumnCount {
                 return Some(self.restore_prefixes(&fixed, table_block, line_index, original_line));
             }
 
-            if escaped_count < current_count {
-                if let Some(fixed) = self.fix_row_by_truncation(&escaped_row, expected_count, flavor) {
-                    return Some(self.restore_prefixes(&fixed, table_block, line_index, original_line));
-                }
+            if escaped_count < current_count
+                && let Some(fixed) = self.fix_row_by_truncation(&escaped_row, expected_count, flavor)
+            {
+                return Some(self.restore_prefixes(&fixed, table_block, line_index, original_line));
             }
         }
 
@@ -220,8 +220,7 @@ impl Rule for MD056TableColumnCount {
                 .collect();
 
             // Determine expected column count from header row (strip list/blockquote prefix first)
-            let header_content =
-                TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
+            let header_content = TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
             let expected_count = TableUtils::count_cells_with_flavor(header_content, flavor);
 
             if expected_count == 0 {
@@ -298,8 +297,7 @@ impl Rule for MD056TableColumnCount {
                 .collect();
 
             // Determine expected column count from header row (strip list/blockquote prefix first)
-            let header_content =
-                TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
+            let header_content = TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
             let expected_count = TableUtils::count_cells_with_flavor(header_content, flavor);
 
             if expected_count == 0 {

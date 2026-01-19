@@ -203,13 +203,12 @@ impl TableUtils {
 
             // Check if this is a list item that contains a table row
             let (list_prefix, list_content, content_indent) = Self::extract_list_prefix(line_content);
-            let (is_list_table, effective_content) = if !list_prefix.is_empty()
-                && Self::is_potential_table_row_content(list_content)
-            {
-                (true, list_content)
-            } else {
-                (false, line_content)
-            };
+            let (is_list_table, effective_content) =
+                if !list_prefix.is_empty() && Self::is_potential_table_row_content(list_content) {
+                    (true, list_content)
+                } else {
+                    (false, line_content)
+                };
 
             // Look for potential table start
             if is_list_table || Self::is_potential_table_row(effective_content) {
@@ -755,11 +754,7 @@ impl TableUtils {
     ///
     /// This is useful for processing table rows that may be inside list items or blockquotes.
     /// The line_index indicates which line of the table this is (0 = header, 1 = delimiter, etc.)
-    pub fn extract_table_row_content<'a>(
-        line: &'a str,
-        table_block: &TableBlock,
-        line_index: usize,
-    ) -> &'a str {
+    pub fn extract_table_row_content<'a>(line: &'a str, table_block: &TableBlock, line_index: usize) -> &'a str {
         // First strip blockquote prefix
         let (_, after_blockquote) = Self::extract_blockquote_prefix(line);
 
