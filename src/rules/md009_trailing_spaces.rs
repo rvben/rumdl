@@ -49,7 +49,8 @@ impl MD009TrailingSpaces {
         line_len: usize,
         content_end: usize,
     ) -> (usize, usize, usize, usize) {
-        (line, content_end, line, line_len + 1)
+        // Return 1-indexed columns to match calculate_trailing_range behavior
+        (line, content_end + 1, line, line_len + 1)
     }
 
     fn is_empty_list_item_line(line: &str, prev_line: Option<&str>) -> bool {
