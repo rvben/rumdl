@@ -3,7 +3,7 @@ use crate::utils::regex_cache::{escape_regex, get_cached_fancy_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use fancy_regex::Regex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
@@ -77,6 +77,8 @@ pub struct MD044ProperNames {
     config: MD044Config,
     // Cache the combined regex pattern string
     combined_pattern: Option<String>,
+    // Precomputed lowercase name variants for fast pre-checks
+    name_variants: Vec<String>,
     // Cache for name violations by content hash
     content_cache: Arc<Mutex<HashMap<u64, Vec<WarningPosition>>>>,
 }
@@ -90,9 +92,11 @@ impl MD044ProperNames {
             html_comments: true, // Default to checking HTML comments
         };
         let combined_pattern = Self::create_combined_pattern(&config);
+        let name_variants = Self::build_name_variants(&config);
         Self {
             config,
             combined_pattern,
+            name_variants,
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -110,9 +114,11 @@ impl MD044ProperNames {
 
     pub fn from_config_struct(config: MD044Config) -> Self {
         let combined_pattern = Self::create_combined_pattern(&config);
+        let name_variants = Self::build_name_variants(&config);
         Self {
             config,
             combined_pattern,
+            name_variants,
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -165,6 +171,31 @@ impl MD044ProperNames {
         Some(format!(r"(?i)({})", patterns.join("|")))
     }
 
+    fn build_name_variants(config: &MD044Config) -> Vec<String> {
+        let mut variants = HashSet::new();
+        for name in &config.names {
+            let lower_name = name.to_lowercase();
+            variants.insert(lower_name.clone());
+
+            let lower_no_dots = lower_name.replace('.', "");
+            if lower_name != lower_no_dots {
+                variants.insert(lower_no_dots);
+            }
+
+            let ascii_normalized = Self::ascii_normalize(&lower_name);
+            if ascii_normalized != lower_name {
+                variants.insert(ascii_normalized.clone());
+
+                let ascii_no_dots = ascii_normalized.replace('.', "");
+                if ascii_normalized != ascii_no_dots {
+                    variants.insert(ascii_no_dots);
+                }
+            }
+        }
+
+        variants.into_iter().collect()
+    }
+
     // Find all name violations in the content and return positions
     fn find_name_violations(&self, content: &str, ctx: &crate::lint_context::LintContext) -> Vec<WarningPosition> {
         // Early return: if no names configured or content is empty
@@ -173,31 +204,12 @@ impl MD044ProperNames {
         }
 
         // Early return: quick check if any of the configured names might be in content
-        let content_lower = content.to_lowercase();
-        let has_potential_matches = self.config.names.iter().any(|name| {
-            let name_lower = name.to_lowercase();
-            let name_no_dots = name_lower.replace('.', "");
-
-            // Check direct match
-            if content_lower.contains(&name_lower) || content_lower.contains(&name_no_dots) {
-                return true;
-            }
-
-            // Also check ASCII-normalized version
-            let ascii_normalized = Self::ascii_normalize(&name_lower);
-
-            if ascii_normalized != name_lower {
-                if content_lower.contains(&ascii_normalized) {
-                    return true;
-                }
-                let ascii_no_dots = ascii_normalized.replace('.', "");
-                if ascii_normalized != ascii_no_dots && content_lower.contains(&ascii_no_dots) {
-                    return true;
-                }
-            }
-
-            false
-        });
+        let content_lower = if content.is_ascii() {
+            content.to_ascii_lowercase()
+        } else {
+            content.to_lowercase()
+        };
+        let has_potential_matches = self.name_variants.iter().any(|name| content_lower.contains(name));
 
         if !has_potential_matches {
             return Vec::new();
@@ -265,29 +277,10 @@ impl MD044ProperNames {
 
             // Early return: skip lines that don't contain any potential matches
             let line_lower = line.to_lowercase();
-            let has_line_matches = self.config.names.iter().any(|name| {
-                let name_lower = name.to_lowercase();
-                let name_no_dots = name_lower.replace('.', "");
-
-                // Check direct match
-                if line_lower.contains(&name_lower) || line_lower.contains(&name_no_dots) {
-                    return true;
-                }
-
-                // Also check ASCII-normalized version
-                let ascii_normalized = Self::ascii_normalize(&name_lower);
-                if ascii_normalized != name_lower {
-                    if line_lower.contains(&ascii_normalized) {
-                        return true;
-                    }
-                    let ascii_no_dots = ascii_normalized.replace('.', "");
-                    if ascii_normalized != ascii_no_dots && line_lower.contains(&ascii_no_dots) {
-                        return true;
-                    }
-                }
-
-                false
-            });
+            let has_line_matches = self
+                .name_variants
+                .iter()
+                .any(|name| line_lower.contains(name));
 
             if !has_line_matches {
                 continue;

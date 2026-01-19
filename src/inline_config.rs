@@ -31,6 +31,13 @@ fn normalize_rule_name(rule: &str) -> String {
         .unwrap_or_else(|| rule.to_uppercase())
 }
 
+fn has_inline_config_markers(content: &str) -> bool {
+    if !content.contains("<!--") {
+        return false;
+    }
+    content.contains("markdownlint") || content.contains("rumdl") || content.contains("prettier-ignore")
+}
+
 #[derive(Debug, Clone)]
 pub struct InlineConfig {
     /// Rules that are disabled at each line (1-indexed line -> set of disabled rules)
@@ -69,11 +76,26 @@ impl InlineConfig {
 
     /// Process all inline comments in the content and return the configuration state
     pub fn from_content(content: &str) -> Self {
+        if !has_inline_config_markers(content) {
+            return Self::new();
+        }
+
+        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+        Self::from_content_with_code_blocks_internal(content, &code_blocks)
+    }
+
+    /// Process all inline comments in the content with precomputed code blocks.
+    pub fn from_content_with_code_blocks(content: &str, code_blocks: &[(usize, usize)]) -> Self {
+        if !has_inline_config_markers(content) {
+            return Self::new();
+        }
+
+        Self::from_content_with_code_blocks_internal(content, code_blocks)
+    }
+
+    fn from_content_with_code_blocks_internal(content: &str, code_blocks: &[(usize, usize)]) -> Self {
         let mut config = Self::new();
         let lines: Vec<&str> = content.lines().collect();
-
-        // Detect code blocks to skip comments within them
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
         // Pre-compute line positions for checking if a line is in a code block
         let mut line_positions = Vec::with_capacity(lines.len());

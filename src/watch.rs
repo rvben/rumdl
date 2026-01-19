@@ -127,6 +127,10 @@ pub fn perform_check_run(
         return (false, false, false);
     }
 
+    let cache_hashes = cache
+        .as_ref()
+        .map(|_| Arc::new(crate::file_processor::CacheHashes::new(config, &enabled_rules)));
+
     // Find all markdown files to check
     let file_paths = match crate::file_processor::find_markdown_files(&args.paths, args, config, project_root) {
         Ok(paths) => paths,
@@ -176,6 +180,7 @@ pub fn perform_check_run(
                 args.silent,
                 config,
                 cache.as_ref().map(Arc::clone),
+                cache_hashes.as_deref(),
             );
 
             if !result.warnings.is_empty() {
@@ -353,6 +358,7 @@ pub fn perform_check_run(
         // Parallel processing for multiple files with thread-safe cache
         // Each worker locks the mutex ONLY for brief cache get/set operations
         let enabled_rules_arc = Arc::new(enabled_rules.clone());
+        let cache_hashes = cache_hashes.clone();
 
         // Process files in parallel - now includes FileIndex in the result (no second pass needed)
         let results: Vec<_> = file_paths
@@ -374,6 +380,7 @@ pub fn perform_check_run(
                     cache.as_ref().map(Arc::clone),
                     project_root,
                     args.show_full_path,
+                    cache_hashes.as_deref(),
                 );
                 (file_path.clone(), result)
             })
@@ -463,6 +470,7 @@ pub fn perform_check_run(
                     cache.as_ref().map(Arc::clone),
                     project_root,
                     args.show_full_path,
+                    cache_hashes.as_deref(),
                 );
 
             // Store FileIndex for cross-file analysis (extracted from first pass)

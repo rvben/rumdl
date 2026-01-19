@@ -1,6 +1,6 @@
 //! Tests for unfixable rules functionality (Issue #56)
 
-use rumdl_lib::config::{Config, GlobalConfig};
+use rumdl_lib::config::Config;
 use rumdl_lib::rule::{FixCapability, Rule};
 use rumdl_lib::rules::MD018NoMissingSpaceAtx;
 use rumdl_lib::rules::MD033NoInlineHtml;
@@ -29,13 +29,8 @@ fn test_unfixable_config_prevents_fixing() {
     let _content = "##Heading without space\n[empty link]()\n";
 
     // Create config with MD018 marked as unfixable
-    let config = Config {
-        global: GlobalConfig {
-            unfixable: vec!["MD018".to_string()],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let mut config = Config::default();
+    config.global.unfixable = vec!["MD018".to_string()];
 
     // The helper function should identify MD018 as unfixable
     assert!(!is_rule_actually_fixable(&config, "MD018"));
@@ -47,13 +42,8 @@ fn test_fixable_list_restricts_fixing() {
     let _content = "##Heading without space\n[empty link]()\n";
 
     // Create config with only MD042 in fixable list
-    let config = Config {
-        global: GlobalConfig {
-            fixable: vec!["MD042".to_string()],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let mut config = Config::default();
+    config.global.fixable = vec!["MD042".to_string()];
 
     // Only MD042 should be fixable
     assert!(!is_rule_actually_fixable(&config, "MD018"));
@@ -64,14 +54,9 @@ fn test_fixable_list_restricts_fixing() {
 #[test]
 fn test_unfixable_takes_precedence_over_fixable() {
     // If a rule is in both lists, unfixable takes precedence
-    let config = Config {
-        global: GlobalConfig {
-            unfixable: vec!["MD018".to_string()],
-            fixable: vec!["MD018".to_string(), "MD042".to_string()],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let mut config = Config::default();
+    config.global.unfixable = vec!["MD018".to_string()];
+    config.global.fixable = vec!["MD018".to_string(), "MD042".to_string()];
 
     // MD018 should be unfixable (unfixable takes precedence)
     assert!(!is_rule_actually_fixable(&config, "MD018"));
@@ -81,13 +66,8 @@ fn test_unfixable_takes_precedence_over_fixable() {
 
 #[test]
 fn test_case_insensitive_rule_names() {
-    let config = Config {
-        global: GlobalConfig {
-            unfixable: vec!["md018".to_string()], // lowercase
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let mut config = Config::default();
+    config.global.unfixable = vec!["md018".to_string()]; // lowercase
 
     // Should match regardless of case
     assert!(!is_rule_actually_fixable(&config, "MD018"));
@@ -97,14 +77,7 @@ fn test_case_insensitive_rule_names() {
 
 #[test]
 fn test_empty_config_allows_all_fixes() {
-    let config = Config {
-        global: GlobalConfig {
-            unfixable: vec![],
-            fixable: vec![],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let config = Config::default();
 
     // Everything should be fixable with empty config
     assert!(is_rule_actually_fixable(&config, "MD018"));
@@ -134,13 +107,8 @@ fn is_rule_actually_fixable(config: &Config, rule_name: &str) -> bool {
 
 #[test]
 fn test_fix_count_excludes_unfixable() {
-    let config = Config {
-        global: GlobalConfig {
-            unfixable: vec!["MD042".to_string()], // Mark MD042 as unfixable
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let mut config = Config::default();
+    config.global.unfixable = vec!["MD042".to_string()]; // Mark MD042 as unfixable
 
     // Simulate warnings that would be detected from markdown content
     // Each tuple represents (rule_name, has_fix_available)

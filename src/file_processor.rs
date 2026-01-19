@@ -11,6 +11,7 @@ use rumdl_lib::config as rumdl_config;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::utils::code_block_utils::CodeBlockUtils;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -587,6 +588,7 @@ pub fn process_file_with_formatter(
     cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
     project_root: Option<&Path>,
     show_full_path: bool,
+    cache_hashes: Option<&CacheHashes>,
 ) -> (
     bool,
     usize,
@@ -606,7 +608,7 @@ pub fn process_file_with_formatter(
 
     // Call the original process_file_inner to get warnings, original line ending, and FileIndex
     let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending, file_index) =
-        process_file_inner(file_path, rules, verbose, quiet, silent, config, cache);
+        process_file_inner(file_path, rules, verbose, quiet, silent, config, cache, cache_hashes);
 
     // Don't return early if we're in fix mode - we might need to format embedded markdown blocks
     if total_warnings == 0 && fix_mode == crate::FixMode::Check && !diff {
@@ -785,6 +787,20 @@ pub struct ProcessFileResult {
     pub file_index: rumdl_lib::workspace_index::FileIndex,
 }
 
+pub struct CacheHashes {
+    pub config_hash: String,
+    pub rules_hash: String,
+}
+
+impl CacheHashes {
+    pub fn new(config: &rumdl_config::Config, rules: &[Box<dyn Rule>]) -> Self {
+        Self {
+            config_hash: LintCache::hash_config(config),
+            rules_hash: LintCache::hash_rules(rules),
+        }
+    }
+}
+
 pub fn process_file_inner(
     file_path: &str,
     rules: &[Box<dyn Rule>],
@@ -793,6 +809,7 @@ pub fn process_file_inner(
     silent: bool,
     config: &rumdl_config::Config,
     cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
+    cache_hashes: Option<&CacheHashes>,
 ) -> (
     Vec<rumdl_lib::rule::LintWarning>,
     String,
@@ -801,7 +818,16 @@ pub fn process_file_inner(
     rumdl_lib::utils::LineEnding,
     rumdl_lib::workspace_index::FileIndex,
 ) {
-    let result = process_file_with_index(file_path, rules, verbose, quiet, silent, config, cache);
+    let result = process_file_with_index(
+        file_path,
+        rules,
+        verbose,
+        quiet,
+        silent,
+        config,
+        cache,
+        cache_hashes,
+    );
     (
         result.warnings,
         result.content,
@@ -821,6 +847,7 @@ pub fn process_file_with_index(
     silent: bool,
     config: &rumdl_config::Config,
     cache: Option<std::sync::Arc<std::sync::Mutex<LintCache>>>,
+    cache_hashes: Option<&CacheHashes>,
 ) -> ProcessFileResult {
     use std::time::Instant;
 
@@ -881,8 +908,14 @@ pub fn process_file_with_index(
     }
 
     // Compute hashes for cache (Ruff-style: file content + config + enabled rules)
-    let config_hash = LintCache::hash_config(config);
-    let rules_hash = LintCache::hash_rules(rules);
+    let (config_hash, rules_hash) = if let Some(hashes) = cache_hashes {
+        (Cow::Borrowed(&hashes.config_hash), Cow::Borrowed(&hashes.rules_hash))
+    } else {
+        (
+            Cow::Owned(LintCache::hash_config(config)),
+            Cow::Owned(LintCache::hash_rules(rules)),
+        )
+    };
 
     // Try to get from cache first (lock briefly for cache read)
     // Note: Cache only stores single-file warnings; cross-file checks must run fresh
@@ -1069,6 +1102,10 @@ pub fn apply_fixes_coordinated(
 /// - Beyond 5 levels, the content is likely either malicious or unintentional
 const MAX_EMBEDDED_DEPTH: usize = 5;
 
+fn has_fenced_code_blocks(content: &str) -> bool {
+    content.contains("```") || content.contains("~~~")
+}
+
 /// Format markdown content embedded in fenced code blocks with `markdown` or `md` language.
 ///
 /// This function detects markdown code blocks and recursively applies formatting to their content.
@@ -1092,6 +1129,9 @@ fn format_embedded_markdown_blocks_recursive(
 ) -> usize {
     // Prevent excessive recursion
     if depth >= MAX_EMBEDDED_DEPTH {
+        return 0;
+    }
+    if !has_fenced_code_blocks(content) {
         return 0;
     }
 
@@ -1182,6 +1222,9 @@ fn check_embedded_markdown_blocks_recursive(
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     // Prevent excessive recursion
     if depth >= MAX_EMBEDDED_DEPTH {
+        return Vec::new();
+    }
+    if !has_fenced_code_blocks(content) {
         return Vec::new();
     }
 

@@ -293,9 +293,7 @@ impl FixCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::GlobalConfig;
     use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-    use indexmap::IndexMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Mock rule that checks content and applies fixes based on a condition
@@ -437,13 +435,7 @@ mod tests {
         })];
 
         let mut content = "This is BAD content".to_string();
-        let config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let config = Config::default();
 
         let result = coordinator
             .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
@@ -475,13 +467,7 @@ mod tests {
         ];
 
         let mut content = "Code: INDENT".to_string();
-        let config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let config = Config::default();
 
         let result = coordinator
             .apply_fixes_iterative(&rules, &[], &mut content, &config, 10)
@@ -522,13 +508,7 @@ mod tests {
         ];
 
         let mut content = "HEADING CODE".to_string();
-        let config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let config = Config::default();
 
         let result = coordinator
             .apply_fixes_iterative(&rules, &[], &mut content, &config, 10)
@@ -551,13 +531,7 @@ mod tests {
         })];
 
         let mut content = "BAD content".to_string();
-        let mut config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let mut config = Config::default();
         config.global.unfixable = vec!["MD001".to_string()];
 
         let result = coordinator
@@ -587,13 +561,7 @@ mod tests {
         ];
 
         let mut content = "AB".to_string();
-        let mut config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let mut config = Config::default();
         config.global.fixable = vec!["AllowedRule".to_string()];
 
         let result = coordinator
@@ -651,13 +619,7 @@ mod tests {
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(AlwaysChangeRule)];
 
         let mut content = "test".to_string();
-        let config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let config = Config::default();
 
         let result = coordinator
             .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
@@ -675,13 +637,7 @@ mod tests {
         let rules: Vec<Box<dyn Rule>> = vec![];
 
         let mut content = "unchanged".to_string();
-        let config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let config = Config::default();
 
         let result = coordinator
             .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
@@ -705,13 +661,7 @@ mod tests {
         })];
 
         let mut content = "clean content".to_string();
-        let config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let config = Config::default();
 
         let result = coordinator
             .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
@@ -774,13 +724,7 @@ mod tests {
             }),
         ];
 
-        let config = Config {
-            global: GlobalConfig::default(),
-            per_file_ignores: HashMap::new(),
-            per_file_flavor: IndexMap::new(),
-            rules: Default::default(),
-            project_root: None,
-        };
+        let config = Config::default();
 
         // First run
         let mut content1 = "A".to_string();

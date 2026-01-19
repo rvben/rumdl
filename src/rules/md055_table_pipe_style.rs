@@ -150,6 +150,20 @@ impl MD055TablePipeStyle {
         }
     }
 
+    /// Simple table row fix for tests - creates a dummy TableBlock without list context
+    #[cfg(test)]
+    fn fix_table_row(&self, line: &str, target_style: &str) -> String {
+        let dummy_block = TableBlock {
+            start_line: 0,
+            end_line: 0,
+            header_line: 0,
+            delimiter_line: 0,
+            content_lines: vec![],
+            list_context: None,
+        };
+        self.fix_table_row_with_context(line, target_style, &dummy_block, 0)
+    }
+
     /// Fix a table row to match the target style, with full context for list tables
     ///
     /// This handles tables inside list items by stripping the list prefix,

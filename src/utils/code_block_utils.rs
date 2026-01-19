@@ -35,7 +35,14 @@ impl CodeBlockUtils {
     ///
     /// Returns a sorted vector of (start, end) byte offset tuples.
     pub fn detect_code_blocks(content: &str) -> Vec<(usize, usize)> {
+        let (blocks, _) = Self::detect_code_blocks_and_spans(content);
+        blocks
+    }
+
+    /// Returns code block ranges and inline code span ranges in a single pulldown-cmark pass.
+    pub fn detect_code_blocks_and_spans(content: &str) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
         let mut blocks = Vec::new();
+        let mut spans = Vec::new();
         let mut code_block_start: Option<usize> = None;
 
         // Use pulldown-cmark with all extensions for maximum compatibility
@@ -54,6 +61,9 @@ impl CodeBlockUtils {
                         blocks.push((start, range.end));
                     }
                 }
+                Event::Code(_) => {
+                    spans.push((range.start, range.end));
+                }
                 _ => {}
             }
         }
@@ -66,7 +76,7 @@ impl CodeBlockUtils {
 
         // Sort by start position (should already be sorted, but ensure consistency)
         blocks.sort_by_key(|&(start, _)| start);
-        blocks
+        (blocks, spans)
     }
 
     /// Check if a position is within a code block (for compatibility)

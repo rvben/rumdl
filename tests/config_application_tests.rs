@@ -1,12 +1,11 @@
-use indexmap::IndexMap;
-use rumdl_lib::config::{Config, GlobalConfig, RuleConfig, normalize_key};
+use rumdl_lib::config::{Config, RuleConfig, normalize_key};
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::*;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fs;
 
 fn create_test_config() -> Config {
-    let mut rules = BTreeMap::new();
+    let mut config = Config::default();
 
     // Add MD013 config
     let mut md013_values = BTreeMap::new();
@@ -17,7 +16,7 @@ fn create_test_config() -> Config {
         severity: None,
         values: md013_values,
     };
-    rules.insert(normalize_key("MD013"), md013_config);
+    config.rules.insert(normalize_key("MD013"), md013_config);
 
     // Add MD004 config
     let mut md004_values = BTreeMap::new();
@@ -26,15 +25,9 @@ fn create_test_config() -> Config {
         severity: None,
         values: md004_values,
     };
-    rules.insert(normalize_key("MD004"), md004_config);
+    config.rules.insert(normalize_key("MD004"), md004_config);
 
-    Config {
-        global: GlobalConfig::default(),
-        per_file_ignores: HashMap::new(),
-        per_file_flavor: IndexMap::new(),
-        rules,
-        project_root: None,
-    }
+    config
 }
 
 // Helper function to apply configuration to specific rules
@@ -238,13 +231,8 @@ fn test_partial_rule_config() {
     // Use normalized key
     rules_map.insert(normalize_key("MD013"), md013_config);
 
-    let config = Config {
-        global: GlobalConfig::default(),
-        per_file_ignores: HashMap::new(),
-        per_file_flavor: IndexMap::new(),
-        rules: rules_map,
-        project_root: None,
-    };
+    let mut config = Config::default();
+    config.rules = rules_map;
 
     // Apply configs using LOCAL helper, getting a NEW vector
     let configured_rules_1 = apply_rule_configs(&initial_rules, &config);
@@ -281,13 +269,8 @@ fn test_partial_rule_config() {
     // Use normalized key
     rules_map.insert(normalize_key("MD013"), md013_config);
 
-    let config = Config {
-        global: GlobalConfig::default(),
-        per_file_ignores: HashMap::new(),
-        per_file_flavor: IndexMap::new(),
-        rules: rules_map,
-        project_root: None,
-    };
+    let mut config = Config::default();
+    config.rules = rules_map;
 
     // Apply configs using LOCAL helper with modified config, getting ANOTHER NEW vector
     let configured_rules_2 = apply_rule_configs(&initial_rules, &config);

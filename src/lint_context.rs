@@ -629,8 +629,12 @@ impl<'a> LintContext<'a> {
             offsets
         });
 
-        // Detect code blocks once and cache them
-        let code_blocks = profile_section!("Code blocks", profile, CodeBlockUtils::detect_code_blocks(content));
+        // Detect code blocks and code spans once and cache them
+        let (code_blocks, code_span_ranges) = profile_section!(
+            "Code blocks",
+            profile,
+            CodeBlockUtils::detect_code_blocks_and_spans(content)
+        );
 
         // Pre-compute HTML comment ranges ONCE for all operations
         let html_comment_ranges = profile_section!(
@@ -708,7 +712,11 @@ impl<'a> LintContext<'a> {
         );
 
         // Parse code spans early so we can exclude them from link/image parsing
-        let code_spans = profile_section!("Code spans", profile, Self::parse_code_spans(content, &lines));
+        let code_spans = profile_section!(
+            "Code spans",
+            profile,
+            Self::build_code_spans_from_ranges(content, &lines, &code_span_ranges)
+        );
 
         // Mark lines that are continuations of multi-line code spans
         // This is needed for parse_list_blocks to correctly handle list items with multi-line code spans
@@ -795,6 +803,8 @@ impl<'a> LintContext<'a> {
             ranges
         });
 
+        let inline_config = InlineConfig::from_content_with_code_blocks(content, &code_blocks);
+
         Self {
             content,
             line_offsets,
@@ -825,7 +835,7 @@ impl<'a> LintContext<'a> {
             mdx_comment_ranges,
             citation_ranges,
             shortcode_ranges,
-            inline_config: InlineConfig::from_content(content),
+            inline_config,
         }
     }
 
@@ -3293,75 +3303,88 @@ impl<'a> LintContext<'a> {
 
     /// Parse all inline code spans in the content using pulldown-cmark streaming parser
     fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
-        let mut code_spans = Vec::new();
-
         // Quick check - if no backticks, no code spans
         if !content.contains('`') {
-            return code_spans;
+            return Vec::new();
         }
 
         // Use pulldown-cmark's streaming parser with byte offsets
         let parser = Parser::new(content).into_offset_iter();
+        let mut ranges = Vec::new();
 
         for (event, range) in parser {
             if let Event::Code(_) = event {
-                let start_pos = range.start;
-                let end_pos = range.end;
-
-                // The range includes the backticks, extract the actual content
-                let full_span = &content[start_pos..end_pos];
-                let backtick_count = full_span.chars().take_while(|&c| c == '`').count();
-
-                // Extract content between backticks, preserving spaces
-                let content_start = start_pos + backtick_count;
-                let content_end = end_pos - backtick_count;
-                let span_content = if content_start < content_end {
-                    content[content_start..content_end].to_string()
-                } else {
-                    String::new()
-                };
-
-                // Use binary search to find line number - O(log n) instead of O(n)
-                // Find the rightmost line whose byte_offset <= start_pos
-                let line_idx = lines
-                    .partition_point(|line| line.byte_offset <= start_pos)
-                    .saturating_sub(1);
-                let line_num = line_idx + 1;
-                let byte_col_start = start_pos - lines[line_idx].byte_offset;
-
-                // Find end column using binary search
-                let end_line_idx = lines
-                    .partition_point(|line| line.byte_offset <= end_pos)
-                    .saturating_sub(1);
-                let byte_col_end = end_pos - lines[end_line_idx].byte_offset;
-
-                // Convert byte offsets to character positions for correct Unicode handling
-                // This ensures consistency with warning.column which uses character positions
-                let line_content = lines[line_idx].content(content);
-                let col_start = if byte_col_start <= line_content.len() {
-                    line_content[..byte_col_start].chars().count()
-                } else {
-                    line_content.chars().count()
-                };
-
-                let end_line_content = lines[end_line_idx].content(content);
-                let col_end = if byte_col_end <= end_line_content.len() {
-                    end_line_content[..byte_col_end].chars().count()
-                } else {
-                    end_line_content.chars().count()
-                };
-
-                code_spans.push(CodeSpan {
-                    line: line_num,
-                    end_line: end_line_idx + 1,
-                    start_col: col_start,
-                    end_col: col_end,
-                    byte_offset: start_pos,
-                    byte_end: end_pos,
-                    backtick_count,
-                    content: span_content,
-                });
+                ranges.push((range.start, range.end));
             }
+        }
+
+        Self::build_code_spans_from_ranges(content, lines, &ranges)
+    }
+
+    fn build_code_spans_from_ranges(
+        content: &str,
+        lines: &[LineInfo],
+        ranges: &[(usize, usize)],
+    ) -> Vec<CodeSpan> {
+        let mut code_spans = Vec::new();
+        if ranges.is_empty() {
+            return code_spans;
+        }
+
+        for &(start_pos, end_pos) in ranges {
+            // The range includes the backticks, extract the actual content
+            let full_span = &content[start_pos..end_pos];
+            let backtick_count = full_span.chars().take_while(|&c| c == '`').count();
+
+            // Extract content between backticks, preserving spaces
+            let content_start = start_pos + backtick_count;
+            let content_end = end_pos - backtick_count;
+            let span_content = if content_start < content_end {
+                content[content_start..content_end].to_string()
+            } else {
+                String::new()
+            };
+
+            // Use binary search to find line number - O(log n) instead of O(n)
+            // Find the rightmost line whose byte_offset <= start_pos
+            let line_idx = lines
+                .partition_point(|line| line.byte_offset <= start_pos)
+                .saturating_sub(1);
+            let line_num = line_idx + 1;
+            let byte_col_start = start_pos - lines[line_idx].byte_offset;
+
+            // Find end column using binary search
+            let end_line_idx = lines
+                .partition_point(|line| line.byte_offset <= end_pos)
+                .saturating_sub(1);
+            let byte_col_end = end_pos - lines[end_line_idx].byte_offset;
+
+            // Convert byte offsets to character positions for correct Unicode handling
+            // This ensures consistency with warning.column which uses character positions
+            let line_content = lines[line_idx].content(content);
+            let col_start = if byte_col_start <= line_content.len() {
+                line_content[..byte_col_start].chars().count()
+            } else {
+                line_content.chars().count()
+            };
+
+            let end_line_content = lines[end_line_idx].content(content);
+            let col_end = if byte_col_end <= end_line_content.len() {
+                end_line_content[..byte_col_end].chars().count()
+            } else {
+                end_line_content.chars().count()
+            };
+
+            code_spans.push(CodeSpan {
+                line: line_num,
+                end_line: end_line_idx + 1,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: start_pos,
+                byte_end: end_pos,
+                backtick_count,
+                content: span_content,
+            });
         }
 
         // Sort by position to ensure consistent ordering
