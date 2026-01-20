@@ -139,8 +139,8 @@ impl Rule for MD018NoMissingSpaceAtx {
 
         // Check all lines that have ATX headings from cached info
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // Skip lines inside HTML blocks (e.g., CSS selectors like #id)
-            if line_info.in_html_block {
+            // Skip lines inside HTML blocks or HTML comments (e.g., CSS selectors like #id)
+            if line_info.in_html_block || line_info.in_html_comment {
                 continue;
             }
 
@@ -201,7 +201,11 @@ impl Rule for MD018NoMissingSpaceAtx {
                         }
                     }
                 }
-            } else if !line_info.in_code_block && !line_info.in_front_matter && !line_info.is_blank {
+            } else if !line_info.in_code_block
+                && !line_info.in_front_matter
+                && !line_info.in_html_comment
+                && !line_info.is_blank
+            {
                 // Check for malformed headings that weren't detected as proper headings
                 if let Some((hash_end_pos, fixed_line)) = self.check_atx_heading_line(line_info.content(ctx.content)) {
                     let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
@@ -265,7 +269,11 @@ impl Rule for MD018NoMissingSpaceAtx {
                         }
                     }
                 }
-            } else if !line_info.in_code_block && !line_info.in_front_matter && !line_info.is_blank {
+            } else if !line_info.in_code_block
+                && !line_info.in_front_matter
+                && !line_info.in_html_comment
+                && !line_info.is_blank
+            {
                 // Fix malformed headings
                 if let Some((_, fixed_line)) = self.check_atx_heading_line(line_info.content(ctx.content)) {
                     lines.push(fixed_line);
@@ -789,5 +797,39 @@ title: Test Document
             "Should only flag the malformed heading outside frontmatter"
         );
         assert_eq!(result[0].line, 10, "Should flag line 10");
+    }
+
+    #[test]
+    fn test_skip_html_comments() {
+        // Content inside HTML comments should NOT be flagged
+        // This includes Jupyter cell markers like #%% in commented-out code blocks
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = r#"# Real Heading
+
+Some text.
+
+<!--
+```
+#%% Cell marker
+import matplotlib.pyplot as plt
+
+#%% Another cell
+data = [1, 2, 3]
+```
+-->
+
+More content.
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should find no issues - the #%% markers are inside HTML comments
+        assert!(
+            result.is_empty(),
+            "Should not flag content inside HTML comments, found {} issues",
+            result.len()
+        );
     }
 }
