@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.222] - 2026-01-20
+
+### Fixed
+
+- **MD018: Comprehensive false positive fixes** ([#314](https://github.com/rvben/rumdl/issues/314))
+  - Skip content inside HTML comments (e.g., Jupyter cell markers `#%%`)
+  - Skip indented patterns to match markdownlint behavior
+  - Skip YAML comments inside frontmatter
+  - Flag all malformed headings at line start
+
+- **Tables inside list items** ([#314](https://github.com/rvben/rumdl/issues/314))
+  - Tables embedded in list items are now detected, linted, and formatted correctly
+  - Validate delimiter indentation for list-table detection
+
+- **MD009: Correct 1-indexed column in ASCII path**
+  - Column numbers in diagnostics now match editor positions
+
+- **Schema: Include all flavor aliases** ([#312](https://github.com/rvben/rumdl/issues/312))
+  - Added `gfm`, `github`, `commonmark`, `qmd`, `rmd`, `rmarkdown` to schema
+  - JSON schema now matches documentation
+
+- **CLI: Prevent duplicate config and use canonical rule list**
+  - Fixes edge case where config could be loaded multiple times
+
+### Performance
+
+- **Optimize code detection and cache hash computation**
+  - Faster detection of code blocks and spans
+
+- **Cache per-file globsets**
+  - Significant speedup for rules using file-specific patterns
+
 ## [0.0.221] - 2026-01-18
 
 ### Added
