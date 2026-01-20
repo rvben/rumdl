@@ -172,7 +172,6 @@ Severity affects:
 | [MD029](md029.md) | OL prefix                 | Ordered list item prefix                                  |
 | [MD030](md030.md) | List marker space         | Spaces after list markers                                 |
 | [MD032](md032.md) | Blanks around lists       | Lists should be surrounded by blank lines                 |
-| [MD051](md051.md) | Link fragments            | Link fragments should be valid heading IDs                |
 | [MD069](md069.md) | No duplicate list markers | Duplicate markers like `- - text` from copy-paste         |
 
 ## Whitespace Rules
@@ -221,6 +220,7 @@ Severity affects:
 | [MD034](md034.md) | No bare URLs           | Bare URL used                                         |
 | [MD042](md042.md) | No empty links         | No empty links                                        |
 | [MD045](md045.md) | No alt text            | Images should have alternate text                     |
+| [MD051](md051.md) | Link fragments         | Link fragments should be valid heading IDs            |
 | [MD052](md052.md) | Reference links images | References should be defined                          |
 | [MD053](md053.md) | Link image definitions | Link and image reference definitions should be needed |
 | [MD054](md054.md) | Link image style       | Link and image style                                  |
