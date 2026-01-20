@@ -33,6 +33,15 @@ impl MD018NoMissingSpaceAtx {
             return None;
         }
 
+        // Only flag patterns at column 1 (no indentation) to match markdownlint behavior
+        // Indented patterns are likely:
+        // - Multi-line link continuations (e.g., "  #sig-contribex](url)")
+        // - List item content
+        // - Other continuation contexts
+        if indent > 0 {
+            return None;
+        }
+
         // Skip emoji hashtags and Unicode hashtag patterns
         let is_emoji = get_cached_regex(EMOJI_HASHTAG_PATTERN_STR)
             .map(|re| re.is_match(trimmed_line))
@@ -138,6 +147,12 @@ impl Rule for MD018NoMissingSpaceAtx {
             if let Some(heading) = &line_info.heading {
                 // Only check ATX headings
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                    // Skip indented headings to match markdownlint behavior
+                    // Markdownlint only flags patterns at column 1
+                    if line_info.indent > 0 {
+                        continue;
+                    }
+
                     // Check if there's a space after the marker
                     let line = line_info.content(ctx.content);
                     let trimmed = line.trim_start();
@@ -640,25 +655,33 @@ const element = document.querySelector('#main-content');
 
     #[test]
     fn test_indented_malformed_headings() {
-        // ATX headings can have 0-3 spaces of indentation
+        // Indented patterns are skipped to match markdownlint behavior.
+        // Markdownlint only flags patterns at column 1 (no indentation).
+        // Indented patterns are often multi-line link continuations or list content.
         let rule = MD018NoMissingSpaceAtx::new();
 
-        // 1-3 spaces should still be detected as malformed headings
+        // Indented patterns should NOT be flagged (matches markdownlint)
         assert!(
-            rule.check_atx_heading_line(" #hello").is_some(),
-            "1-space indented #hello should be detected"
+            rule.check_atx_heading_line(" #hello").is_none(),
+            "1-space indented #hello should be skipped"
         );
         assert!(
-            rule.check_atx_heading_line("  #hello").is_some(),
-            "2-space indented #hello should be detected"
+            rule.check_atx_heading_line("  #hello").is_none(),
+            "2-space indented #hello should be skipped"
         );
         assert!(
-            rule.check_atx_heading_line("   #hello").is_some(),
-            "3-space indented #hello should be detected"
+            rule.check_atx_heading_line("   #hello").is_none(),
+            "3-space indented #hello should be skipped"
         );
 
         // 4+ spaces is a code block, not checked by this function
         // (code block detection happens at LintContext level)
+
+        // BUT patterns at column 1 (no indentation) ARE flagged
+        assert!(
+            rule.check_atx_heading_line("#hello").is_some(),
+            "Non-indented #hello should be detected"
+        );
     }
 
     #[test]
