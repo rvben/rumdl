@@ -277,10 +277,7 @@ impl MD044ProperNames {
 
             // Early return: skip lines that don't contain any potential matches
             let line_lower = line.to_lowercase();
-            let has_line_matches = self
-                .name_variants
-                .iter()
-                .any(|name| line_lower.contains(name));
+            let has_line_matches = self.name_variants.iter().any(|name| line_lower.contains(name));
 
             if !has_line_matches {
                 continue;

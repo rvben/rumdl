@@ -801,6 +801,7 @@ impl CacheHashes {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn process_file_inner(
     file_path: &str,
     rules: &[Box<dyn Rule>],
@@ -818,16 +819,7 @@ pub fn process_file_inner(
     rumdl_lib::utils::LineEnding,
     rumdl_lib::workspace_index::FileIndex,
 ) {
-    let result = process_file_with_index(
-        file_path,
-        rules,
-        verbose,
-        quiet,
-        silent,
-        config,
-        cache,
-        cache_hashes,
-    );
+    let result = process_file_with_index(file_path, rules, verbose, quiet, silent, config, cache, cache_hashes);
     (
         result.warnings,
         result.content,
@@ -839,6 +831,7 @@ pub fn process_file_inner(
 }
 
 /// Process a file and return both warnings and FileIndex for cross-file aggregation
+#[allow(clippy::too_many_arguments)]
 pub fn process_file_with_index(
     file_path: &str,
     rules: &[Box<dyn Rule>],

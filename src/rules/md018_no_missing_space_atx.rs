@@ -186,7 +186,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                         }
                     }
                 }
-            } else if !line_info.in_code_block && !line_info.is_blank {
+            } else if !line_info.in_code_block && !line_info.in_front_matter && !line_info.is_blank {
                 // Check for malformed headings that weren't detected as proper headings
                 if let Some((hash_end_pos, fixed_line)) = self.check_atx_heading_line(line_info.content(ctx.content)) {
                     let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
@@ -250,7 +250,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                         }
                     }
                 }
-            } else if !line_info.in_code_block && !line_info.is_blank {
+            } else if !line_info.in_code_block && !line_info.in_front_matter && !line_info.is_blank {
                 // Fix malformed headings
                 if let Some((_, fixed_line)) = self.check_atx_heading_line(line_info.content(ctx.content)) {
                     lines.push(fixed_line);
@@ -736,5 +736,35 @@ const element = document.querySelector('#main-content');
         assert!(flagged_lines.contains(&9), "#Tag should be flagged");
 
         assert_eq!(result.len(), 4, "Should have exactly 4 warnings");
+    }
+
+    #[test]
+    fn test_skip_frontmatter_yaml_comments() {
+        // YAML comments in frontmatter should NOT be flagged as missing space in headings
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = r#"---
+#reviewers:
+#- sig-api-machinery
+#another_comment: value
+title: Test Document
+---
+
+# Valid heading
+
+#invalid heading without space
+"#;
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag line 10 (#invalid heading without space)
+        // Lines 2-4 are YAML comments in frontmatter and should be skipped
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only flag the malformed heading outside frontmatter"
+        );
+        assert_eq!(result[0].line, 10, "Should flag line 10");
     }
 }

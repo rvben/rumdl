@@ -10,6 +10,9 @@
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
+/// Type alias for code block and span ranges: (code_blocks, code_spans)
+pub type CodeRanges = (Vec<(usize, usize)>, Vec<(usize, usize)>);
+
 /// Classification of code blocks relative to list contexts
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodeBlockContext {
@@ -40,7 +43,7 @@ impl CodeBlockUtils {
     }
 
     /// Returns code block ranges and inline code span ranges in a single pulldown-cmark pass.
-    pub fn detect_code_blocks_and_spans(content: &str) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+    pub fn detect_code_blocks_and_spans(content: &str) -> CodeRanges {
         let mut blocks = Vec::new();
         let mut spans = Vec::new();
         let mut code_block_start: Option<usize> = None;

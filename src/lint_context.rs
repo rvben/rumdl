@@ -3321,11 +3321,7 @@ impl<'a> LintContext<'a> {
         Self::build_code_spans_from_ranges(content, lines, &ranges)
     }
 
-    fn build_code_spans_from_ranges(
-        content: &str,
-        lines: &[LineInfo],
-        ranges: &[(usize, usize)],
-    ) -> Vec<CodeSpan> {
+    fn build_code_spans_from_ranges(content: &str, lines: &[LineInfo], ranges: &[(usize, usize)]) -> Vec<CodeSpan> {
         let mut code_spans = Vec::new();
         if ranges.is_empty() {
             return code_spans;
