@@ -45,6 +45,7 @@ It offers:
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
+- 🎯 **Multiple Markdown flavors** - [GFM, MkDocs, MDX, Quarto](docs/flavors.md) support with auto-detection
 - 🌐 **Multiple installation options** - Rust, Python, standalone binaries
 - 🐍 **Installable via pip** for Python users
 - 📏 **Modern CLI** with detailed error reporting
@@ -81,6 +82,9 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
     - [Inputs](#inputs)
     - [Examples](#examples)
 - [Rules](#rules)
+- [Flavors](#flavors)
+  - [Supported Flavors](#supported-flavors)
+  - [Configuring Flavors](#configuring-flavors)
 - [Command-line Interface](#command-line-interface)
   - [Commands](#commands)
     - [`check [PATHS...]`](#check-paths)
@@ -453,6 +457,42 @@ For a complete list of rules and their descriptions, see our [documentation](htt
 rumdl rule
 ```
 
+## Flavors
+
+rumdl supports multiple Markdown flavors to accommodate different documentation systems. Each flavor adjusts rule behavior for syntax specific to that system, reducing false positives.
+
+### Supported Flavors
+
+| Flavor                                              | Use Case                     | Key Features                                      |
+| --------------------------------------------------- | ---------------------------- | ------------------------------------------------- |
+| [standard](docs/flavors/standard.md)                | Default Markdown             | CommonMark + GFM extensions (tables, task lists)  |
+| [gfm](docs/flavors/gfm.md)                          | GitHub Flavored Markdown     | Extended autolinks, security-sensitive HTML       |
+| [mkdocs](docs/flavors/mkdocs.md)                    | MkDocs / Material for MkDocs | Admonitions, content tabs, mkdocstrings           |
+| [mdx](docs/flavors/mdx.md)                          | MDX (JSX in Markdown)        | JSX components, ESM imports, expressions          |
+| [quarto](docs/flavors/quarto.md)                    | Quarto / RMarkdown           | Citations, shortcodes, executable code blocks     |
+
+### Configuring Flavors
+
+Set a global flavor in your configuration:
+
+```toml
+[global]
+flavor = "mkdocs"
+```
+
+Or configure per-file patterns:
+
+```toml
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+"**/*.mdx" = "mdx"
+"**/*.qmd" = "quarto"
+```
+
+When no flavor is configured, rumdl auto-detects based on file extension (`.mdx` → mdx, `.qmd`/`.Rmd` → quarto, `.md` → standard).
+
+For complete flavor documentation, see the [Flavors Guide](docs/flavors.md).
+
 ## Command-line Interface
 
 ```bash
@@ -814,9 +854,14 @@ Here's an example `.rumdl.toml` configuration file:
 line-length = 100
 exclude = ["node_modules", "build", "dist"]
 respect-gitignore = true
+flavor = "mkdocs"  # Use MkDocs flavor (see Flavors section)
 
 # Disable specific rules
 disabled-rules = ["MD013", "MD033"]
+
+# Per-file flavor overrides
+[per-file-flavor]
+"**/*.mdx" = "mdx"
 
 # Disable specific rules for specific files
 [per-file-ignores]
