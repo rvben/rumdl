@@ -214,17 +214,28 @@ impl TableUtils {
             if is_list_table || Self::is_potential_table_row(effective_content) {
                 // For list tables, we need to check indented continuation lines
                 // For regular tables, check the next line directly
-                let next_line_content = if i + 1 < lines.len() {
+                let (next_line_content, delimiter_has_valid_indent) = if i + 1 < lines.len() {
                     let next_raw = Self::strip_blockquote_prefix(lines[i + 1]);
                     if is_list_table {
-                        // For list tables, strip the expected indentation
-                        Self::strip_list_continuation_indent(next_raw, content_indent)
+                        // For list tables, verify the delimiter line has proper indentation
+                        // before accepting it as part of the list table
+                        let leading_spaces = next_raw.len() - next_raw.trim_start().len();
+                        if leading_spaces >= content_indent {
+                            // Has proper indentation, strip it and check as delimiter
+                            (Self::strip_list_continuation_indent(next_raw, content_indent), true)
+                        } else {
+                            // Not enough indentation - this is a top-level table, not a list table
+                            (next_raw, false)
+                        }
                     } else {
-                        next_raw
+                        (next_raw, true)
                     }
                 } else {
-                    ""
+                    ("", true)
                 };
+
+                // For list tables, only accept if delimiter has valid indentation
+                let effective_is_list_table = is_list_table && delimiter_has_valid_indent;
 
                 if i + 1 < lines.len() && Self::is_delimiter_row(next_line_content) {
                     // Found a table! Find its end
@@ -242,7 +253,7 @@ impl TableUtils {
                         let raw_content = Self::strip_blockquote_prefix(line);
 
                         // For list tables, strip expected indentation
-                        let line_content = if is_list_table {
+                        let line_content = if effective_is_list_table {
                             Self::strip_list_continuation_indent(raw_content, content_indent)
                         } else {
                             raw_content
@@ -254,7 +265,7 @@ impl TableUtils {
                         }
 
                         // For list tables, the continuation line must have proper indentation
-                        if is_list_table {
+                        if effective_is_list_table {
                             let leading_spaces = raw_content.len() - raw_content.trim_start().len();
                             if leading_spaces < content_indent {
                                 // Not enough indentation - end of table
@@ -272,7 +283,7 @@ impl TableUtils {
                         }
                     }
 
-                    let list_context = if is_list_table {
+                    let list_context = if effective_is_list_table {
                         Some(ListTableContext {
                             list_prefix: list_prefix.to_string(),
                             content_indent,
@@ -1394,5 +1405,41 @@ But no delimiter row
             Some("leading_and_trailing")
         );
         assert_eq!(TableUtils::determine_pipe_style(">>> | H1 | H2"), Some("leading_only"));
+    }
+
+    #[test]
+    fn test_list_table_delimiter_requires_indentation() {
+        // Test case: list item contains pipe, but delimiter line is at column 1
+        // This should NOT be detected as a list table since the delimiter has no indentation.
+        // The result is a non-list table starting at line 0 (the list item becomes the header)
+        // but list_context should be None.
+        let content = "- List item with | pipe\n|---|---|\n| Cell 1 | Cell 2 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let tables = TableUtils::find_table_blocks(content, &ctx);
+
+        // The table will be detected starting at line 0, but crucially it should NOT have
+        // list_context set, meaning it won't be treated as a list-table for column count purposes
+        assert_eq!(tables.len(), 1, "Should find exactly one table");
+        assert!(
+            tables[0].list_context.is_none(),
+            "Should NOT have list context since delimiter has no indentation"
+        );
+    }
+
+    #[test]
+    fn test_list_table_with_properly_indented_delimiter() {
+        // Test case: list item with table header, delimiter properly indented
+        // This SHOULD be detected as a list table
+        let content = "- | Header 1 | Header 2 |\n  |----------|----------|\n  | Cell 1   | Cell 2   |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let tables = TableUtils::find_table_blocks(content, &ctx);
+
+        // Should find exactly one list-table starting at line 0
+        assert_eq!(tables.len(), 1, "Should find exactly one table");
+        assert_eq!(tables[0].start_line, 0, "Table should start at list item line");
+        assert!(
+            tables[0].list_context.is_some(),
+            "Should be a list table since delimiter is properly indented"
+        );
     }
 }
