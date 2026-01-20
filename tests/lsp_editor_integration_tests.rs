@@ -243,7 +243,7 @@ fn test_partial_document_editing() {
 }
 
 #[test]
-fn test_concurrent_editing_simulation() {
+fn test_concurrent_editing_performance() {
     // Simulate multiple rapid edits (like fast typing or paste operations)
     let _base_content = r#"# Document Title
 
