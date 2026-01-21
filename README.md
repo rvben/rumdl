@@ -6,7 +6,7 @@
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rvben/rumdl/ci.yml)](https://github.com/rvben/rumdl/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Crates.io](https://img.shields.io/crates/v/rumdl)](https://crates.io/crates/rumdl)
-[![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/) [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest) [![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers) [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn)
+[![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/) [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest) [![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers) [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn) [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github-sponsors)](https://github.com/sponsors/rvben)
 
 ## A modern Markdown linter and formatter, built for speed with Rust
 
@@ -1130,6 +1130,13 @@ rumdl schema print
 ```
 
 The schema is automatically generated from the Rust types using `schemars` and should be kept in sync with the configuration structures.
+
+## Sponsors
+
+rumdl is free and open source. If it saves you time, consider [sponsoring the project](https://github.com/sponsors/rvben).
+
+<!-- sponsors -->
+<!-- sponsors -->
 
 ## License
 
