@@ -610,9 +610,23 @@ pub fn process_file_with_formatter(
     let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending, file_index) =
         process_file_inner(file_path, rules, verbose, quiet, silent, config, cache, cache_hashes);
 
-    // Don't return early if we're in fix mode - we might need to format embedded markdown blocks
+    // In check mode with no warnings, return early
     if total_warnings == 0 && fix_mode == crate::FixMode::Check && !diff {
         return (false, 0, 0, 0, Vec::new(), file_index);
+    }
+
+    // In fix mode with no warnings to fix, check if there are embedded markdown blocks to format
+    // If not, return early to avoid the re-lint which doesn't apply per-file-ignores or inline config
+    if total_warnings == 0 && fix_mode != crate::FixMode::Check && !diff {
+        // Check if there's any embedded markdown to format
+        let has_embedded = has_fenced_code_blocks(&content)
+            && CodeBlockUtils::detect_markdown_code_blocks(&content)
+                .iter()
+                .any(|b| !content[b.content_start..b.content_end].trim().is_empty());
+
+        if !has_embedded {
+            return (false, 0, 0, 0, Vec::new(), file_index);
+        }
     }
 
     // Format and output warnings (show diagnostics unless silent)
@@ -692,14 +706,47 @@ pub fn process_file_with_formatter(
             }
         }
 
+        // If there were no original warnings, we only formatted embedded blocks.
+        // In this case, return success (no issues) without re-linting, since re-lint
+        // doesn't apply per-file-ignores or inline config that the original lint did.
+        if total_warnings == 0 {
+            return (false, 0, warnings_fixed, 0, Vec::new(), file_index);
+        }
+
         // Re-lint the fixed content to see which warnings remain
         // This is needed both for display and to determine exit code (following Ruff's convention)
+        //
+        // Apply the same filtering as the original lint to ensure consistent behavior:
+        // 1. Per-file-ignores: filter rules based on config
+        // 2. Inline config: filter warnings based on inline directives
+        let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
+        let filtered_rules: Vec<_> = if !ignored_rules_for_file.is_empty() {
+            rules
+                .iter()
+                .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
+                .collect()
+        } else {
+            rules.iter().collect()
+        };
+
         let fixed_ctx = LintContext::new(&content, config.markdown_flavor(), None);
+        let inline_config = rumdl_lib::inline_config::InlineConfig::from_content(&content);
         let mut remaining_warnings = Vec::new();
 
-        for rule in rules {
+        for rule in &filtered_rules {
             if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
-                remaining_warnings.extend(rule_warnings);
+                // Filter warnings based on inline config directives
+                let filtered_warnings = rule_warnings.into_iter().filter(|warning| {
+                    let rule_name = warning.rule_name.as_deref().unwrap_or(rule.name());
+                    // Extract base rule name for sub-rules like "MD029-style" -> "MD029"
+                    let base_rule_name = if let Some(dash_pos) = rule_name.find('-') {
+                        &rule_name[..dash_pos]
+                    } else {
+                        rule_name
+                    };
+                    !inline_config.is_rule_disabled(base_rule_name, warning.line)
+                });
+                remaining_warnings.extend(filtered_warnings);
             }
         }
 
