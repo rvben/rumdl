@@ -1,0 +1,110 @@
+# =============================================================================
+# rumdl Documentation - Zensical Configuration
+# =============================================================================
+
+[project]
+site_name = "rumdl"
+site_description = "A high-performance Markdown linter and formatter, written in Rust"
+site_author = "Ruben Jongejan"
+site_url = "https://rumdl.dev/"
+copyright = """
+Copyright &copy; 2024-2026 Ruben Jongejan
+"""
+
+# Repository settings for edit links
+repo_url = "https://github.com/rvben/rumdl"
+repo_name = "rvben/rumdl"
+
+# Navigation structure - references existing files directly
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = [
+    { "Installation" = "getting-started/installation.md" },
+    { "Quick Start" = "getting-started/quickstart.md" },
+  ]},
+  { "Usage" = [
+    { "CLI Commands" = "usage/cli.md" },
+    { "Editor Integration" = "usage/editors.md" },
+    { "CI/CD Integration" = "usage/ci-cd.md" },
+    { "Pre-commit" = "usage/pre-commit.md" },
+  ]},
+  { "Configuration" = [
+    { "Global Settings" = "global-settings.md" },
+    { "Inline Configuration" = "inline-configuration.md" },
+    { "Markdown Flavors" = "flavors.md" },
+  ]},
+  { "Rules" = "RULES.md" },
+  { "Integrations" = [
+    { "LSP Server" = "lsp.md" },
+    { "VS Code" = "vscode-extension.md" },
+  ]},
+  { "Reference" = [
+    { "markdownlint Comparison" = "markdownlint-comparison.md" },
+  ]},
+]
+
+# -----------------------------------------------------------------------------
+# Theme configuration
+# -----------------------------------------------------------------------------
+[project.theme]
+language = "en"
+
+features = [
+    "announce.dismiss",
+    "content.action.edit",
+    "content.action.view",
+    "content.code.annotate",
+    "content.code.copy",
+    "content.code.select",
+    "content.footnote.tooltips",
+    "content.tabs.link",
+    "content.tooltips",
+    "navigation.footer",
+    "navigation.indexes",
+    "navigation.instant",
+    "navigation.instant.prefetch",
+    "navigation.path",
+    "navigation.sections",
+    "navigation.top",
+    "navigation.tracking",
+    "search.highlight",
+]
+
+# Light/dark mode toggle
+[[project.theme.palette]]
+scheme = "default"
+primary = "deep-purple"
+accent = "amber"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "deep-purple"
+accent = "amber"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+# Icons
+[project.theme.icon]
+logo = "lucide/file-check"
+repo = "fontawesome/brands/github"
+
+# -----------------------------------------------------------------------------
+# Social links
+# -----------------------------------------------------------------------------
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/rvben/rumdl"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/discord"
+link = "https://discord.gg/ADTJFSFUyn"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/python"
+link = "https://pypi.org/project/rumdl/"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/rust"
+link = "https://crates.io/crates/rumdl"
