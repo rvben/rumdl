@@ -369,6 +369,16 @@ impl MD030ListMarkerSpace {
             }
         }
 
+        // Case 3: Single space after marker but expected spacing differs
+        // This handles custom configurations like ul_single = 3
+        if after_marker.starts_with(' ') && !after_marker.starts_with("  ") && expected_spaces != 1 {
+            let content = &after_marker[1..]; // Skip the single space
+            if !content.is_empty() {
+                let spaces = " ".repeat(expected_spaces);
+                return Some(format!("{indent}{marker}{spaces}{content}"));
+            }
+        }
+
         None
     }
 
@@ -394,9 +404,9 @@ impl MD030ListMarkerSpace {
                     break;
                 }
 
-                // Only fix if there's already a space (fixing multiple spaces to single space)
+                // Fix if there's a space (handling both multiple spaces and single space with non-default config)
                 // Don't add spaces where there are none - too ambiguous for unordered markers
-                if after_marker.starts_with("  ")
+                if after_marker.starts_with(' ')
                     && let Some(fixed) = self.fix_marker_spacing(marker, after_marker, indent, is_multi_line, false)
                 {
                     return Some(format!("{blockquote_prefix}{fixed}"));

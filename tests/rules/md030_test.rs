@@ -442,8 +442,37 @@ mod tests {
         let content = "*  Item (should become 2 spaces)\n1.   Item (should become 3 spaces)";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
+        // With custom config ul_single=2 and ol_single=3, spacing should be adjusted to match
         let expected = "*  Item (should become 2 spaces)\n1.   Item (should become 3 spaces)";
         assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_custom_config_single_space_to_multi() {
+        // Issue #318: Fix should work when configured spacing differs from default
+        // When ul_single=3, a line with 1 space should be fixed to 3 spaces
+        let rule = MD030ListMarkerSpace::new(3, 3, 2, 2); // Custom: ul=3 spaces, ol=2 spaces
+        let content = "* Item with one space\n1. Ordered with one space";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Single space should be expanded to match configuration
+        let expected = "*   Item with one space\n1.  Ordered with one space";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_check_custom_config_single_space_violation() {
+        // Issue #318: Check should detect when single space doesn't match config
+        let rule = MD030ListMarkerSpace::new(3, 3, 2, 2); // Custom: ul=3 spaces, ol=2 spaces
+        let content = "* Item with one space\n1. Ordered with one space";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should detect violations for both lines
+        assert_eq!(result.len(), 2, "Should detect 2 spacing violations. Got: {result:?}");
+        assert!(result[0].message.contains("Expected: 3"));
+        assert!(result[0].message.contains("Actual: 1"));
+        assert!(result[1].message.contains("Expected: 2"));
+        assert!(result[1].message.contains("Actual: 1"));
     }
 
     #[test]
