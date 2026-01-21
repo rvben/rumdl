@@ -158,7 +158,7 @@ For faster installation and better dependency management with [uv](https://githu
 uv tool install rumdl
 
 # Or run without installing
-uvx run rumdl check .
+uvx rumdl check .
 ```
 
 ### Using mise
