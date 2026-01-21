@@ -6,6 +6,7 @@ use unicode_width::UnicodeWidthStr;
 
 mod md060_config;
 use crate::md013_line_length::MD013Config;
+pub use md060_config::ColumnAlign;
 use md060_config::MD060Config;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -159,6 +160,7 @@ impl MD060TableFormat {
                 enabled,
                 style,
                 max_width: LineLength::from_const(0),
+                column_align: ColumnAlign::Auto,
             },
             md013_config: MD013Config::default(),
             md013_disabled: false,
@@ -331,6 +333,7 @@ impl MD060TableFormat {
         column_alignments: &[ColumnAlignment],
         is_delimiter: bool,
         compact_delimiter: bool,
+        column_align_override: ColumnAlign,
     ) -> String {
         let formatted_cells: Vec<String> = cells
             .iter()
@@ -376,8 +379,13 @@ impl MD060TableFormat {
                     let current_width = Self::calculate_cell_display_width(cell);
                     let padding = target_width.saturating_sub(current_width);
 
-                    // Apply alignment based on column's alignment indicator
-                    let alignment = column_alignments.get(i).copied().unwrap_or(ColumnAlignment::Left);
+                    // Apply alignment: use override if specified, otherwise use delimiter indicators
+                    let alignment = match column_align_override {
+                        ColumnAlign::Auto => column_alignments.get(i).copied().unwrap_or(ColumnAlignment::Left),
+                        ColumnAlign::Left => ColumnAlignment::Left,
+                        ColumnAlign::Center => ColumnAlignment::Center,
+                        ColumnAlign::Right => ColumnAlignment::Right,
+                    };
                     match alignment {
                         ColumnAlignment::Left => {
                             // Left: content on left, padding on right
@@ -654,6 +662,7 @@ impl MD060TableFormat {
                                 &column_alignments,
                                 is_delimiter,
                                 false,
+                                self.config.column_align,
                             ));
                         }
                     }
@@ -676,7 +685,11 @@ impl MD060TableFormat {
 
                 // If the table is already aligned with consistent column widths
                 // AND the delimiter style matches the target style, preserve as-is
-                if Self::is_table_already_aligned(&stripped_lines, flavor, compact_delimiter) {
+                // EXCEPT: when column-align is explicitly set (not Auto), we must reformat
+                // to apply the specified text alignment within cells
+                if self.config.column_align == ColumnAlign::Auto
+                    && Self::is_table_already_aligned(&stripped_lines, flavor, compact_delimiter)
+                {
                     return TableFormatResult {
                         lines: table_lines.iter().map(|s| s.to_string()).collect(),
                         auto_compacted: false,
@@ -712,6 +725,7 @@ impl MD060TableFormat {
                             &column_alignments,
                             is_delimiter,
                             compact_delimiter,
+                            self.config.column_align,
                         ));
                     }
                 }
@@ -1104,6 +1118,7 @@ mod tests {
             enabled: true,
             style: "aligned-no-space".to_string(),
             max_width: LineLength::from_const(50),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1250,6 +1265,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1279,6 +1295,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(50),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false); // MD013 setting doesn't matter
 
@@ -1309,6 +1326,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(100),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1334,6 +1352,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(30), false);
 
@@ -1356,6 +1375,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(24),
+            column_align: ColumnAlign::Auto,
         };
         let rule_tight = MD060TableFormat::from_config_struct(config_tight, md013_with_line_length(80), false);
 
@@ -1372,6 +1392,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1395,6 +1416,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0), // Inherit
+            column_align: ColumnAlign::Auto,
         };
 
         // Test with different MD013 line_length values
@@ -1426,6 +1448,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(17),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1445,6 +1468,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(16),
+            column_align: ColumnAlign::Auto,
         };
         let rule_under = MD060TableFormat::from_config_struct(config_under, md013_with_line_length(80), false);
 
@@ -1462,6 +1486,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(50),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1529,6 +1554,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(100), // Large enough to not trigger auto-compact
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1556,6 +1582,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0), // Inherit
+            column_align: ColumnAlign::Auto,
         };
         let md013_config = MD013Config::default();
         let rule = MD060TableFormat::from_config_struct(config, md013_config, true /* disabled */);
@@ -1582,6 +1609,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let md013_config = MD013Config {
             tables: false, // User doesn't care about table line length
@@ -1611,6 +1639,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let md013_config = MD013Config {
             tables: true,
@@ -1640,6 +1669,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(50), // Explicit limit
+            column_align: ColumnAlign::Auto,
         };
         let md013_config = MD013Config {
             tables: false,                          // This would make it unlimited...
@@ -1667,6 +1697,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0), // Inherit
+            column_align: ColumnAlign::Auto,
         };
         let md013_config = MD013Config {
             tables: true,
@@ -1697,6 +1728,7 @@ mod tests {
             enabled: true,
             style: "aligned-no-space".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -1730,6 +1762,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -1752,6 +1785,7 @@ mod tests {
             enabled: true,
             style: "aligned-no-space".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -1774,6 +1808,7 @@ mod tests {
             enabled: true,
             style: "aligned".to_string(),
             max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -1822,5 +1857,370 @@ mod tests {
         let mixed = MD060TableFormat::calculate_cell_display_width(" 日本語ABC ");
         // 3 CJK chars (width 6) + 3 ASCII (width 3) = 9
         assert_eq!(mixed, 9, "Mixed CJK/ASCII content");
+    }
+
+    // === Issue #317: column-align option tests ===
+
+    #[test]
+    fn test_md060_column_align_left() {
+        // Default/explicit left alignment
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Left,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        let content = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | Seattle |\n| Bob | 25 | Portland |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Left aligned: content on left, padding on right
+        assert!(
+            lines[2].contains("| Alice "),
+            "Content should be left-aligned (Alice should have trailing padding)"
+        );
+        assert!(
+            lines[3].contains("| Bob   "),
+            "Content should be left-aligned (Bob should have trailing padding)"
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_center() {
+        // Center alignment forces all columns to center
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Center,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        let content = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | Seattle |\n| Bob | 25 | Portland |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Center aligned: padding split on both sides
+        // "Bob" (3 chars) in "Name" column (5 chars) = 2 padding total, 1 left, 1 right
+        assert!(
+            lines[3].contains("|  Bob  |"),
+            "Bob should be centered with padding on both sides. Got: {}",
+            lines[3]
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_right() {
+        // Right alignment forces all columns to right-align
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Right,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        let content = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | Seattle |\n| Bob | 25 | Portland |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Right aligned: padding on left, content on right
+        assert!(
+            lines[3].contains("|   Bob |"),
+            "Bob should be right-aligned with padding on left. Got: {}",
+            lines[3]
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_auto_respects_delimiter() {
+        // Auto mode (default) should respect delimiter row alignment indicators
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        // Left, center, right columns via delimiter indicators
+        let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | B | C |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Verify alignment is applied per-column based on delimiter
+        assert!(fixed.contains("| A "), "Left column should be left-aligned");
+        // Center and right columns with longer content in header
+        let lines: Vec<&str> = fixed.lines().collect();
+        // The content row should have B centered and C right-aligned
+        // B (1 char) in "Center" (6 chars) = 5 padding, ~2 left, ~3 right
+        // C (1 char) in "Right" (5 chars) = 4 padding, all on left
+        assert!(
+            lines[2].contains(" C |"),
+            "Right column should be right-aligned. Got: {}",
+            lines[2]
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_overrides_delimiter_indicators() {
+        // column-align should override delimiter row indicators
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Right, // Override all to right
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        // Delimiter says left, center, right - but we override all to right
+        let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | B | C |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // ALL columns should be right-aligned despite delimiter indicators
+        // "A" in "Left" column (4 chars minimum due to header length) should be right-aligned
+        assert!(
+            lines[2].contains("    A |") || lines[2].contains("   A |"),
+            "Even left-indicated column should be right-aligned. Got: {}",
+            lines[2]
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_with_aligned_no_space() {
+        // column-align should work with aligned-no-space style
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned-no-space".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Center,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        let content = "| Name | Age |\n|---|---|\n| Alice | 30 |\n| Bob | 25 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Delimiter row should have no spaces (aligned-no-space)
+        assert!(
+            lines[1].contains("|---"),
+            "Delimiter should have no spaces in aligned-no-space style. Got: {}",
+            lines[1]
+        );
+        // Content should still be centered
+        assert!(
+            lines[3].contains("|  Bob  |"),
+            "Content should be centered. Got: {}",
+            lines[3]
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_config_parsing() {
+        // Test that column-align config is correctly parsed
+        let toml_str = r#"
+enabled = true
+style = "aligned"
+column-align = "center"
+"#;
+        let config: MD060Config = toml::from_str(toml_str).expect("Should parse config");
+        assert_eq!(config.column_align, ColumnAlign::Center);
+
+        let toml_str = r#"
+enabled = true
+style = "aligned"
+column-align = "right"
+"#;
+        let config: MD060Config = toml::from_str(toml_str).expect("Should parse config");
+        assert_eq!(config.column_align, ColumnAlign::Right);
+
+        let toml_str = r#"
+enabled = true
+style = "aligned"
+column-align = "left"
+"#;
+        let config: MD060Config = toml::from_str(toml_str).expect("Should parse config");
+        assert_eq!(config.column_align, ColumnAlign::Left);
+
+        let toml_str = r#"
+enabled = true
+style = "aligned"
+column-align = "auto"
+"#;
+        let config: MD060Config = toml::from_str(toml_str).expect("Should parse config");
+        assert_eq!(config.column_align, ColumnAlign::Auto);
+    }
+
+    #[test]
+    fn test_md060_column_align_default_is_auto() {
+        // Without column-align specified, default should be Auto
+        let toml_str = r#"
+enabled = true
+style = "aligned"
+"#;
+        let config: MD060Config = toml::from_str(toml_str).expect("Should parse config");
+        assert_eq!(config.column_align, ColumnAlign::Auto);
+    }
+
+    #[test]
+    fn test_md060_column_align_reformats_already_aligned_table() {
+        // A table that is already aligned (left) should be reformatted when column-align=right
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Right,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        // This table is already properly aligned with left alignment
+        let content = "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |\n| Bob   | 25  |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Should be reformatted with right alignment
+        assert!(
+            lines[2].contains("| Alice |") && lines[2].contains("|  30 |"),
+            "Already aligned table should be reformatted with right alignment. Got: {}",
+            lines[2]
+        );
+        assert!(
+            lines[3].contains("|   Bob |") || lines[3].contains("|  Bob |"),
+            "Bob should be right-aligned. Got: {}",
+            lines[3]
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_with_cjk_characters() {
+        // CJK characters have double display width - centering should account for this
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Center,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        let content = "| Name | City |\n|---|---|\n| Alice | 東京 |\n| Bob | LA |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Both Alice and Bob should be centered, and 東京 should be properly aligned
+        // considering its double-width display
+        assert!(fixed.contains("Bob"), "Table should contain Bob");
+        assert!(fixed.contains("東京"), "Table should contain 東京");
+    }
+
+    #[test]
+    fn test_md060_column_align_ignored_for_compact_style() {
+        // column-align should have no effect on compact style (minimal padding)
+        let config = MD060Config {
+            enabled: true,
+            style: "compact".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Right, // This should be ignored
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        let content = "| Name | Age |\n|---|---|\n| Alice | 30 |\n| Bob | 25 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Compact style: single space padding, no alignment
+        assert!(
+            fixed.contains("| Alice |"),
+            "Compact style should have single space padding, not alignment. Got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_ignored_for_tight_style() {
+        // column-align should have no effect on tight style (no padding)
+        let config = MD060Config {
+            enabled: true,
+            style: "tight".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Center, // This should be ignored
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        let content = "| Name | Age |\n|---|---|\n| Alice | 30 |\n| Bob | 25 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Tight style: no spaces at all
+        assert!(
+            fixed.contains("|Alice|"),
+            "Tight style should have no spaces. Got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_with_empty_cells() {
+        // Empty cells should be handled correctly with centering
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Center,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        let content = "| Name | Age |\n|---|---|\n| Alice | 30 |\n|  | 25 |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let lines: Vec<&str> = fixed.lines().collect();
+
+        // Empty cell should have all padding (centered empty string)
+        assert!(
+            lines[3].contains("|       |") || lines[3].contains("|      |"),
+            "Empty cell should be padded correctly. Got: {}",
+            lines[3]
+        );
+    }
+
+    #[test]
+    fn test_md060_column_align_auto_preserves_already_aligned() {
+        // With column-align=auto (default), already aligned tables should be preserved
+        let config = MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(0),
+            column_align: ColumnAlign::Auto,
+        };
+        let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
+
+        // This table is already properly aligned
+        let content = "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |\n| Bob   | 25  |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should be preserved as-is
+        assert_eq!(
+            fixed, content,
+            "Already aligned table should be preserved with column-align=auto"
+        );
     }
 }

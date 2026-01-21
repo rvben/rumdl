@@ -46,3 +46,8 @@ style = "leading_and_trailing"
 [MD060]
 enabled = true
 style = "aligned"
+
+# Skip MD060 for md060.md since it contains intentional example tables in code fences
+# that trigger false positives (tables inside code blocks shouldn't be checked)
+[per-file-ignores]
+"docs/md060.md" = ["MD060"]
