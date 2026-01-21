@@ -610,6 +610,19 @@ pub fn process_file_with_formatter(
     let (all_warnings, mut content, total_warnings, fixable_warnings, original_line_ending, file_index) =
         process_file_inner(file_path, rules, verbose, quiet, silent, config, cache, cache_hashes);
 
+    // Compute filtered rules based on per-file-ignores for embedded markdown formatting
+    // This ensures embedded markdown formatting respects per-file-ignores just like linting does
+    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
+    let filtered_rules: Vec<Box<dyn Rule>> = if !ignored_rules_for_file.is_empty() {
+        rules
+            .iter()
+            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
+            .map(|r| dyn_clone::clone_box(&**r))
+            .collect()
+    } else {
+        rules.to_vec()
+    };
+
     // In check mode with no warnings, return early
     if total_warnings == 0 && fix_mode == crate::FixMode::Check && !diff {
         return (false, 0, 0, 0, Vec::new(), file_index);
@@ -662,7 +675,8 @@ pub fn process_file_with_formatter(
         warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, true, true, config);
 
         // Format embedded markdown blocks (recursive formatting)
-        let embedded_formatted = format_embedded_markdown_blocks(&mut content, rules, config);
+        // Use filtered_rules to respect per-file-ignores for embedded content
+        let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
         warnings_fixed += embedded_formatted;
 
         if warnings_fixed > 0 {
@@ -686,7 +700,8 @@ pub fn process_file_with_formatter(
         warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, silent, config);
 
         // Format embedded markdown blocks (recursive formatting)
-        let embedded_formatted = format_embedded_markdown_blocks(&mut content, rules, config);
+        // Use filtered_rules to respect per-file-ignores for embedded content
+        let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
         warnings_fixed += embedded_formatted;
 
         // Write fixed content back to file
@@ -1181,6 +1196,9 @@ fn format_embedded_markdown_blocks_recursive(
         return 0;
     }
 
+    // Parse inline config from the parent content to respect disable/enable directives
+    let inline_config = rumdl_lib::inline_config::InlineConfig::from_content(content);
+
     let mut formatted_count = 0;
 
     // Process blocks in reverse order to maintain byte offsets
@@ -1193,6 +1211,17 @@ fn format_embedded_markdown_blocks_recursive(
             continue;
         }
 
+        // Compute the line number of the block's opening fence
+        // The inline config state at this line determines which rules are disabled
+        let block_line = content[..block.content_start].matches('\n').count() + 1;
+
+        // Filter rules based on inline config at this block's location
+        let block_rules: Vec<Box<dyn Rule>> = rules
+            .iter()
+            .filter(|rule| !inline_config.is_rule_disabled(rule.name(), block_line))
+            .map(|r| dyn_clone::clone_box(&**r))
+            .collect();
+
         // Strip common indentation from all lines
         let (stripped_content, common_indent) = strip_common_indent(block_content);
 
@@ -1200,12 +1229,13 @@ fn format_embedded_markdown_blocks_recursive(
         let mut formatted = stripped_content;
 
         // First, recursively format any nested markdown blocks
-        let nested_formatted = format_embedded_markdown_blocks_recursive(&mut formatted, rules, config, depth + 1);
+        let nested_formatted =
+            format_embedded_markdown_blocks_recursive(&mut formatted, &block_rules, config, depth + 1);
 
         // Create a context and collect warnings for the embedded content
         let ctx = LintContext::new(&formatted, config.markdown_flavor(), None);
         let mut warnings = Vec::new();
-        for rule in rules {
+        for rule in &block_rules {
             if let Ok(rule_warnings) = rule.check(&ctx) {
                 warnings.extend(rule_warnings);
             }
@@ -1213,7 +1243,7 @@ fn format_embedded_markdown_blocks_recursive(
 
         // Apply fixes
         if !warnings.is_empty() {
-            let _fixed = apply_fixes_coordinated(rules, &warnings, &mut formatted, true, true, config);
+            let _fixed = apply_fixes_coordinated(&block_rules, &warnings, &mut formatted, true, true, config);
         }
 
         // Remove trailing newline that MD047 may have added if original didn't have one
@@ -1274,6 +1304,9 @@ fn check_embedded_markdown_blocks_recursive(
         return Vec::new();
     }
 
+    // Parse inline config from the parent content to respect disable/enable directives
+    let inline_config = rumdl_lib::inline_config::InlineConfig::from_content(content);
+
     let mut all_warnings = Vec::new();
 
     for block in blocks {
@@ -1289,11 +1322,24 @@ fn check_embedded_markdown_blocks_recursive(
         // Count newlines before content_start to get the starting line number
         let line_offset = content[..block.content_start].matches('\n').count();
 
+        // Compute the line number of the block's opening fence (1-indexed)
+        // The inline config state at this line determines which rules are disabled
+        let block_line = line_offset + 1;
+
+        // Filter rules based on inline config at this block's location
+        let block_rules: Vec<&Box<dyn Rule>> = rules
+            .iter()
+            .filter(|rule| !inline_config.is_rule_disabled(rule.name(), block_line))
+            .collect();
+
         // Strip common indentation from all lines
         let (stripped_content, _common_indent) = strip_common_indent(block_content);
 
         // First, recursively check any nested markdown blocks
-        let nested_warnings = check_embedded_markdown_blocks_recursive(&stripped_content, rules, config, depth + 1);
+        // Clone rules for recursion since we need owned values
+        let block_rules_owned: Vec<Box<dyn Rule>> = block_rules.iter().map(|r| dyn_clone::clone_box(&***r)).collect();
+        let nested_warnings =
+            check_embedded_markdown_blocks_recursive(&stripped_content, &block_rules_owned, config, depth + 1);
 
         // Adjust nested warning line numbers and add to results
         for mut warning in nested_warnings {
@@ -1307,7 +1353,7 @@ fn check_embedded_markdown_blocks_recursive(
         // Create a context and collect warnings for the embedded content
         // Skip file-scoped rules that don't apply to embedded snippets
         let ctx = LintContext::new(&stripped_content, config.markdown_flavor(), None);
-        for rule in rules {
+        for rule in &block_rules {
             // Skip file-scoped rules for embedded content
             match rule.name() {
                 "MD041" => continue, // "First line in file should be heading" - not a file
@@ -2100,5 +2146,176 @@ mod tests {
         let warnings = check_embedded_markdown_blocks(content, &rules, &config);
 
         assert!(warnings.is_empty(), "Should have no warnings without embedded markdown");
+    }
+
+    #[test]
+    fn test_format_embedded_markdown_respects_filtered_rules() {
+        // Test that embedded markdown formatting respects per-file-ignores
+        // This simulates what happens when per-file-ignores excludes certain rules
+        let config = rumdl_config::Config::default();
+        let all_rules = rumdl_lib::rules::all_rules(&config);
+
+        // Content with MD022 violation (missing blank line above heading)
+        let original = "# Rule Documentation\n\n```markdown\n# Heading\n## No blank line above\n```\n";
+
+        // Test 1: WITH MD022 rule - should add blank line
+        let mut content_with_rule = original.to_string();
+        let formatted_with_rule = format_embedded_markdown_blocks(&mut content_with_rule, &all_rules, &config);
+
+        assert!(formatted_with_rule > 0, "Should format when MD022 is active");
+        assert!(
+            content_with_rule.contains("# Heading\n\n## No blank line above"),
+            "Should add blank line when MD022 is active"
+        );
+
+        // Test 2: WITHOUT MD022 rule (simulating per-file-ignores) - should NOT add blank line
+        let filtered_rules: Vec<Box<dyn crate::Rule>> = all_rules
+            .iter()
+            .filter(|rule| rule.name() != "MD022")
+            .map(|r| dyn_clone::clone_box(&**r))
+            .collect();
+
+        let mut content_without_rule = original.to_string();
+        let _formatted_without_rule =
+            format_embedded_markdown_blocks(&mut content_without_rule, &filtered_rules, &config);
+
+        // The content should NOT have MD022 fix applied
+        assert!(
+            content_without_rule.contains("# Heading\n## No blank line above"),
+            "Should NOT add blank line when MD022 is filtered out (per-file-ignores)"
+        );
+
+        // If other rules applied fixes, that's fine, but MD022 specifically shouldn't
+        // The key assertion is that the missing blank line above ## is preserved
+        assert_ne!(
+            content_with_rule, content_without_rule,
+            "Filtered rules should produce different result than all rules"
+        );
+    }
+
+    #[test]
+    fn test_format_embedded_markdown_respects_inline_config() {
+        // Test that embedded markdown formatting respects inline disable directives
+        let config = rumdl_config::Config::default();
+        let rules = rumdl_lib::rules::all_rules(&config);
+
+        // Content with MD022 violation inside a markdown block, wrapped in inline disable
+        let original = r#"# Doc
+
+<!-- rumdl-disable MD022 -->
+
+```markdown
+# Heading
+## No blank line above
+```
+
+<!-- rumdl-enable MD022 -->
+"#;
+
+        let mut content = original.to_string();
+        let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
+
+        // The embedded content should NOT be modified because MD022 is disabled via inline config
+        assert!(
+            content.contains("# Heading\n## No blank line above"),
+            "Should NOT add blank line when MD022 is disabled via inline config. Got: {content}"
+        );
+
+        // No blocks should have been formatted
+        assert_eq!(formatted, 0, "No blocks should be formatted when rules are disabled");
+    }
+
+    #[test]
+    fn test_check_embedded_markdown_respects_inline_config() {
+        // Test that embedded markdown checking respects inline disable directives
+        // This ensures check and fmt behave consistently
+        let config = rumdl_config::Config::default();
+        let rules = rumdl_lib::rules::all_rules(&config);
+
+        // Content with MD022 violation inside a markdown block, wrapped in inline disable
+        let content = r#"# Doc
+
+<!-- rumdl-disable MD022 -->
+
+```markdown
+# Heading
+## No blank line above
+```
+
+<!-- rumdl-enable MD022 -->
+"#;
+
+        let warnings = check_embedded_markdown_blocks(content, &rules, &config);
+
+        // Should have NO MD022 warnings because it's disabled via inline config
+        let md022_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_ref().is_some_and(|n| n == "MD022"))
+            .collect();
+
+        assert!(
+            md022_warnings.is_empty(),
+            "Should NOT report MD022 warnings when disabled via inline config. Got: {md022_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_check_and_format_consistency() {
+        // Verify that check and format behave identically for inline config
+        let config = rumdl_config::Config::default();
+        let rules = rumdl_lib::rules::all_rules(&config);
+
+        // Content with violations both inside and outside disabled region
+        let content = r#"# Doc
+
+<!-- rumdl-disable MD022 -->
+
+```markdown
+# Heading
+## Inside disabled - should be ignored
+```
+
+<!-- rumdl-enable MD022 -->
+
+```markdown
+# Another
+## Outside disabled - should be reported/fixed
+```
+"#;
+
+        // Check should report warnings only for the second block
+        let warnings = check_embedded_markdown_blocks(content, &rules, &config);
+        let md022_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_ref().is_some_and(|n| n == "MD022"))
+            .collect();
+
+        assert!(
+            !md022_warnings.is_empty(),
+            "Should report MD022 for block outside disabled region"
+        );
+
+        // All warnings should be for lines after the enable comment (line 11+)
+        for w in &md022_warnings {
+            assert!(
+                w.line > 10,
+                "MD022 warning should be after enable comment, got line {}",
+                w.line
+            );
+        }
+
+        // Format should only modify the second block
+        let mut format_content = content.to_string();
+        let formatted = format_embedded_markdown_blocks(&mut format_content, &rules, &config);
+
+        assert!(formatted > 0, "Should format the second block");
+        assert!(
+            format_content.contains("# Heading\n## Inside disabled"),
+            "First block should be unchanged"
+        );
+        assert!(
+            format_content.contains("# Another\n\n## Outside disabled"),
+            "Second block should have blank line added"
+        );
     }
 }
