@@ -5,8 +5,12 @@
 ![rumdl Logo](https://raw.githubusercontent.com/rvben/rumdl/main/assets/logo.png)
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rvben/rumdl/release.yml)](https://github.com/rvben/rumdl/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Crates.io](https://img.shields.io/crates/v/rumdl)](https://crates.io/crates/rumdl)
-[![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/) [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest) [![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers) [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Crates.io](https://img.shields.io/crates/v/rumdl)](https://crates.io/crates/rumdl)
+[![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn)
 
 ## A modern Markdown linter and formatter, built for speed with Rust
 
@@ -17,20 +21,17 @@
 ## Quick Start
 
 ```bash
-# Install using Cargo
-cargo install rumdl
-
 # Lint Markdown files in the current directory
-rumdl check .
+uvx rumdl check .
 
 # Format files (exits 0 on success, even if unfixable violations remain)
-rumdl fmt .
+uvx rumdl fmt .
 
 # Auto-fix and report unfixable violations (exits 0 if all fixed, 1 if violations remain)
-rumdl check --fix .
+uvx rumdl check --fix .
 
 # Create a default configuration file
-rumdl init
+uvx rumdl init
 ```
 
 ## Overview
@@ -157,7 +158,7 @@ For faster installation and better dependency management with [uv](https://githu
 uv tool install rumdl
 
 # Or run without installing
-uv tool run rumdl check .
+uvx run rumdl check .
 ```
 
 ### Using mise
