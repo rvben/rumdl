@@ -901,6 +901,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    // Initialize logging from RUST_LOG environment variable
+    // This allows users to debug config discovery with: RUST_LOG=debug rumdl check ...
+    env_logger::Builder::from_default_env()
+        .format_timestamp(None)
+        .format_target(false)
+        .init();
+
     let cli = Cli::parse();
 
     // Set color override globally based on --color flag
@@ -1420,15 +1427,10 @@ build-backend = "setuptools.build_meta"
                 verbose,
                 config,
             } => {
-                // Setup logging for the LSP server
+                // If verbose flag is set, increase log level to Debug
+                // (logging is already initialized in main() via RUST_LOG)
                 if verbose {
-                    env_logger::Builder::from_default_env()
-                        .filter_level(log::LevelFilter::Debug)
-                        .init();
-                } else {
-                    env_logger::Builder::from_default_env()
-                        .filter_level(log::LevelFilter::Info)
-                        .init();
+                    log::set_max_level(log::LevelFilter::Debug);
                 }
 
                 // Validate config file exists if provided

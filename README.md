@@ -723,10 +723,11 @@ For editor-specific information on setting up the LSP, refer to our [LSP documen
 rumdl can be configured in several ways:
 
 1. Using a `.rumdl.toml` or `rumdl.toml` file in your project directory or parent directories
-2. Using a `.config/rumdl.toml` file (following the [config-dir convention](https://github.com/pi0/config-dir))
+2. Using a `<project>/.config/rumdl.toml` file (following the [config-dir convention](https://github.com/pi0/config-dir))
 3. Using the `[tool.rumdl]` section in your project's `pyproject.toml` file (for Python projects)
 4. Using command-line arguments
-5. **Automatic markdownlint compatibility**: rumdl automatically discovers and loads existing markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.)
+5. Using a **global user config** at `~/.config/rumdl/rumdl.toml` (see [Global Configuration](#global-configuration) below)
+6. **Automatic markdownlint compatibility**: rumdl automatically discovers and loads existing markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.)
 
 ### Configuration Discovery
 
@@ -735,8 +736,8 @@ run rumdl from any subdirectory of your project and it will find the configurati
 
 The search follows these rules:
 
-- Searches upward for `.rumdl.toml`, `rumdl.toml`, `.config/rumdl.toml`, or `pyproject.toml` (with `[tool.rumdl]` section)
-- Precedence order: `.rumdl.toml` > `rumdl.toml` > `.config/rumdl.toml` > `pyproject.toml`
+- Searches upward for `.rumdl.toml`, `rumdl.toml`, `<dir>/.config/rumdl.toml`, or `pyproject.toml` (with `[tool.rumdl]` section)
+- Precedence order: `.rumdl.toml` > `rumdl.toml` > `<dir>/.config/rumdl.toml` > `pyproject.toml`
 - Stops at the first configuration file found
 - Stops searching when it encounters a `.git` directory (project boundary)
 - Maximum traversal depth of 100 directories
