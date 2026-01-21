@@ -18,3 +18,5 @@ issues/
 CLAUDE.md
 uv.lock
 .vscode/
+.cursor/
+.idea/
