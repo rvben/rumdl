@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.224] - 2026-01-22
+
+### Added
+
+- **GitHub Action: `fail-on-error` and `output-file` inputs** ([#324](https://github.com/rvben/rumdl/issues/324), [#325](https://github.com/rvben/rumdl/issues/325))
+  - `fail-on-error`: Control whether the workflow fails on violations (default: `true`)
+  - `output-file`: Write lint results to a file for use in subsequent steps
+
+- **LSP: `source.fixAll.rumdl` code action for fix-on-save**
+  - Enables VS Code's "Fix All on Save" feature for rumdl
+  - Configure with `editor.codeActionsOnSave: { "source.fixAll.rumdl": "explicit" }`
+
 ## [0.0.223] - 2026-01-21
 
 ### Added

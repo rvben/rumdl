@@ -2050,7 +2050,7 @@ dependencies = [
 
 [[package]]
 name = "rumdl"
-version = "0.0.223"
+version = "0.0.224"
 dependencies = [
  "anyhow",
  "assert_cmd",
