@@ -126,6 +126,52 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
+# Check 9: Discover new notable projects using rumdl (informational only)
+echo -n "Checking for new notable projects using rumdl... "
+if command -v python3 &>/dev/null && [[ -f "scripts/update-used-by.py" ]]; then
+    DISCOVERY_OUTPUT=$(python3 scripts/update-used-by.py 2>&1)
+    if echo "$DISCOVERY_OUTPUT" | grep -q "NEW:"; then
+        echo -e "${YELLOW}⚠${NC}"
+        echo -e "${YELLOW}INFO: New projects with 500+ stars discovered${NC}"
+        echo "$DISCOVERY_OUTPUT" | grep -E "(NEW:|Add to README)"
+        echo ""
+    else
+        echo -e "${GREEN}✓${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} (script not found)"
+fi
+
+# Check 10: Verify documented rule count matches actual rule count
+echo -n "Checking rule count in docs... "
+ACTUAL_RULE_COUNT=$(grep -cE '^\s*\("MD[0-9]+", ' src/rules/mod.rs)
+DOCS_MISMATCHES=""
+
+# Check docs/index.md
+while read -r DOCS_COUNT; do
+    if [[ "$DOCS_COUNT" != "$ACTUAL_RULE_COUNT" ]]; then
+        DOCS_MISMATCHES="${DOCS_MISMATCHES}docs/index.md says $DOCS_COUNT, "
+    fi
+done < <(grep -oE '[0-9]+ lint(ing)? rules' docs/index.md | grep -oE '[0-9]+')
+
+# Check docs/RULES.md
+while read -r DOCS_COUNT; do
+    if [[ "$DOCS_COUNT" != "$ACTUAL_RULE_COUNT" ]]; then
+        DOCS_MISMATCHES="${DOCS_MISMATCHES}docs/RULES.md says $DOCS_COUNT, "
+    fi
+done < <(grep -oE 'implements [0-9]+ rules' docs/RULES.md | grep -oE '[0-9]+')
+
+if [[ -z "$DOCS_MISMATCHES" ]]; then
+    echo -e "${GREEN}✓${NC} ($ACTUAL_RULE_COUNT rules)"
+else
+    echo -e "${RED}✗${NC}"
+    echo -e "${RED}ERROR: Rule count mismatch in documentation${NC}"
+    echo "Actual rules: $ACTUAL_RULE_COUNT"
+    echo "Mismatches: ${DOCS_MISMATCHES%, }"
+    echo "Update docs/index.md and docs/RULES.md to match"
+    ((ERRORS++))
+fi
+
 # Summary
 echo ""
 echo "════════════════════════════════════════"

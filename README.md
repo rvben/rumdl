@@ -1139,6 +1139,20 @@ rumdl schema print
 
 The schema is automatically generated from the Rust types using `schemars` and should be kept in sync with the configuration structures.
 
+## Used By
+
+rumdl is used by these notable open source projects:
+
+| Project                                                           | Stars                                                                                 |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [PyO3/pyo3](https://github.com/PyO3/pyo3)                         | ![stars](https://img.shields.io/github/stars/PyO3/pyo3?style=flat-square)             |
+| [beeware/toga](https://github.com/beeware/toga)                   | ![stars](https://img.shields.io/github/stars/beeware/toga?style=flat-square)          |
+| [beeware/briefcase](https://github.com/beeware/briefcase)         | ![stars](https://img.shields.io/github/stars/beeware/briefcase?style=flat-square)     |
+| [mikavilpas/yazi.nvim](https://github.com/mikavilpas/yazi.nvim)   | ![stars](https://img.shields.io/github/stars/mikavilpas/yazi.nvim?style=flat-square)  |
+| [matrix-org/matrix.org](https://github.com/matrix-org/matrix.org) | ![stars](https://img.shields.io/github/stars/matrix-org/matrix.org?style=flat-square) |
+
+*Using rumdl? [Let us know!](https://github.com/rvben/rumdl/issues/307)*
+
 ## Sponsors
 
 rumdl is free and open source. If it saves you time, consider [sponsoring the project](https://github.com/sponsors/rvben).
