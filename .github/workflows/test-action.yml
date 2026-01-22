@@ -67,6 +67,117 @@ jobs:
             exit 1
           fi
 
+  test-informational-mode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action with fail-on-error=false (should succeed despite violations)
+        uses: ./
+        with:
+          path: __tests__/fixtures/malformed/
+          fail-on-error: "false"
+
+  test-output-file:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action with output-file
+        uses: ./
+        with:
+          path: __tests__/fixtures/clean/
+          output-file: lint-results.txt
+      - name: Verify output file was created
+        run: |
+          if [ ! -f lint-results.txt ]; then
+            echo "Output file was not created"
+            exit 1
+          fi
+          echo "Output file contents:"
+          cat lint-results.txt
+
+  test-output-file-with-violations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action with output-file on malformed markdown
+        id: lint-malformed
+        continue-on-error: true
+        uses: ./
+        with:
+          path: __tests__/fixtures/malformed/
+          output-file: violations.txt
+      - name: Verify output file contains violations
+        run: |
+          if [ ! -f violations.txt ]; then
+            echo "Output file was not created"
+            exit 1
+          fi
+          if ! grep -q "MD" violations.txt; then
+            echo "Output file should contain MD rule violations"
+            cat violations.txt
+            exit 1
+          fi
+          echo "Output file contains violations as expected:"
+          cat violations.txt
+
+  test-output-file-subdirectory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action with output-file in subdirectory
+        uses: ./
+        with:
+          path: __tests__/fixtures/clean/
+          output-file: results/subdir/lint-output.txt
+      - name: Verify output file was created in subdirectory
+        run: |
+          if [ ! -f results/subdir/lint-output.txt ]; then
+            echo "Output file was not created in subdirectory"
+            exit 1
+          fi
+          echo "Output file created in subdirectory successfully"
+
+  test-combined-informational-with-output:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action with both fail-on-error=false and output-file
+        uses: ./
+        with:
+          path: __tests__/fixtures/malformed/
+          fail-on-error: "false"
+          output-file: informational-results.txt
+      - name: Verify output file contains violations but action succeeded
+        run: |
+          if [ ! -f informational-results.txt ]; then
+            echo "Output file was not created"
+            exit 1
+          fi
+          if ! grep -q "MD" informational-results.txt; then
+            echo "Output file should contain MD rule violations"
+            exit 1
+          fi
+          echo "Combined mode works: violations captured, action succeeded"
+
+  test-invalid-fail-on-error:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action with invalid fail-on-error value (should fail)
+        id: should-fail
+        continue-on-error: true
+        uses: ./
+        with:
+          path: __tests__/fixtures/clean/
+          fail-on-error: "maybe"
+      - name: Verify action failed with validation error
+        run: |
+          if [ "${{ steps.should-fail.outcome }}" == "success" ]; then
+            echo "Expected failure but got success"
+            exit 1
+          fi
+          echo "Action correctly rejected invalid fail-on-error value"
+
   all-tests-passed:
     runs-on: ubuntu-latest
     needs:
@@ -75,6 +186,12 @@ jobs:
       - test-with-config
       - test-annotations
       - test-expected-failure
+      - test-informational-mode
+      - test-output-file
+      - test-output-file-with-violations
+      - test-output-file-subdirectory
+      - test-combined-informational-with-output
+      - test-invalid-fail-on-error
     if: always()
     steps:
       - name: All tests passed

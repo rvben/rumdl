@@ -25,6 +25,14 @@ inputs:
       Possible values: logs (default), annotations
     required: false
     default: "logs"
+  fail-on-error:
+    description: "Fail the workflow if violations are found (default: true)"
+    required: false
+    default: "true"
+  output-file:
+    description: "Write results to this file path (optional)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -37,3 +45,5 @@ runs:
         GHA_RUMDL_PATH: ${{ inputs.path }}
         GHA_RUMDL_CONFIG: ${{ inputs.config }}
         GHA_RUMDL_REPORT_TYPE: ${{ inputs.report-type }}
+        GHA_RUMDL_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        GHA_RUMDL_OUTPUT_FILE: ${{ inputs.output-file }}
