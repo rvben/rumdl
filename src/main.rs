@@ -501,6 +501,10 @@ pub struct CheckArgs {
     #[arg(long, help = "Show diff of what would be fixed instead of fixing files")]
     diff: bool,
 
+    /// Exit with code 1 if any formatting changes would be made (like rustfmt --check)
+    #[arg(long, help = "Exit with code 1 if any formatting changes would be made (for CI)")]
+    check: bool,
+
     /// List all available rules
     #[arg(short, long, default_value = "false")]
     list_rules: bool,
@@ -1030,6 +1034,11 @@ build-backend = "setuptools.build_meta"
                     "never" => FailOn::Never,
                     _ => FailOn::Any,
                 };
+
+                // --check mode enables diff (don't write files) and will exit 1 if changes needed
+                if args.check {
+                    args.diff = true;
+                }
 
                 if cli.no_config || cli.isolated {
                     run_check(&args, None, cli.no_config || cli.isolated);
@@ -1751,6 +1760,12 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         exit::tool_error();
     }
 
+    if args.check && args.fix {
+        eprintln!("{}: --check and --fix cannot be used together", "Error".red().bold());
+        eprintln!("Use --check to verify formatting without changes, or --fix to apply them");
+        exit::tool_error();
+    }
+
     // Warn about deprecated --force-exclude flag
     if args.force_exclude {
         eprintln!(
@@ -1867,7 +1882,7 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
     // Use the same cache directory for workspace index cache (when cache is enabled)
     let workspace_cache_dir = if cache_enabled { Some(cache_dir.as_path()) } else { None };
 
-    let (has_issues, has_warnings, has_errors) = watch::perform_check_run(
+    let (has_issues, has_warnings, has_errors, total_issues_fixed) = watch::perform_check_run(
         args,
         &config,
         quiet,
@@ -1875,6 +1890,11 @@ fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool)
         workspace_cache_dir,
         project_root.as_deref(),
     );
+
+    // In --check mode (for fmt), exit with code 1 if any formatting changes would be made
+    if args.check && total_issues_fixed > 0 {
+        exit::violations_found();
+    }
 
     // Determine if we should fail based on --fail-on setting
     let should_fail = match args.fail_on_mode {

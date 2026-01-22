@@ -77,10 +77,11 @@ pub fn clear_screen() {
 }
 
 /// Perform a single check run (extracted from run_check for reuse in watch mode)
-/// Returns (has_issues, has_warnings, has_errors):
+/// Returns (has_issues, has_warnings, has_errors, total_issues_fixed):
 ///   - has_issues: any violations (info, warning, or error)
 ///   - has_warnings: any Warning or Error severity violations
 ///   - has_errors: any Error-severity violations
+///   - total_issues_fixed: number of issues fixed (or would be fixed in diff mode)
 pub fn perform_check_run(
     args: &crate::CheckArgs,
     config: &rumdl_config::Config,
@@ -88,7 +89,7 @@ pub fn perform_check_run(
     cache: Option<Arc<std::sync::Mutex<crate::cache::LintCache>>>,
     workspace_cache_dir: Option<&Path>,
     project_root: Option<&Path>,
-) -> (bool, bool, bool) {
+) -> (bool, bool, bool, usize) {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
     use rumdl_lib::rule::Severity;
 
@@ -114,7 +115,7 @@ pub fn perform_check_run(
         Ok(fmt) => fmt,
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            return (true, true, true);
+            return (true, true, true, 0);
         }
     };
 
@@ -124,7 +125,7 @@ pub fn perform_check_run(
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
         crate::stdin_processor::process_stdin(&enabled_rules, args, config);
-        return (false, false, false);
+        return (false, false, false, 0);
     }
 
     let cache_hashes = cache
@@ -138,14 +139,14 @@ pub fn perform_check_run(
             if !args.silent {
                 eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
             }
-            return (true, true, true);
+            return (true, true, true, 0);
         }
     };
     if file_paths.is_empty() {
         if !quiet {
             println!("No markdown files found to check.");
         }
-        return (false, false, false);
+        return (false, false, false, 0);
     }
 
     // Check if any enabled rule needs cross-file analysis
@@ -328,7 +329,7 @@ pub fn perform_check_run(
             eprintln!("Error writing output: {e}");
         });
 
-        return (has_issues, has_warnings, has_errors);
+        return (has_issues, has_warnings, has_errors, 0);
     }
 
     let start_time = Instant::now();
@@ -659,7 +660,7 @@ pub fn perform_check_run(
         }
     }
 
-    (has_issues, has_warnings, has_errors)
+    (has_issues, has_warnings, has_errors, total_issues_fixed)
 }
 
 /// Run the linter in watch mode, re-running on file changes

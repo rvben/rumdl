@@ -686,11 +686,11 @@ pub fn process_file_with_formatter(
             });
         }
 
-        // Don't actually write the file in diff mode
+        // Don't actually write the file in diff mode, but report how many would be fixed
         return (
-            total_warnings > 0,
+            total_warnings > 0 || warnings_fixed > 0,
             total_warnings,
-            0,
+            warnings_fixed,
             fixable_warnings,
             all_warnings,
             file_index,
