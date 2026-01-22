@@ -1,0 +1,18 @@
+# rumdl configuration for Zensical/MkDocs Material documentation
+# Zensical uses MkDocs Material syntax extensions
+
+[global]
+flavor = "mkdocs"
+# Exclude rule documentation files (contain intentional violations as examples)
+exclude = [
+    "md*.md",
+    "**/flavors/*.md",
+    "inline-configuration.md",
+    "markdownlint-comparison.md"
+]
+disable = [
+    "MD013",  # Line length not enforced in documentation
+    "MD030",  # Grid cards use 3-space indentation for card layout
+    "MD035",  # Grid card separators (---) inside HTML blocks
+    "MD057",  # Relative links are resolved by Zensical build
+]

@@ -4,13 +4,13 @@
 
 ![rumdl Logo](https://raw.githubusercontent.com/rvben/rumdl/main/assets/logo.png)
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/rvben/rumdl/release.yml)](https://github.com/rvben/rumdl/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/rvben/rumdl/ci.yml)](https://github.com/rvben/rumdl/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Crates.io](https://img.shields.io/crates/v/rumdl)](https://crates.io/crates/rumdl)
 [![PyPI](https://img.shields.io/pypi/v/rumdl)](https://pypi.org/project/rumdl/)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rvben/rumdl)](https://github.com/rvben/rumdl/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/rvben/rumdl)](https://github.com/rvben/rumdl/stargazers)
-[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn)
+[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn) [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github-sponsors)](https://github.com/sponsors/rvben)
 
 ## A modern Markdown linter and formatter, built for speed with Rust
 
@@ -176,7 +176,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.0.222
+mise use rumdl@0.0.223
 ```
 
 ### Using Nix (macOS/Linux)
@@ -353,7 +353,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.0.222
+    rev: v0.0.223
     hooks:
       - id: rumdl      # Lint only (fails on issues)
       - id: rumdl-fmt  # Auto-format and fail if issues remain
@@ -387,7 +387,7 @@ However, for pre-commit workflows where you want to exclude certain files even w
    ```yaml
    repos:
      - repo: https://github.com/rvben/rumdl-pre-commit
-       rev: v0.0.222
+       rev: v0.0.223
        hooks:
          - id: rumdl
            args: [--force-exclude]  # Respect exclude patterns from config
@@ -727,10 +727,11 @@ For editor-specific information on setting up the LSP, refer to our [LSP documen
 rumdl can be configured in several ways:
 
 1. Using a `.rumdl.toml` or `rumdl.toml` file in your project directory or parent directories
-2. Using a `.config/rumdl.toml` file (following the [config-dir convention](https://github.com/pi0/config-dir))
+2. Using a `<project>/.config/rumdl.toml` file (following the [config-dir convention](https://github.com/pi0/config-dir))
 3. Using the `[tool.rumdl]` section in your project's `pyproject.toml` file (for Python projects)
 4. Using command-line arguments
-5. **Automatic markdownlint compatibility**: rumdl automatically discovers and loads existing markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.)
+5. Using a **global user config** at `~/.config/rumdl/rumdl.toml` (see [Global Configuration](#global-configuration) below)
+6. **Automatic markdownlint compatibility**: rumdl automatically discovers and loads existing markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.)
 
 ### Configuration Discovery
 
@@ -739,8 +740,8 @@ run rumdl from any subdirectory of your project and it will find the configurati
 
 The search follows these rules:
 
-- Searches upward for `.rumdl.toml`, `rumdl.toml`, `.config/rumdl.toml`, or `pyproject.toml` (with `[tool.rumdl]` section)
-- Precedence order: `.rumdl.toml` > `rumdl.toml` > `.config/rumdl.toml` > `pyproject.toml`
+- Searches upward for `.rumdl.toml`, `rumdl.toml`, `<dir>/.config/rumdl.toml`, or `pyproject.toml` (with `[tool.rumdl]` section)
+- Precedence order: `.rumdl.toml` > `rumdl.toml` > `<dir>/.config/rumdl.toml` > `pyproject.toml`
 - Stops at the first configuration file found
 - Stops searching when it encounters a `.git` directory (project boundary)
 - Maximum traversal depth of 100 directories
@@ -1133,6 +1134,13 @@ rumdl schema print
 ```
 
 The schema is automatically generated from the Rust types using `schemars` and should be kept in sync with the configuration structures.
+
+## Sponsors
+
+rumdl is free and open source. If it saves you time, consider [sponsoring the project](https://github.com/sponsors/rvben).
+
+<!-- sponsors -->
+<!-- sponsors -->
 
 ## License
 

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.223] - 2026-01-21
+
+### Added
+
+- **MD060: `column-align` option for table cell text alignment** ([#317](https://github.com/rvben/rumdl/issues/317))
+  - Options: `left`, `center`, `right` to force alignment for all columns
+  - Complements existing table formatting rules
+
+- **Documentation site** ([rumdl.dev](https://rumdl.dev))
+  - Rule documentation with examples and configuration guides
+
+### Fixed
+
+- **Embedded markdown respects per-file-ignores and inline config**
+  - Both `rumdl check` and `rumdl fmt` now honor `<!-- rumdl-disable -->` comments
+  - Per-file-ignores configuration applies to embedded markdown blocks
+
+- **Fix mode re-lint uses filtered rules** ([#319](https://github.com/rvben/rumdl/issues/319))
+  - After applying fixes, re-linting respects per-file-ignores and inline config
+
+- **MD030: Auto-fix applies custom spacing config** ([#318](https://github.com/rvben/rumdl/issues/318))
+  - Custom `ul_single`, `ol_single`, etc. values now applied during fix
+
+### Changed
+
+- **Documentation improvements**
+  - Fixed MD051 location in RULES.md tables (thanks @Ravlen in #315)
+  - Added Flavors section to README (closes #316)
+  - Added Discord server link to issue templates (thanks @pygarap in #321)
+
 ## [0.0.222] - 2026-01-20
 
 ### Fixed

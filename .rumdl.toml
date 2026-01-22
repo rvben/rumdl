@@ -6,6 +6,13 @@ include = [
     "docs/**/*.md",
     "README.md"
 ]
+# Exclude rule documentation files (contain intentional violations as examples)
+exclude = [
+    "docs/md*.md",
+    "**/flavors/*.md",
+    "docs/inline-configuration.md",
+    "docs/markdownlint-comparison.md"
+]
 # Globally disable specific rules
 disable = ["MD033", "MD057"]
 respect-gitignore = true
@@ -46,3 +53,12 @@ style = "leading_and_trailing"
 [MD060]
 enabled = true
 style = "aligned"
+
+# Per-file rule ignores
+[per-file-ignores]
+# Skip MD060 for md060.md since it contains intentional example tables in code fences
+"docs/md060.md" = ["MD060"]
+# Zensical/MkDocs Material uses custom syntax that triggers these rules
+"docs/index.md" = ["MD030", "MD035", "MD060"]
+"docs/getting-started/*.md" = ["MD046", "MD060"]
+"docs/usage/*.md" = ["MD046", "MD060"]

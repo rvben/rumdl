@@ -3,6 +3,52 @@ use crate::types::LineLength;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
+/// Controls how cell text is aligned within padded columns.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ColumnAlign {
+    /// Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)
+    #[default]
+    Auto,
+    /// Force all columns to left-align text
+    Left,
+    /// Force all columns to center text
+    Center,
+    /// Force all columns to right-align text
+    Right,
+}
+
+impl Serialize for ColumnAlign {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            ColumnAlign::Auto => serializer.serialize_str("auto"),
+            ColumnAlign::Left => serializer.serialize_str("left"),
+            ColumnAlign::Center => serializer.serialize_str("center"),
+            ColumnAlign::Right => serializer.serialize_str("right"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ColumnAlign {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.to_lowercase().as_str() {
+            "auto" => Ok(ColumnAlign::Auto),
+            "left" => Ok(ColumnAlign::Left),
+            "center" => Ok(ColumnAlign::Center),
+            "right" => Ok(ColumnAlign::Right),
+            _ => Err(serde::de::Error::custom(format!(
+                "Invalid column-align value: {s}. Valid options: auto, left, center, right"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD060Config {
     #[serde(default = "default_enabled")]
@@ -42,6 +88,25 @@ pub struct MD060Config {
     /// ```
     #[serde(default = "default_max_width", rename = "max-width")]
     pub max_width: LineLength,
+
+    /// Controls how cell text is aligned within the padded column width.
+    ///
+    /// - `auto` (default): Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)
+    /// - `left`: Force all columns to left-align text
+    /// - `center`: Force all columns to center text
+    /// - `right`: Force all columns to right-align text
+    ///
+    /// Only applies when `style = "aligned"` or `style = "aligned-no-space"`.
+    ///
+    /// # Examples
+    ///
+    /// ```toml
+    /// [MD060]
+    /// style = "aligned"
+    /// column-align = "center"  # Center all cell text
+    /// ```
+    #[serde(default, rename = "column-align")]
+    pub column_align: ColumnAlign,
 }
 
 impl Default for MD060Config {
@@ -50,6 +115,7 @@ impl Default for MD060Config {
             enabled: default_enabled(),
             style: default_style(),
             max_width: default_max_width(),
+            column_align: ColumnAlign::Auto,
         }
     }
 }
