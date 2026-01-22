@@ -857,7 +857,7 @@ impl RumdlLanguageServer {
 
                         let fix_all_action = CodeAction {
                             title: format!("Fix all rumdl issues ({total_fixable} fixable)"),
-                            kind: Some(CodeActionKind::QUICKFIX),
+                            kind: Some(CodeActionKind::new("source.fixAll.rumdl")),
                             diagnostics: Some(Vec::new()),
                             edit: Some(WorkspaceEdit {
                                 changes: Some(
@@ -1134,7 +1134,15 @@ impl LanguageServer for RumdlLanguageServer {
                         include_text: Some(false),
                     })),
                 })),
-                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+                    code_action_kinds: Some(vec![
+                        CodeActionKind::QUICKFIX,
+                        CodeActionKind::SOURCE_FIX_ALL,
+                        CodeActionKind::new("source.fixAll.rumdl"),
+                    ]),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                    resolve_provider: None,
+                })),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
@@ -1694,12 +1702,39 @@ impl LanguageServer for RumdlLanguageServer {
     async fn code_action(&self, params: CodeActionParams) -> JsonRpcResult<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
         let range = params.range;
+        let requested_kinds = params.context.only;
 
         if let Some(text) = self.get_document_content(&uri).await {
             match self.get_code_actions(&uri, &text, range).await {
                 Ok(actions) => {
-                    let response: Vec<CodeActionOrCommand> =
-                        actions.into_iter().map(CodeActionOrCommand::CodeAction).collect();
+                    // Filter actions by requested kinds (if specified and non-empty)
+                    // LSP spec: "If provided with no kinds, all supported kinds are returned"
+                    // LSP code action kinds are hierarchical: source.fixAll.rumdl matches source.fixAll
+                    let filtered_actions = if let Some(ref kinds) = requested_kinds
+                        && !kinds.is_empty()
+                    {
+                        actions
+                            .into_iter()
+                            .filter(|action| {
+                                action.kind.as_ref().is_some_and(|action_kind| {
+                                    let action_kind_str = action_kind.as_str();
+                                    kinds.iter().any(|requested| {
+                                        let requested_str = requested.as_str();
+                                        // Match if action kind starts with requested kind
+                                        // e.g., "source.fixAll.rumdl" matches "source.fixAll"
+                                        action_kind_str.starts_with(requested_str)
+                                    })
+                                })
+                            })
+                            .collect()
+                    } else {
+                        actions
+                    };
+
+                    let response: Vec<CodeActionOrCommand> = filtered_actions
+                        .into_iter()
+                        .map(CodeActionOrCommand::CodeAction)
+                        .collect();
                     Ok(Some(response))
                 }
                 Err(e) => {
@@ -3399,5 +3434,76 @@ disable = ["MD022"]
         let content = "# Heading  \n\nParagraph  \n- List item  \n\n\n";
         let result = RumdlLanguageServer::apply_formatting_options(content.to_string(), &options);
         assert_eq!(result, "# Heading\n\nParagraph\n- List item\n");
+    }
+
+    #[test]
+    fn test_code_action_kind_filtering() {
+        // Test the hierarchical code action kind matching used in code_action handler
+        // LSP spec: source.fixAll.rumdl should match requests for source.fixAll
+
+        let matches = |action_kind: &str, requested: &str| -> bool { action_kind.starts_with(requested) };
+
+        // source.fixAll.rumdl matches source.fixAll (parent kind)
+        assert!(matches("source.fixAll.rumdl", "source.fixAll"));
+
+        // source.fixAll.rumdl matches source.fixAll.rumdl (exact match)
+        assert!(matches("source.fixAll.rumdl", "source.fixAll.rumdl"));
+
+        // source.fixAll.rumdl matches source (grandparent kind)
+        assert!(matches("source.fixAll.rumdl", "source"));
+
+        // quickfix matches quickfix (exact match)
+        assert!(matches("quickfix", "quickfix"));
+
+        // source.fixAll.rumdl does NOT match quickfix
+        assert!(!matches("source.fixAll.rumdl", "quickfix"));
+
+        // quickfix does NOT match source.fixAll
+        assert!(!matches("quickfix", "source.fixAll"));
+
+        // source.fixAll does NOT match source.fixAll.rumdl (child is more specific)
+        assert!(!matches("source.fixAll", "source.fixAll.rumdl"));
+    }
+
+    #[test]
+    fn test_code_action_kind_filter_with_empty_array() {
+        // LSP spec: "If provided with no kinds, all supported kinds are returned"
+        // An empty array should be treated the same as None (return all actions)
+
+        let filter_actions = |kinds: Option<Vec<&str>>| -> bool {
+            // Simulates our filtering logic
+            if let Some(ref k) = kinds
+                && !k.is_empty()
+            {
+                // Would filter
+                false
+            } else {
+                // Return all
+                true
+            }
+        };
+
+        // None returns all actions
+        assert!(filter_actions(None));
+
+        // Empty array returns all actions (per LSP spec)
+        assert!(filter_actions(Some(vec![])));
+
+        // Non-empty array triggers filtering
+        assert!(!filter_actions(Some(vec!["source.fixAll"])));
+    }
+
+    #[test]
+    fn test_code_action_kind_constants() {
+        // Verify our custom code action kind string matches LSP conventions
+        let fix_all_rumdl = CodeActionKind::new("source.fixAll.rumdl");
+        assert_eq!(fix_all_rumdl.as_str(), "source.fixAll.rumdl");
+
+        // Verify it's a sub-kind of SOURCE_FIX_ALL
+        assert!(
+            fix_all_rumdl
+                .as_str()
+                .starts_with(CodeActionKind::SOURCE_FIX_ALL.as_str())
+        );
     }
 }
