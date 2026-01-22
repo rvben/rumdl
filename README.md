@@ -769,20 +769,19 @@ rumdl provides a JSON Schema for `.rumdl.toml` configuration files, enabling aut
 
 The schema is available at `https://raw.githubusercontent.com/rvben/rumdl/main/rumdl.schema.json`.
 
-**VS Code Setup:**
+**Automatic Setup (via SchemaStore):**
 
-1. Install the "Even Better TOML" extension
-2. The schema will be automatically associated with `.rumdl.toml` and `rumdl.toml` files once submitted to SchemaStore
+The schema is registered with [SchemaStore](https://www.schemastore.org/), so editors with TOML support will automatically provide autocomplete and validation for `.rumdl.toml` and `rumdl.toml` files.
+
+**VS Code:** Install the "Even Better TOML" extension - schema association is automatic.
 
 **Manual Schema Association:**
 
-Add this to your `.rumdl.toml` file (in a comment, as TOML doesn't support `$schema`):
+If your editor doesn't support SchemaStore, add this comment to your config file:
 
 ```toml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/rvben/rumdl/main/rumdl.schema.json
 ```
-
-This enables IntelliSense, validation, and hover documentation for all configuration options.
 
 ### Global Configuration
 
