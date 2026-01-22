@@ -21,17 +21,20 @@
 ## Quick Start
 
 ```bash
+# Install using Cargo
+cargo install rumdl
+
 # Lint Markdown files in the current directory
-uvx rumdl check .
+rumdl check .
 
 # Format files (exits 0 on success, even if unfixable violations remain)
-uvx rumdl fmt .
+rumdl fmt .
 
 # Auto-fix and report unfixable violations (exits 0 if all fixed, 1 if violations remain)
-uvx rumdl check --fix .
+rumdl check --fix .
 
 # Create a default configuration file
-uvx rumdl init
+rumdl init
 ```
 
 ## Overview
