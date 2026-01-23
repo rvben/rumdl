@@ -88,6 +88,10 @@ mod md005_unicode_test;
 mod md029_unicode_test;
 mod md054_unicode_test;
 
+// Formatter idempotency tests
+mod formatter_idempotency_test;
+mod formatter_proptest;
+
 // Cross-rule integration test modules
 mod emphasis_edge_cases_test;
 mod heading_edge_cases_test;
