@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help benchmark benchmark-run benchmark-chart lint-actions
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help benchmark benchmark-run benchmark-chart lint-actions fuzz fuzz-long
 
 # Development environment setup
 setup-mise:
@@ -110,6 +110,15 @@ test-complexity:
 	@echo "Running O(n²) complexity regression tests..."
 	@echo "These tests verify all rules maintain linear O(n) complexity."
 	cargo nextest run --profile performance -E 'test(linear_complexity)'
+
+# Fuzz testing (requires nightly Rust)
+fuzz:
+	@echo "Running fuzz test for fix idempotency (30 seconds)..."
+	cargo +nightly fuzz run fuzz_fix_idempotency -- -max_total_time=30
+
+fuzz-long:
+	@echo "Running extended fuzz test (5 minutes)..."
+	cargo +nightly fuzz run fuzz_fix_idempotency -- -max_total_time=300
 
 clean:
 	cargo clean

@@ -1,0 +1,24 @@
+[package]
+name = "rumdl-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.rumdl]
+path = ".."
+default-features = false
+features = ["parallel"]
+
+# Fuzz fix idempotency - verifies fixes don't oscillate
+[[bin]]
+name = "fuzz_fix_idempotency"
+path = "fuzz_targets/fuzz_fix_idempotency.rs"
+test = false
+doc = false
+bench = false
