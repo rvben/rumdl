@@ -552,6 +552,44 @@ impl MD032BlanksAroundLists {
                             }),
                         });
                     }
+
+                    // Also check if a blank line is needed AFTER this ordered list item
+                    // This ensures single-pass idempotency
+                    if line_idx + 1 < num_lines {
+                        let next_line = lines[line_idx + 1];
+                        let next_is_blank = is_blank_in_context(next_line);
+                        let next_excluded = ctx
+                            .line_info(line_idx + 2)
+                            .is_some_and(|info| info.in_code_block || info.in_front_matter);
+
+                        if !next_is_blank && !next_excluded && !next_line.trim().is_empty() {
+                            // Check if next line is part of this potential list (continuation or another item)
+                            let next_is_list_content = ORDERED_LIST_NON_ONE_RE.is_match(next_line)
+                                || next_line.trim_start().starts_with("- ")
+                                || next_line.trim_start().starts_with("* ")
+                                || next_line.trim_start().starts_with("+ ")
+                                || next_line.starts_with("1. ")
+                                || (next_line.len() > next_line.trim_start().len()); // indented continuation
+
+                            if !next_is_list_content {
+                                let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
+                                let bq_prefix = ctx.blockquote_prefix_for_blank_line(line_idx);
+                                warnings.push(LintWarning {
+                                    line: start_line,
+                                    column: start_col,
+                                    end_line,
+                                    end_column: end_col,
+                                    severity: Severity::Warning,
+                                    rule_name: Some(self.name().to_string()),
+                                    message: "List should be followed by blank line".to_string(),
+                                    fix: Some(Fix {
+                                        range: line_index.line_col_to_byte_range_with_length(line_num + 1, 1, 0),
+                                        replacement: format!("{bq_prefix}\n"),
+                                    }),
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }

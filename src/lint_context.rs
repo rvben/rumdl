@@ -3639,8 +3639,13 @@ impl<'a> LintContext<'a> {
             } else {
                 min_continuation_for_tracking
             };
+            // Lazy continuation allows unindented text to continue a list item,
+            // but NOT structural elements like headings, code fences, or horizontal rules
+            let is_structural_element = line_info.heading.is_some()
+                || line_info.content(content).trim().starts_with("```")
+                || line_info.content(content).trim().starts_with("~~~");
             let is_valid_continuation = effective_continuation_indent >= adjusted_min_continuation_for_tracking
-                || (line_info.indent == 0 && !line_info.is_blank); // Lazy continuation
+                || (line_info.indent == 0 && !line_info.is_blank && !is_structural_element);
 
             if std::env::var("RUMDL_DEBUG_LIST").is_ok() && line_info.list_item.is_none() && !line_info.is_blank {
                 eprintln!(
