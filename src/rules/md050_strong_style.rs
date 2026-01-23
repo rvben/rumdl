@@ -300,7 +300,7 @@ impl Rule for MD050StrongStyle {
                         message: message.to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range(line_num + 1, m.start() + 1),
+                            range: line_index.line_col_to_byte_range_with_length(line_num + 1, m.start() + 1, m.len()),
                             replacement: match target_style {
                                 StrongStyle::Asterisk => format!("**{text}**"),
                                 StrongStyle::Underscore => format!("__{text}__"),
