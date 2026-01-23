@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-01-23
+
+### 🎉 First Stable Release
+
+rumdl reaches production-ready status after validation against 99,291 markdown files
+across 51 popular repositories (kubernetes, react, vscode, rust-lang, tensorflow, and more)
+with **zero false positives detected**.
+
+### Added
+
+- **CLI: `fmt --check` flag for CI usage**
+  - Returns non-zero exit code if files would be modified
+  - Enables dry-run formatting checks in CI pipelines
+
+- **Fuzz testing infrastructure**
+  - Fix idempotency fuzzer verifies fixes don't oscillate
+  - Run with `make fuzz` (requires nightly Rust)
+
+### Fixed
+
+- **MD032: Single-pass idempotency for list blank lines**
+  - Fixes edge case where multiple fix passes could produce different results
+
+- **MD050: Correct byte range for fix replacement**
+  - Fixes auto-fix for strong emphasis style in certain edge cases
+
+### Changed
+
+- **README: Added "Used By" section** with notable projects using rumdl
+- **README: Updated SchemaStore section** to reflect current status
+
 ## [0.0.224] - 2026-01-22
 
 ### Added

@@ -181,7 +181,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.0.223
+mise use rumdl@0.1.0
 ```
 
 ### Using Nix (macOS/Linux)
@@ -358,7 +358,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.0.223
+    rev: v0.1.0
     hooks:
       - id: rumdl      # Lint only (fails on issues)
       - id: rumdl-fmt  # Auto-format and fail if issues remain
@@ -392,7 +392,7 @@ However, for pre-commit workflows where you want to exclude certain files even w
    ```yaml
    repos:
      - repo: https://github.com/rvben/rumdl-pre-commit
-       rev: v0.0.223
+       rev: v0.1.0
        hooks:
          - id: rumdl
            args: [--force-exclude]  # Respect exclude patterns from config
@@ -410,7 +410,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: rvben/rumdl@v0
+      - uses: rvben/rumdl@0.1.0v0
 ```
 
 The `v0` tag always points to the latest stable release, following GitHub Actions conventions.
@@ -429,7 +429,7 @@ The `v0` tag always points to the latest stable release, following GitHub Action
 **Lint specific directory with pinned version:**
 
 ```yaml
-- uses: rvben/rumdl@v0
+- uses: rvben/rumdl@0.1.0v0
   with:
     version: "0.0.189"
     path: docs/
@@ -438,7 +438,7 @@ The `v0` tag always points to the latest stable release, following GitHub Action
 **Use custom config and show annotations in PR:**
 
 ```yaml
-- uses: rvben/rumdl@v0
+- uses: rvben/rumdl@0.1.0v0
   with:
     config: .rumdl.toml
     report-type: annotations

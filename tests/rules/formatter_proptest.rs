@@ -16,7 +16,11 @@ fn apply_all_fixes(content: &str, warnings: &[LintWarning]) -> String {
 
     let mut result = content.to_string();
     for fix in fixes {
-        if fix.range.end <= result.len() {
+        // Validate range is within bounds and on character boundaries
+        if fix.range.end <= result.len()
+            && result.is_char_boundary(fix.range.start)
+            && result.is_char_boundary(fix.range.end)
+        {
             result.replace_range(fix.range.clone(), &fix.replacement);
         }
     }
