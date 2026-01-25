@@ -1064,11 +1064,7 @@ impl MD013LineLength {
                         break_on_sentences: true,
                         preserve_breaks: false,
                         sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                        abbreviations: if config.abbreviations.is_empty() {
-                            None
-                        } else {
-                            Some(config.abbreviations.clone())
-                        },
+                        abbreviations: config.abbreviations_for_reflow(),
                     };
 
                     let mut result: Vec<String> = Vec::new();
@@ -1382,6 +1378,7 @@ impl MD013LineLength {
                     || (next_trimmed.starts_with('[') && next_line.contains("]:"))
                     || is_template_directive_only(next_line)
                     || is_standalone_attr_list(next_line)
+                    || is_snippet_block_delimiter(next_line)
                 {
                     break;
                 }
@@ -1500,11 +1497,7 @@ impl MD013LineLength {
                     break_on_sentences: true,
                     preserve_breaks: false,
                     sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                    abbreviations: if config.abbreviations.is_empty() {
-                        None
-                    } else {
-                        Some(config.abbreviations.clone())
-                    },
+                    abbreviations: config.abbreviations_for_reflow(),
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 

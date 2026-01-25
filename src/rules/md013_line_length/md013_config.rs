@@ -127,6 +127,18 @@ impl Default for MD013Config {
     }
 }
 
+impl MD013Config {
+    /// Convert abbreviations Vec to Option for ReflowOptions
+    /// Empty Vec means "use defaults only" so it maps to None
+    pub fn abbreviations_for_reflow(&self) -> Option<Vec<String>> {
+        if self.abbreviations.is_empty() {
+            None
+        } else {
+            Some(self.abbreviations.clone())
+        }
+    }
+}
+
 impl RuleConfig for MD013Config {
     const RULE_NAME: &'static str = "MD013";
 }
@@ -284,5 +296,33 @@ mod tests {
         assert!(!config.paragraphs, "paragraphs should be false");
         assert!(config.reflow, "reflow should be true");
         assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
+    }
+
+    #[test]
+    fn test_abbreviations_for_reflow_empty_vec() {
+        // Empty vec means "use defaults only" -> returns None
+        let config = MD013Config {
+            abbreviations: Vec::new(),
+            ..Default::default()
+        };
+        assert!(
+            config.abbreviations_for_reflow().is_none(),
+            "Empty abbreviations should return None for reflow"
+        );
+    }
+
+    #[test]
+    fn test_abbreviations_for_reflow_with_custom() {
+        // Non-empty vec means "use these custom abbreviations" -> returns Some
+        let config = MD013Config {
+            abbreviations: vec!["Corp".to_string(), "Inc".to_string()],
+            ..Default::default()
+        };
+        let result = config.abbreviations_for_reflow();
+        assert!(result.is_some(), "Custom abbreviations should return Some");
+        let abbrevs = result.unwrap();
+        assert_eq!(abbrevs.len(), 2);
+        assert!(abbrevs.contains(&"Corp".to_string()));
+        assert!(abbrevs.contains(&"Inc".to_string()));
     }
 }

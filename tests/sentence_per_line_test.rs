@@ -640,3 +640,38 @@ fn test_issue_338_multiple_snippets_in_document() {
         );
     }
 }
+
+#[test]
+fn test_issue_338_bare_snippet_delimiter_as_paragraph_boundary() {
+    let rule = create_sentence_per_line_rule();
+
+    // Bare snippet delimiters (multi-file block format) should act as paragraph boundaries
+    // This is the format:
+    // --8<--
+    // file1.md
+    // file2.md
+    // --8<--
+    let content = "First sentence. Second sentence.\n--8<--\nfile.md\n--8<--\nThird sentence.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Only the first line should have a warning (2 sentences)
+    // The snippet block should NOT be merged with the text
+    assert!(!result.is_empty(), "Should detect multiple sentences on first line");
+    assert!(
+        result[0].message.contains("2 sentences"),
+        "First line has 2 sentences: {:?}",
+        result[0].message
+    );
+
+    // The snippet delimiter should not appear in any fix
+    for warning in &result {
+        if let Some(fix) = &warning.fix {
+            assert!(
+                !fix.replacement.contains("--8<--"),
+                "Snippet delimiter should not be in fix: {:?}",
+                fix.replacement
+            );
+        }
+    }
+}
