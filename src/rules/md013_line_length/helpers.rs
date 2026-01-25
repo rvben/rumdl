@@ -147,8 +147,9 @@ pub(crate) fn is_numbered_list_item(line: &str) -> bool {
     // Can have more digits
     while let Some(c) = chars.next() {
         if c == '.' {
-            // After period, must have a space or be end of line
-            return chars.next().is_none_or(|c| c == ' ');
+            // After period, must have a space (consistent with extract_list_marker_and_content)
+            // "2019." alone is NOT treated as a list item to avoid false positives
+            return chars.next() == Some(' ');
         }
         if !c.is_numeric() {
             return false;
@@ -198,4 +199,55 @@ pub(crate) fn is_template_directive_only(line: &str) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test for issue #336: "2019." alone should NOT be treated as a list item
+    /// This prevents convergence failures when a year appears at the end of a sentence
+    #[test]
+    fn test_numbered_list_item_requires_space_after_period() {
+        // Valid list items (have space after period)
+        assert!(is_numbered_list_item("1. Item"));
+        assert!(is_numbered_list_item("10. Item"));
+        assert!(is_numbered_list_item("99. Long number"));
+        assert!(is_numbered_list_item("123. Triple digits"));
+
+        // Invalid: number+period without space (like years at end of sentences)
+        // These should NOT be treated as list items to avoid reflow issues
+        assert!(!is_numbered_list_item("2019."));
+        assert!(!is_numbered_list_item("1999."));
+        assert!(!is_numbered_list_item("2023."));
+        assert!(!is_numbered_list_item("1.")); // Even single digit without space
+
+        // Invalid: not starting with digit
+        assert!(!is_numbered_list_item("a. Item"));
+        assert!(!is_numbered_list_item(". Item"));
+        assert!(!is_numbered_list_item("Item"));
+
+        // Invalid: no period
+        assert!(!is_numbered_list_item("1 Item"));
+        assert!(!is_numbered_list_item("123"));
+    }
+
+    #[test]
+    fn test_is_list_item_bullet_and_numbered() {
+        // Bullet list items
+        assert!(is_list_item("- Item"));
+        assert!(is_list_item("* Item"));
+        assert!(is_list_item("+ Item"));
+
+        // Bullet without space = not a list item
+        assert!(!is_list_item("-Item"));
+        assert!(!is_list_item("*Item"));
+
+        // Numbered list items
+        assert!(is_list_item("1. Item"));
+        assert!(is_list_item("99. Item"));
+
+        // Year at end of sentence = not a list item
+        assert!(!is_list_item("2019."));
+    }
 }

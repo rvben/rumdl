@@ -285,8 +285,9 @@ fn is_numbered_list_item(line: &str) -> bool {
     // Can have more digits
     while let Some(c) = chars.next() {
         if c == '.' {
-            // After period, must have a space or be end of line
-            return chars.next().is_none_or(|c| c == ' ');
+            // After period, must have a space (consistent with list marker extraction)
+            // "2019." alone is NOT treated as a list item to avoid false positives
+            return chars.next() == Some(' ');
         }
         if !c.is_numeric() {
             return false;
