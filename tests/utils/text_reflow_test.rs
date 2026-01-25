@@ -2833,3 +2833,410 @@ fn test_mixed_quotes_and_emphasis() {
         "Should split with mixed emphasis and quotes: {result:?}"
     );
 }
+
+// =============================================================================
+// Email autolink tests
+// Regression tests for issue #339 where email autolinks caused infinite loops
+// =============================================================================
+
+#[test]
+fn test_email_autolink_not_treated_as_html_tag() {
+    // Issue #339: Email autolinks like <user@example.com> were being treated as HTML tags,
+    // causing content duplication and infinite loops in sentence-per-line reflow
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "First sentence here. Reach me at <test@example.com>.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert_eq!(lines[0], "First sentence here.");
+    assert_eq!(lines[1], "Reach me at <test@example.com>.");
+}
+
+#[test]
+fn test_email_autolink_at_end_of_sentence() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Contact us at <support@company.com>. We respond within 24 hours.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert_eq!(lines[0], "Contact us at <support@company.com>.");
+    assert_eq!(lines[1], "We respond within 24 hours.");
+}
+
+#[test]
+fn test_email_autolink_mid_sentence() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Email <admin@test.org> for more info. Thank you.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert_eq!(lines[0], "Email <admin@test.org> for more info.");
+    assert_eq!(lines[1], "Thank you.");
+}
+
+#[test]
+fn test_email_autolink_complex_domain() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Reach me at <user.name+tag@sub.domain.example.com>. Thanks!";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<user.name+tag@sub.domain.example.com>"));
+}
+
+#[test]
+fn test_url_autolinks_still_work() {
+    // Make sure URL autolinks still work correctly after the email autolink fix
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Visit <https://example.com> for details. See you there.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert_eq!(lines[0], "Visit <https://example.com> for details.");
+    assert_eq!(lines[1], "See you there.");
+}
+
+#[test]
+fn test_html_tag_vs_email_autolink_distinction() {
+    // Test that real HTML tags are still processed correctly
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    // HTML tags should be kept as-is
+    let input = "Use the <code>command</code> here. It's simple.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<code>"));
+    assert!(lines[0].contains("</code>"));
+}
+
+#[test]
+fn test_email_autolink_no_content_duplication() {
+    // Regression test for the content extraction bug in issue #339
+    // The bug caused text BEFORE the email to be duplicated in the HtmlTag element
+    // e.g., "Reach me at <test@example.com>" would create:
+    //   HtmlTag("Reach me at <test@example.com>") instead of just the email
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Prefix text <test@example.com> suffix text.";
+    let result = reflow_markdown(input, &options);
+
+    // Should NOT contain duplicated prefix
+    assert_eq!(
+        result.matches("Prefix text").count(),
+        1,
+        "Prefix should appear exactly once: {result:?}"
+    );
+    // Email should appear exactly once
+    assert_eq!(
+        result.matches("<test@example.com>").count(),
+        1,
+        "Email should appear exactly once: {result:?}"
+    );
+}
+
+#[test]
+fn test_multiple_emails_in_sentence() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Contact <sales@example.com> or <support@example.com> for help. Thanks!";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<sales@example.com>"));
+    assert!(lines[0].contains("<support@example.com>"));
+}
+
+#[test]
+fn test_email_and_html_tags_mixed() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Use <code>git</code> or email <dev@example.com> for help. Done.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    // Verify email is preserved correctly (the main focus of issue #339)
+    assert!(lines[0].contains("<dev@example.com>"));
+    // Verify HTML tags are present (opening and closing)
+    assert!(lines[0].contains("<code>"));
+    assert!(lines[0].contains("</code>"));
+}
+
+#[test]
+fn test_email_and_url_autolinks_mixed() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Visit <https://example.com> or email <info@example.com> for details. Bye.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<https://example.com>"));
+    assert!(lines[0].contains("<info@example.com>"));
+}
+
+#[test]
+fn test_email_with_long_tld() {
+    // TLDs like .museum, .photography exist
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Contact <curator@art.museum> for exhibitions. Welcome!";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<curator@art.museum>"));
+}
+
+#[test]
+fn test_email_with_numbers_in_local_part() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Email <user123@test99.example.com> for access. Thanks!";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<user123@test99.example.com>"));
+}
+
+#[test]
+fn test_email_with_percent_encoding_chars() {
+    // EMAIL_PATTERN allows % in local part for percent-encoded chars
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Email <user%40special@example.com> if needed. Done!";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<user%40special@example.com>"));
+}
+
+#[test]
+fn test_invalid_email_single_char_tld_treated_as_html() {
+    // <a@b.c> has single-char TLD which doesn't exist - treated as HTML tag
+    // This should still work (preserved as-is) without causing issues
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Check <a@b.c> for testing. Done!";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    // Should be preserved regardless of classification
+    assert!(lines[0].contains("<a@b.c>"));
+}
+
+#[test]
+fn test_invalid_email_no_tld_treated_as_html() {
+    // <user@localhost> has no TLD - treated as HTML tag
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Use <user@localhost> locally. Done!";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<user@localhost>"));
+}
+
+#[test]
+fn test_email_at_very_start_of_text() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "<start@example.com> is the contact. Use it.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].starts_with("<start@example.com>"));
+}
+
+#[test]
+fn test_email_as_only_content() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "<only@example.com>";
+    let result = reflow_markdown(input, &options);
+
+    assert_eq!(result, "<only@example.com>");
+}
+
+#[test]
+fn test_consecutive_emails() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "<first@example.com><second@example.com> are contacts. Done.";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<first@example.com>"));
+    assert!(lines[0].contains("<second@example.com>"));
+}
+
+#[test]
+fn test_email_idempotency() {
+    // Applying reflow twice should produce the same result
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Contact <test@example.com> for help. Thank you for reading.";
+    let first_pass = reflow_markdown(input, &options);
+    let second_pass = reflow_markdown(&first_pass, &options);
+
+    assert_eq!(first_pass, second_pass, "Reflow should be idempotent");
+}
+
+#[test]
+fn test_email_with_hyphen_in_domain() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Email <contact@my-company.example.com> for info. Thanks!";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines.len(), 2, "Should split into 2 sentences: {result:?}");
+    assert!(lines[0].contains("<contact@my-company.example.com>"));
+}
+
+#[test]
+fn test_html_entity_extraction_no_duplication() {
+    // Regression test: html_entity extraction had the same bug
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Use &nbsp; for spacing. Done!";
+    let result = reflow_markdown(input, &options);
+
+    assert_eq!(
+        result.matches("Use").count(),
+        1,
+        "Prefix should appear exactly once: {result:?}"
+    );
+    assert_eq!(
+        result.matches("&nbsp;").count(),
+        1,
+        "Entity should appear exactly once: {result:?}"
+    );
+}
+
+#[test]
+fn test_hugo_shortcode_extraction_no_duplication() {
+    // Regression test: hugo_shortcode extraction had the same bug
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "Include {{< figure src=\"test.png\" >}} here. Done!";
+    let result = reflow_markdown(input, &options);
+
+    assert_eq!(
+        result.matches("Include").count(),
+        1,
+        "Prefix should appear exactly once: {result:?}"
+    );
+    assert_eq!(
+        result.matches("{{< figure").count(),
+        1,
+        "Shortcode should appear exactly once: {result:?}"
+    );
+}
