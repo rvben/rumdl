@@ -326,3 +326,317 @@ fn test_custom_abbreviation_with_period_in_config() {
         "Abbreviation config with/without period should behave the same"
     );
 }
+
+// =============================================================================
+// Issue #335: Abbreviations config not recognized
+// =============================================================================
+
+#[test]
+fn test_issue_335_abbreviations_config_empty_vec_uses_defaults() {
+    // Issue #335: When abbreviations was Option<Vec<String>>, None and Some(vec![])
+    // behaved differently. Now with Vec<String>, empty vec means "use defaults only"
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::from_const(0),
+        code_blocks: false,
+        tables: false,
+        headings: false,
+        paragraphs: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
+        abbreviations: vec![], // Empty = use built-in defaults
+    });
+
+    // "Dr." is a built-in abbreviation - should NOT split after it
+    // This single-sentence text should produce no warnings
+    let content = "Dr. Smith is here today.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Single sentence with abbreviation - no warning expected
+    assert!(
+        result.is_empty(),
+        "Single sentence with built-in abbreviation should not trigger warning: {result:?}"
+    );
+
+    // Now test that "Dr." doesn't cause incorrect split in multi-sentence
+    let content2 = "Dr. Smith is here. He arrived today.";
+    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result2 = rule.check(&ctx2).unwrap();
+
+    // Should detect 2 sentences (split at "here.", not at "Dr.")
+    assert!(
+        !result2.is_empty() && result2[0].message.contains("2 sentences"),
+        "Should detect 2 sentences, not 3 (Dr. is abbreviation): {result2:?}"
+    );
+
+    // Verify the fix splits correctly (after "here.", not after "Dr.")
+    if let Some(fix) = &result2[0].fix {
+        assert!(
+            fix.replacement.starts_with("Dr. Smith"),
+            "Fix should keep 'Dr. Smith' together: {:?}",
+            fix.replacement
+        );
+    }
+}
+
+#[test]
+fn test_issue_335_custom_abbreviations_extend_defaults() {
+    // Custom abbreviations should be ADDED to defaults, not replace them
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::from_const(0),
+        code_blocks: false,
+        tables: false,
+        headings: false,
+        paragraphs: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
+        abbreviations: vec!["Corp".to_string(), "Inc".to_string()],
+    });
+
+    // Single sentence with multiple abbreviations - no warning expected
+    let content = "Dr. Smith works at Corp. headquarters today.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Single sentence with built-in and custom abbreviations should not trigger warning: {result:?}"
+    );
+
+    // Verify both built-in (Dr.) and custom (Corp., Inc.) are recognized
+    let content2 = "Dr. Smith at Corp. arrived. He contacted Inc. today.";
+    let ctx2 = LintContext::new(content2, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result2 = rule.check(&ctx2).unwrap();
+
+    // Should detect 2 sentences (split at "arrived." and end)
+    assert!(
+        !result2.is_empty() && result2[0].message.contains("2 sentences"),
+        "Should detect exactly 2 sentences (abbreviations recognized): {result2:?}"
+    );
+
+    // Verify the fix keeps abbreviations intact
+    if let Some(fix) = &result2[0].fix {
+        assert!(
+            fix.replacement.contains("Dr. Smith") && fix.replacement.contains("Corp."),
+            "Fix should keep abbreviations intact: {:?}",
+            fix.replacement
+        );
+    }
+}
+
+// =============================================================================
+// Issue #336: Year at end of sentence breaks reflow
+// =============================================================================
+
+#[test]
+fn test_issue_336_year_at_end_of_sentence_not_list_item() {
+    // Issue #336: "2019." was incorrectly identified as a list item because
+    // is_numbered_list_item() didn't require space after the period
+    let rule = create_sentence_per_line_rule();
+
+    let content = "The event happened in 2019. It was a great year.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should detect 2 sentences and offer to fix
+    assert!(!result.is_empty(), "Should detect multiple sentences: {result:?}");
+    assert!(
+        result[0].message.contains("2 sentences"),
+        "Should detect exactly 2 sentences: {result:?}"
+    );
+
+    // Verify a fix is available (means the reflow didn't fail/loop)
+    assert!(
+        result[0].fix.is_some(),
+        "Should have a fix available (no infinite loop): {result:?}"
+    );
+}
+
+#[test]
+fn test_issue_336_various_years_at_sentence_end() {
+    let rule = create_sentence_per_line_rule();
+
+    let test_cases = [
+        "Founded in 1999. Still going strong.",
+        "Released in 2023. Users love it.",
+        "Since 1776. A long history.",
+        "Updated 2024. Now with new features.",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should detect 2 sentences
+        assert!(
+            !result.is_empty() && result[0].message.contains("2 sentences"),
+            "Should detect 2 sentences for: {content}, got: {result:?}"
+        );
+
+        // Should have a fix available (no convergence failure)
+        assert!(result[0].fix.is_some(), "Should have fix for: {content}");
+    }
+}
+
+#[test]
+fn test_issue_336_actual_numbered_list_still_works() {
+    // Make sure we didn't break actual numbered lists
+    let rule = create_sentence_per_line_rule();
+
+    let content = "1. First item\n2. Second item\n3. Third item";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Numbered lists should not trigger sentence-per-line warnings
+    assert!(
+        result.is_empty(),
+        "Numbered list items should not trigger warnings: {result:?}"
+    );
+}
+
+// =============================================================================
+// Issue #337: attr_list syntax being reflowed incorrectly
+// =============================================================================
+
+#[test]
+fn test_issue_337_standalone_attr_list_preserved() {
+    // Issue #337: Standalone attr_list like `{ .class-name }` should be preserved
+    // and not merged into the previous paragraph during reflow
+    let rule = create_sentence_per_line_rule();
+
+    // Single sentence followed by attr_list - should not trigger warning
+    let content = "This is a single sentence.\n{ .special-class }";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // The attr_list should be treated as a separate block, not merged with paragraph
+    // If there's a warning, it should not be about multiple sentences
+    for warning in &result {
+        assert!(
+            !warning.message.contains("sentences"),
+            "attr_list should not cause sentence count issues: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_337_various_attr_list_formats() {
+    let rule = create_sentence_per_line_rule();
+
+    let test_cases = [
+        "Single sentence.\n{ .class }",
+        "Single sentence.\n{: .class }",
+        "Single sentence.\n{#custom-id}",
+        "Single sentence.\n{: #id .class }",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not incorrectly count attr_list as part of paragraph
+        for warning in &result {
+            assert!(
+                !warning.message.contains("2 sentences"),
+                "attr_list should not be counted as sentence in: {content}, got: {result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_issue_337_inline_attr_list_in_heading() {
+    // Inline attr_lists (part of heading) should not cause issues
+    let rule = create_sentence_per_line_rule();
+
+    let content = "# Heading {#custom-id}\n\nThis is one sentence.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should not trigger any warnings for this valid content
+    assert!(
+        result.is_empty(),
+        "Heading with inline attr_list should not cause warnings: {result:?}"
+    );
+}
+
+// =============================================================================
+// Issue #338: MkDocs Snippets notation being reflowed
+// =============================================================================
+
+#[test]
+fn test_issue_338_snippets_delimiter_not_merged() {
+    // Issue #338: MkDocs Snippets notation like `;--8<--` should be preserved
+    let rule = create_sentence_per_line_rule();
+
+    // Snippets on their own line should not be merged with surrounding text
+    let content = "Some text here.\n\n;--8<-- \"path/to/file.md\"\n\nMore text after.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Snippets line should be treated as its own block
+    for warning in &result {
+        // Should not try to merge snippets with other text
+        assert!(
+            !warning.message.contains("--8<--"),
+            "Snippets notation should not appear in warning message: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_338_snippets_block_style() {
+    let rule = create_sentence_per_line_rule();
+
+    // Block-style snippets (without semicolon)
+    let content = "Introduction here.\n\n--8<-- \"includes/header.md\"\n\nConclusion here.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Snippets should be treated as block element
+    for warning in &result {
+        assert!(
+            !warning.message.contains("--8<--"),
+            "Block snippets should be preserved: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_338_snippets_with_line_range() {
+    let rule = create_sentence_per_line_rule();
+
+    // Snippets with line range specifier
+    let content = "Text before.\n\n--8<-- \"file.md:5:10\"\n\nText after.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should handle snippets with options
+    for warning in &result {
+        assert!(
+            !warning.message.contains("--8<--"),
+            "Snippets with line range should be preserved: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_338_multiple_snippets_in_document() {
+    let rule = create_sentence_per_line_rule();
+
+    let content = "Header text.\n\n--8<-- \"file1.md\"\n\n--8<-- \"file2.md\"\n\nFooter text.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Multiple snippets should all be preserved
+    for warning in &result {
+        assert!(
+            !warning.message.contains("--8<--"),
+            "Multiple snippets should all be preserved: {result:?}"
+        );
+    }
+}
