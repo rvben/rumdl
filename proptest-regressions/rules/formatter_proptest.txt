@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 24e174e0aa5029e4447421ada4288f56565e79c53e5ab7da5077b110f02940bf # shrinks to content = "- \n# \n**\n2. \n# "
+cc 9e61db7552b4c2dc5113df7668b04ba6835145824d9468ff31706f0d9f0e4e16 # shrinks to content = "`𝼧FM?FZ`\n**Ⱥ8!ￒQ\u{11727}<<^ **"
