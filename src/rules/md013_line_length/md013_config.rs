@@ -86,8 +86,8 @@ pub struct MD013Config {
     /// Periods are optional - both "Dr" and "Dr." work the same
     /// Inherited from global config, can be overridden per-rule
     /// Custom abbreviations are always added to the built-in defaults
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub abbreviations: Option<Vec<String>>,
+    #[serde(default)]
+    pub abbreviations: Vec<String>,
 }
 
 fn default_line_length() -> LineLength {
@@ -122,7 +122,7 @@ impl Default for MD013Config {
             reflow: false,
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
-            abbreviations: None,
+            abbreviations: Vec::new(),
         }
     }
 }
@@ -208,7 +208,7 @@ mod tests {
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,
             length_mode: LengthMode::default(),
-            abbreviations: None,
+            abbreviations: Vec::new(),
         };
 
         let toml_str = toml::to_string(&config).unwrap();

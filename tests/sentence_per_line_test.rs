@@ -15,7 +15,7 @@ fn create_sentence_per_line_rule() -> MD013LineLength {
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
-        abbreviations: None,
+        abbreviations: vec![],
     })
 }
 
@@ -181,7 +181,7 @@ fn test_single_sentence_with_no_line_length_constraint() {
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
-        abbreviations: None,
+        abbreviations: vec![],
     });
     let content = "This document provides advice for porting Rust code using PyO3 to run under\n\
                    free-threaded Python.";
@@ -241,7 +241,7 @@ fn test_custom_abbreviations_recognized() {
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
-        abbreviations: Some(vec!["Assn".to_string()]),
+        abbreviations: vec!["Assn".to_string()],
     });
 
     // With custom "Assn" abbreviation, this should be ONE sentence
@@ -269,7 +269,7 @@ fn test_custom_abbreviations_merged_with_builtin() {
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
-        abbreviations: Some(vec!["Assn".to_string()]),
+        abbreviations: vec!["Assn".to_string()],
     });
 
     // Both "Dr." (built-in) and "Assn." (custom) should be recognized
@@ -297,7 +297,7 @@ fn test_custom_abbreviation_with_period_in_config() {
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
-        abbreviations: Some(vec!["Univ".to_string()]),
+        abbreviations: vec!["Univ".to_string()],
     });
 
     let rule_with_period = MD013LineLength::from_config_struct(MD013Config {
@@ -310,7 +310,7 @@ fn test_custom_abbreviation_with_period_in_config() {
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
-        abbreviations: Some(vec!["Univ.".to_string()]),
+        abbreviations: vec!["Univ.".to_string()],
     });
 
     let content = "Visit Univ. Campus for the tour.";

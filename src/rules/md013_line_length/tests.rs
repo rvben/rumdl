@@ -1975,7 +1975,7 @@ fn test_paragraphs_false_skips_regular_text() {
         reflow: false,
         reflow_mode: ReflowMode::default(),
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2005,7 +2005,7 @@ fn test_paragraphs_false_still_checks_code_blocks() {
         reflow: false,
         reflow_mode: ReflowMode::default(),
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2036,7 +2036,7 @@ fn test_paragraphs_false_still_checks_headings() {
         reflow: false,
         reflow_mode: ReflowMode::default(),
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2065,7 +2065,7 @@ fn test_paragraphs_false_with_reflow_sentence_per_line() {
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2094,7 +2094,7 @@ fn test_paragraphs_true_checks_regular_text() {
         reflow: false,
         reflow_mode: ReflowMode::default(),
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2123,7 +2123,7 @@ fn test_line_length_zero_disables_all_checks() {
         reflow: false,
         reflow_mode: ReflowMode::default(),
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2152,7 +2152,7 @@ fn test_line_length_zero_with_headings() {
         reflow: false,
         reflow_mode: ReflowMode::default(),
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2181,7 +2181,7 @@ fn test_line_length_zero_with_code_blocks() {
         reflow: false,
         reflow_mode: ReflowMode::default(),
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2210,7 +2210,7 @@ fn test_line_length_zero_with_sentence_per_line_reflow() {
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2267,7 +2267,7 @@ Final paragraph.
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: LengthMode::default(),
-        abbreviations: None,
+        abbreviations: Vec::new(),
     };
     let rule = MD013LineLength::from_config_struct(config);
     let result = rule.check(&ctx).unwrap();

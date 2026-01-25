@@ -112,6 +112,28 @@ pub fn contains_attr_list(line: &str) -> bool {
     ATTR_LIST_PATTERN.is_match(line)
 }
 
+/// Check if a line is a standalone block attr_list (on its own line)
+/// This is used for block-level attributes like:
+/// ```markdown
+/// Paragraph text.
+/// { .class-name }
+/// ```
+/// or with colon:
+/// ```markdown
+/// Paragraph text.
+/// {: .class-name }
+/// ```
+#[inline]
+pub fn is_standalone_attr_list(line: &str) -> bool {
+    let trimmed = line.trim();
+    // Must start with { and end with }
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return false;
+    }
+    // Must be a valid attr_list (not just random braces)
+    ATTR_LIST_PATTERN.is_match(trimmed)
+}
+
 /// Extract all attr_lists from a line
 pub fn find_attr_lists(line: &str) -> Vec<AttrList> {
     if !line.contains('{') {
@@ -378,5 +400,31 @@ No ID here.
         assert_eq!(attrs.len(), 1);
         assert_eq!(attrs[0].id, Some("my_custom_id".to_string()));
         assert_eq!(attrs[0].classes, vec!["my_class"]);
+    }
+
+    /// Test for issue #337: Standalone attr_lists should be detected
+    /// These should be treated as paragraph boundaries in reflow
+    #[test]
+    fn test_is_standalone_attr_list() {
+        // Valid standalone attr_lists (on their own line)
+        assert!(is_standalone_attr_list("{ .class-name }"));
+        assert!(is_standalone_attr_list("{: .class-name }"));
+        assert!(is_standalone_attr_list("{#custom-id}"));
+        assert!(is_standalone_attr_list("{: #custom-id .class }"));
+        assert!(is_standalone_attr_list("  { .indented }  ")); // With whitespace
+
+        // Not standalone (part of other content)
+        assert!(!is_standalone_attr_list("Some text {#id}"));
+        assert!(!is_standalone_attr_list("{#id} more text"));
+        assert!(!is_standalone_attr_list("# Heading {#id}"));
+
+        // Not valid attr_lists (just braces)
+        assert!(!is_standalone_attr_list("{ }"));
+        assert!(!is_standalone_attr_list("{}"));
+        assert!(!is_standalone_attr_list("{ random text }"));
+
+        // Empty line
+        assert!(!is_standalone_attr_list(""));
+        assert!(!is_standalone_attr_list("   "));
     }
 }

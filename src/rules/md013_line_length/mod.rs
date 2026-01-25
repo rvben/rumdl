@@ -3,6 +3,8 @@
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::mkdocs_attr_list::is_standalone_attr_list;
+use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::range_utils::LineIndex;
 use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{
@@ -43,7 +45,7 @@ impl MD013LineLength {
                 reflow: false,
                 reflow_mode: ReflowMode::default(),
                 length_mode: LengthMode::default(),
-                abbreviations: None,
+                abbreviations: Vec::new(),
             },
         }
     }
@@ -1062,7 +1064,11 @@ impl MD013LineLength {
                         break_on_sentences: true,
                         preserve_breaks: false,
                         sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                        abbreviations: config.abbreviations.clone(),
+                        abbreviations: if config.abbreviations.is_empty() {
+                            None
+                        } else {
+                            Some(config.abbreviations.clone())
+                        },
                     };
 
                     let mut result: Vec<String> = Vec::new();
@@ -1375,6 +1381,7 @@ impl MD013LineLength {
                     || is_horizontal_rule(next_trimmed)
                     || (next_trimmed.starts_with('[') && next_line.contains("]:"))
                     || is_template_directive_only(next_line)
+                    || is_standalone_attr_list(next_line)
                 {
                     break;
                 }
@@ -1401,6 +1408,16 @@ impl MD013LineLength {
 
             if contains_definition_list {
                 // Don't reflow definition lists - skip this paragraph
+                i = paragraph_start + paragraph_lines.len();
+                continue;
+            }
+
+            // Skip reflowing if this paragraph contains MkDocs Snippets markers
+            // Snippets blocks (-8<- ... -8<-) should be preserved exactly
+            let contains_snippets = paragraph_lines.iter().any(|line| is_snippet_block_delimiter(line));
+
+            if contains_snippets {
+                // Don't reflow Snippets blocks - skip this paragraph
                 i = paragraph_start + paragraph_lines.len();
                 continue;
             }
@@ -1483,7 +1500,11 @@ impl MD013LineLength {
                     break_on_sentences: true,
                     preserve_breaks: false,
                     sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                    abbreviations: config.abbreviations.clone(),
+                    abbreviations: if config.abbreviations.is_empty() {
+                        None
+                    } else {
+                        Some(config.abbreviations.clone())
+                    },
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
