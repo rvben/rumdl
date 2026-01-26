@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-01-26
+
+### Fixed
+
+- **MD013: Preserve MkDocs snippet delimiters during reflow** ([#338](https://github.com/rvben/rumdl/issues/338))
+  - `-8<-` and `--8<--` delimiters now stay on their own lines when reflowing list items
+  - Prevents MkDocs Snippets extension syntax from being corrupted
+
+- **MD013: Detect same-line closing tags for script/style elements** ([#339](https://github.com/rvben/rumdl/issues/339))
+  - Self-closing tags like `<script src="..."></script>` no longer cause subsequent lines to be skipped
+  - Lines after inline script/style tags are now properly checked for line length
+
+- **MD013: Improve reflow handling for config and MkDocs syntax** ([#335](https://github.com/rvben/rumdl/issues/335), [#337](https://github.com/rvben/rumdl/issues/337))
+  - Recognize `abbreviations` config option (was showing "unknown option" error)
+  - Preserve attrlist syntax `{: .class }` on its own line during reflow
+
+- **MD013: Require space after period for numbered list detection** ([#336](https://github.com/rvben/rumdl/issues/336))
+  - Prevents "failed to converge after 100 iterations" error on certain inputs
+  - Version numbers like `1.2.3` no longer mistakenly detected as list items
+
+- **MD013: Handle email autolinks correctly**
+  - Email addresses in angle brackets (e.g., `<user@example.com>`) no longer break HTML tag extraction
+
+- **MD005/MD030: Use blockquote-aware indent calculation**
+  - List continuation detection now correctly handles blockquote prefixes
+  - Multi-line list item detection accounts for blockquote nesting
+
+### Changed
+
+- **Shared blockquote utilities for indent calculation**
+  - Centralized logic for calculating indentation within blockquotes
+  - Improves consistency across MD005, MD030, and MD032 rules
+
 ## [0.1.0] - 2026-01-23
 
 ### 🎉 First Stable Release
