@@ -597,6 +597,39 @@ mod tests {
         assert_eq!(fixed, expected, "Multi-line spacing should be fixed correctly");
     }
 
+    #[test]
+    fn test_multi_line_blockquote_list_regression() {
+        // Regression test: multi-line detection must work for lists inside blockquotes
+        // Previously, the raw indent (0 for blockquote lines) was compared against
+        // content_column, causing all blockquote list items to appear as single-line.
+        let rule = MD030ListMarkerSpace::new(
+            1, // ul_single
+            3, // ul_multi - multi-line items should require 3 spaces
+            1, // ol_single
+            1, // ol_multi
+        );
+
+        // A blockquote list where the item has continuation content
+        // The continuation ">   more text" has 2 spaces of indent after the marker
+        let content = "> - First item\n>   more text\n> - Second item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // First item is multi-line (has continuation), so should expect 3 spaces (ul_multi)
+        // It only has 1 space, so should be flagged
+        assert_eq!(
+            result.len(),
+            1,
+            "Multi-line blockquote list item should be detected. Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 1, "Warning should be on line 1");
+        assert!(
+            result[0].message.contains("Expected: 3"),
+            "Should expect ul_multi (3) spaces. Got: {}",
+            result[0].message
+        );
+    }
+
     // Tests for issue #253: MD030 false positive on hard-wrapped brackets
     // https://github.com/rvben/rumdl/issues/253
 

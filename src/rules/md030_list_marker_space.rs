@@ -6,6 +6,7 @@
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::list_utils::ListType;
+use crate::utils::blockquote::effective_indent_in_blockquote;
 use crate::utils::element_cache::ElementCache;
 use crate::utils::range_utils::calculate_match_range;
 use toml;
@@ -304,15 +305,39 @@ impl MD030ListMarkerSpace {
                 // this list item is done
                 let line_content = lines.get(next_line_num - 1).unwrap_or(&"");
                 if !line_content.trim().is_empty() {
-                    let expected_continuation_indent = current_list.content_column;
-                    let actual_indent = line_content.len() - line_content.trim_start().len();
+                    // Get blockquote level from the current list item's line
+                    let bq_level = current_line_info
+                        .blockquote
+                        .as_ref()
+                        .map(|bq| bq.nesting_level)
+                        .unwrap_or(0);
 
-                    if actual_indent < expected_continuation_indent {
+                    // For blockquote lists, min continuation indent is just the marker width
+                    // (not the full content_column which includes blockquote prefix)
+                    let min_continuation_indent = if bq_level > 0 {
+                        // For lists in blockquotes, use marker width (2 for "* " or "- ")
+                        // content_column includes blockquote prefix, so subtract that
+                        current_list.content_column.saturating_sub(
+                            current_line_info
+                                .blockquote
+                                .as_ref()
+                                .map(|bq| bq.prefix.len())
+                                .unwrap_or(0),
+                        )
+                    } else {
+                        current_list.content_column
+                    };
+
+                    // Calculate effective indent (blockquote-aware)
+                    let raw_indent = line_content.len() - line_content.trim_start().len();
+                    let actual_indent = effective_indent_in_blockquote(line_content, bq_level, raw_indent);
+
+                    if actual_indent < min_continuation_indent {
                         break; // Line is not indented enough to be part of this list item
                     }
 
                     // If we find a continuation line, this is multi-line
-                    if actual_indent >= expected_continuation_indent {
+                    if actual_indent >= min_continuation_indent {
                         return true;
                     }
                 }
