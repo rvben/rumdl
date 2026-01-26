@@ -3,6 +3,7 @@
 //! Provides reusable traits and functions for rule implementations and core linter logic.
 
 pub mod anchor_styles;
+pub mod blockquote;
 pub mod code_block_utils;
 // DocumentStructure has been merged into LintContext
 // pub mod document_structure;
