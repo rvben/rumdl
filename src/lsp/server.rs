@@ -1567,6 +1567,12 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn will_save_wait_until(&self, params: WillSaveTextDocumentParams) -> JsonRpcResult<Option<Vec<TextEdit>>> {
+        // Only apply fixes on manual saves (Cmd+S / Ctrl+S), not on autosave
+        // This respects VSCode's editor.formatOnSave: "explicit" setting
+        if params.reason != TextDocumentSaveReason::MANUAL {
+            return Ok(None);
+        }
+
         let config_guard = self.config.read().await;
         let enable_auto_fix = config_guard.enable_auto_fix;
         drop(config_guard);
