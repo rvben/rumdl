@@ -343,3 +343,67 @@ fn test_issue_186_sublist_after_code_block() {
         result
     );
 }
+
+/// Regression test: lists inside blockquotes must use blockquote-aware indent calculation
+/// Previously, raw indent (0 for blockquote lines) was compared against content_column,
+/// causing continuation detection to fail for blockquote lists.
+#[test]
+fn test_blockquote_list_continuation_detection() {
+    let rule = MD005ListIndent::default();
+
+    // List inside blockquote with proper continuation indent
+    let content = "\
+> * Parent item
+>   * Child item with correct indent";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Blockquote nested list should not be flagged with correct indent. Got: {:?}",
+        result
+    );
+}
+
+/// Test nested blockquotes with lists
+#[test]
+fn test_nested_blockquote_list_indent() {
+    let rule = MD005ListIndent::default();
+
+    // Nested blockquote with properly indented list
+    let content = "\
+> > * Outer item
+> >   * Inner item";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Nested blockquote list should not be flagged. Got: {:?}",
+        result
+    );
+}
+
+/// Test blockquote list with continuation content (like issue #268 pattern)
+#[test]
+fn test_blockquote_list_with_continuation_content() {
+    let rule = MD005ListIndent::default();
+
+    // Pattern from issue #268: list items with continuation in blockquote
+    let content = "\
+> 1. Opening the app
+>    and doing stuff
+>    [**See preview here!**](https://example.com)
+> 2. Second item";
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Blockquote list with continuation content should not be flagged. Got: {:?}",
+        result
+    );
+}

@@ -3,6 +3,7 @@
 //!
 //! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
 
+use crate::utils::blockquote::effective_indent_in_blockquote;
 use crate::utils::range_utils::calculate_match_range;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
@@ -25,6 +26,10 @@ pub struct MD005ListIndent {
 struct LineCacheInfo {
     /// Indentation level for each line (0 for empty lines)
     indentation: Vec<usize>,
+    /// Blockquote nesting level for each line (0 for non-blockquote lines)
+    blockquote_levels: Vec<usize>,
+    /// Line content references for blockquote-aware indent calculation
+    line_contents: Vec<String>,
     /// Bit flags: bit 0 = has_content, bit 1 = is_list_item, bit 2 = is_continuation_content
     flags: Vec<u8>,
     /// Parent list item line number for each list item (1-indexed, 0 = no parent)
@@ -40,6 +45,8 @@ impl LineCacheInfo {
     fn new(ctx: &crate::lint_context::LintContext) -> Self {
         let total_lines = ctx.lines.len();
         let mut indentation = Vec::with_capacity(total_lines);
+        let mut blockquote_levels = Vec::with_capacity(total_lines);
+        let mut line_contents = Vec::with_capacity(total_lines);
         let mut flags = Vec::with_capacity(total_lines);
         let mut parent_map = HashMap::new();
 
@@ -57,10 +64,18 @@ impl LineCacheInfo {
         let mut indent_stack: Vec<(usize, usize)> = Vec::new();
 
         for (idx, line_info) in ctx.lines.iter().enumerate() {
-            let content = line_info.content(ctx.content).trim_start();
+            let line_content = line_info.content(ctx.content);
+            let content = line_content.trim_start();
             let line_indent = line_info.byte_len - content.len();
 
             indentation.push(line_indent);
+
+            // Store blockquote level for blockquote-aware indent calculation
+            let bq_level = line_info.blockquote.as_ref().map(|bq| bq.nesting_level).unwrap_or(0);
+            blockquote_levels.push(bq_level);
+
+            // Store line content for blockquote-aware indent calculation
+            line_contents.push(line_content.to_string());
 
             let mut flag = 0u8;
             if !content.is_empty() {
@@ -91,6 +106,8 @@ impl LineCacheInfo {
 
         Self {
             indentation,
+            blockquote_levels,
+            line_contents,
             flags,
             parent_map,
         }
@@ -106,16 +123,60 @@ impl LineCacheInfo {
         self.flags.get(idx).is_some_and(|&f| f & FLAG_IS_LIST_ITEM != 0)
     }
 
+    /// Get blockquote info for a line (level and prefix length)
+    fn blockquote_info(&self, line: usize) -> (usize, usize) {
+        if line == 0 || line > self.line_contents.len() {
+            return (0, 0);
+        }
+        let idx = line - 1;
+        let bq_level = self.blockquote_levels.get(idx).copied().unwrap_or(0);
+        if bq_level == 0 {
+            return (0, 0);
+        }
+        // Calculate prefix length from line content
+        let content = &self.line_contents[idx];
+        let mut prefix_len = 0;
+        let mut found = 0;
+        for c in content.chars() {
+            prefix_len += c.len_utf8();
+            if c == '>' {
+                found += 1;
+                if found == bq_level {
+                    // Include optional space after last >
+                    if content.get(prefix_len..prefix_len + 1) == Some(" ") {
+                        prefix_len += 1;
+                    }
+                    break;
+                }
+            }
+        }
+        (bq_level, prefix_len)
+    }
+
     /// Fast O(n) check for continuation content between lines using cached data
+    ///
+    /// For blockquote-aware detection, also pass the parent's blockquote level and
+    /// blockquote prefix length. These are used to calculate effective indentation
+    /// for lines inside blockquotes.
     fn find_continuation_indent(
         &self,
         start_line: usize,
         end_line: usize,
         parent_content_column: usize,
+        parent_bq_level: usize,
+        parent_bq_prefix_len: usize,
     ) -> Option<usize> {
         if start_line == 0 || start_line > end_line || end_line > self.indentation.len() {
             return None;
         }
+
+        // For blockquote lists, min continuation indent is the content column
+        // WITHOUT the blockquote prefix portion
+        let min_continuation_indent = if parent_bq_level > 0 {
+            parent_content_column.saturating_sub(parent_bq_prefix_len)
+        } else {
+            parent_content_column
+        };
 
         // Convert to 0-indexed
         let start_idx = start_line - 1;
@@ -127,20 +188,47 @@ impl LineCacheInfo {
                 continue;
             }
 
-            // If this line is indented at or past the parent's content column,
+            // Calculate effective indent (blockquote-aware)
+            let line_bq_level = self.blockquote_levels.get(idx).copied().unwrap_or(0);
+            let raw_indent = self.indentation[idx];
+            let effective_indent = if line_bq_level == parent_bq_level && parent_bq_level > 0 {
+                effective_indent_in_blockquote(&self.line_contents[idx], parent_bq_level, raw_indent)
+            } else {
+                raw_indent
+            };
+
+            // If this line is indented at or past the min continuation indent,
             // it's continuation content
-            if self.indentation[idx] >= parent_content_column {
-                return Some(self.indentation[idx]);
+            if effective_indent >= min_continuation_indent {
+                return Some(effective_indent);
             }
         }
         None
     }
 
     /// Fast O(n) check if any continuation content exists after parent
-    fn has_continuation_content(&self, parent_line: usize, current_line: usize, parent_content_column: usize) -> bool {
+    ///
+    /// For blockquote-aware detection, also pass the parent's blockquote level and
+    /// blockquote prefix length.
+    fn has_continuation_content(
+        &self,
+        parent_line: usize,
+        current_line: usize,
+        parent_content_column: usize,
+        parent_bq_level: usize,
+        parent_bq_prefix_len: usize,
+    ) -> bool {
         if parent_line == 0 || current_line <= parent_line || current_line > self.indentation.len() {
             return false;
         }
+
+        // For blockquote lists, min continuation indent is the content column
+        // WITHOUT the blockquote prefix portion
+        let min_continuation_indent = if parent_bq_level > 0 {
+            parent_content_column.saturating_sub(parent_bq_prefix_len)
+        } else {
+            parent_content_column
+        };
 
         // Convert to 0-indexed
         let start_idx = parent_line; // parent_line + 1 - 1
@@ -156,9 +244,18 @@ impl LineCacheInfo {
                 continue;
             }
 
-            // If this line is indented at or past the parent's content column,
+            // Calculate effective indent (blockquote-aware)
+            let line_bq_level = self.blockquote_levels.get(idx).copied().unwrap_or(0);
+            let raw_indent = self.indentation[idx];
+            let effective_indent = if line_bq_level == parent_bq_level && parent_bq_level > 0 {
+                effective_indent_in_blockquote(&self.line_contents[idx], parent_bq_level, raw_indent)
+            } else {
+                raw_indent
+            };
+
+            // If this line is indented at or past the min continuation indent,
             // it's continuation content
-            if self.indentation[idx] >= parent_content_column {
+            if effective_indent >= min_continuation_indent {
                 return true;
             }
         }
@@ -430,9 +527,18 @@ impl MD005ListIndent {
             let parent_marker_column = parent_list_item.marker_column;
             let parent_content_column = parent_list_item.content_column;
 
+            // Get parent's blockquote info for blockquote-aware continuation detection
+            let parent_bq_level = line_info.blockquote.as_ref().map(|bq| bq.nesting_level).unwrap_or(0);
+            let parent_bq_prefix_len = line_info.blockquote.as_ref().map(|bq| bq.prefix.len()).unwrap_or(0);
+
             // Check if there are continuation lines between parent and current list
-            let continuation_indent =
-                cache.find_continuation_indent(parent_line + 1, list_line - 1, parent_content_column);
+            let continuation_indent = cache.find_continuation_indent(
+                parent_line + 1,
+                list_line - 1,
+                parent_content_column,
+                parent_bq_level,
+                parent_bq_prefix_len,
+            );
 
             if let Some(continuation_indent) = continuation_indent {
                 let is_standard_continuation =
@@ -459,7 +565,15 @@ impl MD005ListIndent {
                     return true;
                 }
 
-                if cache.has_continuation_content(parent_line, list_line, parent_content_column) {
+                // Get blockquote info for continuation check
+                let (parent_bq_level, parent_bq_prefix_len) = cache.blockquote_info(parent_line);
+                if cache.has_continuation_content(
+                    parent_line,
+                    list_line,
+                    parent_content_column,
+                    parent_bq_level,
+                    parent_bq_prefix_len,
+                ) {
                     return true;
                 }
             }
@@ -478,6 +592,9 @@ impl MD005ListIndent {
         list_indent: usize,
         parent_content_column: usize,
     ) -> bool {
+        // Get blockquote info from cache
+        let (parent_bq_level, parent_bq_prefix_len) = cache.blockquote_info(parent_line);
+
         // Look for list items between parent and current that are at the same indentation
         // and are part of continuation content
         for line_num in (parent_line + 1)..current_line {
@@ -486,9 +603,14 @@ impl MD005ListIndent {
                 && list_item.marker_column == list_indent
             {
                 // Found a list at same indentation - check if it has continuation content before it
-                // USE CACHE instead of self.find_continuation_indent_between()
                 if cache
-                    .find_continuation_indent(parent_line + 1, line_num - 1, parent_content_column)
+                    .find_continuation_indent(
+                        parent_line + 1,
+                        line_num - 1,
+                        parent_content_column,
+                        parent_bq_level,
+                        parent_bq_prefix_len,
+                    )
                     .is_some()
                 {
                     return true;
