@@ -2931,41 +2931,51 @@ impl<'a> LintContext<'a> {
 
                     // For simplicity, just mark lines until we find a closing tag or reach a blank line
                     // This avoids complex nesting logic that might cause infinite loops
+                    // Only search for closing tag on subsequent lines if the opening tag
+                    // does NOT have its closing tag on the same line
                     if !is_closing {
                         let closing_tag = format!("</{tag_name}>");
-                        // style and script tags can contain blank lines (CSS/JS formatting)
-                        let allow_blank_lines = tag_name == "style" || tag_name == "script";
-                        let mut j = i + 1;
-                        let mut found_closing_tag = false;
-                        while j < lines.len() && j < i + 100 {
-                            // Limit search to 100 lines
-                            // Stop at blank lines (except for style/script tags)
-                            if !allow_blank_lines && lines[j].is_blank {
-                                break;
-                            }
 
-                            lines[j].in_html_block = true;
+                        // Check if closing tag is on the same line as opening tag
+                        // (e.g., <script src="..."></script> or <style>.class{}</style>)
+                        let same_line_close = lines[i].content(content).contains(&closing_tag);
 
-                            // Check if this line contains the closing tag
-                            if lines[j].content(content).contains(&closing_tag) {
-                                found_closing_tag = true;
-                            }
-
-                            // After finding closing tag, continue marking lines as
-                            // in_html_block until blank line (per CommonMark spec)
-                            if found_closing_tag {
-                                j += 1;
-                                // Continue marking subsequent lines until blank
-                                while j < lines.len() && j < i + 100 {
-                                    if lines[j].is_blank {
-                                        break;
-                                    }
-                                    lines[j].in_html_block = true;
-                                    j += 1;
+                        // Only search subsequent lines if the tag isn't self-closed on this line
+                        if !same_line_close {
+                            // style and script tags can contain blank lines (CSS/JS formatting)
+                            let allow_blank_lines = tag_name == "style" || tag_name == "script";
+                            let mut j = i + 1;
+                            let mut found_closing_tag = false;
+                            while j < lines.len() && j < i + 100 {
+                                // Limit search to 100 lines
+                                // Stop at blank lines (except for style/script tags)
+                                if !allow_blank_lines && lines[j].is_blank {
+                                    break;
                                 }
-                                break;
+
+                                lines[j].in_html_block = true;
+
+                                // Check if this line contains the closing tag
+                                if lines[j].content(content).contains(&closing_tag) {
+                                    found_closing_tag = true;
+                                }
+
+                                // After finding closing tag, continue marking lines as
+                                // in_html_block until blank line (per CommonMark spec)
+                                if found_closing_tag {
+                                    j += 1;
+                                    // Continue marking subsequent lines until blank
+                                    while j < lines.len() && j < i + 100 {
+                                        if lines[j].is_blank {
+                                            break;
+                                        }
+                                        lines[j].in_html_block = true;
+                                        j += 1;
+                                    }
+                                    break;
+                                }
+                                j += 1;
                             }
-                            j += 1;
                         }
                     }
                 }
