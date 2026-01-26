@@ -1,4 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::blockquote::effective_indent_in_blockquote;
 use crate::utils::element_cache::ElementCache;
 use crate::utils::quarto_divs;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
@@ -178,22 +179,39 @@ impl MD032BlanksAroundLists {
         let mut lazy_lines = HashSet::new();
         let parser = Parser::new_ext(ctx.content, Options::all());
 
-        // Stack of (item_start_byte, expected_content_column) for nested items
-        let mut item_stack: Vec<usize> = vec![];
+        // Stack of (expected_indent_within_context, blockquote_level) for nested items
+        let mut item_stack: Vec<(usize, usize)> = vec![];
         let mut after_soft_break = false;
 
         for (event, range) in parser.into_offset_iter() {
             match event {
                 Event::Start(Tag::Item) => {
-                    // Get the expected content column from pre-parsed LineInfo
                     let line_num = Self::byte_to_line(&ctx.line_offsets, range.start);
-                    let content_col = ctx
-                        .lines
-                        .get(line_num.saturating_sub(1))
-                        .and_then(|li| li.list_item.as_ref())
-                        .map(|item| item.content_column)
-                        .unwrap_or(0);
-                    item_stack.push(content_col);
+                    let line_info = ctx.lines.get(line_num.saturating_sub(1));
+                    let line_content = line_info.map(|li| li.content(ctx.content)).unwrap_or("");
+
+                    // Determine blockquote level from the line content
+                    let bq_level = line_content
+                        .chars()
+                        .take_while(|c| *c == '>' || c.is_whitespace())
+                        .filter(|&c| c == '>')
+                        .count();
+
+                    // Calculate expected indent relative to blockquote context
+                    let expected_indent = if bq_level > 0 {
+                        // For blockquote lists, expect marker width (2 for "- ", 3 for "1. ")
+                        line_info
+                            .and_then(|li| li.list_item.as_ref())
+                            .map(|item| if item.is_ordered { 3 } else { 2 })
+                            .unwrap_or(2)
+                    } else {
+                        line_info
+                            .and_then(|li| li.list_item.as_ref())
+                            .map(|item| item.content_column)
+                            .unwrap_or(0)
+                    };
+
+                    item_stack.push((expected_indent, bq_level));
                     after_soft_break = false;
                 }
                 Event::End(TagEnd::Item) => {
@@ -203,19 +221,17 @@ impl MD032BlanksAroundLists {
                 Event::SoftBreak if !item_stack.is_empty() => {
                     after_soft_break = true;
                 }
-                // Handle both Text and Code events after SoftBreak
-                // (lazy continuation can start with code spans like `token`)
                 Event::Text(_) | Event::Code(_) if after_soft_break => {
-                    if let Some(&expected_col) = item_stack.last() {
+                    if let Some(&(expected_indent, expected_bq_level)) = item_stack.last() {
                         let line_num = Self::byte_to_line(&ctx.line_offsets, range.start);
-                        let actual_indent = ctx
-                            .lines
-                            .get(line_num.saturating_sub(1))
-                            .map(|li| li.indent)
-                            .unwrap_or(0);
+                        let line_info = ctx.lines.get(line_num.saturating_sub(1));
+                        let line_content = line_info.map(|li| li.content(ctx.content)).unwrap_or("");
+                        let fallback_indent = line_info.map(|li| li.indent).unwrap_or(0);
 
-                        // If the text starts at a column less than expected, it's lazy continuation
-                        if actual_indent < expected_col {
+                        let actual_indent =
+                            effective_indent_in_blockquote(line_content, expected_bq_level, fallback_indent);
+
+                        if actual_indent < expected_indent {
                             lazy_lines.insert(line_num);
                         }
                     }
@@ -415,14 +431,25 @@ impl MD032BlanksAroundLists {
                 // If this list was split by code fences, don't extend any segments
                 // They should remain as individual list items for MD032 purposes
                 if !has_code_fence_splits && *end < block.end_line {
-                    // Get the minimum indent required for proper continuation
-                    // This is the content column of the last list item in the segment
-                    let min_continuation_indent = ctx
-                        .lines
-                        .get(*end - 1)
-                        .and_then(|line_info| line_info.list_item.as_ref())
-                        .map(|item| item.content_column)
-                        .unwrap_or(2);
+                    // Get the blockquote level for this block
+                    let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
+
+                    // For blockquote lists, use a simpler min_continuation_indent
+                    // (the content column without the blockquote prefix portion)
+                    let min_continuation_indent = if block_bq_level > 0 {
+                        // For lists in blockquotes, content should align with text after marker
+                        if block.is_ordered {
+                            block.max_marker_width
+                        } else {
+                            2 // "- " or "* "
+                        }
+                    } else {
+                        ctx.lines
+                            .get(*end - 1)
+                            .and_then(|line_info| line_info.list_item.as_ref())
+                            .map(|item| item.content_column)
+                            .unwrap_or(2)
+                    };
 
                     for check_line in (*end + 1)..=block.end_line {
                         if check_line - 1 < ctx.lines.len() {
@@ -436,8 +463,13 @@ impl MD032BlanksAroundLists {
                             if line.in_code_block {
                                 break;
                             }
+
+                            // Calculate effective indent for blockquote lines
+                            let effective_indent =
+                                effective_indent_in_blockquote(line_content, block_bq_level, line.indent);
+
                             // Include indented continuation if indent meets threshold
-                            if line.indent >= min_continuation_indent {
+                            if effective_indent >= min_continuation_indent {
                                 actual_end = check_line;
                             }
                             // Include lazy continuation lines (multiple consecutive lines without indent)

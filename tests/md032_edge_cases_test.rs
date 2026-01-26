@@ -580,6 +580,114 @@ fn test_md032_indent_one_less_than_content_column() {
     );
 }
 
+/// Issue #268: List continuation inside blockquote should not be flagged as needing blank line
+#[test]
+fn test_md032_blockquote_list_continuation_not_flagged() {
+    // When a list item has a properly indented continuation line inside a blockquote,
+    // MD032 should not flag it as needing a blank line
+    let content = r#"> * Improve performance of loading the overview.
+>   Opening the app should be a lot quicker now!
+> * Improve performance of loading a chat
+> * Add ability to swipe through images in a chat (thanks to Nathan van Beelen!)
+>   [**See preview here!**](https://example.com)
+
+Get Pattle from F-droid for Android by adding this repo:
+"#;
+
+    let mut config = Config::default();
+    // Test with allow_lazy_continuation = false to ensure proper continuation is recognized
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // Lines 2 and 5 are properly indented continuation lines within the blockquote
+    // (they have 2 spaces after ">", matching the "* " marker width)
+    // No MD032 warnings should be generated
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Issue #268: Blockquote list continuation should not be flagged. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #268: Multiple list items with continuation in blockquote
+#[test]
+fn test_md032_blockquote_multi_item_list_with_continuations() {
+    let content = r#"# Header
+
+> * **Custom Themes & Material 3 Styling**
+>   Say hello to **dynamic theming**!
+> * **Archived Rooms Support**
+>   Left a room but still want to check what happened?
+> * **Knocking Support**
+>   We now support knocking into public rooms.
+
+#### Improvements
+"#;
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Issue #268: Multiple blockquote list items with continuation should not be flagged. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #268: Ordered list in blockquote with code block
+#[test]
+fn test_md032_blockquote_ordered_list_with_code_block() {
+    let content = r#"> There's 3 methods to block the room:
+>
+> 1. Use the synapse admin API for it:
+> ```bash
+> curl -s -X POST
+> ```
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // The code block is part of the list item within the blockquote
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Issue #268: Ordered list with code block in blockquote should not be flagged. Found warnings: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Issue #295: Wide marker (two-digit number)
 #[test]
 fn test_md032_wide_marker_nested_lazy() {
