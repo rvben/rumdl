@@ -513,6 +513,7 @@ impl MD013LineLength {
                     CodeBlock(String, usize),      // content and original indent
                     NestedListItem(String, usize), // full line content and original indent
                     SemanticLine(String),          // Lines starting with NOTE:, WARNING:, etc that should stay separate
+                    SnippetLine(String),           // MkDocs Snippets delimiters (-8<-) that must stay on their own line
                     Empty,
                 }
 
@@ -616,6 +617,11 @@ impl MD013LineLength {
                             // Check if this is a semantic line (NOTE:, WARNING:, etc.)
                             else if is_semantic_line(&content) {
                                 list_item_lines.push(LineType::SemanticLine(content));
+                            }
+                            // Check if this is a snippet block delimiter (-8<- or --8<--)
+                            // These must be preserved on their own lines for MkDocs Snippets extension
+                            else if is_snippet_block_delimiter(&content) {
+                                list_item_lines.push(LineType::SnippetLine(content));
                             } else {
                                 list_item_lines.push(LineType::Content(content));
                             }
@@ -648,6 +654,7 @@ impl MD013LineLength {
                     },
                     NestedList(Vec<(String, usize)>), // (content, indent) pairs for nested list items
                     SemanticLine(String), // Semantic markers like NOTE:, WARNING: that stay on their own line
+                    SnippetLine(String),  // MkDocs Snippets delimiter that stays on its own line without extra spacing
                     Html {
                         lines: Vec<String>,        // HTML content preserved exactly as-is
                         has_preceding_blank: bool, // Whether there was a blank line before this block
@@ -947,6 +954,36 @@ impl MD013LineLength {
                             blocks.push(Block::SemanticLine(content.clone()));
                             had_preceding_blank = false; // Reset after semantic line
                         }
+                        LineType::SnippetLine(content) => {
+                            // Snippet delimiters (-8<-) are standalone - flush any current block and add as separate block
+                            // Unlike semantic lines, snippet lines don't add extra blank lines around them
+                            if in_code {
+                                blocks.push(Block::Code {
+                                    lines: current_code_block.clone(),
+                                    has_preceding_blank: code_block_has_preceding_blank,
+                                });
+                                current_code_block.clear();
+                                in_code = false;
+                            } else if in_nested_list {
+                                blocks.push(Block::NestedList(current_nested_list.clone()));
+                                current_nested_list.clear();
+                                in_nested_list = false;
+                            } else if in_html_block {
+                                blocks.push(Block::Html {
+                                    lines: current_html_block.clone(),
+                                    has_preceding_blank: html_block_has_preceding_blank,
+                                });
+                                current_html_block.clear();
+                                html_tag_stack.clear();
+                                in_html_block = false;
+                            } else if !current_paragraph.is_empty() {
+                                blocks.push(Block::Paragraph(current_paragraph.clone()));
+                                current_paragraph.clear();
+                            }
+                            // Add snippet line as its own block
+                            blocks.push(Block::SnippetLine(content.clone()));
+                            had_preceding_blank = false;
+                        }
                     }
                 }
 
@@ -993,10 +1030,13 @@ impl MD013LineLength {
                     let has_nested_lists = blocks.iter().any(|b| matches!(b, Block::NestedList(_)));
                     let has_code_blocks = blocks.iter().any(|b| matches!(b, Block::Code { .. }));
                     let has_semantic_lines = blocks.iter().any(|b| matches!(b, Block::SemanticLine(_)));
+                    let has_snippet_lines = blocks.iter().any(|b| matches!(b, Block::SnippetLine(_)));
                     let has_paragraphs = blocks.iter().any(|b| matches!(b, Block::Paragraph(_)));
 
-                    // If we have nested lists, code blocks, or semantic lines but no paragraphs, don't normalize
-                    if (has_nested_lists || has_code_blocks || has_semantic_lines) && !has_paragraphs {
+                    // If we have nested lists, code blocks, semantic lines, or snippet lines but no paragraphs, don't normalize
+                    if (has_nested_lists || has_code_blocks || has_semantic_lines || has_snippet_lines)
+                        && !has_paragraphs
+                    {
                         return false;
                     }
 
@@ -1136,13 +1176,15 @@ impl MD013LineLength {
 
                                 // Add blank line after paragraph block if there's a next block
                                 // BUT: check if next block is a code block that doesn't want a preceding blank
+                                // Also don't add blank lines before snippet lines (they should stay tight)
                                 if block_idx < blocks.len() - 1 {
                                     let next_block = &blocks[block_idx + 1];
                                     let should_add_blank = match next_block {
                                         Block::Code {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
-                                        _ => true, // For all other blocks, add blank line
+                                        Block::SnippetLine(_) => false, // No blank line before snippet delimiters
+                                        _ => true,                      // For all other blocks, add blank line
                                     };
                                     if should_add_blank {
                                         result.push(String::new());
@@ -1201,7 +1243,8 @@ impl MD013LineLength {
                                         Block::Code {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
-                                        _ => true, // For all other blocks, add blank line
+                                        Block::SnippetLine(_) => false, // No blank line before snippet delimiters
+                                        _ => true,                      // For all other blocks, add blank line
                                     };
                                     if should_add_blank {
                                         result.push(String::new());
@@ -1232,12 +1275,26 @@ impl MD013LineLength {
                                         Block::Code {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
-                                        _ => true, // For all other blocks, add blank line
+                                        Block::SnippetLine(_) => false, // No blank line before snippet delimiters
+                                        _ => true,                      // For all other blocks, add blank line
                                     };
                                     if should_add_blank {
                                         result.push(String::new());
                                     }
                                 }
+                            }
+                            Block::SnippetLine(content) => {
+                                // Preserve snippet delimiters (-8<-) as-is on their own line
+                                // Unlike semantic lines, snippet lines don't add extra blank lines
+                                if is_first_block {
+                                    // First block starts with marker
+                                    result.push(format!("{marker}{content}"));
+                                    is_first_block = false;
+                                } else {
+                                    // Subsequent blocks use expected indent
+                                    result.push(format!("{expected_indent}{content}"));
+                                }
+                                // No blank lines added before or after snippet delimiters
                             }
                             Block::Html {
                                 lines: html_lines,
@@ -1270,7 +1327,8 @@ impl MD013LineLength {
                                         Block::Html {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
-                                        _ => true, // For all other blocks, add blank line
+                                        Block::SnippetLine(_) => false, // No blank line before snippet delimiters
+                                        _ => true,                      // For all other blocks, add blank line
                                     };
                                     if should_add_blank {
                                         result.push(String::new());

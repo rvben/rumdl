@@ -289,3 +289,110 @@ enable-reflow = true
         assert!(fixed_content.contains(word), "Missing word '{word}' in fixed content");
     }
 }
+
+/// Issue #338: Snippet delimiters in list items should not be reflowed
+#[test]
+fn test_md013_issue_338_snippets_in_list_items() {
+    use rumdl_lib::config::{Config, MarkdownFlavor, RuleConfig};
+    use rumdl_lib::rules;
+
+    // Test that snippet delimiters are preserved in list items
+    let content = r#"# Test
+
+- Some content:
+  -8<-
+  https://raw.githubusercontent.com/example/file.md
+  -8<-
+
+More text.
+"#;
+
+    let mut config = Config::default();
+    let mut rule_config = RuleConfig::default();
+    rule_config
+        .values
+        .insert("reflow".to_string(), toml::Value::Boolean(true));
+    config.rules.insert("MD013".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md013_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD013").collect();
+
+    let result = rumdl_lib::lint(content, &md013_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    // Should have no warnings since content is already properly formatted
+    // The snippet delimiters should be recognized and preserved
+    assert_eq!(
+        result.len(),
+        0,
+        "Issue #338: Snippet delimiters should be preserved. Found warnings: {:?}",
+        result
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #338: Snippet delimiters should stay on their own lines after reflow via CLI
+#[test]
+fn test_md013_issue_338_snippets_preserved_after_reflow_via_cli() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test_snippets.md");
+
+    // Test that snippet delimiters are preserved when surrounding content is reflowed
+    let content = r#"# Test
+
+- Some content that is long enough to trigger reflow and also has a snippet block inside:
+  -8<-
+  https://raw.githubusercontent.com/example/file.md
+  -8<-
+
+More text.
+"#;
+    fs::write(&file_path, content).unwrap();
+
+    // Create config enabling reflow
+    let config_path = dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[MD013]
+reflow = true
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    // Run rumdl fmt to apply fix
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("fmt")
+        .arg("--no-cache")
+        .arg("-e")
+        .arg("MD013")
+        .arg("--config")
+        .arg(&config_path)
+        .arg(&file_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    // Read the fixed content
+    let fixed = fs::read_to_string(&file_path).unwrap();
+
+    // Verify snippet delimiters are preserved on their own lines
+    assert!(
+        fixed.contains("  -8<-\n  https://"),
+        "Snippet delimiter should be on its own line, followed by URL. Got:\n{fixed}",
+    );
+    assert!(
+        fixed.lines().filter(|l| l.trim() == "-8<-").count() == 2,
+        "Both snippet delimiters should be preserved. Got:\n{fixed}",
+    );
+
+    // Verify the URL is still there
+    assert!(
+        fixed.contains("https://raw.githubusercontent.com/example/file.md"),
+        "URL should be preserved. Got:\n{fixed}",
+    );
+
+    // Verify success
+    assert!(
+        output.status.success() || String::from_utf8_lossy(&output.stdout).contains("Fixed"),
+        "Command should succeed or fix. Stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
