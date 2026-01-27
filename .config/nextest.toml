@@ -110,3 +110,18 @@ retries = { backoff = "exponential", count = 3, delay = "1s", max-delay = "10s" 
 
 # Don't fail fast - run all performance tests
 fail-fast = false
+
+# Smoke testing profile - lighter, stable test runs suitable for package managers
+[profile.smoke]
+# Exclude heavy, randomized and other potentially flaky tests
+default-filter = 'package(rumdl) and not kind(lib) and not test(/performance|benchmark|memory|linear_complexity|scaling|stress|large|comprehensive|deeply_nested|error_propagation|proptest|property_based|perf_|regression|vscode/)'
+
+test-threads = "num-cpus"
+failure-output = "immediate"
+success-output = "final"
+status-level = "pass"
+retries = 0
+
+# Don't fail fast to see all failed results
+# Useful as Nix requires rebuilds for checkPhase failures, and these tests are light
+fail-fast = false
