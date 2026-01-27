@@ -929,6 +929,72 @@ fn test_md032_lazy_continuation_fix_blockquote_existing_indent() {
     );
 }
 
+/// Issue #342: Blockquote lazy continuation with tab indentation
+#[test]
+fn test_md032_lazy_continuation_fix_blockquote_with_tab() {
+    let content = "> - Item\n>\tlazy with tab\n> - another item\n";
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
+    assert!(
+        lazy_warning.is_some(),
+        "Should detect lazy continuation in blockquote with tab. Found: {:?}",
+        warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+
+    let fix = lazy_warning.unwrap().fix.as_ref().unwrap();
+    let mut fixed = content.to_string();
+    fixed.replace_range(fix.range.clone(), &fix.replacement);
+
+    assert_eq!(
+        fixed, "> - Item\n>  lazy with tab\n> - another item\n",
+        "Fix should normalize tab indentation after blockquote prefix"
+    );
+}
+
+/// Issue #342: Blockquote lazy continuation with tab and space after '>'
+#[test]
+fn test_md032_lazy_continuation_fix_blockquote_with_tab_and_space() {
+    let content = "> - Item\n> \tlazy with tab\n> - another item\n";
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("allow-lazy-continuation".to_string(), toml::Value::Boolean(false));
+    config.rules.insert("MD032".to_string(), rule_config);
+
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
+    assert!(
+        lazy_warning.is_some(),
+        "Should detect lazy continuation in blockquote with space + tab. Found: {:?}",
+        warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+
+    let fix = lazy_warning.unwrap().fix.as_ref().unwrap();
+    let mut fixed = content.to_string();
+    fixed.replace_range(fix.range.clone(), &fix.replacement);
+
+    assert_eq!(
+        fixed, "> - Item\n>   lazy with tab\n> - another item\n",
+        "Fix should normalize tab indentation after spaced blockquote prefix"
+    );
+}
+
 /// Issue #342: Idempotency - after fix, no more warnings
 #[test]
 fn test_md032_lazy_continuation_fix_idempotent() {
