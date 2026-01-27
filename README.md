@@ -1143,13 +1143,19 @@ The schema is automatically generated from the Rust types using `schemars` and s
 
 rumdl is used by these notable open source projects:
 
-| Project                                                           | Stars                                                                                 |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| [PyO3/pyo3](https://github.com/PyO3/pyo3)                         | ![stars](https://img.shields.io/github/stars/PyO3/pyo3?style=flat-square)             |
-| [beeware/toga](https://github.com/beeware/toga)                   | ![stars](https://img.shields.io/github/stars/beeware/toga?style=flat-square)          |
-| [beeware/briefcase](https://github.com/beeware/briefcase)         | ![stars](https://img.shields.io/github/stars/beeware/briefcase?style=flat-square)     |
-| [mikavilpas/yazi.nvim](https://github.com/mikavilpas/yazi.nvim)   | ![stars](https://img.shields.io/github/stars/mikavilpas/yazi.nvim?style=flat-square)  |
-| [matrix-org/matrix.org](https://github.com/matrix-org/matrix.org) | ![stars](https://img.shields.io/github/stars/matrix-org/matrix.org?style=flat-square) |
+| Project                                                                                     | Stars                                                                                              |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| [PyO3/pyo3](https://github.com/PyO3/pyo3)                                                   | ![stars](https://img.shields.io/github/stars/PyO3/pyo3?style=flat-square)                          |
+| [beeware/toga](https://github.com/beeware/toga)                                             | ![stars](https://img.shields.io/github/stars/beeware/toga?style=flat-square)                       |
+| [beeware/briefcase](https://github.com/beeware/briefcase)                                   | ![stars](https://img.shields.io/github/stars/beeware/briefcase?style=flat-square)                  |
+| [scop/bash-completion](https://github.com/scop/bash-completion)                             | ![stars](https://img.shields.io/github/stars/scop/bash-completion?style=flat-square)               |
+| [chrisgrieser/nvim-scissors](https://github.com/chrisgrieser/nvim-scissors)                 | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-scissors?style=flat-square)         |
+| [chrisgrieser/nvim-spider](https://github.com/chrisgrieser/nvim-spider)                     | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-spider?style=flat-square)           |
+| [chrisgrieser/nvim-various-textobjs](https://github.com/chrisgrieser/nvim-various-textobjs) | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-various-textobjs?style=flat-square) |
+| [chrisgrieser/shimmering-focus](https://github.com/chrisgrieser/shimmering-focus)           | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-focus?style=flat-square)      |
+| [chrisgrieser/shimmering-obsidian](https://github.com/chrisgrieser/shimmering-obsidian)     | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-obsidian?style=flat-square)   |
+| [matrix-org/matrix.org](https://github.com/matrix-org/matrix.org)                           | ![stars](https://img.shields.io/github/stars/matrix-org/matrix.org?style=flat-square)              |
+| [mikavilpas/yazi.nvim](https://github.com/mikavilpas/yazi.nvim)                             | ![stars](https://img.shields.io/github/stars/mikavilpas/yazi.nvim?style=flat-square)               |
 
 *Using rumdl? [Let us know!](https://github.com/rvben/rumdl/issues/307)*
 
