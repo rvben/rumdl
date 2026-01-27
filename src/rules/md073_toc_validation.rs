@@ -1408,4 +1408,234 @@ Command documentation.
         assert!(rule.enforce_order);
         assert!(rule.nested);
     }
+
+    // ========== Custom Anchor Tests ==========
+
+    #[test]
+    fn test_custom_anchor_id_respected() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+- [My Section](#my-custom-anchor)
+
+<!-- tocstop -->
+
+## My Section {#my-custom-anchor}
+
+Content here.
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should respect custom anchor IDs: {result:?}");
+    }
+
+    #[test]
+    fn test_custom_anchor_id_in_generated_toc() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## First Section {#custom-first}
+
+Content.
+
+## Second Section {#another-custom}
+
+More content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("- [First Section](#custom-first)"));
+        assert!(fixed.contains("- [Second Section](#another-custom)"));
+    }
+
+    #[test]
+    fn test_mixed_custom_and_generated_anchors() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+- [Custom Section](#my-id)
+- [Normal Section](#normal-section)
+
+<!-- tocstop -->
+
+## Custom Section {#my-id}
+
+Content.
+
+## Normal Section
+
+More content.
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should handle mixed custom and generated anchors");
+    }
+
+    // ========== Anchor Style Tests ==========
+
+    #[test]
+    fn test_github_anchor_style_default() {
+        let rule = MD073TocValidation::new();
+        assert_eq!(rule.anchor_style, AnchorStyle::GitHub);
+
+        let content = r#"<!-- toc -->
+
+<!-- tocstop -->
+
+## Test_With_Underscores
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let region = rule.detect_toc_region(&ctx).unwrap();
+        let expected = rule.build_expected_toc(&ctx, &region);
+
+        // GitHub preserves underscores
+        assert_eq!(expected[0].anchor, "test_with_underscores");
+    }
+
+    #[test]
+    fn test_kramdown_anchor_style() {
+        let mut rule = MD073TocValidation::new();
+        rule.anchor_style = AnchorStyle::Kramdown;
+
+        let content = r#"<!-- toc -->
+
+<!-- tocstop -->
+
+## Test_With_Underscores
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let region = rule.detect_toc_region(&ctx).unwrap();
+        let expected = rule.build_expected_toc(&ctx, &region);
+
+        // Kramdown removes underscores
+        assert_eq!(expected[0].anchor, "testwithunderscores");
+    }
+
+    #[test]
+    fn test_kramdown_gfm_anchor_style() {
+        let mut rule = MD073TocValidation::new();
+        rule.anchor_style = AnchorStyle::KramdownGfm;
+
+        let content = r#"<!-- toc -->
+
+<!-- tocstop -->
+
+## Test_With_Underscores
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let region = rule.detect_toc_region(&ctx).unwrap();
+        let expected = rule.build_expected_toc(&ctx, &region);
+
+        // KramdownGfm preserves underscores
+        assert_eq!(expected[0].anchor, "test_with_underscores");
+    }
+
+    // ========== Stress Tests ==========
+
+    #[test]
+    fn test_stress_many_headings() {
+        let rule = MD073TocValidation::new();
+
+        // Generate a document with 150 headings
+        let mut content = String::from("# Title\n\n<!-- toc -->\n\n<!-- tocstop -->\n\n");
+
+        for i in 1..=150 {
+            content.push_str(&format!("## Heading Number {i}\n\nContent for section {i}.\n\n"));
+        }
+
+        let ctx = create_ctx(&content);
+
+        // Should not panic or timeout
+        let result = rule.check(&ctx).unwrap();
+
+        // Should report missing entries for all 150 headings
+        assert_eq!(result.len(), 1, "Should report single warning for TOC");
+        assert!(result[0].message.contains("Missing entry"));
+
+        // Fix should generate TOC with 150 entries
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("- [Heading Number 1](#heading-number-1)"));
+        assert!(fixed.contains("- [Heading Number 100](#heading-number-100)"));
+        assert!(fixed.contains("- [Heading Number 150](#heading-number-150)"));
+    }
+
+    #[test]
+    fn test_stress_deeply_nested() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## Level 2 A
+
+### Level 3 A
+
+#### Level 4 A
+
+## Level 2 B
+
+### Level 3 B
+
+#### Level 4 B
+
+## Level 2 C
+
+### Level 3 C
+
+#### Level 4 C
+
+## Level 2 D
+
+### Level 3 D
+
+#### Level 4 D
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Check nested indentation is correct
+        assert!(fixed.contains("- [Level 2 A](#level-2-a)"));
+        assert!(fixed.contains("  - [Level 3 A](#level-3-a)"));
+        assert!(fixed.contains("    - [Level 4 A](#level-4-a)"));
+        assert!(fixed.contains("- [Level 2 D](#level-2-d)"));
+        assert!(fixed.contains("  - [Level 3 D](#level-3-d)"));
+        assert!(fixed.contains("    - [Level 4 D](#level-4-d)"));
+    }
+
+    #[test]
+    fn test_stress_many_duplicates() {
+        let rule = MD073TocValidation::new();
+
+        // Generate 50 headings with the same text
+        let mut content = String::from("# Title\n\n<!-- toc -->\n\n<!-- tocstop -->\n\n");
+        for _ in 0..50 {
+            content.push_str("## FAQ\n\nContent.\n\n");
+        }
+
+        let ctx = create_ctx(&content);
+        let region = rule.detect_toc_region(&ctx).unwrap();
+        let expected = rule.build_expected_toc(&ctx, &region);
+
+        // Should generate unique anchors for all 50
+        assert_eq!(expected.len(), 50);
+        assert_eq!(expected[0].anchor, "faq");
+        assert_eq!(expected[1].anchor, "faq-1");
+        assert_eq!(expected[49].anchor, "faq-49");
+    }
 }
