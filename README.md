@@ -80,8 +80,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Using Termux User Repository (TUR) (Android)](#using-termux-user-repository-tur-android)
   - [Using Archlinux User Repository](#using-archlinux-user-repository)
   - [Download binary](#download-binary)
-  - [VS Code Extension](#vs-code-extension)
-  - [JetBrains IDEs](#jetbrains-ides)
+  - [Editor Plugins](#editor-plugins)
 - [Usage](#usage)
   - [Stdin/Stdout Formatting](#stdinstdout-formatting)
   - [Editor Integration](#editor-integration)
@@ -239,46 +238,14 @@ Invoke-WebRequest -Uri "https://github.com/rvben/rumdl/releases/latest/download/
 Expand-Archive -Path "rumdl.zip" -DestinationPath "$env:USERPROFILE\.rumdl"
 ```
 
-### VS Code Extension
+### Editor Plugins
 
-For the best development experience, install the rumdl VS Code extension directly from the command line:
+| Editor                              | Install                                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------ |
+| VS Code / Cursor / Windsurf         | `rumdl vscode` or [Marketplace](https://marketplace.visualstudio.com/items?itemName=rumdl.rumdl) |
+| JetBrains (PyCharm, IntelliJ, etc.) | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/29943-rumdl)                        |
 
-```bash
-# Install the VS Code extension
-rumdl vscode
-
-# Check if the extension is installed
-rumdl vscode --status
-
-# Force reinstall the extension
-rumdl vscode --force
-```
-
-The extension provides:
-
-- 🔍 Real-time linting as you type
-- 💡 Quick fixes for common issues
-- 🎨 Code formatting on save
-- 📋 Hover tooltips with rule documentation
-- ⚡ Lightning-fast performance with zero lag
-
-The CLI will automatically detect VS Code, Cursor, or Windsurf and install the appropriate extension. See the
-[VS Code extension documentation](https://github.com/rvben/rumdl/blob/main/docs/vscode-extension.md) for more details.
-
-### JetBrains IDEs
-
-For PyCharm, IntelliJ IDEA, WebStorm, and other JetBrains IDEs, install the rumdl plugin from the JetBrains Marketplace:
-
-**[Install rumdl plugin](https://plugins.jetbrains.com/plugin/29943-rumdl)**
-
-Or search for "rumdl" in your IDE's plugin settings (Settings → Plugins → Marketplace).
-
-The plugin provides:
-
-- 🔍 Real-time linting as you type
-- 🎨 Code formatting on save
-- 📋 Hover tooltips with rule documentation
-- ⚙️ Automatic configuration discovery (`.rumdl.toml`, `pyproject.toml`)
+All plugins provide real-time linting, formatting on save, hover documentation, and automatic configuration discovery.
 
 ## Usage
 
