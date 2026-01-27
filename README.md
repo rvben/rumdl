@@ -81,6 +81,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Using Archlinux User Repository](#using-archlinux-user-repository)
   - [Download binary](#download-binary)
   - [VS Code Extension](#vs-code-extension)
+  - [JetBrains IDEs](#jetbrains-ides)
 - [Usage](#usage)
   - [Stdin/Stdout Formatting](#stdinstdout-formatting)
   - [Editor Integration](#editor-integration)
@@ -263,6 +264,21 @@ The extension provides:
 
 The CLI will automatically detect VS Code, Cursor, or Windsurf and install the appropriate extension. See the
 [VS Code extension documentation](https://github.com/rvben/rumdl/blob/main/docs/vscode-extension.md) for more details.
+
+### JetBrains IDEs
+
+For PyCharm, IntelliJ IDEA, WebStorm, and other JetBrains IDEs, install the rumdl plugin from the JetBrains Marketplace:
+
+**[Install rumdl plugin](https://plugins.jetbrains.com/plugin/29943-rumdl)**
+
+Or search for "rumdl" in your IDE's plugin settings (Settings → Plugins → Marketplace).
+
+The plugin provides:
+
+- 🔍 Real-time linting as you type
+- 🎨 Code formatting on save
+- 📋 Hover tooltips with rule documentation
+- ⚙️ Automatic configuration discovery (`.rumdl.toml`, `pyproject.toml`)
 
 ## Usage
 
