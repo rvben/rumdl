@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-01-27
+
+### Fixed
+
+- **LSP: Only auto-fix on manual saves, not autosave** ([#340](https://github.com/rvben/rumdl/issues/340))
+  - Prevents unwanted fixes when VS Code autosaves in the background
+  - Auto-fix now only triggers on explicit Cmd+S / Ctrl+S saves
+
+- **MD032: Add auto-fix for lazy continuation lines** ([#342](https://github.com/rvben/rumdl/issues/342))
+  - When `allow-lazy-continuation = false`, lazy continuation lines now get proper indentation
+  - Detects all inline formatting at line start (emphasis, strong, strikethrough, links, images, code)
+  - Handles nested lists, blockquotes, and nested blockquotes correctly
+
+- **MD037: Fix range calculation for emphasis spacing** ([#343](https://github.com/rvben/rumdl/pull/343)) (thanks @kachick)
+  - Fix ranges are now stored as absolute positions, preventing double-adjustment in fix mode
+
+### Added
+
+- **Test: Smoke test profile for package managers** ([#341](https://github.com/rvben/rumdl/pull/341)) (thanks @kachick)
+  - `make test-smoke` runs stable tests excluding flaky proptest/stress tests
+  - Useful for Nix and other package managers requiring deterministic test runs
+
 ## [0.1.1] - 2026-01-26
 
 ### Fixed
