@@ -137,7 +137,14 @@ impl Rule for MD037NoSpaceInEmphasis {
                         && !is_in_mdx_comment(ctx, byte_pos)
                         && !is_in_mkdocs_markup(line, line_pos, ctx.flavor)
                     {
-                        filtered_warnings.push(warning.clone());
+                        let mut adjusted_warning = warning.clone();
+                        if let Some(fix) = &mut adjusted_warning.fix {
+                            // Convert line-relative range to absolute range
+                            let abs_start = line_start_pos + fix.range.start;
+                            let abs_end = line_start_pos + fix.range.end;
+                            fix.range = abs_start..abs_end;
+                        }
+                        filtered_warnings.push(adjusted_warning);
                     }
                 }
             }
@@ -163,9 +170,6 @@ impl Rule for MD037NoSpaceInEmphasis {
             return Ok(content.to_string());
         }
 
-        // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = &ctx.line_index;
-
         // Apply fixes
         let mut result = content.to_string();
         let mut offset: isize = 0;
@@ -176,14 +180,9 @@ impl Rule for MD037NoSpaceInEmphasis {
 
         for warning in sorted_warnings {
             if let Some(fix) = &warning.fix {
-                // Calculate the absolute position in the file
-                let line_start = line_index.get_line_start_byte(warning.line).unwrap_or(0);
-                let abs_start = line_start + warning.column - 1;
-                let abs_end = abs_start + (fix.range.end - fix.range.start);
-
                 // Apply fix with offset adjustment
-                let actual_start = (abs_start as isize + offset) as usize;
-                let actual_end = (abs_end as isize + offset) as usize;
+                let actual_start = (fix.range.start as isize + offset) as usize;
+                let actual_end = (fix.range.end as isize + offset) as usize;
 
                 // Make sure we're not out of bounds
                 if actual_start < result.len() && actual_end <= result.len() {
