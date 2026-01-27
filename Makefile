@@ -94,6 +94,9 @@ test-quick:
 test-pre-commit:
 	cargo nextest run --profile pre-commit
 
+test-smoke:
+	cargo nextest run --profile smoke
+
 test-push:
 	@echo "Running CI test suite (excludes performance tests)..."
 	cargo nextest run --profile ci
