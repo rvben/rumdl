@@ -1125,7 +1125,7 @@ pub fn apply_fixes_coordinated(
                     let rule_codes: Vec<&str> = result.fixed_rule_names.iter().map(|s| s.as_str()).collect();
                     eprintln!("Rule codes: {}", rule_codes.join(", "));
                 }
-                eprintln!("Please report at: https://github.com/rvben/rumdl/issues/new");
+                eprintln!("Please report at: https://github.com/rvben/rumdl/issues/new?template=bug_report.yml");
             }
 
             // Count warnings for the rules that were successfully applied
