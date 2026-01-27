@@ -1292,4 +1292,138 @@ Normal paragraph.
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should only flag the triple spaces");
     }
+
+    #[test]
+    fn test_sentence_double_space_after_inline_code() {
+        // Issue #345: Sentence ending with inline code should allow double space
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        // Basic case from issue report
+        let content = "Hello from `backticks`.  How's it going?";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after inline code ending with period");
+
+        // Multiple inline code spans
+        let content = "Use `foo` and `bar`.  Next sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after code at end of sentence");
+
+        // With exclamation mark
+        let content = "The `code` worked!  Celebrate.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after code with exclamation");
+
+        // With question mark
+        let content = "Is `null` falsy?  Yes.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after code with question mark");
+
+        // Inline code mid-sentence (not at end) - double space SHOULD be flagged
+        let content = "The `code`  is here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag 2 spaces after code mid-sentence");
+    }
+
+    #[test]
+    fn test_sentence_double_space_code_with_closing_punctuation() {
+        // Inline code followed by period in parentheses
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        // Code in parentheses
+        let content = "(see `example`).  Next sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after code in parentheses");
+
+        // Code in quotes
+        let content = "He said \"use `code`\".  Then left.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after code in quotes");
+    }
+
+    #[test]
+    fn test_sentence_double_space_after_emphasis() {
+        // Sentence ending with emphasis should allow double space
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        // Asterisk emphasis
+        let content = "The word is *important*.  Next sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after emphasis");
+
+        // Underscore emphasis
+        let content = "The word is _important_.  Next sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after underscore emphasis");
+
+        // Bold (asterisk)
+        let content = "The word is **critical**.  Next sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after bold");
+
+        // Bold (underscore)
+        let content = "The word is __critical__.  Next sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after underscore bold");
+    }
+
+    #[test]
+    fn test_sentence_double_space_after_strikethrough() {
+        // Sentence ending with strikethrough should allow double space
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        let content = "This is ~~wrong~~.  Next sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after strikethrough");
+
+        // With exclamation
+        let content = "That was ~~bad~~!  Learn from it.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after strikethrough with exclamation");
+    }
+
+    #[test]
+    fn test_sentence_double_space_after_extended_markdown() {
+        // Extended markdown syntax (highlight, superscript)
+        let config = MD064Config {
+            allow_sentence_double_space: true,
+        };
+        let rule = MD064NoMultipleConsecutiveSpaces::from_config_struct(config);
+
+        // Highlight syntax
+        let content = "This is ==highlighted==.  Next sentence.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after highlight");
+
+        // Superscript
+        let content = "E equals mc^2^.  Einstein said.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow 2 spaces after superscript");
+    }
 }

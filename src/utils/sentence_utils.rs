@@ -230,8 +230,19 @@ pub fn is_after_sentence_ending_with_abbreviations(
                 }
             }
 
-            // If previous char is alphanumeric, closing quote/paren, or CJK, treat as sentence end
-            if prev.is_alphanumeric() || is_closing_quote(prev) || matches!(prev, ')' | ']') || is_cjk_char(prev) {
+            // If previous char is alphanumeric, closing quote/paren, or markdown inline delimiters, treat as sentence end
+            // Markdown inline elements that can end before punctuation:
+            // - `)` `]` - links, images, footnote refs
+            // - `` ` `` - inline code
+            // - `*` `_` - emphasis/bold
+            // - `~` - strikethrough
+            // - `=` - highlight (extended markdown)
+            // - `^` - superscript (extended markdown)
+            if prev.is_alphanumeric()
+                || is_closing_quote(prev)
+                || matches!(prev, ')' | ']' | '`' | '*' | '_' | '~' | '=' | '^')
+                || is_cjk_char(prev)
+            {
                 return true;
             }
         }
@@ -424,5 +435,79 @@ mod tests {
         // i.e. and e.g. should not be sentence endings
         assert!(!is_after_sentence_ending("i.e.  example", 4));
         assert!(!is_after_sentence_ending("e.g.  example", 4));
+    }
+
+    #[test]
+    fn test_after_inline_code() {
+        // Issue #345: Sentence ending with inline code should be recognized
+        // "Hello from `backticks`.  How's it going?"
+        // Position 23 is after the period following the closing backtick
+        assert!(is_after_sentence_ending("Hello from `backticks`.  Next", 23));
+
+        // Simple case: just code and period
+        assert!(is_after_sentence_ending("`code`.  Next", 7));
+
+        // Multiple inline code spans
+        assert!(is_after_sentence_ending("Use `foo` and `bar`.  Next", 20));
+
+        // With exclamation mark
+        assert!(is_after_sentence_ending("`important`!  Next", 12));
+
+        // With question mark
+        assert!(is_after_sentence_ending("Is it `true`?  Next", 13));
+
+        // Inline code in the middle shouldn't affect sentence detection
+        assert!(is_after_sentence_ending("The `code` works.  Next", 17));
+    }
+
+    #[test]
+    fn test_after_inline_code_with_quotes() {
+        // Inline code before closing quote before period
+        assert!(is_after_sentence_ending("He said \"use `code`\".  Next", 21));
+
+        // Inline code in parentheses
+        assert!(is_after_sentence_ending("(see `example`).  Next", 16));
+    }
+
+    #[test]
+    fn test_after_emphasis() {
+        // Asterisk emphasis
+        assert!(is_after_sentence_ending("The word is *important*.  Next", 24));
+
+        // Underscore emphasis
+        assert!(is_after_sentence_ending("The word is _important_.  Next", 24));
+
+        // With exclamation
+        assert!(is_after_sentence_ending("This is *urgent*!  Next", 17));
+
+        // With question
+        assert!(is_after_sentence_ending("Is it _true_?  Next", 13));
+    }
+
+    #[test]
+    fn test_after_bold() {
+        // Asterisk bold
+        assert!(is_after_sentence_ending("The word is **critical**.  Next", 25));
+
+        // Underscore bold
+        assert!(is_after_sentence_ending("The word is __critical__.  Next", 25));
+    }
+
+    #[test]
+    fn test_after_strikethrough() {
+        // GFM strikethrough
+        assert!(is_after_sentence_ending("This is ~~wrong~~.  Next", 18));
+
+        // With exclamation
+        assert!(is_after_sentence_ending("That was ~~bad~~!  Next", 17));
+    }
+
+    #[test]
+    fn test_after_extended_markdown() {
+        // Highlight syntax (some flavors)
+        assert!(is_after_sentence_ending("This is ==highlighted==.  Next", 24));
+
+        // Superscript syntax (some flavors)
+        assert!(is_after_sentence_ending("E equals mc^2^.  Next", 15));
     }
 }
