@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements 66 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements 67 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -257,6 +257,7 @@ Severity affects:
 | [MD060](md060.md) | Table format           | Table formatting should be consistent |
 | [MD061](md061.md) | Forbidden terms        | Certain terms should not be used      |
 | [MD062](md062.md) | Link destination space | No whitespace in link destinations    |
+| [MD073](md073.md) | TOC validation         | Table of Contents should match headings |
 
 ## Using Rules
 

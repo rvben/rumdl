@@ -66,6 +66,7 @@ mod md069_no_duplicate_list_markers;
 mod md070_nested_code_fence;
 mod md071_blank_line_after_frontmatter;
 mod md072_frontmatter_key_sort;
+mod md073_toc_validation;
 
 pub use md001_heading_increment::MD001HeadingIncrement;
 pub use md003_heading_style::MD003HeadingStyle;
@@ -126,6 +127,7 @@ pub use md069_no_duplicate_list_markers::MD069NoDuplicateListMarkers;
 pub use md070_nested_code_fence::MD070NestedCodeFence;
 pub use md071_blank_line_after_frontmatter::MD071BlankLineAfterFrontmatter;
 pub use md072_frontmatter_key_sort::MD072FrontmatterKeySort;
+pub use md073_toc_validation::MD073TocValidation;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -223,6 +225,7 @@ pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
         ("MD070", MD070NestedCodeFence::from_config),
         ("MD071", MD071BlankLineAfterFrontmatter::from_config),
         ("MD072", MD072FrontmatterKeySort::from_config),
+        ("MD073", MD073TocValidation::from_config),
     ];
     RULES.iter().map(|(_, ctor)| ctor(config)).collect()
 }
