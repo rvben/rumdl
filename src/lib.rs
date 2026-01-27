@@ -95,9 +95,13 @@ impl ContentCharacteristics {
             {
                 chars.has_lists = true;
             }
+            // Ordered lists: line starts with digit, or blockquote line contains digit followed by period
             if !chars.has_lists
-                && line.chars().next().is_some_and(|c| c.is_ascii_digit())
-                && (line.contains(". ") || line.contains('.'))
+                && ((line.chars().next().is_some_and(|c| c.is_ascii_digit())
+                    && (line.contains(". ") || line.contains('.')))
+                    || (trimmed.starts_with('>')
+                        && trimmed.chars().any(|c| c.is_ascii_digit())
+                        && (trimmed.contains(". ") || trimmed.contains('.'))))
             {
                 chars.has_lists = true;
             }
