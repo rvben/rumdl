@@ -21,22 +21,10 @@ static TOC_STOP_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<!--
 static TOC_ENTRY_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)[-*]\s+\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\]\(#([^)]+)\)").unwrap());
 
-/// Detection method for TOC regions
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum TocDetection {
-    /// Only detect using `<!-- toc -->...<!-- tocstop -->` markers
-    #[default]
-    Markers,
-    /// Only detect using heading like "## Table of Contents"
-    Heading,
-    /// Try markers first, fall back to heading detection
-    Both,
-}
-
 /// Represents a detected TOC region in the document
 #[derive(Debug, Clone)]
 struct TocRegion {
-    /// 1-indexed start line of the TOC content (after the marker/heading)
+    /// 1-indexed start line of the TOC content (after the marker)
     start_line: usize,
     /// 1-indexed end line of the TOC content (before the stop marker)
     end_line: usize,
@@ -84,63 +72,98 @@ enum TocMismatch {
     OrderMismatch { entry: TocEntry, expected_position: usize },
 }
 
+/// Regex patterns for stripping markdown formatting from heading text
+static MARKDOWN_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap());
+static MARKDOWN_REF_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\[[^\]]*\]").unwrap());
+static MARKDOWN_IMAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\([^)]+\)").unwrap());
+static MARKDOWN_CODE_SPAN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
+static MARKDOWN_BOLD_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*([^*]+)\*\*").unwrap());
+static MARKDOWN_BOLD_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"__([^_]+)__").unwrap());
+static MARKDOWN_ITALIC_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*([^*]+)\*").unwrap());
+// Match underscore italic at word boundaries (space or start/end)
+// Handles: "_text_", " _text_ ", "start _text_", "_text_ end"
+static MARKDOWN_ITALIC_UNDERSCORE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(^|[^a-zA-Z0-9])_([^_]+)_([^a-zA-Z0-9]|$)").unwrap());
+
+/// Strip markdown formatting from text, preserving plain text content.
+/// Used for TOC entry display text.
+///
+/// Examples:
+/// - `[terminal](url)` → `terminal`
+/// - `**bold**` → `bold`
+/// - `` `code` `` → `code`
+/// - `Tool: [terminal](url)` → `Tool: terminal`
+fn strip_markdown_formatting(text: &str) -> String {
+    let mut result = text.to_string();
+
+    // Strip images first (before links, since images use similar syntax)
+    result = MARKDOWN_IMAGE.replace_all(&result, "$1").to_string();
+
+    // Strip links: [text](url) → text
+    result = MARKDOWN_LINK.replace_all(&result, "$1").to_string();
+
+    // Strip reference links: [text][ref] → text
+    result = MARKDOWN_REF_LINK.replace_all(&result, "$1").to_string();
+
+    // Strip code spans: `code` → code
+    result = MARKDOWN_CODE_SPAN.replace_all(&result, "$1").to_string();
+
+    // Strip bold (do double before single to handle nested)
+    result = MARKDOWN_BOLD_ASTERISK.replace_all(&result, "$1").to_string();
+    result = MARKDOWN_BOLD_UNDERSCORE.replace_all(&result, "$1").to_string();
+
+    // Strip italic
+    result = MARKDOWN_ITALIC_ASTERISK.replace_all(&result, "$1").to_string();
+    // Underscore italic: preserve boundary chars, extract content
+    result = MARKDOWN_ITALIC_UNDERSCORE.replace_all(&result, "$1$2$3").to_string();
+
+    result
+}
+
 /// MD073: Table of Contents Validation
 ///
 /// This rule validates that TOC sections match the actual document headings.
-/// It can detect TOC regions via markers (`<!-- toc -->...<!-- tocstop -->`)
-/// or by heading patterns.
+/// It detects TOC regions via markers (`<!-- toc -->...<!-- tocstop -->`).
+///
+/// To opt into TOC validation, add markers to your document:
+/// ```markdown
+/// <!-- toc -->
+/// - [Section](#section)
+/// <!-- tocstop -->
+/// ```
 ///
 /// ## Configuration
 ///
 /// ```toml
 /// [MD073]
-/// # Detection method: "markers", "heading", or "both"
-/// detection = "both"
+/// # Enable the rule (opt-in, disabled by default)
+/// enabled = true
 /// # Minimum heading level to include (default: 2)
 /// min-level = 2
 /// # Maximum heading level to include (default: 4)
 /// max-level = 4
 /// # Whether TOC order must match document order (default: true)
 /// enforce-order = true
-/// # Whether to use nested indentation (default: true)
-/// nested = true
-/// # Anchor generation style (default: "github")
-/// anchor-style = "github"
-/// # Headings that indicate a TOC section
-/// toc-headings = ["Table of Contents", "Contents", "TOC"]
 /// ```
 #[derive(Clone)]
 pub struct MD073TocValidation {
-    /// How to detect TOC regions
-    detection: TocDetection,
+    /// Whether this rule is enabled (default: false - opt-in rule)
+    enabled: bool,
     /// Minimum heading level to include
     min_level: u8,
     /// Maximum heading level to include
     max_level: u8,
     /// Whether to enforce order matching
     enforce_order: bool,
-    /// Whether to nest entries based on heading level
-    nested: bool,
-    /// Anchor generation style
-    anchor_style: AnchorStyle,
-    /// Heading patterns that indicate TOC sections
-    toc_headings: Vec<String>,
 }
 
 impl Default for MD073TocValidation {
     fn default() -> Self {
         Self {
-            detection: TocDetection::Both,
+            enabled: false, // Disabled by default - opt-in rule
             min_level: 2,
             max_level: 4,
             enforce_order: true,
-            nested: true,
-            anchor_style: AnchorStyle::GitHub,
-            toc_headings: vec![
-                "Table of Contents".to_string(),
-                "Contents".to_string(),
-                "TOC".to_string(),
-            ],
         }
     }
 }
@@ -148,12 +171,10 @@ impl Default for MD073TocValidation {
 impl std::fmt::Debug for MD073TocValidation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MD073TocValidation")
-            .field("detection", &self.detection)
+            .field("enabled", &self.enabled)
             .field("min_level", &self.min_level)
             .field("max_level", &self.max_level)
             .field("enforce_order", &self.enforce_order)
-            .field("nested", &self.nested)
-            .field("toc_headings", &self.toc_headings)
             .finish()
     }
 }
@@ -214,128 +235,9 @@ impl MD073TocValidation {
         None
     }
 
-    /// Detect TOC region by heading pattern
-    fn detect_by_heading(&self, ctx: &LintContext) -> Option<TocRegion> {
-        let mut toc_heading_line = None;
-        let mut content_start_line = None;
-        let mut content_start_byte = None;
-        let mut blank_streak = 0usize;
-
-        for (idx, line_info) in ctx.lines.iter().enumerate() {
-            let line_num = idx + 1;
-
-            // Skip if in code block or front matter
-            if line_info.in_code_block || line_info.in_front_matter {
-                continue;
-            }
-
-            // Look for TOC heading
-            if toc_heading_line.is_none() {
-                if let Some(heading) = &line_info.heading {
-                    // Check if heading text matches any TOC heading pattern
-                    let heading_text = heading.text.trim();
-                    if self.toc_headings.iter().any(|h| h.eq_ignore_ascii_case(heading_text)) {
-                        toc_heading_line = Some(line_num);
-                        // Content starts on the next line
-                        if idx + 1 < ctx.lines.len() {
-                            content_start_line = Some(line_num + 1);
-                            content_start_byte = Some(ctx.lines[idx + 1].byte_offset);
-                        }
-                    }
-                }
-            } else if content_start_line.is_some() {
-                // We found the TOC heading, now find where the TOC ends
-                // TOC ends at:
-                // 1. Next heading
-                // 2. Two consecutive blank lines
-                // 3. End of document
-
-                // Check for next heading
-                if line_info.heading.is_some() {
-                    let end_line = line_num - 1;
-                    let content_end = line_info.byte_offset;
-
-                    // Skip backwards over trailing blank lines
-                    let mut actual_end = end_line;
-                    while actual_end >= content_start_line.unwrap() {
-                        let check_idx = actual_end - 1;
-                        if check_idx < ctx.lines.len() && ctx.lines[check_idx].is_blank {
-                            actual_end -= 1;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if actual_end < content_start_line.unwrap() {
-                        actual_end = content_start_line.unwrap();
-                    }
-
-                    return Some(TocRegion {
-                        start_line: content_start_line.unwrap(),
-                        end_line: actual_end,
-                        content_start: content_start_byte.unwrap(),
-                        content_end,
-                    });
-                }
-
-                // Check for two consecutive blank lines
-                if line_info.is_blank {
-                    blank_streak += 1;
-                    if blank_streak >= 2 {
-                        let start_line = content_start_line.unwrap();
-                        let first_blank_idx = idx - 1;
-                        let mut end_line = line_num.saturating_sub(2);
-                        if end_line < start_line {
-                            end_line = start_line;
-                        }
-
-                        return Some(TocRegion {
-                            start_line,
-                            end_line,
-                            content_start: content_start_byte.unwrap(),
-                            content_end: ctx.lines[first_blank_idx].byte_offset,
-                        });
-                    }
-                } else {
-                    blank_streak = 0;
-                }
-            }
-        }
-
-        // If we found a TOC heading but no subsequent heading, TOC goes to end
-        if let (Some(start_line), Some(start_byte)) = (content_start_line, content_start_byte) {
-            // Find last non-blank line
-            let mut end_line = ctx.lines.len();
-            while end_line > start_line {
-                let check_idx = end_line - 1;
-                if check_idx < ctx.lines.len() && ctx.lines[check_idx].is_blank {
-                    end_line -= 1;
-                } else {
-                    break;
-                }
-            }
-
-            return Some(TocRegion {
-                start_line,
-                end_line,
-                content_start: start_byte,
-                content_end: ctx.content.len(),
-            });
-        }
-
-        None
-    }
-
-    /// Detect TOC region based on configured detection method
+    /// Detect TOC region using markers
     fn detect_toc_region(&self, ctx: &LintContext) -> Option<TocRegion> {
-        match self.detection {
-            TocDetection::Markers => self.detect_by_markers(ctx),
-            TocDetection::Heading => self.detect_by_heading(ctx),
-            TocDetection::Both => {
-                // Try markers first, then fall back to heading
-                self.detect_by_markers(ctx).or_else(|| self.detect_by_heading(ctx))
-            }
-        }
+        self.detect_by_markers(ctx)
     }
 
     /// Extract TOC entries from the detected region
@@ -382,11 +284,11 @@ impl MD073TocValidation {
                     continue;
                 }
 
-                // Use custom ID if available
+                // Use custom ID if available, otherwise generate GitHub-style anchor
                 let base_anchor = if let Some(custom_id) = &heading.custom_id {
                     custom_id.clone()
                 } else {
-                    self.anchor_style.generate_fragment(&heading.text)
+                    AnchorStyle::GitHub.generate_fragment(&heading.text)
                 };
 
                 // Handle duplicate anchors
@@ -436,11 +338,13 @@ impl MD073TocValidation {
             }
         }
 
-        // Check for text mismatches
+        // Check for text mismatches (compare stripped versions)
         for entry in actual {
             if let Some(exp) = expected_anchors.get(entry.anchor.as_str()) {
-                // Normalize comparison (trim, case-insensitive for very flexible matching)
-                if entry.text.trim() != exp.text.trim() {
+                // Compare stripped text (removes markdown formatting like links, emphasis)
+                let actual_stripped = strip_markdown_formatting(entry.text.trim());
+                let expected_stripped = strip_markdown_formatting(exp.text.trim());
+                if actual_stripped != expected_stripped {
                     mismatches.push(TocMismatch::TextMismatch {
                         entry: entry.clone(),
                         expected: (*exp).clone(),
@@ -490,7 +394,7 @@ impl MD073TocValidation {
         mismatches
     }
 
-    /// Generate a new TOC from expected entries
+    /// Generate a new TOC from expected entries (always uses nested indentation)
     fn generate_toc(&self, expected: &[ExpectedTocEntry]) -> String {
         if expected.is_empty() {
             return String::new();
@@ -500,14 +404,12 @@ impl MD073TocValidation {
         let base_level = expected.iter().map(|e| e.level).min().unwrap_or(2);
 
         for entry in expected {
-            let indent = if self.nested {
-                let level_diff = entry.level.saturating_sub(base_level) as usize;
-                "  ".repeat(level_diff)
-            } else {
-                String::new()
-            };
+            let level_diff = entry.level.saturating_sub(base_level) as usize;
+            let indent = "  ".repeat(level_diff);
 
-            result.push_str(&format!("{indent}- [{}](#{})\n", entry.text, entry.anchor));
+            // Strip markdown formatting from heading text for clean TOC entries
+            let display_text = strip_markdown_formatting(&entry.text);
+            result.push_str(&format!("{indent}- [{display_text}](#{})\n", entry.anchor));
         }
 
         result
@@ -524,14 +426,14 @@ impl Rule for MD073TocValidation {
     }
 
     fn should_skip(&self, ctx: &LintContext) -> bool {
-        // Quick check: if no TOC markers or headings that could be TOC
-        let has_toc_marker = ctx.content.contains("<!-- toc") || ctx.content.contains("<!--toc");
-        let has_toc_heading = self
-            .toc_headings
-            .iter()
-            .any(|h| ctx.content.to_lowercase().contains(&h.to_lowercase()));
+        // Skip if rule is disabled (opt-in rule)
+        if !self.enabled {
+            return true;
+        }
 
-        !has_toc_marker && !has_toc_heading
+        // Quick check: skip if no TOC markers
+        let has_toc_marker = ctx.content.contains("<!-- toc") || ctx.content.contains("<!--toc");
+        !has_toc_marker
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
@@ -650,20 +552,14 @@ impl Rule for MD073TocValidation {
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         let value: toml::Value = toml::from_str(
             r#"
-# Detection method: "markers", "heading", or "both"
-detection = "both"
+# Whether this rule is enabled (opt-in, disabled by default)
+enabled = false
 # Minimum heading level to include
 min-level = 2
 # Maximum heading level to include
 max-level = 4
 # Whether TOC order must match document order
 enforce-order = true
-# Whether to use nested indentation
-nested = true
-# Anchor generation style
-anchor-style = "github"
-# Headings that indicate a TOC section
-toc-headings = ["Table of Contents", "Contents", "TOC"]
 "#,
         )
         .ok()?;
@@ -677,13 +573,9 @@ toc-headings = ["Table of Contents", "Contents", "TOC"]
         let mut rule = MD073TocValidation::default();
 
         if let Some(rule_config) = config.rules.get("MD073") {
-            // Parse detection method
-            if let Some(detection_str) = rule_config.values.get("detection").and_then(|v| v.as_str()) {
-                rule.detection = match detection_str.to_lowercase().as_str() {
-                    "markers" => TocDetection::Markers,
-                    "heading" => TocDetection::Heading,
-                    _ => TocDetection::Both,
-                };
+            // Parse enabled (opt-in rule, defaults to false)
+            if let Some(enabled) = rule_config.values.get("enabled").and_then(|v| v.as_bool()) {
+                rule.enabled = enabled;
             }
 
             // Parse min-level
@@ -700,31 +592,6 @@ toc-headings = ["Table of Contents", "Contents", "TOC"]
             if let Some(enforce_order) = rule_config.values.get("enforce-order").and_then(|v| v.as_bool()) {
                 rule.enforce_order = enforce_order;
             }
-
-            // Parse nested
-            if let Some(nested) = rule_config.values.get("nested").and_then(|v| v.as_bool()) {
-                rule.nested = nested;
-            }
-
-            // Parse anchor-style
-            if let Some(style_str) = rule_config.values.get("anchor-style").and_then(|v| v.as_str()) {
-                rule.anchor_style = match style_str.to_lowercase().as_str() {
-                    "kramdown" => AnchorStyle::Kramdown,
-                    "kramdown-gfm" | "jekyll" => AnchorStyle::KramdownGfm,
-                    _ => AnchorStyle::GitHub,
-                };
-            }
-
-            // Parse toc-headings
-            if let Some(headings) = rule_config.values.get("toc-headings").and_then(|v| v.as_array()) {
-                let custom_headings: Vec<String> = headings
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
-                if !custom_headings.is_empty() {
-                    rule.toc_headings = custom_headings;
-                }
-            }
         }
 
         Box::new(rule)
@@ -738,6 +605,14 @@ mod tests {
 
     fn create_ctx(content: &str) -> LintContext<'_> {
         LintContext::new(content, MarkdownFlavor::Standard, None)
+    }
+
+    /// Create rule with enabled=true for tests that call check() directly
+    fn create_enabled_rule() -> MD073TocValidation {
+        MD073TocValidation {
+            enabled: true,
+            ..MD073TocValidation::default()
+        }
     }
 
     // ========== Detection Tests ==========
@@ -787,58 +662,6 @@ Content here.
     }
 
     #[test]
-    fn test_detect_heading_table_of_contents() {
-        let mut rule = MD073TocValidation::new();
-        rule.detection = TocDetection::Heading;
-
-        let content = r#"# Title
-
-## Table of Contents
-
-- [Heading 1](#heading-1)
-- [Heading 2](#heading-2)
-
-## Heading 1
-
-Content.
-
-## Heading 2
-
-More content.
-"#;
-        let ctx = create_ctx(content);
-        let region = rule.detect_by_heading(&ctx);
-        assert!(region.is_some());
-        let region = region.unwrap();
-        // Verify the TOC region was detected
-        assert_eq!(region.start_line, 4);
-    }
-
-    #[test]
-    fn test_detect_heading_ends_on_double_blank_lines() {
-        let mut rule = MD073TocValidation::new();
-        rule.detection = TocDetection::Heading;
-
-        let content = r#"# Title
-
-## Table of Contents
-
-- [Heading 1](#heading-1)
-
-
-This text is not part of TOC.
-
-## Heading 1
-
-Content.
-"#;
-        let ctx = create_ctx(content);
-        let region = rule.detect_by_heading(&ctx).unwrap();
-        assert_eq!(region.start_line, 4);
-        assert_eq!(region.end_line, 5);
-    }
-
-    #[test]
     fn test_no_toc_region() {
         let rule = MD073TocValidation::new();
         let content = r#"# Title
@@ -860,7 +683,7 @@ More content.
 
     #[test]
     fn test_toc_matches_headings() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -885,7 +708,7 @@ More content.
 
     #[test]
     fn test_missing_entry() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -911,7 +734,7 @@ New heading not in TOC.
 
     #[test]
     fn test_stale_entry() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -934,7 +757,7 @@ Content.
 
     #[test]
     fn test_text_mismatch() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1108,28 +931,37 @@ Content.
     }
 
     #[test]
-    fn test_fix_heading_detection_stops_on_double_blank_lines() {
-        let mut rule = MD073TocValidation::new();
-        rule.detection = TocDetection::Heading;
+    fn test_fix_requires_markers() {
+        let rule = create_enabled_rule();
 
-        let content = r#"# Title
-
-## Table of Contents
-
-- [Heading 1](#heading-1)
-
-
-This text is not part of TOC.
+        // Document without markers - no TOC detected, no changes
+        let content_no_markers = r#"# Title
 
 ## Heading 1
 
 Content.
 "#;
-        let ctx = create_ctx(content);
+        let ctx = create_ctx(content_no_markers);
         let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content_no_markers);
 
+        // Document with markers - TOC detected and fixed
+        let content_markers = r#"# Title
+
+<!-- toc -->
+
+- [Old Entry](#old-entry)
+
+<!-- tocstop -->
+
+## Heading 1
+
+Content.
+"#;
+        let ctx = create_ctx(content_markers);
+        let fixed = rule.fix(&ctx).unwrap();
         assert!(fixed.contains("- [Heading 1](#heading-1)"));
-        assert!(fixed.contains("This text is not part of TOC."));
+        assert!(!fixed.contains("Old Entry"));
     }
 
     // ========== Anchor Tests ==========
@@ -1169,7 +1001,7 @@ Even more.
 
     #[test]
     fn test_headings_in_code_blocks_ignored() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1193,7 +1025,7 @@ Content.
 
     #[test]
     fn test_empty_toc_region() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1211,8 +1043,7 @@ Content.
 
     #[test]
     fn test_nested_indentation() {
-        let mut rule = MD073TocValidation::new();
-        rule.nested = true;
+        let rule = create_enabled_rule();
 
         let content = r#"<!-- toc -->
 
@@ -1231,46 +1062,18 @@ Content.
         let expected = rule.build_expected_toc(&ctx, &region);
         let toc = rule.generate_toc(&expected);
 
-        // Check indentation
+        // Check indentation (always nested)
         assert!(toc.contains("- [Level 2](#level-2)"));
         assert!(toc.contains("  - [Level 3](#level-3)"));
         assert!(toc.contains("    - [Level 4](#level-4)"));
         assert!(toc.contains("- [Another Level 2](#another-level-2)"));
     }
 
-    #[test]
-    fn test_flat_no_indentation() {
-        let mut rule = MD073TocValidation::new();
-        rule.nested = false;
-
-        let content = r#"<!-- toc -->
-
-<!-- tocstop -->
-
-## Level 2
-
-### Level 3
-
-#### Level 4
-"#;
-        let ctx = create_ctx(content);
-        let region = rule.detect_toc_region(&ctx).unwrap();
-        let expected = rule.build_expected_toc(&ctx, &region);
-        let toc = rule.generate_toc(&expected);
-
-        // All entries should have no indentation
-        for line in toc.lines() {
-            if !line.is_empty() {
-                assert!(line.starts_with("- ["), "Line should start without indent: {line}");
-            }
-        }
-    }
-
     // ========== Order Mismatch Tests ==========
 
     #[test]
     fn test_order_mismatch_detected() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1297,7 +1100,7 @@ Content B.
 
     #[test]
     fn test_order_mismatch_ignored_when_disabled() {
-        let mut rule = MD073TocValidation::new();
+        let mut rule = create_enabled_rule();
         rule.enforce_order = false;
         let content = r#"# Title
 
@@ -1326,7 +1129,7 @@ Content B.
 
     #[test]
     fn test_unicode_headings() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1352,7 +1155,7 @@ Content with emojis.
 
     #[test]
     fn test_special_characters_in_headings() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1377,7 +1180,7 @@ C++ content.
 
     #[test]
     fn test_code_spans_in_headings() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1406,14 +1209,196 @@ Command documentation.
         assert_eq!(rule.min_level, 2);
         assert_eq!(rule.max_level, 4);
         assert!(rule.enforce_order);
-        assert!(rule.nested);
+    }
+
+    // ========== Markdown Stripping Tests ==========
+
+    #[test]
+    fn test_strip_markdown_formatting_link() {
+        let result = strip_markdown_formatting("Tool: [terminal](https://example.com)");
+        assert_eq!(result, "Tool: terminal");
+    }
+
+    #[test]
+    fn test_strip_markdown_formatting_bold() {
+        let result = strip_markdown_formatting("This is **bold** text");
+        assert_eq!(result, "This is bold text");
+
+        let result = strip_markdown_formatting("This is __bold__ text");
+        assert_eq!(result, "This is bold text");
+    }
+
+    #[test]
+    fn test_strip_markdown_formatting_italic() {
+        let result = strip_markdown_formatting("This is *italic* text");
+        assert_eq!(result, "This is italic text");
+
+        let result = strip_markdown_formatting("This is _italic_ text");
+        assert_eq!(result, "This is italic text");
+    }
+
+    #[test]
+    fn test_strip_markdown_formatting_code_span() {
+        let result = strip_markdown_formatting("Use the `format` function");
+        assert_eq!(result, "Use the format function");
+    }
+
+    #[test]
+    fn test_strip_markdown_formatting_image() {
+        let result = strip_markdown_formatting("See ![logo](image.png) for details");
+        assert_eq!(result, "See logo for details");
+    }
+
+    #[test]
+    fn test_strip_markdown_formatting_reference_link() {
+        let result = strip_markdown_formatting("See [documentation][docs] for details");
+        assert_eq!(result, "See documentation for details");
+    }
+
+    #[test]
+    fn test_strip_markdown_formatting_combined() {
+        // Link is stripped first, leaving bold, then bold is stripped
+        let result = strip_markdown_formatting("Tool: [**terminal**](https://example.com)");
+        assert_eq!(result, "Tool: terminal");
+    }
+
+    #[test]
+    fn test_toc_with_link_in_heading_matches_stripped_text() {
+        let rule = create_enabled_rule();
+
+        // TOC entry text matches the stripped heading text
+        let content = r#"# Title
+
+<!-- toc -->
+
+- [Tool: terminal](#tool-terminal)
+
+<!-- tocstop -->
+
+## Tool: [terminal](https://example.com)
+
+Content here.
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Stripped heading text should match TOC entry: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_toc_with_simplified_text_still_mismatches() {
+        let rule = create_enabled_rule();
+
+        // TOC entry "terminal" does NOT match stripped heading "Tool: terminal"
+        let content = r#"# Title
+
+<!-- toc -->
+
+- [terminal](#tool-terminal)
+
+<!-- tocstop -->
+
+## Tool: [terminal](https://example.com)
+
+Content here.
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should report text mismatch");
+        assert!(result[0].message.contains("Text mismatch"));
+    }
+
+    #[test]
+    fn test_fix_generates_stripped_toc_entries() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## Tool: [busybox](https://www.busybox.net/)
+
+Content.
+
+## Tool: [mount](https://en.wikipedia.org/wiki/Mount)
+
+More content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Generated TOC should have stripped text (links removed)
+        assert!(
+            fixed.contains("- [Tool: busybox](#tool-busybox)"),
+            "TOC entry should have stripped link text"
+        );
+        assert!(
+            fixed.contains("- [Tool: mount](#tool-mount)"),
+            "TOC entry should have stripped link text"
+        );
+        // TOC entries should NOT contain the URL (the actual headings in the document still will)
+        // Check only within the TOC region (between toc markers)
+        let toc_start = fixed.find("<!-- toc -->").unwrap();
+        let toc_end = fixed.find("<!-- tocstop -->").unwrap();
+        let toc_content = &fixed[toc_start..toc_end];
+        assert!(
+            !toc_content.contains("busybox.net"),
+            "TOC should not contain URLs: {toc_content}"
+        );
+        assert!(
+            !toc_content.contains("wikipedia.org"),
+            "TOC should not contain URLs: {toc_content}"
+        );
+    }
+
+    #[test]
+    fn test_fix_with_bold_in_heading() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## **Important** Section
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Generated TOC should have stripped text (bold markers removed)
+        assert!(fixed.contains("- [Important Section](#important-section)"));
+    }
+
+    #[test]
+    fn test_fix_with_code_in_heading() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## Using `async` Functions
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Generated TOC should have stripped text (backticks removed)
+        assert!(fixed.contains("- [Using async Functions](#using-async-functions)"));
     }
 
     // ========== Custom Anchor Tests ==========
 
     #[test]
     fn test_custom_anchor_id_respected() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1433,7 +1418,7 @@ Content here.
 
     #[test]
     fn test_custom_anchor_id_in_generated_toc() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1456,7 +1441,7 @@ More content.
 
     #[test]
     fn test_mixed_custom_and_generated_anchors() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1479,12 +1464,11 @@ More content.
         assert!(result.is_empty(), "Should handle mixed custom and generated anchors");
     }
 
-    // ========== Anchor Style Tests ==========
+    // ========== Anchor Generation Tests ==========
 
     #[test]
-    fn test_github_anchor_style_default() {
-        let rule = MD073TocValidation::new();
-        assert_eq!(rule.anchor_style, AnchorStyle::GitHub);
+    fn test_github_anchor_style() {
+        let rule = create_enabled_rule();
 
         let content = r#"<!-- toc -->
 
@@ -1498,49 +1482,7 @@ Content.
         let region = rule.detect_toc_region(&ctx).unwrap();
         let expected = rule.build_expected_toc(&ctx, &region);
 
-        // GitHub preserves underscores
-        assert_eq!(expected[0].anchor, "test_with_underscores");
-    }
-
-    #[test]
-    fn test_kramdown_anchor_style() {
-        let mut rule = MD073TocValidation::new();
-        rule.anchor_style = AnchorStyle::Kramdown;
-
-        let content = r#"<!-- toc -->
-
-<!-- tocstop -->
-
-## Test_With_Underscores
-
-Content.
-"#;
-        let ctx = create_ctx(content);
-        let region = rule.detect_toc_region(&ctx).unwrap();
-        let expected = rule.build_expected_toc(&ctx, &region);
-
-        // Kramdown removes underscores
-        assert_eq!(expected[0].anchor, "testwithunderscores");
-    }
-
-    #[test]
-    fn test_kramdown_gfm_anchor_style() {
-        let mut rule = MD073TocValidation::new();
-        rule.anchor_style = AnchorStyle::KramdownGfm;
-
-        let content = r#"<!-- toc -->
-
-<!-- tocstop -->
-
-## Test_With_Underscores
-
-Content.
-"#;
-        let ctx = create_ctx(content);
-        let region = rule.detect_toc_region(&ctx).unwrap();
-        let expected = rule.build_expected_toc(&ctx, &region);
-
-        // KramdownGfm preserves underscores
+        // GitHub-style anchors preserve underscores
         assert_eq!(expected[0].anchor, "test_with_underscores");
     }
 
@@ -1548,7 +1490,7 @@ Content.
 
     #[test]
     fn test_stress_many_headings() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
 
         // Generate a document with 150 headings
         let mut content = String::from("# Title\n\n<!-- toc -->\n\n<!-- tocstop -->\n\n");
@@ -1575,7 +1517,7 @@ Content.
 
     #[test]
     fn test_stress_deeply_nested() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
         let content = r#"# Title
 
 <!-- toc -->
@@ -1620,7 +1562,7 @@ Content.
 
     #[test]
     fn test_stress_many_duplicates() {
-        let rule = MD073TocValidation::new();
+        let rule = create_enabled_rule();
 
         // Generate 50 headings with the same text
         let mut content = String::from("# Title\n\n<!-- toc -->\n\n<!-- tocstop -->\n\n");

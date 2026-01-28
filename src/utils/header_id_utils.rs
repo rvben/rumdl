@@ -27,6 +27,12 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+/// Pattern for HTML anchor elements used for custom anchors in headings
+/// Matches: `<a name="..."></a>`, `<a id="..."></a>`, `<a name="..." id="..."></a>`
+/// These are commonly used by some authors to create custom anchors for headings
+static HTML_ANCHOR_ELEMENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"<a\s+(?:name|id)="[^"]*"(?:\s+(?:name|id)="[^"]*")?>\s*</a>\s*"#).unwrap());
+
 /// Pattern for custom header IDs supporting both kramdown and python-markdown attr-list formats
 /// Supports: {#id}, { #id }, {:#id}, {: #id } and full attr-list with classes/attributes
 /// Must contain #id but can have other attributes: {: #id .class data="value" }
@@ -63,6 +69,11 @@ static STANDALONE_ATTR_LIST_PATTERN: LazyLock<Regex> =
 /// assert_eq!(id, Some("my-id".to_string()));
 /// ```
 pub fn extract_header_id(line: &str) -> (String, Option<String>) {
+    // First, strip HTML anchor elements (e.g., <a name="..."></a>) from the line
+    // These are used by some authors for custom anchors: `## <a name="foo"></a>Heading`
+    let line = HTML_ANCHOR_ELEMENT.replace_all(line, "");
+    let line = line.as_ref();
+
     if let Some(captures) = HEADER_ID_PATTERN.captures(line)
         && let Some(full_match) = captures.get(0)
         && let Some(attr_content) = captures.get(1)
@@ -341,5 +352,31 @@ mod tests {
         let (text, id) = extract_header_id("## Another. {#id.more.dots}");
         assert_eq!(text, "## Another. {#id.more.dots}");
         assert_eq!(id, None);
+    }
+
+    #[test]
+    fn test_html_anchor_stripping() {
+        // HTML anchor elements should be stripped from heading text
+        // This is used by some authors for custom anchors
+
+        // Basic <a name="..."></a> pattern
+        let (text, id) = extract_header_id("<a name=\"cheatsheets\"></a>Cheat Sheets");
+        assert_eq!(text, "Cheat Sheets");
+        assert_eq!(id, None);
+
+        // <a id="..."></a> pattern
+        let (text, id) = extract_header_id("<a id=\"tools\"></a>Tools and session management");
+        assert_eq!(text, "Tools and session management");
+        assert_eq!(id, None);
+
+        // With spaces around the anchor
+        let (text, id) = extract_header_id("<a name=\"foo\"></a> Heading with space");
+        assert_eq!(text, "Heading with space");
+        assert_eq!(id, None);
+
+        // Combined with kramdown custom ID
+        let (text, id) = extract_header_id("<a name=\"old\"></a>My Section {#my-custom-id}");
+        assert_eq!(text, "My Section");
+        assert_eq!(id, Some("my-custom-id".to_string()));
     }
 }
