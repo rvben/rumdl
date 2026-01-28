@@ -1305,7 +1305,10 @@ Normal paragraph.
         let content = "Hello from `backticks`.  How's it going?";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Should allow 2 spaces after inline code ending with period");
+        assert!(
+            result.is_empty(),
+            "Should allow 2 spaces after inline code ending with period"
+        );
 
         // Multiple inline code spans
         let content = "Use `foo` and `bar`.  Next sentence.";
@@ -1403,7 +1406,10 @@ Normal paragraph.
         let content = "That was ~~bad~~!  Learn from it.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Should allow 2 spaces after strikethrough with exclamation");
+        assert!(
+            result.is_empty(),
+            "Should allow 2 spaces after strikethrough with exclamation"
+        );
     }
 
     #[test]

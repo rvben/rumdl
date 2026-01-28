@@ -133,6 +133,8 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Building](#building)
   - [Testing](#testing)
   - [JSON Schema Generation](#json-schema-generation)
+- [Used By](#used-by)
+- [Sponsors](#sponsors)
 - [License](#license)
 
 ## Installation
@@ -181,7 +183,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.1.2
+mise use rumdl@0.1.3
 ```
 
 ### Using Nix (macOS/Linux)
@@ -341,7 +343,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.1.2
+    rev: v0.1.3
     hooks:
       - id: rumdl      # Lint only (fails on issues)
       - id: rumdl-fmt  # Auto-format and fail if issues remain
@@ -375,7 +377,7 @@ However, for pre-commit workflows where you want to exclude certain files even w
    ```yaml
    repos:
      - repo: https://github.com/rvben/rumdl-pre-commit
-       rev: v0.1.2
+       rev: v0.1.3
        hooks:
          - id: rumdl
            args: [--force-exclude]  # Respect exclude patterns from config

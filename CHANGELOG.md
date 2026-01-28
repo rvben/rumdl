@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-01-28
+
+### Added
+
+- **MD073: Table of Contents validation rule**
+  - Validates TOC entries match actual document headings
+  - Detects missing, extra, misordered, and misnamed TOC entries
+  - Supports multiple anchor styles: GitHub, GitLab, Markdownlint, VSCode
+  - Configurable: `toc-heading`, `anchor-style`, `case-sensitive`
+
+### Fixed
+
+- **MD064: Recognize sentence endings after markdown inline elements** ([#345](https://github.com/rvben/rumdl/issues/345))
+  - `allow-sentence-double-space` now works with sentences ending in inline code, emphasis, bold, strikethrough, and other markdown elements
+  - Example: `` `code`.  Next sentence `` no longer flags a false positive
+
 ## [0.1.2] - 2026-01-27
 
 ### Fixed
