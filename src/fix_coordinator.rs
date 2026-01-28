@@ -215,6 +215,11 @@ impl FixCoordinator {
                     continue;
                 }
 
+                // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
+                if rule.should_skip(&ctx) {
+                    continue;
+                }
+
                 // Check if this rule has any current warnings
                 let warnings = match rule.check(&ctx) {
                     Ok(w) => w,

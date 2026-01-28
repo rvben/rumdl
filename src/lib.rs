@@ -286,6 +286,11 @@ pub fn lint_and_index(
         #[cfg(not(target_arch = "wasm32"))]
         let _rule_start = Instant::now();
 
+        // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
+        if rule.should_skip(&lint_ctx) {
+            continue;
+        }
+
         // Run single-file check
         let result = rule.check(&lint_ctx);
 

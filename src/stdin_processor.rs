@@ -85,6 +85,10 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
 
     // Run all enabled rules on the content
     for rule in rules {
+        // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
+        if rule.should_skip(&ctx) {
+            continue;
+        }
         match rule.check(&ctx) {
             Ok(warnings) => {
                 all_warnings.extend(warnings);
@@ -135,6 +139,9 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             let fixed_ctx = LintContext::new(&fixed_content, config.markdown_flavor(), source_file.clone());
             let mut remaining_warnings = Vec::new();
             for rule in rules {
+                if rule.should_skip(&fixed_ctx) {
+                    continue;
+                }
                 if let Ok(warnings) = rule.check(&fixed_ctx) {
                     remaining_warnings.extend(warnings);
                 }
