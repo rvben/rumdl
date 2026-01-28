@@ -919,12 +919,9 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Fast path: check if document likely has lists
-        if ctx.content.is_empty() || !ctx.likely_has_lists() {
-            return true;
-        }
-        // Verify list blocks actually exist
-        ctx.list_blocks.is_empty()
+        // Skip if no list blocks exist (includes ordered and unordered lists)
+        // Note: list_blocks is pre-computed in LintContext, so this is already efficient
+        ctx.content.is_empty() || ctx.list_blocks.is_empty()
     }
 
     fn category(&self) -> RuleCategory {

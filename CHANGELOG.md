@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-01-28
+
+### Changed
+
+- **MD073: Simplified to marker-based TOC detection only** ([#332](https://github.com/rvben/rumdl/issues/332))
+  - Removed heading-based TOC detection (~200 lines of code)
+  - Now only supports `<!-- toc -->...<!-- tocstop -->` markers
+  - Ensures consistent detect/fix behavior - only validates TOCs users explicitly mark
+  - Rule is now opt-in: disabled by default, enable with `[MD073] enabled = true`
+
+### Fixed
+
+- **Rules: Call should_skip() in linting engine for opt-in rules**
+  - Opt-in rules (like MD073) now correctly skip when disabled
+  - Previously, rules had to check skip internally which caused inconsistent behavior
+  - Architectural fix affects all rules with opt-in behavior
+
+- **MD073: Fix HTML anchor handling in heading ID generation**
+  - Headings with `<a name="..."></a>` anchors now correctly extract the anchor ID
+  - Centralized fix in `header_id_utils.rs` benefits all anchor-related functionality
+
+- **MD032: Fix should_skip() to detect ordered lists**
+  - `likely_has_lists()` only checked for unordered markers (`*`, `-`, `+`)
+  - Ordered lists (e.g., `1. item`) were incorrectly skipped
+  - Now uses pre-computed `list_blocks` which includes all list types
+
 ## [0.1.3] - 2026-01-28
 
 ### Added
