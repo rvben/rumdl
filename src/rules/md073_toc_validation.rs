@@ -152,6 +152,8 @@ fn strip_markdown_formatting(text: &str) -> String {
 /// max-level = 4
 /// # Whether TOC order must match document order (default: true)
 /// enforce-order = true
+/// # Indent size per nesting level (default: from MD007 config, or 2)
+/// indent = 2
 /// ```
 #[derive(Clone)]
 pub struct MD073TocValidation {
@@ -163,6 +165,8 @@ pub struct MD073TocValidation {
     max_level: u8,
     /// Whether to enforce order matching
     enforce_order: bool,
+    /// Indent size per nesting level (reads from MD007 config by default)
+    pub indent: usize,
 }
 
 impl Default for MD073TocValidation {
@@ -172,6 +176,7 @@ impl Default for MD073TocValidation {
             min_level: 2,
             max_level: 4,
             enforce_order: true,
+            indent: 2, // Default indent, can be overridden by MD007 config
         }
     }
 }
@@ -183,6 +188,7 @@ impl std::fmt::Debug for MD073TocValidation {
             .field("min_level", &self.min_level)
             .field("max_level", &self.max_level)
             .field("enforce_order", &self.enforce_order)
+            .field("indent", &self.indent)
             .finish()
     }
 }
@@ -367,14 +373,14 @@ impl MD073TocValidation {
         }
 
         // Check for indentation mismatches
-        // Expected indentation is 2 spaces per level difference from base level
+        // Expected indentation is indent spaces per level difference from base level
         if !expected.is_empty() {
             let base_level = expected.iter().map(|e| e.level).min().unwrap_or(2);
 
             for entry in actual {
                 if let Some(exp) = expected_anchors.get(entry.anchor.as_str()) {
                     let level_diff = exp.level.saturating_sub(base_level) as usize;
-                    let expected_indent = level_diff * 2;
+                    let expected_indent = level_diff * self.indent;
 
                     if entry.indent_spaces != expected_indent {
                         // Don't report indentation mismatch if already reported as text mismatch
@@ -444,10 +450,11 @@ impl MD073TocValidation {
 
         let mut result = String::new();
         let base_level = expected.iter().map(|e| e.level).min().unwrap_or(2);
+        let indent_str = " ".repeat(self.indent);
 
         for entry in expected {
             let level_diff = entry.level.saturating_sub(base_level) as usize;
-            let indent = "  ".repeat(level_diff);
+            let indent = indent_str.repeat(level_diff);
 
             // Strip markdown formatting from heading text for clean TOC entries
             let display_text = strip_markdown_formatting(&entry.text);
@@ -624,6 +631,7 @@ enforce-order = true
         Self: Sized,
     {
         let mut rule = MD073TocValidation::default();
+        let mut indent_from_md073 = false;
 
         if let Some(rule_config) = config.rules.get("MD073") {
             // Parse enabled (opt-in rule, defaults to false)
@@ -645,6 +653,20 @@ enforce-order = true
             if let Some(enforce_order) = rule_config.values.get("enforce-order").and_then(|v| v.as_bool()) {
                 rule.enforce_order = enforce_order;
             }
+
+            // Parse indent (MD073-specific override)
+            if let Some(indent) = rule_config.values.get("indent").and_then(|v| v.as_integer()) {
+                rule.indent = (indent.clamp(1, 8)) as usize;
+                indent_from_md073 = true;
+            }
+        }
+
+        // If indent not explicitly set in MD073, read from MD007 config
+        if !indent_from_md073
+            && let Some(md007_config) = config.rules.get("MD007")
+            && let Some(indent) = md007_config.values.get("indent").and_then(|v| v.as_integer())
+        {
+            rule.indent = (indent.clamp(1, 8)) as usize;
         }
 
         Box::new(rule)
@@ -1342,6 +1364,164 @@ Command documentation.
         assert_eq!(rule.min_level, 2);
         assert_eq!(rule.max_level, 4);
         assert!(rule.enforce_order);
+        assert_eq!(rule.indent, 2);
+    }
+
+    #[test]
+    fn test_indent_from_md007_config() {
+        use crate::config::{Config, RuleConfig};
+        use std::collections::BTreeMap;
+
+        let mut config = Config::default();
+
+        // Set MD007 indent to 4
+        let mut md007_values = BTreeMap::new();
+        md007_values.insert("indent".to_string(), toml::Value::Integer(4));
+        config.rules.insert(
+            "MD007".to_string(),
+            RuleConfig {
+                severity: None,
+                values: md007_values,
+            },
+        );
+
+        let rule = MD073TocValidation::from_config(&config);
+        let rule = rule.as_any().downcast_ref::<MD073TocValidation>().unwrap();
+
+        assert_eq!(rule.indent, 4, "Should read indent from MD007 config");
+    }
+
+    #[test]
+    fn test_indent_md073_overrides_md007() {
+        use crate::config::{Config, RuleConfig};
+        use std::collections::BTreeMap;
+
+        let mut config = Config::default();
+
+        // Set MD007 indent to 4
+        let mut md007_values = BTreeMap::new();
+        md007_values.insert("indent".to_string(), toml::Value::Integer(4));
+        config.rules.insert(
+            "MD007".to_string(),
+            RuleConfig {
+                severity: None,
+                values: md007_values,
+            },
+        );
+
+        // Set MD073 indent to 3 (should override MD007)
+        let mut md073_values = BTreeMap::new();
+        md073_values.insert("enabled".to_string(), toml::Value::Boolean(true));
+        md073_values.insert("indent".to_string(), toml::Value::Integer(3));
+        config.rules.insert(
+            "MD073".to_string(),
+            RuleConfig {
+                severity: None,
+                values: md073_values,
+            },
+        );
+
+        let rule = MD073TocValidation::from_config(&config);
+        let rule = rule.as_any().downcast_ref::<MD073TocValidation>().unwrap();
+
+        assert_eq!(rule.indent, 3, "MD073 indent should override MD007");
+    }
+
+    #[test]
+    fn test_generate_toc_with_4_space_indent() {
+        let mut rule = create_enabled_rule();
+        rule.indent = 4;
+
+        let content = r#"<!-- toc -->
+
+<!-- tocstop -->
+
+## Level 2
+
+### Level 3
+
+#### Level 4
+
+## Another Level 2
+"#;
+        let ctx = create_ctx(content);
+        let region = rule.detect_toc_region(&ctx).unwrap();
+        let expected = rule.build_expected_toc(&ctx, &region);
+        let toc = rule.generate_toc(&expected);
+
+        // With 4-space indent:
+        // Level 2 = 0 spaces (base level)
+        // Level 3 = 4 spaces
+        // Level 4 = 8 spaces
+        assert!(toc.contains("- [Level 2](#level-2)"), "Level 2 should have no indent");
+        assert!(
+            toc.contains("    - [Level 3](#level-3)"),
+            "Level 3 should have 4-space indent"
+        );
+        assert!(
+            toc.contains("        - [Level 4](#level-4)"),
+            "Level 4 should have 8-space indent"
+        );
+        assert!(toc.contains("- [Another Level 2](#another-level-2)"));
+    }
+
+    #[test]
+    fn test_validate_toc_with_4_space_indent() {
+        let mut rule = create_enabled_rule();
+        rule.indent = 4;
+
+        // TOC with correct 4-space indentation
+        let content = r#"<!-- toc -->
+- [Hello](#hello)
+    - [Another](#another)
+- [Heading](#heading)
+<!-- tocstop -->
+
+## Hello
+
+### Another
+
+## Heading
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should accept 4-space indent when configured: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_toc_wrong_indent_with_4_space_config() {
+        let mut rule = create_enabled_rule();
+        rule.indent = 4;
+
+        // TOC with 2-space indentation (wrong when 4-space is configured)
+        let content = r#"<!-- toc -->
+- [Hello](#hello)
+  - [Another](#another)
+- [Heading](#heading)
+<!-- tocstop -->
+
+## Hello
+
+### Another
+
+## Heading
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should detect wrong indent");
+        assert!(
+            result[0].message.contains("Indentation mismatch"),
+            "Should report indentation mismatch: {}",
+            result[0].message
+        );
+        assert!(
+            result[0].message.contains("expected 4 spaces"),
+            "Should mention expected 4 spaces: {}",
+            result[0].message
+        );
     }
 
     // ========== Markdown Stripping Tests ==========

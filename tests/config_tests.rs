@@ -1857,6 +1857,75 @@ indent = 4
 }
 
 #[test]
+fn test_md073_reads_indent_from_md007_config() {
+    use rumdl_lib::rule::Rule;
+
+    // Test that MD073 reads indent from MD007 config when not explicitly set
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    let config_content = r#"
+[MD007]
+indent = 4
+
+[MD073]
+enabled = true
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Create MD073 rule using from_config
+    let rule = MD073TocValidation::from_config(&config);
+    let rule = rule
+        .as_any()
+        .downcast_ref::<MD073TocValidation>()
+        .expect("Should downcast to MD073TocValidation");
+
+    // MD073 should have read indent=4 from MD007
+    assert_eq!(rule.indent, 4, "MD073 should read indent from MD007 config");
+}
+
+#[test]
+fn test_md073_explicit_indent_overrides_md007() {
+    use rumdl_lib::rule::Rule;
+
+    // Test that MD073's explicit indent overrides MD007's indent
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("test.toml");
+
+    let config_content = r#"
+[MD007]
+indent = 4
+
+[MD073]
+enabled = true
+indent = 3
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+            .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Create MD073 rule using from_config
+    let rule = MD073TocValidation::from_config(&config);
+    let rule = rule
+        .as_any()
+        .downcast_ref::<MD073TocValidation>()
+        .expect("Should downcast to MD073TocValidation");
+
+    // MD073's explicit indent=3 should override MD007's indent=4
+    assert_eq!(rule.indent, 3, "MD073 explicit indent should override MD007");
+}
+
+#[test]
 fn test_severity_config_toml() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let config_path = temp_dir.path().join("test.toml");
