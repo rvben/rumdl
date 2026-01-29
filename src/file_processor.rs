@@ -9,7 +9,7 @@ use ignore::overrides::OverrideBuilder;
 use rumdl_config::{resolve_rule_name, resolve_rule_names};
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::lint_context::LintContext;
-use rumdl_lib::rule::Rule;
+use rumdl_lib::rule::{LintWarning, Rule};
 use rumdl_lib::utils::code_block_utils::CodeBlockUtils;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -658,7 +658,18 @@ pub fn process_file_with_formatter(
             }
         } else {
             // In check mode, show all warnings with [*] for fixable issues
-            let formatted = formatter.format_warnings(&all_warnings, &display_path);
+            // MD033 has LSP-only fixes (for VS Code quick fixes) but can't auto-fix via CLI
+            let display_warnings: Vec<_> = all_warnings
+                .iter()
+                .map(|w| {
+                    if w.rule_name.as_deref() == Some("MD033") {
+                        LintWarning { fix: None, ..w.clone() }
+                    } else {
+                        w.clone()
+                    }
+                })
+                .collect();
+            let formatted = formatter.format_warnings(&display_warnings, &display_path);
             if !formatted.is_empty() {
                 output_writer.writeln(&formatted).unwrap_or_else(|e| {
                     eprintln!("Error writing output: {e}");
@@ -772,8 +783,8 @@ pub fn process_file_with_formatter(
             for warning in &all_warnings {
                 let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
 
-                // Check if the rule is actually fixable based on configuration
-                let is_fixable = is_rule_actually_fixable(config, rule_name);
+                // Check if the rule is actually fixable (config + MD033 has LSP-only fixes)
+                let is_fixable = is_rule_actually_fixable(config, rule_name) && rule_name != "MD033";
 
                 let was_fixed = warning.fix.is_some()
                     && is_fixable
@@ -781,14 +792,9 @@ pub fn process_file_with_formatter(
                         w.line == warning.line && w.column == warning.column && w.rule_name == warning.rule_name
                     });
 
-                let fix_indicator = if warning.fix.is_some() {
-                    if !is_fixable {
-                        " [unfixable]".yellow().to_string()
-                    } else if was_fixed {
-                        " [fixed]".green().to_string()
-                    } else {
-                        String::new()
-                    }
+                // Show [fixed] only for issues that were actually fixed, nothing otherwise
+                let fix_indicator = if was_fixed {
+                    " [fixed]".green().to_string()
                 } else {
                     String::new()
                 };
@@ -984,13 +990,14 @@ pub fn process_file_with_index(
                 println!("Cache hit for {file_path}");
             }
             // Count fixable warnings from cache
+            // MD033 has LSP-only fixes (for VS Code) but can't auto-fix via CLI
             let fixable_warnings = cached_warnings
                 .iter()
                 .filter(|w| {
                     w.fix.is_some()
                         && w.rule_name
                             .as_ref()
-                            .is_some_and(|name| is_rule_actually_fixable(config, name))
+                            .is_some_and(|name| is_rule_actually_fixable(config, name) && name != "MD033")
                 })
                 .count();
 
@@ -1051,13 +1058,14 @@ pub fn process_file_with_index(
     let total_warnings = all_warnings.len();
 
     // Count fixable issues (excluding unfixable rules)
+    // MD033 has LSP-only fixes (for VS Code) but can't auto-fix via CLI
     let fixable_warnings = all_warnings
         .iter()
         .filter(|w| {
             w.fix.is_some()
                 && w.rule_name
                     .as_ref()
-                    .is_some_and(|name| is_rule_actually_fixable(config, name))
+                    .is_some_and(|name| is_rule_actually_fixable(config, name) && name != "MD033")
         })
         .count();
 
