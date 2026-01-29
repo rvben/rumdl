@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-01-29
+
+### Added
+
+- **CLI: JSON output for rule metadata** ([#351](https://github.com/rvben/rumdl/issues/351))
+  - `rumdl rule -o json` exports all rule data as JSON
+  - `rumdl rule -o json-lines` for streaming/piping (one JSON object per line)
+  - Filter options: `--fixable` (`-f`), `--category` (`-c`)
+  - `--list-categories` shows available categories with rule counts
+  - `--explain` includes full documentation in output
+  - JSON includes: code, name, aliases, summary, category, fix_availability, url
+
+### Fixed
+
+- **MD073: Validate TOC entry indentation matches heading levels** ([#353](https://github.com/rvben/rumdl/issues/353))
+  - TOC entries must now have correct indentation relative to heading depth
+  - Example: H2 entries need 2-space indent, H3 entries need 4-space indent
+
+- **CLI: Correctly count fixable issues** ([#349](https://github.com/rvben/rumdl/issues/349))
+  - "Run `rumdl fmt` to fix N issues" message now uses capability-based counting
+  - Previously could show fixable count for rules that don't actually auto-fix
+
+- **CLI: Correctly count files modified by fmt** ([#347](https://github.com/rvben/rumdl/issues/347))
+  - Summary now shows actual number of modified files, not just files with issues
+
+### Changed
+
+- **Docs: Update all documentation URLs to rumdl.dev** ([#352](https://github.com/rvben/rumdl/issues/352))
+  - LSP code actions now link to rumdl.dev instead of GitHub
+  - Rule URLs in JSON output point to rumdl.dev
+
 ## [0.1.4] - 2026-01-28
 
 ### Changed
