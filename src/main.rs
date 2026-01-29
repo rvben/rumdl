@@ -8,12 +8,13 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, shells::Shell};
 use colored::*;
 use core::error::Error;
 use memmap2::Mmap;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Write, stdout};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -570,6 +571,8 @@ enum Commands {
         #[arg(long)]
         status: bool,
     },
+    /// Generate shell completion scripts
+    Completions { shell: Shell },
     /// Clear the cache
     Clean,
     /// Show version information
@@ -1999,6 +2002,7 @@ build-backend = "setuptools.build_meta"
                     }
                 }
             }
+            Commands::Completions { shell } => generate(shell, &mut Cli::command(), "rumdl", &mut stdout()),
             Commands::Clean => {
                 handle_clean_command(&cli);
             }
